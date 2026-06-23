@@ -39,11 +39,14 @@ Survey a codebase: codemap_hotspots (hubs), codemap_orphans (dead-code candidate
 codemap_status (index size), codemap_projects (what's indexed).
 
 Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matches every method
-named Foo. Pass precise:true to codemap_callers/codemap_callees for exact gopls resolution (Go);
-treat codemap_hotspots/codemap_orphans as name-based (they can over- or under-count same-named
-methods). Precise resolution degrades to name-based (with a "note" in the result) when gopls is
-unavailable, so precise:true is never a hard failure. Likewise codemap_semantic returns a "note"
-(not an error) when the project has no embeddings — fall back to codemap_find.
+named Foo — codemap_callers/codemap_impact note when a name is ambiguous and codemap_hotspots flags
+the inflation. The graph-wide fix is to re-run codemap_index with precise:true: a pure-Go go/types
+pass (Go) that makes EVERY query exact (callers, callees, impact, hotspots, path) with no per-call
+flag. For a one-off exact answer without reindexing, pass precise:true to codemap_callers/
+codemap_callees (gopls). Precise resolution degrades to name-based (with a "note" in the result) when
+the go toolchain or module is unavailable, so precise:true is never a hard failure. Likewise
+codemap_semantic returns a "note" (not an error) when the project has no embeddings — fall back to
+codemap_find.
 
 Call codemap_docs for the full guide (workflow, every tool, accuracy, and how codemap fits the
 local toolchain) — useful when wiring codemap into a harness.`

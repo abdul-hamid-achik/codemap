@@ -7,7 +7,7 @@ Every query command accepts `--json` for machine-readable output.
 | Command | Description |
 |---|---|
 | `codemap init [--local]` | Register the current directory as a project |
-| `codemap index [--reindex] [--no-embed]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings |
+| `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly via go/types (Go) |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
 | `codemap projects` | List all registered projects and their index sizes |
 | `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, accuracy, ecosystem) |
@@ -26,16 +26,18 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap symbols <file>` | Outline a file's symbols with their signatures (a structured alternative to reading it) |
 | `codemap source <symbol>` | Print a symbol's source code (the body behind its signature) |
 
-The fast default uses the indexed graph (name-based resolution; same-named methods can
-over-match). `--lsp` asks the language server (gopls) for *exact* callers — e.g. `callers Close`
-might list every caller of any `Close`, while `callers Close --lsp` lists only the callers of
-the specific resolved method. If gopls can't resolve (no Go toolchain, or a project it can't
-build), `--lsp` falls back to name-based results with a note — never a hard error.
+The fast default uses the indexed graph (name-based resolution; same-named methods can over-match,
+e.g. `callers Close` lists callers of every `Close`). **The best fix is to reindex once with
+`codemap index --precise`** (a pure-Go go/types pass), which makes *every* query — callers, callees,
+impact, hotspots, path — exact, with no per-query flag. For a one-off exact answer without
+reindexing, `callers`/`callees` also accept `--lsp` (gopls); both `--precise` and `--lsp` degrade to
+name-based with a note when the toolchain/module isn't available — never a hard error.
 
-The same name-based model affects the analysis commands: `hotspots` can rank ubiquitous method
-names (`String`, `Error`) high with inflated counts, and `orphans` can't see callers reached via
-interface dispatch or reflection — treat its output as dead-code *candidates*. See
-[Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-graph-vs-precise-lsp).
+On a name-based index the analysis commands flag their limits honestly: `callers`/`impact` note when
+a name resolves to multiple definitions, `hotspots` marks name-collision inflation, and `orphans`
+can't see callers reached via interface dispatch or reflection — treat its output as dead-code
+*candidates*. `index --precise` removes the call-edge inflation outright. See
+[Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-vs-precise-gotypes).
 
 ## Analysis
 

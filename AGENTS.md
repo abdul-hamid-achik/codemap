@@ -178,15 +178,20 @@ task install         # go install ./cmd/codemap
   the registry; `docs` returns the agent guide (`internal/app/docs.go`); `annotate`/`annotations`
   pin/list notes + opaque data on a symbol or `from→to` path (graph `annotations` table, schema v2,
   survives reindex). (Planned: `references`, `dependencies`, `semantic_callers`.)
-- CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`), `status`, `callers`,
+- CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`/`--precise`), `status`, `callers`,
   `callees`, `path`, `impact` (`--depth`), `hotspots`/`orphans` (`--top`), `semantic`
   (`--top`), `serve`, `studio` — all query commands accept `--json`.
-- **Accuracy model** (be honest with users): the graph is name-based — intra-package calls
-  resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
-  method (no type info). So `hotspots`/`impact` can over-count common names (`String`, `Error`),
-  and `orphans` misses interface-dispatch/reflection callers (results are *candidates*). Use
-  `callers`/`callees --lsp` (or `precise:true`) for exact Go resolution; graph-wide precise
-  resolution via `go/types` is the planned fix.
+- **Accuracy model** (be honest with users): the graph is name-based by default — intra-package
+  calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
+  method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`
+  marks inflation; `orphans` results are interface/reflection-blind *candidates*). **The graph-wide
+  fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) runs an
+  in-process pure-Go `go/types` pass (`internal/extract/typesrc`) that resolves each call to the one
+  method it invokes and *replaces* the name-based call edges via the `edges.provenance` column — so
+  every query (callers/callees/impact/hotspots/path) becomes exact at once, no query change. Opt-in
+  and additive (name-based stays the default); degrades per-package on type errors and wholesale
+  (with a note) when the `go` toolchain/module is unavailable. `callers`/`callees --lsp`
+  (`precise:true`) remains the per-query gopls path for a one-off without reindexing.
 
 ### Config precedence (highest → lowest)
 1. Env vars `CODEMAP_*` (e.g. `CODEMAP_CONFIG`, `CODEMAP_DATA`, `CODEMAP_EMBEDDING_MODEL`,

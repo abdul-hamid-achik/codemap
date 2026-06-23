@@ -37,7 +37,7 @@ JSON. Results carry each symbol's signature and docstring, so you rarely open
 files; use codemap_source when you need the implementation.`},
 
 	{"commands", `CLI commands (all query commands accept --json):
-  init / index / status / projects   register, index (--reindex, --no-embed), stats, list projects
+  init / index / status / projects   register, index (--reindex, --no-embed, --precise), stats, projects
   callers / callees [--lsp]          who calls X / what X calls (--lsp = exact gopls resolution, Go)
   impact <sym> [--depth N]           definition, callers, transitive blast radius, covering tests
   path <from> <to>                   shortest call path between two symbols
@@ -76,17 +76,22 @@ the knowledge shows up wherever you look at the symbol (and on every studio tab)
 Typical use: codemap_impact a symbol, then codemap_annotate it with the DB rows /
 repro findings that explain it, so the next step has the full picture in place.`},
 
-	{"accuracy", `The graph is name-based by default: fast, offline, language-agnostic. Intra-
+	{"accuracy", `The graph is name-based by default: fast, offline, tolerant of broken code. Intra-
 package calls resolve precisely (Go), but a cross-package method call like
 x.Foo() links to EVERY method named Foo (resolving the receiver's type needs a
-type-checker). Consequences:
-  - callers/callees over-match same-named methods — pass precise:true (gopls) for exact Go.
-  - hotspots can rank ubiquitous names (String, Error) high with inflated counts.
-  - orphans can't see callers via interface dispatch or reflection — treat as candidates.
-Graph-wide precise resolution (pure-Go go/types) is planned. When you need
-exactness on Go today, reach for precise:true / --lsp — and if gopls can't
-resolve (no toolchain, or an unbuildable project) it degrades to name-based
-results with a "note", never a hard error.`},
+type-checker). codemap flags this rather than hiding it:
+  - callers/callees/impact note when a name resolves to multiple definitions.
+  - hotspots marks name-collision inflation; orphans can't see interface/reflection callers (candidates).
+THE GRAPH-WIDE FIX: re-index with 'codemap index --precise' (CLI) or codemap_index
+precise:true (MCP) — a pure-Go go/types pass that resolves every call to the one
+method it invokes and replaces the name-based call edges, so EVERY query (callers,
+callees, impact, hotspots, path) becomes exact at once. Needs the go toolchain + a
+buildable module; packages that don't type-check keep name-based edges (per-package
+degrade), and no go/go.mod falls back wholesale with a "note" — never worse than
+name-based, never a hard error. Opt-in: without --precise the index is the fast
+name-based path. For a one-off exact answer without reindexing, callers/callees also
+accept precise:true / --lsp (gopls). Interface dispatch is statically undecidable, so
+a precise edge points at the interface method, not concrete implementors.`},
 
 	{"ecosystem", `codemap is one tool in a local, XDG-stored toolchain for analyzing and fixing
 code. A harness can chain them:

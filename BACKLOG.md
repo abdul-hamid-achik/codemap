@@ -741,6 +741,20 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #91 (precise epic — docs) — **documented `--precise` everywhere** so the major new
+  capability is discoverable (an undocumented flag helps no one). The accuracy story is rewritten from
+  "name-based with a per-query `--lsp` escape hatch; graph-wide go/types *planned*" to "**`codemap
+  index --precise` is the graph-wide fix, shipped**" across all six doc surfaces: README Accuracy
+  section (full rewrite + index examples + command table) and its anchor (now
+  `#accuracy-name-based-vs-precise-gotypes`, link in docs/cli.md updated to match), docs/cli.md,
+  docs/quick-start.md, docs/mcp.md (`codemap_index` `precise` arg), AGENTS.md (the source of truth),
+  the MCP `instructions` playbook (Accuracy paragraph now leads with `codemap_index precise:true` as
+  the graph-wide fix), and the in-tool `codemap docs` accuracy + commands topics. Framing throughout:
+  `--precise` makes EVERY query exact at once (no per-call flag), opt-in/additive, degrades with a
+  note, `--lsp` remains the one-off per-query path. Playbook-sync test
+  `TestInstructionsCoverKeyCapabilities` still green (kept its asserted strings). Full suite + lint v2
+  (0) green; fmt clean. COMMIT+PUSH. (Remaining follow-up: slice E — make the `⚠ …(inflated)` flags
+  provenance-aware so they don't over-warn on a `--precise` index.)
 - 2026-06-23 #90 (precise epic — slice D: test-file callers) — **precise resolution now covers
   `_test.go` callers too** (`typesrc` flipped to `packages.Config.Tests = true`). The #89 diagnosis
   showed the entire residual was test-file callers staying name-based (Session.Close = 18 precise + 46

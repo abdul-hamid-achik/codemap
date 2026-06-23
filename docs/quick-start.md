@@ -23,6 +23,7 @@ cd ~/projects/myapp
 codemap init                 # register the project
 codemap index                # extract the graph + embed nodes (incremental)
 codemap index --no-embed     # structure only (no Ollama needed)
+codemap index --precise      # exact call edges via go/types (Go; needs the go toolchain)
 ```
 
 Re-running `index` is incremental — unchanged files are skipped. Use `--reindex` to rebuild.

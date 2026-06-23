@@ -49,7 +49,7 @@ directory) and return JSON.
 | Tool | Description |
 |---|---|
 | `codemap_init` | Register a project directory |
-| `codemap_index` | Index/reindex a project (`reindex`, `no_embed`) |
+| `codemap_index` | Index/reindex a project (`reindex`, `no_embed`, `precise` → exact call edges via go/types for Go) |
 | `codemap_status` | Index statistics |
 | `codemap_semantic` | Semantic search by meaning (`query`, `top_k`) |
 | `codemap_callers` | Functions/methods that call a symbol (`precise: true` → exact gopls callers for Go) |

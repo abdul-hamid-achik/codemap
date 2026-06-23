@@ -116,6 +116,7 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 codemap init                       # registers the current directory
 codemap index                      # extract graph + embed nodes (incremental)
 codemap index --no-embed           # structure only (no Ollama needed)
+codemap index --precise            # exact call edges via go/types (Go; needs the go toolchain)
 
 # 2. Navigate the call graph
 codemap callers authenticateUser   # who calls it (fast, name-based)
@@ -164,7 +165,7 @@ Impact of Stats (codemap)
 
 | Command | What it does |
 |---|---|
-| `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`), show stats |
+| `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`, `--precise`), show stats |
 | `projects` | list all registered projects and their index sizes |
 | `callers` / `callees` / `path` | call-graph navigation (`--lsp` on callers/callees for exact gopls results) |
 | `symbols` | list a file's symbols (structured alternative to reading it) |
@@ -180,22 +181,33 @@ Impact of Stats (codemap)
 
 All query commands accept `--json`.
 
-## Accuracy: name-based graph vs precise (LSP)
+## Accuracy: name-based vs precise (go/types)
 
-codemap's graph is **name-based** by default — fast, offline, and language-agnostic. It resolves
-calls *within* a package precisely (Go), but a cross-package method call like `x.Close()` links to
-*every* method named `Close`, because resolving the receiver's type needs a type-checker. Concretely:
+codemap's graph is **name-based by default** — instant, offline, and tolerant of broken code. It
+resolves calls *within* a package precisely (Go), but a cross-package method call like `x.Close()`
+links to *every* method named `Close`, because resolving the receiver's type needs a type-checker.
+codemap is honest about this rather than hiding it: `callers`/`callees`/`impact` flag when a name
+resolves to multiple definitions, and `hotspots` marks name-collision inflation.
 
-- `callers` / `callees` over-match same-named methods — pass `--lsp` (gopls) for **exact** results.
-- `hotspots` can rank ubiquitous method names (`String`, `Error`) high with identical, inflated
-  in-degrees (one per same-named definition).
-- `orphans` finds call-graph dead ends; it can't see callers reached via interface dispatch or
-  reflection, so treat its output as *candidates*, not proof.
+**For an exact graph, reindex with `codemap index --precise`** (Go). It runs an in-process, pure-Go
+`go/types` pass that resolves every call to the one method it actually invokes and **replaces** the
+name-based call edges — so *every* query (`callers`, `callees`, `impact`, `hotspots`, `path`) becomes
+precise at once, with no per-query flag. On the codemap repo itself this collapses the `Close`/`Error`
+fan-out (e.g. one `Close` method that name-matching credited with 71 callers drops to its real ~12)
+and turns `hotspots` from name-collision noise into genuine hubs. Requirements and guarantees:
 
-This is the usual trade-off for an instant, dependency-free index. When you need exactness on Go,
-reach for `--lsp` — and if gopls can't resolve (no Go toolchain, or a project it can't build) it
-**degrades to name-based results with a note**, never a hard error. Precise, graph-wide resolution
-(pure-Go `go/types`) is planned.
+- Needs the `go` toolchain and a buildable module. A package that doesn't type-check keeps its
+  name-based edges (per-package degrade); a project with no `go`/`go.mod` falls back wholesale **with
+  a note** — never a hard error, and never worse than name-based.
+- Purely additive and opt-in: without `--precise`, indexing is byte-for-byte the fast name-based path.
+- Interface dispatch is statically undecidable, so a precise edge points at the interface method, not
+  the concrete implementors.
+
+For a one-off exact answer *without* reindexing, `callers`/`callees` also accept `--lsp` (gopls
+`callHierarchy`), which likewise degrades to name-based with a note when gopls can't resolve.
+
+`orphans` finds call-graph dead ends; it can't see callers reached via interface dispatch or
+reflection, so treat its output as *candidates*, not proof.
 
 ## Use it from an agent (MCP)
 
