@@ -46,6 +46,7 @@ type statusMsg struct {
 type semanticMsg struct {
 	query string
 	hits  []app.SemanticHit
+	mode  string
 	err   error
 }
 type impactMsg struct {
@@ -93,6 +94,7 @@ type Model struct {
 	search      textinput.Model
 	searchHits  []app.SemanticHit
 	searchQuery string
+	searchMode  string // "semantic" or "name"
 	searchSel   int
 
 	// impact tab
@@ -175,11 +177,11 @@ func (m Model) detailCmd(sym string) tea.Cmd {
 func (m Model) semanticCmd(q string) tea.Cmd {
 	ctx, svc, dir := m.ctx, m.service, m.startDir
 	return func() tea.Msg {
-		r, err := svc.Semantic(ctx, dir, q, 50)
+		r, err := svc.Search(ctx, dir, q, 50) // semantic, falling back to name search
 		if err != nil {
 			return semanticMsg{query: q, err: err}
 		}
-		return semanticMsg{query: q, hits: r.Hits}
+		return semanticMsg{query: q, hits: r.Hits, mode: r.Mode}
 	}
 }
 
@@ -292,8 +294,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.searchHits = msg.hits
 		m.searchQuery = msg.query
+		m.searchMode = msg.mode
 		m.searchSel = 0
-		m.statusMsg = fmt.Sprintf("%d matches for %q", len(msg.hits), msg.query)
+		m.statusMsg = fmt.Sprintf("%d %s matches for %q", len(msg.hits), msg.mode, msg.query)
 		return m, nil
 
 	case impactMsg:

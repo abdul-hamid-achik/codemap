@@ -19,7 +19,8 @@
   selected hub's callers and callees on the right.
 - **Metrics** — node/edge/file counts and bar charts by kind and language, plus the top hubs.
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
-- **Search** — semantic search by meaning, ranked by similarity.
+- **Search** — search by meaning (semantic, when an embedded index exists), automatically
+  falling back to fast name search otherwise; the header shows which mode is active.
 
 ## Keys
 

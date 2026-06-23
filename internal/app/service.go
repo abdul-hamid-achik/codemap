@@ -200,10 +200,11 @@ type SemanticHit struct {
 	Score     float32 `json:"score"`
 }
 
-// SemanticReport is returned by Semantic.
+// SemanticReport is returned by Semantic / FindSymbols / Search.
 type SemanticReport struct {
 	Query   string        `json:"query"`
 	Project string        `json:"project"`
+	Mode    string        `json:"mode"` // "semantic" or "name"
 	Hits    []SemanticHit `json:"hits"`
 }
 
@@ -433,7 +434,7 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if err != nil {
 		return nil, err
 	}
-	rep := &SemanticReport{Query: query, Project: name, Hits: []SemanticHit{}}
+	rep := &SemanticReport{Query: query, Project: name, Mode: "semantic", Hits: []SemanticHit{}}
 
 	vecs, err := svc.s.Embedder().Embed(ctx, []string{query})
 	if err != nil {
@@ -714,6 +715,45 @@ func (svc *Service) Path(cwd, from, to string) (*PathReport, error) {
 	}
 	rep.Found = len(nodes) > 0
 	return rep, nil
+}
+
+// FindSymbols does a fast, offline name search over the indexed symbols (no
+// embeddings needed).
+func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	pid, name, found, err := svc.project(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &SemanticReport{Query: query, Project: name, Mode: "name", Hits: []SemanticHit{}}
+	if !found {
+		return rep, nil
+	}
+	g, _ := svc.s.Graph()
+	nodes, err := g.SearchSymbols(pid, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		rep.Hits = append(rep.Hits, SemanticHit{
+			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
+			StartLine: n.StartLine, EndLine: n.EndLine,
+		})
+	}
+	return rep, nil
+}
+
+// Search runs semantic search, falling back to a name search when embeddings
+// are unavailable (e.g. Ollama not running, or a structure-only index) so the
+// query always returns something useful.
+func (svc *Service) Search(ctx context.Context, cwd, query string, topK int) (*SemanticReport, error) {
+	rep, err := svc.Semantic(ctx, cwd, query, topK)
+	if err == nil && rep != nil && len(rep.Hits) > 0 {
+		return rep, nil
+	}
+	return svc.FindSymbols(cwd, query, topK)
 }
 
 // resolveProject finds the registered project whose path is cwd or an ancestor

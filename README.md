@@ -56,7 +56,8 @@ Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`4` or `tab`; navigate with `
   selected hub's callers and callees on the right.
 - **Metrics** — node/edge/file counts and bar charts by kind and language, plus top hubs.
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
-- **Search** — semantic search by meaning (ranked results).
+- **Search** — semantic search by meaning, falling back to fast name search when there are no
+  embeddings (so it works even without Ollama).
 
 ## Installation
 

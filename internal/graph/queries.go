@@ -194,6 +194,19 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 	return out, nil
 }
 
+// SearchSymbols returns nodes whose symbol or FQN contains query (case-
+// insensitive substring) — a fast, offline name search. File nodes excluded.
+func (s *Store) SearchSymbols(projectID int64, query string, limit int) ([]Node, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	like := "%" + query + "%"
+	q := "SELECT " + nodeColsAs("n") + " FROM nodes n " +
+		"WHERE n.project_id = ? AND n.kind != ? AND (n.symbol LIKE ? OR n.fqn LIKE ?) " +
+		"ORDER BY n.symbol, n.file_path LIMIT ?"
+	return s.queryNodes(q, projectID, KindFile, like, like, limit)
+}
+
 // Orphans returns function/method nodes with no incoming `calls` edge —
 // dead-code candidates. (Heuristic: exported API, entrypoints like main/init,
 // and externally-called code may appear here as false positives.)

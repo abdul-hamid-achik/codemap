@@ -267,10 +267,14 @@ func (m Model) renderImpact(w, h int) string {
 
 func (m Model) renderSearch(w, h int) string {
 	var b strings.Builder
-	b.WriteString(title("Search") + "   " + m.search.View() + "\n\n")
+	hdr := title("Search")
+	if m.searchMode != "" {
+		hdr += "  " + countStyle.Render(m.searchMode+" mode")
+	}
+	b.WriteString(hdr + "   " + m.search.View() + "\n\n")
 	switch {
 	case m.searchQuery == "":
-		b.WriteString(mutedStyle.Render("semantic search by meaning — needs an embedded index (codemap index)"))
+		b.WriteString(mutedStyle.Render("search by meaning (semantic, needs an embedded index) or by name — type and press enter"))
 	case len(m.searchHits) == 0:
 		b.WriteString(mutedStyle.Render("no matches"))
 	default:

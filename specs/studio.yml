@@ -47,6 +47,14 @@ steps:
             contains: "Blast radius"
         timeoutMs: 5000
     - snapshot: impact
+    - press: "tab"
+    - type: "Run"
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "name mode"
+        timeoutMs: 8000
+    - snapshot: search
     - press: "ctrl+c"
     - wait:
         process:

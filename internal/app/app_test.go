@@ -330,6 +330,41 @@ func TestServiceSymbols(t *testing.T) {
 	}
 }
 
+func TestServiceSearchNameFallback(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Authenticate() {}\n\nfunc Render() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	// Structure-only index → no embeddings, so Search must fall back to name search.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Search(context.Background(), proj, "Auth", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Mode != "name" {
+		t.Errorf("mode = %q, want name (no embeddings present)", rep.Mode)
+	}
+	found := false
+	for _, h := range rep.Hits {
+		if h.Symbol == "Authenticate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("search 'Auth' = %+v, want Authenticate", rep.Hits)
+	}
+}
+
 func TestStatusUnregistered(t *testing.T) {
 	isolate(t)
 	sess, err := Open("")

@@ -333,6 +333,15 @@
   value. Test + demo (symbols internal/embed/provider.go → Provider/EmbeddingProfile/…). Docs
   (cli/mcp/README/AGENTS) updated. All green, fmt/vet clean. COMMIT+PUSH. **NEXT:** references/
   dependencies tools, precise edges in the indexer, or polish.
+- 2026-06-23 #34 (cron, polish-first) — studio Search now works WITHOUT Ollama (was dead on a
+  structure-only index). graph.SearchSymbols (case-insensitive symbol/fqn LIKE) +
+  Service.FindSymbols (Mode "name") + Service.Search (semantic, falls back to name on
+  error OR zero hits) + SemanticReport.Mode. studio Search uses Search, shows "<mode> mode"
+  badge. Tests (SearchSymbols, Search name fallback) + studio.yml exercises it (snapshot shows
+  "name mode" + app.Run). All units + 5 E2E green, fmt/vet clean. COMMIT+PUSH. NOTE: studio.yml
+  now needs gopls for `task flows` (precise step) — local-only (CI doesn't run flows).
+  **NEXT:** CLI/MCP `find` (name search for agents w/o Ollama), references/dependencies, or
+  precise edges in indexer.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

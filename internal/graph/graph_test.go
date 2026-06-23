@@ -329,6 +329,37 @@ func TestHotspotsOrphansPath(t *testing.T) {
 	}
 }
 
+func TestSearchSymbols(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(sym string) {
+		if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: sym + ".go", Symbol: sym, FQN: "p." + sym, Kind: KindFunction, Language: "go", SourceHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("Authenticate")
+	mk("authMiddleware")
+	mk("Render")
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "x.go", Kind: KindFile, Language: "go", SourceHash: "h"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.SearchSymbols(pid, "auth", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, n := range res {
+		got[n.Symbol] = true
+	}
+	if !got["Authenticate"] || !got["authMiddleware"] {
+		t.Errorf("search 'auth' = %v, want Authenticate + authMiddleware (case-insensitive)", got)
+	}
+	if got["Render"] {
+		t.Error("Render should not match 'auth'")
+	}
+}
+
 func TestStats(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")
