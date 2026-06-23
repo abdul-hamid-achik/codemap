@@ -392,12 +392,23 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if rep.Untested {
 		fmt.Println("  ⚠ no tests reach this symbol")
 	}
-	for _, n := range rep.BlastRadius {
-		marker := " "
-		if n.Kind == "test" {
-			marker = "✓"
+	// List the covering tests explicitly so you know what to run — they're a
+	// subset of the blast radius, but spelling them out beats hunting for ✓.
+	if len(rep.Tests) > 0 {
+		fmt.Println("  covering tests (run these):")
+		for _, t := range rep.Tests {
+			fmt.Printf("     %-36s %s:%d\n", disp(t.FQN, t.Symbol), t.File, t.StartLine)
 		}
-		fmt.Printf("   %s [%d] %-36s %s:%d\n", marker, n.Depth, disp(n.FQN, n.Symbol), n.File, n.StartLine)
+	}
+	if len(rep.BlastRadius) > 0 {
+		fmt.Println("  affected (blast radius):")
+		for _, n := range rep.BlastRadius {
+			marker := " "
+			if n.Kind == "test" {
+				marker = "✓"
+			}
+			fmt.Printf("   %s [%d] %-36s %s:%d\n", marker, n.Depth, disp(n.FQN, n.Symbol), n.File, n.StartLine)
+		}
 	}
 	return nil
 }

@@ -581,6 +581,15 @@
   is set, so the TUI matches the CLI. Test: `TestIndexedMsgShowsWarning`. Full suite + lint v2 (0) +
   studio E2E green; fmt clean. COMMIT+PUSH.
   **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
+- 2026-06-23 #55 (cron, polish-first) — **`impact` now lists the covering tests explicitly** (the
+  flagship's headline answer — "what breaks + what do I run"). Previously tests were only inline in
+  the blast radius (✓ markers); for a large radius you had to hunt for them. Added a "covering tests
+  (run these):" section listing `rep.Tests` (name + file:line), plus an "affected (blast radius):"
+  header so the two lists are distinct. Dogfood/E2E: `impact Helper` → "covering tests (run these):
+  app.TestHelper a_test.go:1". Extended `query.yml` (added a test file to its project so coverage is
+  actually exercised) with a `covering_tests_listed` outcome — all 5 pass; re-stamped. Full suite +
+  lint v2 (0) + fmt clean. COMMIT+PUSH.
+  **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

@@ -8,7 +8,7 @@ target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5; echo '== symbols =='; \"$CM\" symbols a.go; echo '== find =='; \"$CM\" find Run"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; printf '%s' 'package app; import \"testing\"; func TestHelper(t *testing.T) { Helper() }' > \"$P/a_test.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5; echo '== symbols =='; \"$CM\" symbols a.go; echo '== find =='; \"$CM\" find Run"
     cwd: "."
 terminal:
     cols: 100
@@ -41,4 +41,9 @@ outcomes:
       verify:
         screen:
             contains: "func Run()"
-contractHash: sha256:cd00966db5eed3ec413530bf48c70228fb359e90ca599116b2e6bfa1217d8fb2
+    - id: covering_tests_listed
+      description: impact lists the tests that cover the symbol (run-these)
+      verify:
+        screen:
+            contains: "covering tests"
+contractHash: sha256:619321e6a9b10ebe395e2b3b27d37870dd34cf693814c67af38e9d8f310ae9a7
