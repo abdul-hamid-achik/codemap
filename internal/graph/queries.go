@@ -37,22 +37,29 @@ func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 	return ids, rows.Err()
 }
 
-// SignatureIndex returns a map of FQN → signature for a project's symbols, so
-// callers (e.g. semantic search, whose results come from the vector store) can
-// enrich results with signatures in one query rather than per-node lookups.
-func (s *Store) SignatureIndex(projectID int64) (map[string]string, error) {
-	rows, err := s.db.Query("SELECT fqn, signature FROM nodes WHERE project_id=? AND fqn != '' AND signature != ''", projectID)
+// SymInfo holds the displayable text for a symbol, resolved by FQN.
+type SymInfo struct {
+	Signature string
+	Doc       string
+}
+
+// SymbolInfoIndex returns FQN → {signature, docstring} for a project's symbols,
+// so callers whose results come from elsewhere (e.g. semantic search, backed by
+// the vector store) can enrich them in one query rather than per-node lookups.
+// Symbols with neither a signature nor a docstring are omitted.
+func (s *Store) SymbolInfoIndex(projectID int64) (map[string]SymInfo, error) {
+	rows, err := s.db.Query("SELECT fqn, signature, docstring FROM nodes WHERE project_id=? AND fqn != '' AND (signature != '' OR docstring != '')", projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make(map[string]string)
+	out := make(map[string]SymInfo)
 	for rows.Next() {
-		var fqn, sig string
-		if err := rows.Scan(&fqn, &sig); err != nil {
+		var fqn, sig, doc string
+		if err := rows.Scan(&fqn, &sig, &doc); err != nil {
 			return nil, err
 		}
-		out[fqn] = sig
+		out[fqn] = SymInfo{Signature: sig, Doc: doc}
 	}
 	return out, rows.Err()
 }

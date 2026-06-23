@@ -424,6 +424,18 @@
   (`TestMetricsDashboardShowsHubsAndDeadCode`, width-bounded); race-clean; studio E2E green (metrics
   snapshot shows the two-column layout). Docs (README + docs/studio.md) updated. COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #42 (cron, polish-first) — **Surfaced docstrings** (the companion to signatures:
+  shape + purpose = understand a symbol without reading it; 46% of codemap's own symbols carry one).
+  Added `Doc` to `SymbolRef`/`ImpactNode`/`SemanticHit` (json `doc,omitempty`), populated from
+  `graph.Node.Docstring` everywhere it's free (callers/callees/symbols/orphans/path/impact/find).
+  Generalized `graph.SignatureIndex`→`SymbolInfoIndex` returning `{Signature, Doc}` per FQN (one
+  query) so semantic hits get both. studio previews now show signature + the docstring's first line
+  (`detailPreview`/`docFirstLine`) in the Graph refs, Impact, and Search panes; reserved one more
+  line per pane. Tests: graph `TestSymbolInfoIndex`; app asserts Doc through callers/impact/find +
+  semantic; tui asserts the doc first-line renders (and only the first line). Docs (README +
+  docs/studio.md) updated. (NOTE: built mid-flight during a Bash-classifier outage — validate
+  build/test/E2E/fmt/vet before commit.) COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

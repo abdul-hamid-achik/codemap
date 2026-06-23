@@ -360,27 +360,27 @@ func TestSearchSymbols(t *testing.T) {
 	}
 }
 
-func TestSignatureIndex(t *testing.T) {
+func TestSymbolInfoIndex(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")
 	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "Run", FQN: "p.Run",
-		Kind: KindFunction, Language: "go", Signature: "func Run(x int) error", SourceHash: "h"}); err != nil {
+		Kind: KindFunction, Language: "go", Signature: "func Run(x int) error", Docstring: "Run does the thing.", SourceHash: "h"}); err != nil {
 		t.Fatal(err)
 	}
-	// a node without a signature must not appear in the index.
+	// a node with neither signature nor docstring must not appear in the index.
 	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "blank", FQN: "p.blank",
 		Kind: KindFunction, Language: "go", SourceHash: "h2"}); err != nil {
 		t.Fatal(err)
 	}
-	idx, err := s.SignatureIndex(pid)
+	idx, err := s.SymbolInfoIndex(pid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if idx["p.Run"] != "func Run(x int) error" {
-		t.Errorf("SignatureIndex[p.Run] = %q, want %q", idx["p.Run"], "func Run(x int) error")
+	if idx["p.Run"].Signature != "func Run(x int) error" || idx["p.Run"].Doc != "Run does the thing." {
+		t.Errorf("SymbolInfoIndex[p.Run] = %+v, want signature+doc", idx["p.Run"])
 	}
 	if _, ok := idx["p.blank"]; ok {
-		t.Error("nodes without a signature should be excluded from the index")
+		t.Error("nodes without a signature or docstring should be excluded from the index")
 	}
 }
 

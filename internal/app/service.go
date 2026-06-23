@@ -169,7 +169,7 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 }
 
 // SymbolRef is a lightweight reference to a graph node (for query results).
-// Signature lets callers understand each result without a follow-up file read.
+// Signature and Doc let callers understand each result without a file read.
 type SymbolRef struct {
 	Symbol    string `json:"symbol"`
 	FQN       string `json:"fqn,omitempty"`
@@ -178,11 +178,12 @@ type SymbolRef struct {
 	StartLine int    `json:"start_line"`
 	EndLine   int    `json:"end_line"`
 	Signature string `json:"signature,omitempty"`
+	Doc       string `json:"doc,omitempty"`
 }
 
 func nodeToRef(n graph.Node) SymbolRef {
 	return SymbolRef{Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
-		StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature}
+		StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Doc: n.Docstring}
 }
 
 // RelationReport is returned by Callers/Callees.
@@ -202,6 +203,7 @@ type SemanticHit struct {
 	EndLine   int     `json:"end_line"`
 	Score     float32 `json:"score"`
 	Signature string  `json:"signature,omitempty"`
+	Doc       string  `json:"doc,omitempty"`
 }
 
 // SemanticReport is returned by Semantic / FindSymbols / Search.
@@ -458,19 +460,20 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if err != nil {
 		return nil, err
 	}
-	// Vector payloads don't store signatures; resolve them from the graph (one
-	// query) so semantic results are as self-contained as name-search results.
-	var sigs map[string]string
+	// Vector payloads don't store signatures or docstrings; resolve them from the
+	// graph (one query) so semantic results are as self-contained as name search.
+	var info map[string]graph.SymInfo
 	if len(hits) > 0 {
 		if g, gerr := svc.s.Graph(); gerr == nil {
-			sigs, _ = g.SignatureIndex(pid)
+			info, _ = g.SymbolInfoIndex(pid)
 		}
 	}
 	for _, h := range hits {
+		meta := info[h.Meta.FQN]
 		rep.Hits = append(rep.Hits, SemanticHit{
 			Symbol: h.Meta.Symbol, FQN: h.Meta.FQN, Kind: h.Meta.Kind, File: h.Meta.File,
 			StartLine: h.Meta.StartLine, EndLine: h.Meta.EndLine, Score: h.Score,
-			Signature: sigs[h.Meta.FQN],
+			Signature: meta.Signature, Doc: meta.Doc,
 		})
 	}
 	return rep, nil
@@ -485,6 +488,7 @@ type ImpactNode struct {
 	StartLine int    `json:"start_line"`
 	Depth     int    `json:"depth"`
 	Signature string `json:"signature,omitempty"`
+	Doc       string `json:"doc,omitempty"`
 }
 
 // ImpactReport is the flagship impact analysis: who is affected by changing a
@@ -556,7 +560,7 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		in := ImpactNode{
 			Symbol: nd.Node.Symbol, FQN: nd.Node.FQN, Kind: nd.Node.Kind,
 			File: nd.Node.FilePath, StartLine: nd.Node.StartLine, Depth: nd.Depth,
-			Signature: nd.Node.Signature,
+			Signature: nd.Node.Signature, Doc: nd.Node.Docstring,
 		}
 		rep.BlastRadius = append(rep.BlastRadius, in)
 		if nd.Node.Kind == graph.KindTest {
@@ -757,7 +761,7 @@ func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, 
 	for _, n := range nodes {
 		rep.Hits = append(rep.Hits, SemanticHit{
 			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
-			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature,
+			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Doc: n.Docstring,
 		})
 	}
 	return rep, nil

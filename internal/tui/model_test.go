@@ -381,13 +381,19 @@ func TestImpactShowsSignaturePreview(t *testing.T) {
 	rep := &app.ImpactReport{
 		Symbol: "Foo", Found: true,
 		BlastRadius: []app.ImpactNode{
-			{Symbol: "Run", Depth: 1, Signature: "func Run(x int) error"},
+			{Symbol: "Run", Depth: 1, Signature: "func Run(x int) error", Doc: "Run executes the pipeline.\nMore detail."},
 		},
 	}
 	m, _ = applyMsg(m, impactMsg{symbol: "Foo", rep: rep})
 	out := m.render()
 	if !strings.Contains(out, "func Run(x int) error") {
 		t.Errorf("impact should preview the selected node's signature:\n%s", out)
+	}
+	if !strings.Contains(out, "Run executes the pipeline.") {
+		t.Errorf("impact should preview the docstring's first line:\n%s", out)
+	}
+	if strings.Contains(out, "More detail.") {
+		t.Error("only the docstring's first line should show in the preview")
 	}
 }
 

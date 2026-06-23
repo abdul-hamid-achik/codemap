@@ -130,7 +130,7 @@ func TestQueryResultsCarrySignature(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
 	if err := os.WriteFile(filepath.Join(proj, "main.go"),
-		[]byte("package app\n\nfunc Run(x int) int { return Helper(x) }\n\nfunc Helper(n int) int { return n }\n"), 0o644); err != nil {
+		[]byte("package app\n\n// Run sends x through Helper.\nfunc Run(x int) int { return Helper(x) }\n\n// Helper returns n unchanged.\nfunc Helper(n int) int { return n }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	sess, err := Open("")
@@ -143,13 +143,16 @@ func TestQueryResultsCarrySignature(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// callers carry the caller's signature (no follow-up file read needed).
+	// callers carry the caller's signature AND docstring (no file read needed).
 	cr, err := svc.Callers(proj, "Helper")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cr.Results) != 1 || cr.Results[0].Signature != "func Run(x int) int" {
 		t.Errorf("caller signature = %q, want %q", sigOf(cr.Results), "func Run(x int) int")
+	}
+	if len(cr.Results) == 1 && cr.Results[0].Doc != "Run sends x through Helper." {
+		t.Errorf("caller doc = %q, want %q", cr.Results[0].Doc, "Run sends x through Helper.")
 	}
 
 	// blast-radius nodes carry signatures too.
@@ -159,21 +162,21 @@ func TestQueryResultsCarrySignature(t *testing.T) {
 	}
 	found := false
 	for _, n := range ir.BlastRadius {
-		if n.Symbol == "Run" && n.Signature == "func Run(x int) int" {
+		if n.Symbol == "Run" && n.Signature == "func Run(x int) int" && n.Doc == "Run sends x through Helper." {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("blast radius missing Run's signature: %+v", ir.BlastRadius)
+		t.Errorf("blast radius missing Run's signature/doc: %+v", ir.BlastRadius)
 	}
 
-	// offline name search carries it as well.
+	// offline name search carries them as well.
 	fr, err := svc.FindSymbols(proj, "Helper", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fr.Hits) == 0 || fr.Hits[0].Signature != "func Helper(n int) int" {
-		t.Errorf("find signature = %+v, want func Helper(n int) int", fr.Hits)
+	if len(fr.Hits) == 0 || fr.Hits[0].Signature != "func Helper(n int) int" || fr.Hits[0].Doc != "Helper returns n unchanged." {
+		t.Errorf("find signature/doc = %+v, want func Helper(n int) int / Helper returns n unchanged.", fr.Hits)
 	}
 }
 
@@ -209,16 +212,20 @@ func TestServiceSemantic(t *testing.T) {
 	if len(rep.Hits) == 0 {
 		t.Fatal("semantic search returned no hits")
 	}
-	// Signatures are resolved from the graph even though the vector payload
-	// lacks them, so semantic hits are as self-contained as name-search hits.
-	var got string
+	// Signatures and docstrings are resolved from the graph even though the
+	// vector payload lacks them, so semantic hits are as self-contained as
+	// name-search hits.
+	var gotSig, gotDoc string
 	for _, h := range rep.Hits {
 		if h.Symbol == "Authenticate" {
-			got = h.Signature
+			gotSig, gotDoc = h.Signature, h.Doc
 		}
 	}
-	if got != "func Authenticate()" {
-		t.Errorf("semantic hit signature = %q, want %q", got, "func Authenticate()")
+	if gotSig != "func Authenticate()" {
+		t.Errorf("semantic hit signature = %q, want %q", gotSig, "func Authenticate()")
+	}
+	if gotDoc != "Authenticate validates a jwt token." {
+		t.Errorf("semantic hit doc = %q, want %q", gotDoc, "Authenticate validates a jwt token.")
 	}
 }
 

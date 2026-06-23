@@ -43,5 +43,6 @@
 
 Symbols are shown with their fully-qualified names so same-named methods (e.g.
 `graph.Store.Close` vs `app.Session.Close`) are easy to tell apart. In the Graph, Impact, and
-Search panes the selected symbol's **signature** is previewed at the bottom (`⟩ func …`), so you
-can tell what a symbol is without opening the file.
+Search panes the selected symbol's **signature** and the first line of its **docstring** are
+previewed at the bottom (`⟩ func …`), so you can tell what a symbol is and what it does without
+opening the file.

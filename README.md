@@ -164,8 +164,8 @@ returns JSON. `codemap_callers` / `codemap_callees` accept `precise: true` for e
 gopls-resolved results (Go).
 
 Results carry each symbol's **signature** (e.g. `func (s *Store) Hotspots(projectID int64, limit
-int) ([]Hotspot, error)`), so an agent understands callers/callees/hits without a follow-up file
-read — and same-named symbols are easy to tell apart.
+int) ([]Hotspot, error)`) and **docstring**, so an agent understands what callers/callees/hits are
+and what they do without a follow-up file read — and same-named symbols are easy to tell apart.
 
 The flagship is `codemap_impact` — one call returns a symbol's definition sites, callers, the
 transitive blast radius, and which tests cover those paths, replacing many file reads.
