@@ -726,6 +726,16 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   Annotations`, tui `TestSearchPaneMarksAnnotated`. Full suite + lint v2 (0) + studio/query/semantic
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
+## Post-v0.2.0 polish
+- 2026-06-23 #69 (annotation follow-up) — **studio Search now shows the SELECTED hit's annotations**
+  (not just the `⟐` row marker), consistent with the Graph/Impact panes — using `hit.Annotations`
+  already enriched in #68 (no extra query): ⟐ note/data lines under the sig/doc preview (capped 2).
+  Also refreshed the `codemap_docs` "annotations" topic to state annotations surface in EVERY query
+  result (impact, callers/callees incl. precise, source, semantic/find) and every studio tab — so the
+  agent guide matches reality. Test `TestSearchPreviewShowsSelectedAnnotations`. Full suite + lint v2
+  (0) + studio E2E green; fmt clean. COMMIT+PUSH. **Annotation surfacing is now fully consistent
+  across all surfaces (marker + selected-detail in every list pane).**
+
 ## 🏷️ Release — v0.2.0 (2026-06-23)
 Minor release (user-requested). Since v0.1.0: the **annotation layer surfaces everywhere** — added
 inline surfacing on the studio Graph pane (#66), the precise/`--lsp`+MCP-`precise` path (#67), and

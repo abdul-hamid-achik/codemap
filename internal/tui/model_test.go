@@ -518,6 +518,19 @@ func TestSearchPaneMarksAnnotated(t *testing.T) {
 	}
 }
 
+func TestSearchPreviewShowsSelectedAnnotations(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m.search.SetValue("x")
+	m, _ = applyMsg(m, semanticMsg{query: "x", mode: "name", hits: []app.SemanticHit{
+		{Symbol: "Pinned", Annotations: []graph.Annotation{{ID: 1, Kind: "node", Target: "Pinned", Source: "postgres", Note: "hot path"}}},
+	}})
+	out := m.render() // searchSel defaults to 0 (the annotated hit)
+	if !strings.Contains(out, "postgres: hot path") {
+		t.Errorf("search preview should show the selected hit's annotations:\n%s", out)
+	}
+}
+
 func TestSearchShowsSignaturePreview(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch

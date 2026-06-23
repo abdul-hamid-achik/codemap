@@ -549,8 +549,22 @@ func (m Model) renderSearch(w, h int) string {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(hits)-end)) + "\n")
 		}
 		if m.searchSel < len(hits) {
-			if p := detailPreview(hits[m.searchSel].Signature, hits[m.searchSel].Doc, w); p != "" {
+			sel := hits[m.searchSel]
+			if p := detailPreview(sel.Signature, sel.Doc, w); p != "" {
 				b.WriteString("\n" + p)
+			}
+			for i, a := range sel.Annotations { // the selected hit's pinned notes/data
+				if i >= 2 {
+					break
+				}
+				line := a.Source
+				if a.Note != "" {
+					line += ": " + a.Note
+				}
+				if a.Data != "" {
+					line += "  " + strings.Join(strings.Fields(a.Data), " ")
+				}
+				b.WriteString("\n" + countStyle.Render("⟐ ") + truncate(line, w-2))
 			}
 		}
 	}

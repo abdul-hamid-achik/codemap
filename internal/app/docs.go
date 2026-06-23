@@ -67,9 +67,10 @@ across reindex.
        codemap annotations [<sym> | <from> <to>]   (--rm <id> to delete)
 
 'source' is a free label (note, mongosh, postgres, vidtrace, …); 'data' is stored
-opaquely (often JSON). Annotations on a symbol surface INLINE in codemap_impact,
-codemap_callers/callees, and codemap_source results (matched by name or resolved
-FQN) — so once pinned, the knowledge shows up wherever you look at the symbol.
+opaquely (often JSON). Annotations on a symbol surface INLINE in EVERY query result
+— codemap_impact, codemap_callers/callees (by-name and precise:true), codemap_source,
+and codemap_semantic/codemap_find — matched by name or resolved FQN, so once pinned
+the knowledge shows up wherever you look at the symbol (and on every studio tab).
 Typical use: codemap_impact a symbol, then codemap_annotate it with the DB rows /
 repro findings that explain it, so the next step has the full picture in place.`},
 
