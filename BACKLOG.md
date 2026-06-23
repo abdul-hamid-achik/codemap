@@ -602,6 +602,15 @@
   chain `Top → Run → Helper`. Demonstrates the shortest-call-path graph capability end-to-end and
   guards its output. 6/6 query outcomes pass; re-stamped. Spec-only (no Go change; CI green). COMMIT+PUSH.
   **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
+- 2026-06-23 #58 (cron, polish-first) — **source viewer scroll-position indicator.** Reading a long
+  function in the `s`/`ctrl+s` overlay gave no sense of position; the title now shows `(lines A–B of
+  N)` when the source exceeds the viewport. Computed from `srcScroll`+viewport; hidden when it all
+  fits. (Verified `version` already shows commit+date — no change needed.) Test extended
+  (`TestSourceViewerScrollAndClose` asserts the indicator). Full suite + lint v2 (0) + studio E2E
+  green; fmt clean. COMMIT+PUSH.
+  **NEXT:** the safe-polish surface is essentially exhausted; the next real usefulness jump is the
+  deferred backend — pure-Go `go/types` call resolution (accuracy) and LSP-backend wiring (multi-
+  language). Both are deliberate epics warranting a focused go-ahead, not 5-min loop increments.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

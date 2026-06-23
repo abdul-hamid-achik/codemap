@@ -524,6 +524,9 @@ func TestSourceViewerScrollAndClose(t *testing.T) {
 	if !strings.Contains(out, "pkg.Foo  foo.go:1-30") || !strings.Contains(out, "line 0") {
 		t.Errorf("viewer should show the title and first lines:\n%s", out)
 	}
+	if !strings.Contains(out, "of 30)") {
+		t.Errorf("viewer should show a scroll-position indicator:\n%s", out)
+	}
 	if m.maxSrcScroll() <= 0 {
 		t.Fatalf("expected scrollable content, maxScroll=%d", m.maxSrcScroll())
 	}

@@ -43,13 +43,18 @@ func (m Model) render() string {
 // renderSource is the full-screen, scrollable source overlay (opened with `s`).
 func (m Model) renderSource(w, h int) string {
 	var b strings.Builder
-	b.WriteString(symStyle.Render(truncate(m.srcTitle, w)) + "\n\n")
 	vp := h - 2
 	if vp < 1 {
 		vp = 1
 	}
-	start := clamp(m.srcScroll, 0, len(m.srcLines))
-	end := clamp(start+vp, 0, len(m.srcLines))
+	n := len(m.srcLines)
+	start := clamp(m.srcScroll, 0, n)
+	end := clamp(start+vp, 0, n)
+	hdr := symStyle.Render(truncate(m.srcTitle, w-22))
+	if n > vp { // scrollable → show where we are
+		hdr += "  " + mutedStyle.Render(fmt.Sprintf("(lines %d–%d of %d)", start+1, end, n))
+	}
+	b.WriteString(hdr + "\n\n")
 	for i := start; i < end; i++ {
 		gutter := mutedStyle.Render(fmt.Sprintf("%4d ", i+1))
 		b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
