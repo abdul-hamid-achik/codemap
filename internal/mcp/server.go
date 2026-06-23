@@ -85,6 +85,7 @@ type indexInput struct {
 	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Reindex bool   `json:"reindex,omitempty" jsonschema:"wipe and rebuild the whole index"`
 	NoEmbed bool   `json:"no_embed,omitempty" jsonschema:"skip semantic embeddings (structure only)"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"resolve call edges exactly with go/types (Go; needs the go toolchain) — eliminates same-named over-matching"`
 }
 
 type semanticInput struct {
@@ -235,7 +236,7 @@ func (s *Server) handleInit(_ context.Context, _ *sdkmcp.CallToolRequest, in pat
 }
 
 func (s *Server) handleIndex(ctx context.Context, _ *sdkmcp.CallToolRequest, in indexInput) (*sdkmcp.CallToolResult, any, error) {
-	rep, err := s.svc.Index(ctx, cwdOf(in.Path), index.Options{Reindex: in.Reindex}, !in.NoEmbed)
+	rep, err := s.svc.Index(ctx, cwdOf(in.Path), index.Options{Reindex: in.Reindex, Precise: in.Precise}, !in.NoEmbed)
 	return result(rep, err)
 }
 

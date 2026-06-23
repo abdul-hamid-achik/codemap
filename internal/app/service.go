@@ -46,6 +46,10 @@ type IndexReport struct {
 	Nodes        int               `json:"nodes"`
 	Edges        int               `json:"edges"`
 	Errors       []index.FileError `json:"errors,omitempty"`
+	// Precise* surface the opt-in go/types pass (index --precise).
+	PreciseUpgraded int    `json:"precise_upgraded,omitempty"`
+	PreciseSkipped  int    `json:"precise_skipped,omitempty"`
+	PreciseNote     string `json:"precise_note,omitempty"`
 }
 
 // StatusReport is returned by Status.
@@ -134,6 +138,9 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.Nodes = res.Nodes
 	rep.Edges = res.Edges
 	rep.Errors = res.Errors
+	rep.PreciseUpgraded = res.PreciseUpgraded
+	rep.PreciseSkipped = res.PreciseSkipped
+	rep.PreciseNote = res.PreciseNote
 	// No supported (Go) files but other recognized source present → explain the
 	// empty result rather than leaving the user puzzled (v0.1 indexes Go).
 	if res.FilesScanned == 0 && len(res.Unsupported) > 0 {

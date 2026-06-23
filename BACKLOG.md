@@ -741,6 +741,27 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #89 (precise epic — slice C: wired + shipped) — **`codemap index --precise` eliminates
+  same-named call over-matching end-to-end.** Pass 3 in the indexer (gated on `opts.Precise`, after the
+  name-based Pass 2): `exec.LookPath("go")` → `typesrc.Resolve(root)` → build `fqnTo` (caller) + `posTo`
+  ((file,line)→nodeID, callee) from ProjectNodes → `DeleteCallEdgesBySource(cleanSourceIDs, ProvName)`
+  → re-insert one `AddEdgeProv(…, ProvPrecise)` per resolved in-module call. Same `calls` edge_type ⇒
+  **zero query changes**; Callers/Impact/Hotspots/BlastRadius all deflate to truth automatically. Wired
+  through every surface: `Options.Precise`, `Result.Precise{Upgraded,Skipped,Note}`, `IndexReport` +
+  CLI `--precise` flag (prints "N call edges resolved exactly via go/types") + MCP `codemap_index`
+  `precise` arg. Degrades safely: no `go`/non-module ⇒ note + keep name edges (never wipes what it
+  can't replace). Tests (go-gated): `TestPreciseCollapsesNameFanout` — the corrected fixture (3 callers
+  → one concrete T1.Run; name-based inflates T2/T3.Run to in-degree 3, precise drops them to 0, T1.Run
+  stays 3, **total edges to T1.Run == 3 = the double-counting guard the design's winning approach
+  missed**) + `TestPreciseDegradesGracefully`. **Real-repo dogfood proves it surgically:** on codemap
+  `--precise` resolved 683 call edges exactly; `lspsrc.Extractor.Close` (was 71, almost all spurious)
+  dropped out of the top hotspots, and the identical fan-out pairs (71,71,70,70…) differentiated. The
+  provenance breakdown is the proof — `app.Session.Close` in-degree 64 = **18 non-test callers all
+  `provenance='precise'` (resolved exactly) + 46 `_test.go` callers still `'name'`** (typesrc uses
+  `Tests:false` to match slice-1 scope). So precise is 100% correct for non-test code; resolving
+  test-file callers (flip to `Tests:true`) is **slice D**. Full suite + lint v2 (0) + query/studio E2E
+  green; fmt clean. CGO_ENABLED=0 pure-Go throughout. COMMIT+PUSH. **The name-based over-matching that
+  #79–#86 could only flag is now eliminated for real Go code — the deferred backend, delivered.**
 - 2026-06-23 #88 (precise epic — slice B: typesrc resolver) — **pure-Go `go/types` precise call
   resolver** in new `internal/extract/typesrc/`, standalone + unit-tested (not yet wired into the
   indexer). `Resolve(ctx, root)` runs one whole-module `packages.Load(LoadMode)` where `LoadMode`

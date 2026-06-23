@@ -199,6 +199,7 @@ func init() {
 
 	indexCmd.Flags().Bool("reindex", false, "wipe and rebuild the whole project index")
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
+	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly with go/types (Go; needs the go toolchain) — eliminates same-named over-matching")
 	initCmd.Flags().Bool("local", false, "create a .codemap directory inside the project")
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
@@ -254,7 +255,8 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	}
 	reindex, _ := cmd.Flags().GetBool("reindex")
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
-	rep, err := app.NewService(sess).Index(cmd.Context(), cwd, index.Options{Reindex: reindex}, !noEmbed)
+	precise, _ := cmd.Flags().GetBool("precise")
+	rep, err := app.NewService(sess).Index(cmd.Context(), cwd, index.Options{Reindex: reindex, Precise: precise}, !noEmbed)
 	if err != nil {
 		return err
 	}
@@ -267,6 +269,13 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Indexed %q (%s)\n", rep.Project, rep.Root)
 	fmt.Printf("  files: %d scanned, %d indexed, %d skipped\n", rep.FilesScanned, rep.FilesIndexed, rep.FilesSkipped)
 	fmt.Printf("  graph: %d nodes, %d edges (embeddings: %v)\n", rep.Nodes, rep.Edges, rep.Embedded)
+	if precise {
+		if rep.PreciseNote != "" {
+			fmt.Printf("  precise: %s\n", rep.PreciseNote)
+		} else {
+			fmt.Printf("  precise: %d call edges resolved exactly via go/types (%d unresolved)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
+		}
+	}
 	for _, e := range rep.Errors {
 		fmt.Fprintf(os.Stderr, "  ! %s: %s\n", e.File, e.Err)
 	}

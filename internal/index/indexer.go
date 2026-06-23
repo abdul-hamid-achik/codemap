@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/gosrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/typesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
@@ -29,6 +31,10 @@ type Options struct {
 	// Reindex wipes the project and rebuilds all nodes, edges, and vectors.
 	// Without it, files with an unchanged content hash are skipped.
 	Reindex bool
+	// Precise runs the opt-in go/types pass that replaces name-based call edges
+	// with exact ones for cleanly type-checked packages. Requires the `go`
+	// toolchain and a buildable module; degrades to name-based otherwise.
+	Precise bool
 }
 
 // FileError records a per-file failure that didn't abort the whole run.
@@ -49,6 +55,13 @@ type Result struct {
 	// number of files skipped because codemap has no extractor for it yet (v0.1
 	// indexes Go). Lets callers explain a "0 indexed" result.
 	Unsupported map[string]int `json:"unsupported,omitempty"`
+	// Precise* report the opt-in go/types pass (Options.Precise). PreciseUpgraded
+	// is the number of exact call edges that superseded name-based ones;
+	// PreciseSkipped counts resolved callees with no graph node (interface methods,
+	// edges the position join missed); PreciseNote explains a degraded/no-op pass.
+	PreciseUpgraded int    `json:"precise_upgraded,omitempty"`
+	PreciseSkipped  int    `json:"precise_skipped,omitempty"`
+	PreciseNote     string `json:"precise_note,omitempty"`
 }
 
 // Indexer turns project files into a stored graph + vectors. The vector store
@@ -129,6 +142,14 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// Pass 2: resolve references into edges against the project-wide symbol map.
 	if _, err := ix.resolveEdges(projectID, pending); err != nil {
 		return res, err
+	}
+
+	// Pass 3 (opt-in): replace name-based call edges with go/types-precise ones for
+	// cleanly type-checked packages. Best-effort and project-wide — degrades to the
+	// name baseline (with a note) when the toolchain/module isn't available, and
+	// never makes the graph worse than name-based.
+	if opts.Precise {
+		ix.resolvePreciseEdges(ctx, projectID, root, res)
 	}
 
 	if ix.vectors != nil {
@@ -358,6 +379,95 @@ func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int,
 		}
 	}
 	return count, nil
+}
+
+// precisePos keys a node by its declaration position for the precise callee join.
+type precisePos struct {
+	file string
+	line int
+}
+
+// resolvePreciseEdges runs the go/types pass and supersedes name-based call edges
+// with exact ones for cleanly type-checked packages. It mutates res (PreciseUpgraded
+// /Skipped/Note) and never returns an error: any failure degrades to the name
+// baseline, which is already in place. The invariant is "a clean source either gets
+// its precise edges or keeps its name edges entirely" — supersede only deletes a
+// source's name edges in the same pass that re-inserts its precise ones.
+func (ix *Indexer) resolvePreciseEdges(ctx context.Context, projectID int64, root string, res *Result) {
+	if _, err := exec.LookPath("go"); err != nil {
+		res.PreciseNote = "precise skipped: the 'go' toolchain is required for --precise but is not on PATH; kept name-based edges"
+		return
+	}
+	pr, err := typesrc.Resolve(ctx, root)
+	if err != nil {
+		res.PreciseNote = "precise unavailable: " + err.Error() + "; kept name-based edges"
+		return
+	}
+	if pr == nil || !pr.Available {
+		res.PreciseNote = "precise unavailable: project is not a buildable Go module; kept name-based edges"
+		return
+	}
+
+	nodes, err := ix.graph.ProjectNodes(projectID)
+	if err != nil {
+		res.PreciseNote = "precise failed loading nodes: " + err.Error()
+		return
+	}
+	fqnTo := make(map[string]int64, len(nodes))
+	posTo := make(map[precisePos]int64, len(nodes))
+	var cleanSources []int64
+	for _, n := range nodes {
+		if n.FQN != "" {
+			fqnTo[n.FQN] = n.ID
+		}
+		posTo[precisePos{n.FilePath, n.StartLine}] = n.ID
+		if pr.CleanFiles[n.FilePath] {
+			cleanSources = append(cleanSources, n.ID)
+		}
+	}
+
+	// Drop the name-based call edges of every clean source, then re-insert the
+	// precise ones below. Doing the delete first (on provenance='name', regardless
+	// of weight) is what prevents the in-package WeightLSP=1.0 name edges from
+	// surviving and double-counting against the precise 1.0 edges.
+	if err := ix.graph.DeleteCallEdgesBySource(cleanSources, graph.ProvName); err != nil {
+		res.PreciseNote = "precise supersede (delete) failed: " + err.Error()
+		return
+	}
+
+	upgraded, skipped := 0, 0
+	for _, e := range pr.Edges {
+		if e.External {
+			continue // stdlib/dep callee — no codemap node to point at
+		}
+		from, ok := fqnTo[e.CallerFQN]
+		if !ok {
+			skipped++
+			continue
+		}
+		to, ok := posTo[precisePos{e.CalleeFile, e.CalleeLine}]
+		if !ok {
+			// Position join missed (rare) — fall back to the FQN; still a miss for
+			// e.g. an interface method, which has no declaration node in slice 1.
+			if to, ok = fqnTo[e.CalleeFQN]; !ok {
+				skipped++
+				continue
+			}
+		}
+		if to == from {
+			continue
+		}
+		if _, err := ix.graph.AddEdgeProv(from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); err != nil {
+			res.PreciseNote = "precise edge insert failed: " + err.Error()
+			return
+		}
+		upgraded++
+	}
+	res.PreciseUpgraded = upgraded
+	res.PreciseSkipped = skipped
+	if upgraded == 0 {
+		res.PreciseNote = "precise pass resolved no in-module call edges (single-package leaf project, or all calls external/dynamic); kept name-based edges"
+	}
 }
 
 func samePackage(ids []int64, dirOf map[int64]string, dir string) []int64 {
