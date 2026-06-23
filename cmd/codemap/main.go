@@ -156,6 +156,12 @@ var (
 		Args:  cobra.MinimumNArgs(1),
 		RunE:  runFind,
 	}
+	sourceCmd = &cobra.Command{
+		Use:   "source <symbol>",
+		Short: "Print a symbol's source code (the body behind its signature)",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSource,
+	}
 )
 
 func init() {
@@ -178,7 +184,7 @@ func init() {
 	findCmd.Flags().Int("top", 50, "maximum results")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd)
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -536,6 +542,34 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	fmt.Printf("%s (%d symbols):\n", rep.File, len(rep.Symbols))
 	for _, s := range rep.Symbols {
 		fmt.Printf("  %-9s %5d  %s\n", s.Kind, s.StartLine, sigOrName(s.Signature, s.FQN, s.Symbol))
+	}
+	return nil
+}
+
+func runSource(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	rep, err := app.NewService(sess).Source(cwd, args[0])
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if len(rep.Matches) == 0 {
+		fmt.Printf("no symbol named %q (is the project indexed?)\n", rep.Symbol)
+		return nil
+	}
+	for i, mch := range rep.Matches {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Printf("// %s  %s:%d-%d\n", disp(mch.FQN, mch.Symbol), mch.File, mch.StartLine, mch.EndLine)
+		fmt.Println(mch.Source)
 	}
 	return nil
 }

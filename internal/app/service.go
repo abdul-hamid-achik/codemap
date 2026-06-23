@@ -672,6 +672,82 @@ func projectRel(root, cwd, file string) string {
 	return file
 }
 
+// SourceMatch is a symbol's definition with its source text read back from disk.
+type SourceMatch struct {
+	Symbol    string `json:"symbol"`
+	FQN       string `json:"fqn,omitempty"`
+	Kind      string `json:"kind"`
+	File      string `json:"file"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Signature string `json:"signature,omitempty"`
+	Doc       string `json:"doc,omitempty"`
+	Source    string `json:"source"`
+}
+
+// SourceReport is returned by Source.
+type SourceReport struct {
+	Symbol  string        `json:"symbol"`
+	Project string        `json:"project"`
+	Matches []SourceMatch `json:"matches"`
+}
+
+// Source returns the source code of every symbol matching name, read from the
+// indexed file at its recorded line range — the implementation behind the
+// signature/docstring, without the caller having to open the file. The graph
+// only stores line ranges (not source), so this reads from disk; reindex if a
+// file changed since indexing.
+func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
+	pid, projName, found, err := svc.project(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &SourceReport{Symbol: name, Project: projName, Matches: []SourceMatch{}}
+	if !found {
+		return rep, nil
+	}
+	g, _ := svc.s.Graph()
+	p, err := g.GetProjectByName(projName)
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := g.FindNodesBySymbol(pid, name)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		if n.Kind == graph.KindFile {
+			continue
+		}
+		src, _ := readLineRange(filepath.Join(p.Path, n.FilePath), n.StartLine, n.EndLine)
+		rep.Matches = append(rep.Matches, SourceMatch{
+			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
+			StartLine: n.StartLine, EndLine: n.EndLine,
+			Signature: n.Signature, Doc: n.Docstring, Source: src,
+		})
+	}
+	return rep, nil
+}
+
+// readLineRange returns lines [start, end] (1-based, inclusive) of a file.
+func readLineRange(path string, start, end int) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	if start < 1 {
+		start = 1
+	}
+	lines := strings.Split(string(data), "\n")
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if start > end {
+		return "", nil
+	}
+	return strings.Join(lines[start-1:end], "\n"), nil
+}
+
 // Hotspots returns the most-referenced nodes (hubs).
 func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 	pid, name, found, err := svc.project(cwd)

@@ -450,6 +450,19 @@
   focus-aware footer. Full suite + studio E2E green (impact snapshot shows `func Helper()` under the
   defined symbol); fmt/vet clean. COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #44 (cron, polish-first) — **`source` command + `codemap_source` MCP tool** — the last
+  piece of the symbol-understanding story (where→what→why→**the actual code**), serving the "and
+  refactors" half of the north star. `Service.Source(cwd, symbol)` resolves the symbol's node(s) and
+  reads the body from the indexed file at its `[StartLine,EndLine]` range (new `readLineRange`; minimal
+  backend — no new extraction/storage, just a file-slice read), returning `{signature, doc, source}`
+  per match. So an agent reads a definition in one call without opening the file; same-named symbols
+  return all matches. CLI `source <symbol>` (text prints `// fqn file:start-end` + body, or `--json`)
+  and `codemap_source`. → **13 MCP tools, 17 CLI commands.** Dogfood: `source readLineRange` returned
+  the function itself; `source samePackage --json` → source field populated. Tests: app
+  `TestServiceSource`; mcp presence check extended (+find, +source). Docs (README tools list+count+
+  Commands table, AGENTS set(13), docs/cli.md, docs/mcp.md) updated. Full suite + help/query/studio
+  E2E green; fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

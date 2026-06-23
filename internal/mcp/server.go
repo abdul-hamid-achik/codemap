@@ -106,6 +106,11 @@ type findInput struct {
 	Top   int    `json:"top,omitempty" jsonschema:"maximum results"`
 }
 
+type sourceInput struct {
+	Symbol string `json:"symbol" jsonschema:"the symbol whose source code to return"`
+	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -155,6 +160,10 @@ func (s *Server) register() {
 		Name:        "codemap_find",
 		Description: "Find symbols by name (case-insensitive substring over names/FQNs). Fast and offline — no embeddings needed, unlike codemap_semantic.",
 	}, s.handleFind)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_source",
+		Description: "Return a symbol's source code (the implementation behind its signature), read from the indexed file's line range — so you can read a definition without opening the whole file.",
+	}, s.handleSource)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -224,6 +233,11 @@ func (s *Server) handleSymbols(_ context.Context, _ *sdkmcp.CallToolRequest, in 
 
 func (s *Server) handleFind(_ context.Context, _ *sdkmcp.CallToolRequest, in findInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.FindSymbols(cwdOf(in.Path), in.Query, in.Top)
+	return result(rep, err)
+}
+
+func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in sourceInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol)
 	return result(rep, err)
 }
 

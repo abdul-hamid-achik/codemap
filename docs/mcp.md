@@ -40,6 +40,7 @@ directory) and return JSON.
 | `codemap_path` | Shortest call path (`from`, `to`) |
 | `codemap_symbols` | List the symbols defined in a `file` (structured alternative to reading it) |
 | `codemap_find` | Find symbols by name (offline; no embeddings) |
+| `codemap_source` | Return a `symbol`'s source code (its body, read from the indexed line range) |
 
 The flagship is **`codemap_impact`** — one call returns a symbol's definition sites, callers,
 the transitive blast radius, and which tests cover those paths, replacing many file reads.

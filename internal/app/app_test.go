@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,6 +186,39 @@ func sigOf(refs []SymbolRef) string {
 		return "(no results)"
 	}
 	return refs[0].Signature
+}
+
+func TestServiceSource(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	src := "package app\n\n// Add sums two ints.\nfunc Add(a, b int) int {\n\treturn a + b\n}\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Source(proj, "Add")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Matches) != 1 {
+		t.Fatalf("Source(Add) matches = %d, want 1: %+v", len(rep.Matches), rep.Matches)
+	}
+	m := rep.Matches[0]
+	if !strings.Contains(m.Source, "func Add(a, b int) int") || !strings.Contains(m.Source, "return a + b") {
+		t.Errorf("source body not returned:\n%s", m.Source)
+	}
+	if m.Signature != "func Add(a, b int) int" || m.Doc != "Add sums two ints." {
+		t.Errorf("source match missing signature/doc: %+v", m)
+	}
 }
 
 func TestServiceSemantic(t *testing.T) {
