@@ -391,6 +391,17 @@
   Docs (README agent section + docs/studio.md) updated. COMMIT+PUSH.
   **NEXT:** signature in semantic-mode hits (payload or graph lookup), references/dependencies
   tools, full precise (gopls) edges in the indexer.
+- 2026-06-23 #39 (cron, polish-first) — **Completed #38: semantic-mode hits now carry signatures
+  too** (they come from the veclite payload, which has no signature). Resolved from the graph via
+  a new `graph.SignatureIndex(projectID) map[FQN]signature` (one query, keyed by FQN, excludes
+  blank sigs) — works on EXISTING indexes, no reindex. `Semantic()` now opens the graph, builds the
+  index once when there are hits, and fills `hit.Signature` by FQN. Live dogfood (Ollama up):
+  `semantic "shortest call path" --json` → `app.Service.Path` / `graph.Store.Path` distinguished by
+  full signature (previously `(none)`). studio Search preview is now consistent across semantic AND
+  name mode. 2 new tests (graph SignatureIndex incl. blank-exclusion; app semantic-hit signature via
+  fakeEmbedder); full suite + studio E2E green; fmt/vet clean. (Caught a stale-`bin/` dogfood: rebuilt
+  the binary before testing.) COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

@@ -37,6 +37,26 @@ func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+// SignatureIndex returns a map of FQN → signature for a project's symbols, so
+// callers (e.g. semantic search, whose results come from the vector store) can
+// enrich results with signatures in one query rather than per-node lookups.
+func (s *Store) SignatureIndex(projectID int64) (map[string]string, error) {
+	rows, err := s.db.Query("SELECT fqn, signature FROM nodes WHERE project_id=? AND fqn != '' AND signature != ''", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]string)
+	for rows.Next() {
+		var fqn, sig string
+		if err := rows.Scan(&fqn, &sig); err != nil {
+			return nil, err
+		}
+		out[fqn] = sig
+	}
+	return out, rows.Err()
+}
+
 // BlastRadius returns the transitive callers of symbol — everything affected if
 // it changes — up to maxDepth hops, each with its minimum depth. The BFS is
 // cycle-safe (a visited map keyed by node id), so recursive call graphs do not

@@ -434,11 +434,14 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if topK <= 0 {
 		topK = 10
 	}
-	_, name, err := svc.resolveProject(cwd)
+	pid, name, found, err := svc.project(cwd)
 	if err != nil {
 		return nil, err
 	}
 	rep := &SemanticReport{Query: query, Project: name, Mode: "semantic", Hits: []SemanticHit{}}
+	if !found {
+		return rep, nil
+	}
 
 	vecs, err := svc.s.Embedder().Embed(ctx, []string{query})
 	if err != nil {
@@ -455,10 +458,19 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if err != nil {
 		return nil, err
 	}
+	// Vector payloads don't store signatures; resolve them from the graph (one
+	// query) so semantic results are as self-contained as name-search results.
+	var sigs map[string]string
+	if len(hits) > 0 {
+		if g, gerr := svc.s.Graph(); gerr == nil {
+			sigs, _ = g.SignatureIndex(pid)
+		}
+	}
 	for _, h := range hits {
 		rep.Hits = append(rep.Hits, SemanticHit{
 			Symbol: h.Meta.Symbol, FQN: h.Meta.FQN, Kind: h.Meta.Kind, File: h.Meta.File,
 			StartLine: h.Meta.StartLine, EndLine: h.Meta.EndLine, Score: h.Score,
+			Signature: sigs[h.Meta.FQN],
 		})
 	}
 	return rep, nil

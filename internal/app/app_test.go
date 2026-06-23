@@ -209,6 +209,17 @@ func TestServiceSemantic(t *testing.T) {
 	if len(rep.Hits) == 0 {
 		t.Fatal("semantic search returned no hits")
 	}
+	// Signatures are resolved from the graph even though the vector payload
+	// lacks them, so semantic hits are as self-contained as name-search hits.
+	var got string
+	for _, h := range rep.Hits {
+		if h.Symbol == "Authenticate" {
+			got = h.Signature
+		}
+	}
+	if got != "func Authenticate()" {
+		t.Errorf("semantic hit signature = %q, want %q", got, "func Authenticate()")
+	}
 }
 
 func TestServiceImpact(t *testing.T) {
