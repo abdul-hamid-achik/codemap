@@ -274,6 +274,14 @@
   the LSP client/lspsrc aren't in the index path, so "LSP value" isn't user-visible yet.
   Consider wiring lspsrc as an opt-in indexer backend (per-language servers) OR a precise
   `callers --lsp` path via gopls callHierarchy. Otherwise: docs polish, more glyphrun specs.
+- 2026-06-23 #27 (cron, polish-first) — Docs accuracy + E2E coverage. CLAUDE.md reconciled:
+  fixed key-files map (removed nonexistent internal/search; added internal/lsp, vector, index,
+  embed, config; gosrc/lspsrc backends), marked ntcharts gotcha forward-looking (Metrics uses
+  ASCII bars, no chart dep), softened the extraction line (go/parser today, LSP wiring in
+  progress). Added specs/query.yml E2E (index→callers→impact→hotspots; FQN-clear output) → 5
+  glyphrun specs all PASS. All docs (README/AGENTS/CLAUDE + VitePress) now match reality.
+  COMMIT+PUSH. **NEXT:** the one remaining material lever is LSP edge precision (E2.2b) — a
+  user-visible `callers --lsp`/callHierarchy path or lspsrc-in-indexer. Else: keep polishing.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -415,9 +423,9 @@
 
 ## Epic 5 — Tests & quality
 - [ ] E5.1 unit tests (graph traversal/cycles, extract, search, config) — high coverage
-- [x] E5.2 glyphrun.config.yml + specs/*.yml (version, help, index_status, studio) — 4 specs
-      PASS via `task flows`; contractHashes stamped. studio.yml drives the TUI under a 120×40
-      PTY (Graph hubs + Metrics bars) and is also our visual-regression snapshot source.
+- [x] E5.2 glyphrun.config.yml + specs/*.yml (version, help, index_status, studio, query) —
+      5 specs PASS via `task flows`; contractHashes stamped. studio.yml drives the TUI under a
+      120×40 PTY; query.yml exercises callers/impact/hotspots end-to-end (snapshot source).
 - [x] E5.3 .golangci.yml (v2 schema; errcheck + staticcheck) — local lint falls back to
       vet+gofmt when golangci-lint v2 absent
 - [x] E5.4 CI .github/workflows/ci.yml (test/race/build/coverage + golangci-lint-action lint)

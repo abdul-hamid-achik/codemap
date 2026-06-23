@@ -5,17 +5,20 @@ and the handful of things that are easy to get wrong.
 
 ## What codemap is
 
-Local-first code intelligence: a structural code graph (LSP + stdlib parsers; optional
-tree-sitter) fused with semantic vectors (veclite), exposed as a unified query layer. Three
-surfaces over one store: CLI (`--json` for agents), MCP server (`codemap serve`), and the
-`studio` TUI.
+Local-first code intelligence: a structural code graph (stdlib `go/parser` today; a headless
+LSP client is built and being wired in; tree-sitter planned) fused with semantic vectors
+(veclite), exposed as a unified query layer. Three surfaces over one store: CLI (`--json` for
+agents), MCP server (`codemap serve`), and the `studio` TUI.
 
 Surfaces / key files:
 - CLI + all commands: `cmd/codemap/main.go`
-- Service layer (everything routes here): `internal/app/service.go`
-- MCP server (thin): `internal/mcp/server.go`
-- studio TUI: `internal/tui/` (tabs: graph, metrics, impact, search)
-- Graph store: `internal/graph/`  ·  Search: `internal/search/`  ·  Extract: `internal/extract/`
+- Service layer (everything routes here): `internal/app/` (service.go, session.go)
+- MCP server (thin, 10 tools): `internal/mcp/server.go`
+- studio TUI: `internal/tui/` (model.go/view.go; tabs graph/metrics/impact/search)
+- Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`
+- Extraction: `internal/extract/` (`gosrc` = go/parser, `lspsrc` = LSP-backed)
+- LSP client: `internal/lsp/`  ·  indexer: `internal/index/`  ·  embeddings: `internal/embed/`
+  ·  config (XDG): `internal/config/`
 
 ## Two documentation surfaces — do not mix them
 
@@ -35,11 +38,11 @@ Surfaces / key files:
   `charm.land/lipgloss/v2`, `charm.land/bubbles/v2`, `charm.land/glamour/v2` — **not**
   `github.com/charmbracelet/...`. The github `/v2` tags resolve on the proxy but fail the
   module-path check because `go.mod` declares `charm.land` as canonical.
-- **ntcharts v2 (`github.com/NimbleMarkets/ntcharts/v2`) has a `replace` to a bubbletea
-  fork** ("awaiting upstream merges"). That replace is ignored by our module, so it may not
-  build against stock `charm.land/bubbletea/v2 v2.0.7`. If `go build` breaks, either mirror
-  the `replace` in our `go.mod` or pin bubbletea to the version ntcharts wants (`v2.0.6`).
-  **Run `go build ./...` early when wiring charts.**
+- **(Future) ntcharts** — Metrics currently uses hand-rolled ASCII bars (no chart dep). If you
+  add `github.com/NimbleMarkets/ntcharts/v2`, note its `go.mod` `replace`s bubbletea to a fork
+  ("awaiting upstream merges"); that replace is ignored by our module, so it may not build
+  against stock `charm.land/bubbletea/v2`. Mirror the replace or pin bubbletea to what ntcharts
+  wants, and `go build ./...` early.
 - **Keep `CGO_ENABLED=0` for releases.** Everything is pure-Go (`modernc.org/sqlite`,
   veclite, the go-sdk). tree-sitter is the *only* thing that needs CGO — it stays behind the
   `treesitter` build tag and out of release binaries until 0.2.
