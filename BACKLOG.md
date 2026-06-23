@@ -574,6 +574,13 @@
   `TestIndexNonGoWarns`. Full suite + lint v2 (0) + index_status/query E2E green; fmt clean. COMMIT+PUSH.
   **NEXT:** wire the LSP backend into the indexer for TS/Python (unlocks multi-language), pure-Go
   `go/types` call resolution (accuracy), references/dependencies tools.
+- 2026-06-23 #54 (cron, polish-first) — **studio surfaces the index warning on `ctrl+r`** (consistency
+  follow-up to #53). The CLI warns when a project has no Go files (or embeddings are unavailable), but
+  studio's in-place reindex showed only "reindexed: 0 files · 0 nodes · 0 edges" — leaving a non-Go
+  (or no-Ollama) user puzzled. Now `indexedMsg` shows `⚠ <warning>` in the footer when `rep.Warning`
+  is set, so the TUI matches the CLI. Test: `TestIndexedMsgShowsWarning`. Full suite + lint v2 (0) +
+  studio E2E green; fmt clean. COMMIT+PUSH.
+  **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

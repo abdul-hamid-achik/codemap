@@ -445,6 +445,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.rep != nil {
 			m.statusMsg = fmt.Sprintf("reindexed: %d files · %d nodes · %d edges",
 				msg.rep.FilesIndexed, msg.rep.Nodes, msg.rep.Edges)
+			if msg.rep.Warning != "" { // e.g. no Go files, or embeddings unavailable
+				m.statusMsg = "⚠ " + msg.rep.Warning
+			}
 		}
 		// Refresh everything the new index affects.
 		return m, tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd())

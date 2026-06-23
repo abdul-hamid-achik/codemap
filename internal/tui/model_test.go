@@ -279,6 +279,14 @@ func TestIndexedMsgRefreshes(t *testing.T) {
 	}
 }
 
+func TestIndexedMsgShowsWarning(t *testing.T) {
+	m := sized(t, 120, 40)
+	u, _ := m.Update(indexedMsg{rep: &app.IndexReport{Warning: "no Go files to index (codemap v0.1 indexes Go); skipped 2 typescript"}})
+	if got := u.(Model).statusMsg; !strings.Contains(got, "no Go files") {
+		t.Errorf("reindex warning should surface in studio, got %q", got)
+	}
+}
+
 func TestGraphWalkRecenterAndBack(t *testing.T) {
 	m := sized(t, 120, 40)
 	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{
