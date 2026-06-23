@@ -731,7 +731,9 @@ Minor release (user-requested). Since v0.1.0: the **annotation layer surfaces ev
 inline surfacing on the studio Graph pane (#66), the precise/`--lsp`+MCP-`precise` path (#67), and
 Search incl. JSON enrichment for agents (#68); plus **documented agent registration** (#65: per-CLI
 `mcp add` one-liners). Same proven pure-Go pipeline as v0.1.0 (goreleaser → 5 targets → homebrew-tap).
-Tag `v0.2.0` to publish.
+RELEASED & verified: tag `v0.2.0` on `916059f` → GitHub release (5 platform artifacts + checksums) +
+homebrew-tap formula `0.2.0`; `brew upgrade` → local /opt/homebrew/bin/codemap is 0.2.0, so the
+registered agents serve the new annotation features on their next session.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
