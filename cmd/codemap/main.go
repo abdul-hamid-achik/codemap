@@ -384,10 +384,13 @@ func runCallers(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	label := fmt.Sprintf("Callers of %s", rep.Symbol)
-	if useLSP {
+	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
 		label += " (precise, via gopls)"
 	}
 	renderRefs(label, rep.Results)
+	if rep.Note != "" {
+		fmt.Println(rep.Note)
+	}
 	renderAnnotations(rep.Annotations)
 	return nil
 }
@@ -417,10 +420,13 @@ func runCallees(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	label := fmt.Sprintf("Callees of %s", rep.Symbol)
-	if useLSP {
+	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
 		label += " (precise, via gopls)"
 	}
 	renderRefs(label, rep.Results)
+	if rep.Note != "" {
+		fmt.Println(rep.Note)
+	}
 	renderAnnotations(rep.Annotations)
 	return nil
 }

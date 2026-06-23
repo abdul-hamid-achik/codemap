@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -522,6 +523,44 @@ func TestServiceSemantic(t *testing.T) {
 	}
 	if gotDoc != "Authenticate validates a jwt token." {
 		t.Errorf("semantic hit doc = %q, want %q", gotDoc, "Authenticate validates a jwt token.")
+	}
+}
+
+func TestPreciseFallbackToNameBased(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	// Two same-named methods + their callers: name-based callers of Process
+	// over-matches (both RunT and RunU), which is exactly the result the fallback
+	// should return when precise resolution is unavailable.
+	src := "package app\n\n" +
+		"type T struct{}\ntype U struct{}\n\n" +
+		"func (T) Process() {}\nfunc (U) Process() {}\n\n" +
+		"func RunT() { var t T; t.Process() }\n" +
+		"func RunU() { var u U; u.Process() }\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a language-server failure (e.g. gopls "no views") and confirm we
+	// degrade to name-based results with an explanatory note rather than erroring.
+	rep, err := svc.preciseFallback(proj, "Process", errors.New("jsonrpc error 0: no views"), svc.Callers)
+	if err != nil {
+		t.Fatalf("fallback should not error, got %v", err)
+	}
+	if rep.Note == "" || !strings.Contains(rep.Note, "name-based") {
+		t.Errorf("fallback should note it used name-based results, got %q", rep.Note)
+	}
+	if len(rep.Results) == 0 {
+		t.Error("fallback should return the name-based callers, got none")
 	}
 }
 

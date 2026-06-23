@@ -387,6 +387,7 @@ type RelationReport struct {
 	Symbol      string             `json:"symbol"`
 	Project     string             `json:"project"`
 	Results     []SymbolRef        `json:"results"`
+	Note        string             `json:"note,omitempty"`        // set when precise resolution fell back to name-based
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to the queried symbol
 }
 
@@ -513,17 +514,32 @@ func (svc *Service) symbolAnnotationsByName(name, symbol string) []graph.Annotat
 func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
 	c, _, project, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
 	if err != nil {
-		return nil, err
+		return svc.preciseFallback(cwd, symbol, err, svc.Callers)
 	}
 	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(c),
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
+}
+
+// preciseFallback degrades to name-based results when the language server can't
+// resolve precisely (e.g. gopls can't form a workspace view in a restricted
+// environment, or the project isn't a buildable module), attaching a note so the
+// caller knows the results are name-based. Far better than failing a query with a
+// raw "jsonrpc error: no views". If name-based resolution itself errors, that's
+// surfaced instead.
+func (svc *Service) preciseFallback(cwd, symbol string, cause error, nameBased func(cwd, symbol string) (*RelationReport, error)) (*RelationReport, error) {
+	rep, err := nameBased(cwd, symbol)
+	if err != nil {
+		return nil, err
+	}
+	rep.Note = fmt.Sprintf("precise (gopls) resolution unavailable (%v) — showing name-based results", cause)
+	return rep, nil
 }
 
 // PreciseCallees computes exact callees of a Go symbol using gopls callHierarchy.
 func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
 	_, ce, project, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
 	if err != nil {
-		return nil, err
+		return svc.preciseFallback(cwd, symbol, err, svc.Callees)
 	}
 	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(ce),
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil

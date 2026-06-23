@@ -727,6 +727,21 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #77 (lsp polish) — **precise (`--lsp` / `precise:true`) degrades gracefully instead of
+  erroring.** Dogfooding the LSP path surfaced a real wart: `codemap callers Foo --lsp` works when
+  gopls can form a workspace view (correctly resolving `T.Process` vs `U.Process` where name-based
+  over-matches both), but in a restricted environment — isolated HOME, no module cache, or a
+  non-buildable project — gopls returns `jsonrpc error 0: no views`, which the CLI surfaced as a raw
+  error **plus a full usage dump**. Now `PreciseCallers`/`PreciseCallees` catch a language-server
+  failure and fall back to name-based results via a shared `preciseFallback` helper, setting
+  `RelationReport.Note` ("precise (gopls) resolution unavailable (…) — showing name-based results").
+  The CLI prints the note and drops the "(precise, via gopls)" label when it fell back (so it never
+  mislabels name-based output as precise); the note rides the JSON to MCP agents too. Verified E2E:
+  isolated env → graceful degrade (name-based + note, exit 0, no usage spew); real env → precise still
+  resolves exactly one caller, labeled precise, no note. Test `TestPreciseFallbackToNameBased` drives
+  the helper deterministically (no gopls needed). New field `RelationReport.Note`. Full suite + lint v2
+  (0) + query/studio/semantic E2E green; fmt clean. COMMIT+PUSH. (Confirmed the precise path itself
+  works end-to-end — a dedicated LSP demonstration flow is now a clean future increment.)
 - 2026-06-23 #76 (mcp/agent polish) — **MCP query tools signal "not indexed" instead of empty results.**
   Completes the cold-start theme on the surface the harness vision cares most about: agents. Before,
   `codemap_callers`/`codemap_impact`/`codemap_find`/etc. on a never-indexed project returned empty
