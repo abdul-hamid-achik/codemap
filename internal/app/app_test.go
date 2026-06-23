@@ -540,6 +540,11 @@ func TestPreciseCallersGopls(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// pin an annotation so we can confirm the precise path surfaces it too.
+	if _, err := svc.AnnotateNode(proj, "Helper", "note", "precise too", ""); err != nil {
+		t.Fatal(err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	rep, err := svc.PreciseCallers(ctx, proj, "Helper")
@@ -554,6 +559,9 @@ func TestPreciseCallersGopls(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("precise callers of Helper = %+v, want to include Run", rep.Results)
+	}
+	if len(rep.Annotations) != 1 || rep.Annotations[0].Note != "precise too" {
+		t.Errorf("precise callers should surface the symbol's annotations, got %+v", rep.Annotations)
 	}
 }
 

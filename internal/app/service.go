@@ -436,6 +436,20 @@ func symbolAnnotations(g *graph.Store, projectID int64, symbol string) []graph.A
 	return nodeAnnotationsFor(g, projectID, candidates...)
 }
 
+// symbolAnnotationsByName resolves a symbol's annotations given the project name
+// (used by the precise/gopls path, which carries the name rather than the pid).
+func (svc *Service) symbolAnnotationsByName(name, symbol string) []graph.Annotation {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil
+	}
+	p, err := g.GetProjectByName(name)
+	if err != nil {
+		return nil
+	}
+	return symbolAnnotations(g, p.ID, symbol)
+}
+
 // PreciseCallers computes exact callers of a Go symbol using gopls callHierarchy
 // (no by-name inflation). Go-only for now; errors if gopls is unavailable.
 func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
@@ -443,7 +457,8 @@ func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*Re
 	if err != nil {
 		return nil, err
 	}
-	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(c)}, nil
+	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(c),
+		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
 }
 
 // PreciseCallees computes exact callees of a Go symbol using gopls callHierarchy.
@@ -452,7 +467,8 @@ func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*Re
 	if err != nil {
 		return nil, err
 	}
-	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(ce)}, nil
+	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(ce),
+		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
 }
 
 // PreciseRelationsAt returns both exact callers and callees of the symbol whose

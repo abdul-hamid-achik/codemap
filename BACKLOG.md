@@ -708,6 +708,16 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   `TestGraphPaneShowsAnnotations`. Full suite + lint v2 (0) + race + studio E2E green; fmt clean.
   COMMIT+PUSH.
   **NEXT:** precise/`--lsp`-path annotation surfacing; Search-pane indicator; then harness wiring.
+- 2026-06-23 #67 (annotation follow-up) — **precise/`--lsp` path now surfaces annotations too.**
+  `PreciseCallers`/`PreciseCallees` (CLI `--lsp` + MCP `precise:true`) populated their RelationReport
+  without annotations — inconsistent with the by-name path. Added `symbolAnnotationsByName(name,
+  symbol)` (resolves pid from the project name the precise path carries) and wired it into both
+  precise reports; the CLI already renders `rep.Annotations`. Dogfood: `callers B --lsp` shows the
+  exact gopls caller AND the pinned note. Extended `TestPreciseCallersGopls` to assert it. Full suite
+  (gopls present) + lint v2 (0) green; fmt clean. COMMIT+PUSH.
+  **Annotation layer is now complete on every surface** (CLI by-name + precise, MCP, studio
+  Graph/Impact, callers/callees/source). **NEXT:** Search-pane per-hit indicator (lower value — needs
+  per-hit lookup); broader harness wiring is harness-side.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
