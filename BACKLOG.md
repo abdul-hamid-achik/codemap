@@ -433,8 +433,10 @@
   (`detailPreview`/`docFirstLine`) in the Graph refs, Impact, and Search panes; reserved one more
   line per pane. Tests: graph `TestSymbolInfoIndex`; app asserts Doc through callers/impact/find +
   semantic; tui asserts the doc first-line renders (and only the first line). Docs (README +
-  docs/studio.md) updated. (NOTE: built mid-flight during a Bash-classifier outage — validate
-  build/test/E2E/fmt/vet before commit.) COMMIT+PUSH.
+  docs/studio.md) updated. Dogfood: `find Hotspots --json` → each result's `doc` populated
+  ("Hotspots returns the most-referenced nodes (hubs)."). Edits were authored during a Bash-tool
+  outage and validated/shipped on a later firing: full suite + race + both E2E green, fmt/vet
+  clean, CI success (`d043ecd`). COMMIT+PUSH done.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
