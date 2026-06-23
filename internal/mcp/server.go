@@ -40,7 +40,10 @@ codemap_status (index size), codemap_projects (what's indexed).
 Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matches every method
 named Foo. Pass precise:true to codemap_callers/codemap_callees for exact gopls resolution (Go);
 treat codemap_hotspots/codemap_orphans as name-based (they can over- or under-count same-named
-methods).`
+methods).
+
+Call codemap_docs for the full guide (workflow, every tool, accuracy, and how codemap fits the
+local toolchain) — useful when wiring codemap into a harness.`
 
 // Server wraps the go-sdk MCP server over a codemap session.
 type Server struct {
@@ -129,6 +132,10 @@ type sourceInput struct {
 // emptyInput is for tools that take no arguments (e.g. codemap_projects).
 type emptyInput struct{}
 
+type docsInput struct {
+	Topic string `json:"topic,omitempty" jsonschema:"optional section: overview, workflow, commands, accuracy, ecosystem; empty returns the full guide"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -186,6 +193,10 @@ func (s *Server) register() {
 		Name:        "codemap_projects",
 		Description: "List every project registered with codemap and its index size (nodes, edges, files) — discover what's indexed. Queries target one project at a time (via path/cwd).",
 	}, s.handleProjects)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_docs",
+		Description: "Learn how to use codemap effectively: an agent guide covering the index-first workflow, which tool to use for what, the accuracy model (when to pass precise:true), and how codemap fits the local toolchain. Optional 'topic' (overview/workflow/commands/accuracy/ecosystem).",
+	}, s.handleDocs)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -266,6 +277,12 @@ func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in s
 func (s *Server) handleProjects(_ context.Context, _ *sdkmcp.CallToolRequest, _ emptyInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.Projects()
 	return result(rep, err)
+}
+
+func (s *Server) handleDocs(_ context.Context, _ *sdkmcp.CallToolRequest, in docsInput) (*sdkmcp.CallToolResult, any, error) {
+	return &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: app.Docs(in.Topic)}},
+	}, nil, nil
 }
 
 // ---- helpers ----

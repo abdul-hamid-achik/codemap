@@ -168,6 +168,12 @@ var (
 		Args:  cobra.NoArgs,
 		RunE:  runProjects,
 	}
+	docsCmd = &cobra.Command{
+		Use:   "docs [topic]",
+		Short: "Print the agent guide to codemap (topics: overview, workflow, commands, accuracy, ecosystem)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runDocs,
+	}
 )
 
 func init() {
@@ -190,7 +196,7 @@ func init() {
 	findCmd.Flags().Int("top", 50, "maximum results")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, projectsCmd)
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, projectsCmd, docsCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -612,6 +618,15 @@ func runProjects(cmd *cobra.Command, _ []string) error {
 	for _, p := range rep.Projects {
 		fmt.Printf("%-20s %8d %8d %7d  %s\n", truncStr(p.Name, 20), p.Nodes, p.Edges, p.Files, p.Path)
 	}
+	return nil
+}
+
+func runDocs(_ *cobra.Command, args []string) error {
+	topic := ""
+	if len(args) > 0 {
+		topic = args[0]
+	}
+	fmt.Print(app.Docs(topic))
 	return nil
 }
 

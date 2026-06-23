@@ -167,6 +167,7 @@ Impact of Stats (codemap)
 | `symbols` | list a file's symbols (structured alternative to reading it) |
 | `find` | find symbols by name (offline) |
 | `source` | print a symbol's source code (the body behind its signature) |
+| `docs` | print the agent guide to codemap (`docs [topic]`) |
 | `impact` | blast radius + test coverage for a symbol (`--depth`) |
 | `hotspots` / `orphans` | hubs / dead-code candidates (`--top`) |
 | `semantic` | meaning-based search (`--top`) |
@@ -210,13 +211,14 @@ claude mcp add codemap -- codemap serve
 }
 ```
 
-Tools (14): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
+Tools (15): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
 `codemap_orphans`, `codemap_path`, `codemap_symbols`, `codemap_find`, `codemap_source`,
-`codemap_projects`. Each takes an optional `path` (the project directory) and
+`codemap_projects`, `codemap_docs`. Each takes an optional `path` (the project directory) and
 returns JSON. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
 gopls-resolved results (Go); `codemap_source` returns a symbol's body so an agent can read a
-definition without opening the file; `codemap_projects` lists what's indexed.
+definition without opening the file; `codemap_projects` lists what's indexed; **`codemap_docs`
+returns an agent guide** so a harness can learn the tool and the index→understand→read workflow.
 
 Results carry each symbol's **signature** (e.g. `func (s *Store) Hotspots(projectID int64, limit
 int) ([]Hotspot, error)`) and **docstring**, so an agent understands what callers/callees/hits are

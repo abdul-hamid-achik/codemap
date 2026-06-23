@@ -625,6 +625,26 @@
   18 blast, 9 covering tests (3 listed + "… 6 more"), and the affected list with the ✓ test marker —
   demonstrating "what breaks + what do I run" in one call. Docs-only (CI green trivially); fmt clean.
   **NEXT:** deferred backend epics (go/types accuracy, LSP multi-language) — warrant a focused go-ahead.
+- 2026-06-23 #61 (USER ASK) — **`docs` command + `codemap_docs` MCP tool** — so agents/harnesses can
+  learn the tool (user requested this directly). New `internal/app/docs.go` holds a concise,
+  topic-addressable agent guide (overview · workflow · commands · accuracy · ecosystem), reflecting
+  the real commands, the index→understand→read loop, the name-based-vs-precise accuracy model, and
+  how codemap fits the local toolchain (vecgrep/vidtrace/fcheap/noted). `codemap docs [topic]` (CLI)
+  and `codemap_docs` (MCP, optional topic); MCP `instructions` now point a harness at codemap_docs.
+  → **15 MCP tools, 19 CLI commands.** Tests: app `TestDocs`, mcp presence (+docs). Docs (README
+  count+table, AGENTS set(15), cli.md, mcp.md) updated. Full suite + lint v2 (0) + help E2E green. PUSH.
+
+## User vision (2026-06-23) — agent harness on top of the toolchain
+The user wants codemap (with vecgrep/vidtrace/fcheap/noted, all XDG-stored) to power an agent
+harness that analyzes & fixes codebases. Concrete asks, in priority order:
+1. [DONE #61] `docs` command + `codemap_docs` so a harness can learn the tool.
+2. **Annotations/notes (the core new capability):** tag graph nodes AND call paths with (a) external
+   data fetched from a DB (mongosh/postgres/etc.) and (b) free-form exploration notes; then query and
+   analyze them. → NEW: an annotations store keyed by node/FQN and by path, CRUD + list + attached to
+   query results, on CLI + MCP. Pure-Go, SQLite alongside the graph.
+3. Ecosystem flow: vidtrace (repro) → vecgrep (semantic) → codemap (structure/impact) → fcheap
+   (persist/search artifacts). codemap's role: structural understanding + the annotation layer.
+**NEXT:** design + build the annotations/notes layer (#2) — the core of the harness vision.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

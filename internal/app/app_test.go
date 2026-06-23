@@ -216,6 +216,24 @@ func TestIndexNonGoWarns(t *testing.T) {
 	}
 }
 
+func TestDocs(t *testing.T) {
+	full := Docs("")
+	for _, want := range []string{"## overview", "## workflow", "## accuracy", "codemap_impact", "precise:true"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("full docs should contain %q", want)
+		}
+	}
+	// a known topic returns just that section.
+	acc := Docs("accuracy")
+	if !strings.Contains(acc, "name-based") || strings.Contains(acc, "## overview") {
+		t.Errorf("topic docs should be just that section, got: %q", acc[:min(80, len(acc))])
+	}
+	// an unknown topic lists the available ones.
+	if got := Docs("nope"); !strings.Contains(got, "available:") {
+		t.Errorf("unknown topic should list available topics, got %q", got)
+	}
+}
+
 func TestServiceProjects(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
