@@ -727,6 +727,13 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #72 (status polish) — **studio Search badge says why it isn't semantic.** When the
+  search runs in name mode *because the project has no embeddings*, the header badge now reads
+  `name mode (no embeddings)` (conditioned on `m.status.Vectors == 0`, so an Ollama-down-but-embedded
+  project still just shows `name mode`). Completes the embedding-readiness UX thread across CLI
+  `status` (#70), Metrics (#71), and Search (#72) — every surface now tells you whether semantic
+  search is available and, in name mode, why not. Test `TestSearchNameModeNoEmbeddingsHint`. Full
+  suite + lint v2 (0) + studio E2E green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #71 (status polish) — **studio Metrics shows embedding state too** (consistency with #70).
   The Metrics header now reads `… · N embedded · semantic search ready` or `… · no embeddings — name
   search only`, reusing `m.status.Vectors` already loaded by statusCmd (no new fetch). So a studio user

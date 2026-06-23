@@ -518,7 +518,11 @@ func (m Model) renderSearch(w, h int) string {
 	var b strings.Builder
 	hdr := title("Search")
 	if m.searchMode != "" {
-		hdr += "  " + countStyle.Render(m.searchMode+" mode")
+		badge := m.searchMode + " mode"
+		if m.searchMode == "name" && m.status != nil && m.status.Vectors == 0 {
+			badge += " (no embeddings)" // why it isn't semantic; see Metrics for how to enable
+		}
+		hdr += "  " + countStyle.Render(badge)
 	}
 	b.WriteString(hdr + "   " + m.search.View() + "\n\n")
 	switch {

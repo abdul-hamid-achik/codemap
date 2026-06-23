@@ -539,6 +539,16 @@ func TestSearchPaneMarksAnnotated(t *testing.T) {
 	}
 }
 
+func TestSearchNameModeNoEmbeddingsHint(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{Registered: true, Vectors: 0}}) // structure-only
+	m, _ = applyMsg(m, semanticMsg{query: "x", mode: "name", hits: []app.SemanticHit{{Symbol: "A"}}})
+	if !strings.Contains(m.render(), "no embeddings") {
+		t.Error("name-mode search with no embeddings should hint why it isn't semantic")
+	}
+}
+
 func TestSearchPreviewShowsSelectedAnnotations(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch
