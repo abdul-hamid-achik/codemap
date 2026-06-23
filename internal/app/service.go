@@ -193,15 +193,30 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	rep.Languages = st.Languages
 	rep.Kinds = st.Kinds
 	// Best-effort: how many of this project's nodes are embedded (so callers know
-	// whether semantic search is available). Don't create the store if absent.
-	if _, statErr := os.Stat(config.VeclitePath()); statErr == nil {
-		if v, vErr := svc.s.Vectors(); vErr == nil {
-			if n, cErr := v.CountByProject(name); cErr == nil {
-				rep.Vectors = n
-			}
-		}
+	// whether semantic search is available).
+	if n, ok := svc.embeddedCount(name); ok {
+		rep.Vectors = n
 	}
 	return rep, nil
+}
+
+// embeddedCount reports how many vectors exist for the named project and whether
+// that count is known. It never creates the veclite store: if the file is absent
+// the project is structure-only, which is a known 0 — so a structure-only project
+// is never charged a store-open or an empty file just to be counted.
+func (svc *Service) embeddedCount(name string) (n int, ok bool) {
+	if _, err := os.Stat(config.VeclitePath()); err != nil {
+		return 0, true // no veclite file → definitely no embeddings
+	}
+	v, err := svc.s.Vectors()
+	if err != nil {
+		return 0, false
+	}
+	c, err := v.CountByProject(name)
+	if err != nil {
+		return 0, false
+	}
+	return c, true
 }
 
 // ProjectInfo is one registered project with its index size.
@@ -424,7 +439,8 @@ func enrichHitAnnotations(g *graph.Store, projectID int64, hits []SemanticHit) {
 type SemanticReport struct {
 	Query   string        `json:"query"`
 	Project string        `json:"project"`
-	Mode    string        `json:"mode"` // "semantic" or "name"
+	Mode    string        `json:"mode"`           // "semantic", "name", or "none" (no embeddings)
+	Note    string        `json:"note,omitempty"` // why there are no results, when applicable
 	Hits    []SemanticHit `json:"hits"`
 }
 
@@ -685,6 +701,16 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	}
 	rep := &SemanticReport{Query: query, Project: name, Mode: "semantic", Hits: []SemanticHit{}}
 	if !found {
+		return rep, nil
+	}
+
+	// Structure-only projects have no vectors. Detect that up front so the answer is
+	// an accurate "no embeddings" instead of an empty "no matches" — and so we skip
+	// both a pointless embedder call (which would error if Ollama is down) and the
+	// creation of an empty veclite file.
+	if n, ok := svc.embeddedCount(name); ok && n == 0 {
+		rep.Mode = "none"
+		rep.Note = "no embeddings for this project — run 'codemap index' with Ollama running to enable semantic search, or use 'codemap find' for name search"
 		return rep, nil
 	}
 

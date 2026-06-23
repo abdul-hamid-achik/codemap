@@ -525,6 +525,40 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestSemanticNoEmbeddings(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Authenticate() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	// Deliberately leave the embedder as the default (Ollama) and DON'T embed:
+	// a structure-only project must answer without ever calling it.
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Semantic(context.Background(), proj, "authentication", 5)
+	if err != nil {
+		t.Fatalf("semantic on a structure-only project should not error (no embedder call), got %v", err)
+	}
+	if rep.Mode != "none" {
+		t.Errorf("mode = %q, want %q", rep.Mode, "none")
+	}
+	if len(rep.Hits) != 0 {
+		t.Errorf("expected no hits without embeddings, got %d", len(rep.Hits))
+	}
+	if !strings.Contains(rep.Note, "no embeddings") {
+		t.Errorf("note should explain the project has no embeddings, got %q", rep.Note)
+	}
+}
+
 func TestServiceImpact(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

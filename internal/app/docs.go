@@ -43,7 +43,9 @@ files; use codemap_source when you need the implementation.`},
   path <from> <to>                   shortest call path between two symbols
   symbols <file>                     a file's outline (signatures)
   find <query>                       name search (offline, no embeddings)
-  semantic <query>                   meaning-based search (needs an embedded index)
+  semantic <query>                   meaning-based search (needs an embedded index;
+                                     on a structure-only project it returns mode
+                                     "none" with a note — use find instead)
   source <sym>                       a symbol's source code
   hotspots / orphans [--top N]       hubs / dead-code candidates
   annotate <sym> | <from> <to>       pin a note/data to a symbol or call path

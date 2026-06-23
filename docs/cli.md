@@ -51,6 +51,11 @@ interface dispatch or reflection — treat its output as dead-code *candidates*.
 | `codemap semantic <query> [--top N]` | Meaning-based search across the indexed graph |
 | `codemap find <query> [--top N]` | Find symbols by name, with signatures (offline; no embeddings needed) |
 
+On a structure-only project (indexed with `--no-embed`, or before Ollama was available), `codemap semantic`
+returns no hits with a short note explaining there are no embeddings — and the JSON carries `"mode": "none"`
+plus that `"note"` — so you know to embed the index or fall back to `codemap find`. It never calls the
+embedder or creates an empty vector store in that case.
+
 ## Surfaces
 
 | Command | Description |

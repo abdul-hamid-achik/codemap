@@ -727,6 +727,20 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #73 (correctness) — **`semantic` answers honestly on structure-only projects.** Before,
+  `codemap semantic` / `codemap_semantic` on an un-embedded project would (a) call the embedder anyway
+  — erroring if Ollama was down even though the project legitimately has no vectors, (b) lazily create
+  an empty veclite file, and (c) print a misleading `no matches` (as if the symbols didn't exist).
+  Now `Semantic` checks the embedded count up front via a new shared `embeddedCount` helper (never
+  creates the store — absent veclite file = known 0; the same guard `Status` uses, now DRY) and
+  returns early with `Mode: "none"` + a `Note`: "no embeddings for this project — run 'codemap index'
+  with Ollama … or use 'codemap find' …". CLI prints the note instead of `no matches`; JSON carries
+  `mode`+`note` so agents know to embed or fall back to `find`. This is the CLI/MCP counterpart of the
+  studio name-mode hint (#72) — and matters more, since agents hit the CLI/MCP not the TUI. New field
+  `SemanticReport.Note`. Test `TestSemanticNoEmbeddings` (default Ollama embedder, never called; mode
+  "none", note set, no error). Docs updated (agent guide `commands` topic + docs/cli.md). Verified with
+  an isolated-XDG `index --no-embed` → `semantic` real-CLI run (text note + JSON mode/note). Full suite
+  + lint v2 (0) + semantic/index_status/query E2E green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #72 (status polish) — **studio Search badge says why it isn't semantic.** When the
   search runs in name mode *because the project has no embeddings*, the header badge now reads
   `name mode (no embeddings)` (conditioned on `m.status.Vectors == 0`, so an Ollama-down-but-embedded

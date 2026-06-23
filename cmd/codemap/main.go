@@ -461,7 +461,11 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	if len(rep.Hits) == 0 {
-		fmt.Println("no matches")
+		if rep.Note != "" {
+			fmt.Println(rep.Note)
+		} else {
+			fmt.Println("no matches")
+		}
 		return nil
 	}
 	for _, h := range rep.Hits {
