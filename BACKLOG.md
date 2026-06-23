@@ -727,6 +727,20 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #80 (ambiguity honesty, cont.) — **`callers`/`callees` warn on ambiguous names too**, the
+  grounded #79 follow-up. `codemap callers Close` lists 71 callers merged across 6 unrelated `Close`
+  methods with no signal — same wart as impact, but here `--lsp` is the directly actionable fix. The
+  shared `relation` helper now does one extra `FindNodesBySymbol` and, when >1 definition, sets
+  `RelationReport.Note`: `"Close" matches 6 definitions (name-based) — these results merge all of them;
+  add --lsp (gopls) for one exact method`. CLI prints it as a `⚠` line (also gave the #77 precise-
+  fallback note a `⚠`, consistent); note rides JSON to MCP agents. The ambiguity check is about the
+  *queried* symbol's definitions (verified: `callees runStatus` has no note even though its results
+  include the ambiguous Close methods). Reuses RelationReport.Note from #77 with no collision — name-
+  based path sets ambiguity, precise path sets fallback (and preciseFallback's name-based call has its
+  ambiguity note overwritten by the more-actionable fallback message, which still passes its test).
+  Tests: `TestCallersWarnsOnAmbiguousName` (ambiguous→note, unique→none). Verified live on the codemap
+  repo. Full suite + lint v2 (0) + query/studio E2E green; fmt clean. COMMIT+PUSH. (Studio Graph tab is
+  node-centric exploration — different model — so left as-is; CLI+MCP cover the bare-name query surface.)
 - 2026-06-23 #79 (flagship honesty) — **`impact` warns when the name is ambiguous.** Dogfooding found
   a real flagship wart: `codemap impact Close` resolves to 6 different `Close` methods across packages
   and silently merges them into one blast radius reading "direct callers: 71" — a misleadingly huge,

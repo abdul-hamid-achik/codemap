@@ -479,6 +479,12 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	for _, n := range nodes {
 		rep.Results = append(rep.Results, nodeToRef(n))
 	}
+	// Name-based resolution conflates same-named definitions, so these results are
+	// the union across all of them. Flag it (mirrors impact) and point at the
+	// precise path that disambiguates — far better than a silent over-count.
+	if defs, derr := g.FindNodesBySymbol(p.ID, symbol); derr == nil && len(defs) > 1 {
+		rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — these results merge all of them; add --lsp (gopls) for one exact method", symbol, len(defs))
+	}
 	rep.Annotations = symbolAnnotations(g, p.ID, symbol)
 	return rep, nil
 }

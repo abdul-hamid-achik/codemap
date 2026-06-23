@@ -389,7 +389,7 @@ func runCallers(cmd *cobra.Command, args []string) error {
 	}
 	renderRefs(label, rep.Results)
 	if rep.Note != "" {
-		fmt.Println(rep.Note)
+		fmt.Println("⚠ " + rep.Note)
 	}
 	renderAnnotations(rep.Annotations)
 	return nil
@@ -425,7 +425,7 @@ func runCallees(cmd *cobra.Command, args []string) error {
 	}
 	renderRefs(label, rep.Results)
 	if rep.Note != "" {
-		fmt.Println(rep.Note)
+		fmt.Println("⚠ " + rep.Note)
 	}
 	renderAnnotations(rep.Annotations)
 	return nil

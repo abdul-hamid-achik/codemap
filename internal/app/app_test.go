@@ -526,6 +526,46 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestCallersWarnsOnAmbiguousName(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	src := "package app\n\n" +
+		"type T struct{}\ntype U struct{}\n\n" +
+		"func (T) Close() {}\nfunc (U) Close() {}\n\n" +
+		"func RunT() { var t T; t.Close() }\n" +
+		"func RunU() { var u U; u.Close() }\n" +
+		"func Solo() {}\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ambiguous name: callers merge both Close definitions and must say so.
+	amb, err := svc.Callers(proj, "Close")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if amb.Note == "" || !strings.Contains(amb.Note, "definitions") {
+		t.Errorf("ambiguous callers should warn it merges same-named defs, got %q", amb.Note)
+	}
+	// Unique name: no warning.
+	solo, err := svc.Callees(proj, "Solo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if solo.Note != "" {
+		t.Errorf("unambiguous callees should carry no note, got %q", solo.Note)
+	}
+}
+
 func TestImpactWarnsOnAmbiguousName(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
