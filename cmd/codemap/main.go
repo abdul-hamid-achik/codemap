@@ -150,6 +150,12 @@ var (
 		Args:  cobra.ExactArgs(1),
 		RunE:  runSymbols,
 	}
+	findCmd = &cobra.Command{
+		Use:   "find <query>",
+		Short: "Find symbols by name (fast, offline — no embeddings needed)",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  runFind,
+	}
 )
 
 func init() {
@@ -169,9 +175,10 @@ func init() {
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
+	findCmd.Flags().Int("top", 50, "maximum results")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd)
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -478,6 +485,31 @@ func runPath(cmd *cobra.Command, args []string) error {
 	fmt.Println(strings.Join(names, " → "))
 	for _, p := range rep.Path {
 		fmt.Printf("  %-30s %s:%d\n", p.Symbol, p.File, p.StartLine)
+	}
+	return nil
+}
+
+func runFind(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	top, _ := cmd.Flags().GetInt("top")
+	rep, err := app.NewService(sess).FindSymbols(cwd, strings.Join(args, " "), top)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if len(rep.Hits) == 0 {
+		fmt.Printf("no symbols matching %q (is the project indexed?)\n", rep.Query)
+		return nil
+	}
+	for _, h := range rep.Hits {
+		fmt.Printf("  %-9s %-36s %s:%d\n", h.Kind, disp(h.FQN, h.Symbol), h.File, h.StartLine)
 	}
 	return nil
 }

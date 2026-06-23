@@ -39,6 +39,7 @@ the specific resolved method.
 | Command | Description |
 |---|---|
 | `codemap semantic <query> [--top N]` | Meaning-based search across the indexed graph |
+| `codemap find <query> [--top N]` | Find symbols by name (offline; no embeddings needed) |
 
 ## Surfaces
 

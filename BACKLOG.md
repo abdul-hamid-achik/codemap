@@ -342,6 +342,12 @@
   now needs gopls for `task flows` (precise step) — local-only (CI doesn't run flows).
   **NEXT:** CLI/MCP `find` (name search for agents w/o Ollama), references/dependencies, or
   precise edges in indexer.
+- 2026-06-23 #35 (cron, polish-first) — Exposed offline name search to CLI + agents: `find
+  <query>` command + `codemap_find` MCP tool (both → Service.FindSymbols). Agents/people
+  without Ollama can now search (codemap_semantic hard-requires it). → **12 MCP tools, 15 CLI
+  commands.** Demo: `find Precise` → PreciseCallers/Callees/RelationsAt etc. (offline). Docs
+  (README/AGENTS/cli/mcp) updated. All units + 5 E2E green, fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** references/dependencies tools, precise edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

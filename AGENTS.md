@@ -166,8 +166,8 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (11): `init, index, status, semantic,
-  callers, callees, impact, hotspots, orphans, path, symbols`. Each takes an optional `path`
+- Tool names are `codemap_`-prefixed. Current set (12): `init, index, status, semantic,
+  callers, callees, impact, hotspots, orphans, path, symbols, find`. Each takes an optional `path`
   (project dir, defaults to cwd) and returns JSON; callers/callees take `precise` (gopls).
   (Planned: `references`, `dependencies`, `semantic_callers`.)
 - CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`), `status`, `callers`,
