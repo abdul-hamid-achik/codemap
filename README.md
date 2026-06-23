@@ -43,14 +43,20 @@ instead of dozens of file reads.
 Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`4` or `tab`; navigate with `↑`/`↓`.
 
 ```
- codemap studio                        myproject · 411 nodes · 1414 edges · 35 files
+ codemap studio                       codemap · 509 nodes · 1849 edges · 35 files
   1 Graph   2 Metrics   3 Impact   4 Search
- Hubs                          │ Close
-    38  Close                  │  Called by (38)
-    21  Error                  │    indexFile   internal/index/indexer.go:182
-    18  NewService             │    Index       internal/app/service.go:81
-                               │  Calls (0)
+ Hubs                                 │ lspsrc.Extractor.Close
+    57  lspsrc.Extractor.Close        │  Called by (57)
+    56  app.Session.Close             │   ▸ main.runInit    cmd/codemap/main.go:186
+    56  graph.Store.Close             │     main.runIndex   cmd/codemap/main.go:209
+    26  app.NewService                │  Calls (9)
+    19  app.Open                      │     app.Session.Close  internal/app/session.go:80
+                                      │  ⟩ func runInit(cmd *cobra.Command, ...) error
+ ↑/↓ hub · → walk callers/calls · enter → impact · p precise · ctrl+c quit
 ```
+
+Fully-qualified names disambiguate same-named symbols (six different `Close` methods above), and
+the selected node's signature is previewed (`⟩ func runInit(...)`).
 
 - **Graph** — a call-graph explorer: hubs (most-referenced symbols) on the left as jump
   points, the centered node's callers and callees on the right. Press `→` to focus the right

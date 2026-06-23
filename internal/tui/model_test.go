@@ -397,6 +397,27 @@ func TestImpactShowsSignaturePreview(t *testing.T) {
 	}
 }
 
+func TestImpactHeaderShowsAnalyzedSymbol(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabImpact
+	m.impact.SetValue("Authenticate")
+	rep := &app.ImpactReport{
+		Symbol: "Authenticate", Found: true,
+		Locations: []app.SymbolRef{{
+			Symbol: "Authenticate", FQN: "auth.Authenticate", File: "auth.go", StartLine: 42,
+			Signature: "func Authenticate(tok string) (Claims, error)", Doc: "Authenticate validates a jwt.",
+		}},
+		BlastRadius: []app.ImpactNode{{Symbol: "Login", Depth: 1}},
+	}
+	m, _ = applyMsg(m, impactMsg{symbol: "Authenticate", rep: rep})
+	out := m.render()
+	for _, want := range []string{"func Authenticate(tok string) (Claims, error)", "Authenticate validates a jwt."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("impact header should show the analyzed symbol's %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestSearchShowsSignaturePreview(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch

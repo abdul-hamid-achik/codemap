@@ -438,6 +438,18 @@
   outage and validated/shipped on a later firing: full suite + race + both E2E green, fmt/vet
   clean, CI success (`d043ecd`). COMMIT+PUSH done.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #43 (cron, polish-first) — **Impact tab now self-contained + refreshed stale README/docs
+  studio example.** (1) The Impact "defined" header showed only a bare name+location; it now renders
+  the analyzed symbol's **signature** on its own line plus the **docstring** first line (free from
+  `rep.Locations`, which are SymbolRefs carrying both since #38/#42) — so you see what you're
+  analyzing, matching the Graph/Search previews. New `firstDoc` helper; `TestImpactHeaderShowsAnalyzed
+  Symbol`. (2) The README + docs/studio.md ASCII art was stale (bare `Close`, fabricated counts, no
+  sig preview). Captured a REAL studio view of codemap-on-itself via a throwaway glyph spec and used
+  the faithful output: FQN hub list (six distinct `Close` methods → shows disambiguation),
+  `Called by (57)`/`Calls (9)`, the `▸` selection, and the `⟩ func runInit(...)` signature preview +
+  focus-aware footer. Full suite + studio E2E green (impact snapshot shows `func Helper()` under the
+  defined symbol); fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

@@ -4,13 +4,16 @@
 (Bubble Tea / Lip Gloss / Bubbles).
 
 ```
- codemap studio                        myproject · 411 nodes · 1414 edges · 35 files
+ codemap studio                       codemap · 509 nodes · 1849 edges · 35 files
   1 Graph   2 Metrics   3 Impact   4 Search
- Hubs                          │ graph.Store.Close
-    45  graph.Store.Close      │  Called by (8)
-    45  app.Session.Close      │    indexFile   internal/index/indexer.go:182
-    21  embed.…Error           │    Index       internal/app/service.go:81
-                               │  Calls (0)
+ Hubs                                 │ lspsrc.Extractor.Close
+    57  lspsrc.Extractor.Close        │  Called by (57)
+    56  app.Session.Close             │   ▸ main.runInit    cmd/codemap/main.go:186
+    56  graph.Store.Close             │     main.runIndex   cmd/codemap/main.go:209
+    26  app.NewService                │  Calls (9)
+    19  app.Open                      │     app.Session.Close  internal/app/session.go:80
+                                      │  ⟩ func runInit(cmd *cobra.Command, ...) error
+ ↑/↓ hub · → walk callers/calls · enter → impact · p precise · ctrl+c quit
 ```
 
 ## Tabs

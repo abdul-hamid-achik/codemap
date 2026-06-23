@@ -311,8 +311,14 @@ func (m Model) renderImpact(w, h int) string {
 		b.WriteString(mutedStyle.Render(fmt.Sprintf("symbol %q not found", m.impactSymbol)))
 	default:
 		for _, l := range rep.Locations {
-			b.WriteString(mutedStyle.Render("defined  ") + symStyle.Render(displayName(l.FQN, l.Symbol)) + "  " +
-				mutedStyle.Render(fmt.Sprintf("%s:%d", l.File, l.StartLine)) + "\n")
+			b.WriteString(mutedStyle.Render("defined  ") + symStyle.Render(displayName(l.FQN, l.Symbol)) +
+				mutedStyle.Render(fmt.Sprintf("  %s:%d", l.File, l.StartLine)) + "\n")
+			if sig := strings.Join(strings.Fields(l.Signature), " "); sig != "" {
+				b.WriteString("  " + countStyle.Render(truncate(sig, w-2)) + "\n")
+			}
+		}
+		if d := docFirstLine(firstDoc(rep.Locations)); d != "" {
+			b.WriteString("  " + mutedStyle.Render(truncate(d, w-2)) + "\n")
 		}
 		cover := fmt.Sprintf("%d direct callers · %d in blast radius · %d covering tests",
 			len(rep.DirectCallers), len(rep.BlastRadius), len(rep.Tests))
@@ -430,6 +436,16 @@ func docFirstLine(doc string) string {
 	for _, ln := range strings.Split(doc, "\n") {
 		if ln = strings.TrimSpace(ln); ln != "" {
 			return ln
+		}
+	}
+	return ""
+}
+
+// firstDoc returns the first non-empty docstring among the given refs.
+func firstDoc(refs []app.SymbolRef) string {
+	for _, r := range refs {
+		if r.Doc != "" {
+			return r.Doc
 		}
 	}
 	return ""
