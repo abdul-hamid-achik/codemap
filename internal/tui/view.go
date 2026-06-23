@@ -63,9 +63,16 @@ func (m Model) tabBar() string {
 }
 
 func (m Model) footer() string {
-	hint := "tab switch · ↑/↓ navigate · enter run · ctrl+c quit"
-	if m.active == tabGraph {
-		hint = "1-4 tabs · ↑/↓ select hub · ctrl+c quit"
+	var hint string
+	switch m.active {
+	case tabGraph:
+		hint = "↑/↓ select hub · enter → impact · 1-4 tabs · ctrl+c quit"
+	case tabSearch:
+		hint = "type · enter search · ↑/↓ scroll · tab switch · ctrl+c quit"
+	case tabImpact:
+		hint = "type symbol · enter · ↑/↓ scroll · tab switch · ctrl+c quit"
+	default:
+		hint = "1-4 tabs · ctrl+c quit"
 	}
 	status := m.statusMsg
 	if m.errMsg != "" {
@@ -213,14 +220,23 @@ func (m Model) renderImpact(w, h int) string {
 		}
 		b.WriteString("\n" + countStyle.Render(cover) + "\n\n")
 		b.WriteString(sectionStyle.Render("Blast radius") + "\n")
-		budget := clamp(h-8, 1, 30)
-		for _, n := range firstN(rep.BlastRadius, budget) {
+		br := rep.BlastRadius
+		budget := clamp(h-11, 1, 40)
+		start := clamp(m.impactOffset, 0, maxStart(len(br), budget))
+		end := clamp(start+budget, 0, len(br))
+		if start > 0 {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more above\n", start)))
+		}
+		for _, n := range br[start:end] {
 			marker := "  "
 			if n.Kind == "test" {
 				marker = symStyle.Render("✓ ")
 			}
 			fmt.Fprintf(&b, " %s[%d] %s %s\n", marker, n.Depth, padRight(n.Symbol, 28),
 				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", n.File, n.StartLine), w-40)))
+		}
+		if end < len(br) {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(br)-end)))
 		}
 	}
 	return b.String()
@@ -237,11 +253,20 @@ func (m Model) renderSearch(w, h int) string {
 	case len(m.searchHits) == 0:
 		b.WriteString(mutedStyle.Render("no matches"))
 	default:
-		budget := clamp(h-3, 1, 50)
-		for _, hit := range firstN(m.searchHits, budget) {
+		hits := m.searchHits
+		budget := clamp(h-6, 1, 50)
+		start := clamp(m.searchOffset, 0, maxStart(len(hits), budget))
+		end := clamp(start+budget, 0, len(hits))
+		if start > 0 {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more above\n", start)))
+		}
+		for _, hit := range hits[start:end] {
 			fmt.Fprintf(&b, "  %s  %s %s\n", countStyle.Render(fmt.Sprintf("%.3f", hit.Score)),
 				symStyle.Render(padRight(hit.Symbol, 28)),
 				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-44)))
+		}
+		if end < len(hits) {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(hits)-end)))
 		}
 	}
 	return b.String()
@@ -334,6 +359,13 @@ func truncate(s string, w int) string {
 		r = r[:w-1]
 	}
 	return string(r) + "…"
+}
+
+func maxStart(n, budget int) int {
+	if n > budget {
+		return n - budget
+	}
+	return 0
 }
 
 func clamp(n, lo, hi int) int {

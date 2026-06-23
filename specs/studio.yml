@@ -30,7 +30,18 @@ steps:
             contains: "By kind"
         timeoutMs: 5000
     - snapshot: metrics
-    - press: "q"
+    - press: "1"
+    - wait:
+        screen:
+            contains: "Hubs"
+        timeoutMs: 5000
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "Blast radius"
+        timeoutMs: 5000
+    - snapshot: impact
+    - press: "ctrl+c"
     - wait:
         process:
             exitCode: 0

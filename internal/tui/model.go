@@ -79,14 +79,16 @@ type Model struct {
 	status    *app.StatusReport
 
 	// search tab
-	search      textinput.Model
-	searchHits  []app.SemanticHit
-	searchQuery string
+	search       textinput.Model
+	searchHits   []app.SemanticHit
+	searchQuery  string
+	searchOffset int
 
 	// impact tab
 	impact       textinput.Model
 	impactRep    *app.ImpactReport
 	impactSymbol string
+	impactOffset int
 
 	// graph tab (call-graph explorer)
 	graphLoaded  bool
@@ -234,6 +236,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.searchHits = msg.hits
 		m.searchQuery = msg.query
+		m.searchOffset = 0
 		m.statusMsg = fmt.Sprintf("%d matches for %q", len(msg.hits), msg.query)
 		return m, nil
 
@@ -246,6 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.impactRep = msg.rep
 		m.impactSymbol = msg.symbol
+		m.impactOffset = 0
 		if msg.rep != nil {
 			m.statusMsg = fmt.Sprintf("%s: %d callers, %d blast, %d tests",
 				msg.symbol, len(msg.rep.DirectCallers), len(msg.rep.BlastRadius), len(msg.rep.Tests))
@@ -285,25 +289,49 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.active {
 	case tabSearch:
-		if key == "enter" {
+		switch key {
+		case "enter":
 			q := m.search.Value()
 			if q == "" {
 				return m, nil
 			}
 			m.statusMsg = "searching…"
+			m.searchOffset = 0
 			return m, m.semanticCmd(q)
+		case "up": // single-line input ignores up/down, so use them to scroll results
+			if m.searchOffset > 0 {
+				m.searchOffset--
+			}
+			return m, nil
+		case "down":
+			if m.searchOffset < len(m.searchHits)-1 {
+				m.searchOffset++
+			}
+			return m, nil
 		}
 		m.search, cmd = m.search.Update(msg)
 		return m, cmd
 
 	case tabImpact:
-		if key == "enter" {
+		switch key {
+		case "enter":
 			s := m.impact.Value()
 			if s == "" {
 				return m, nil
 			}
 			m.statusMsg = "analyzing…"
+			m.impactOffset = 0
 			return m, m.impactCmd(s)
+		case "up":
+			if m.impactOffset > 0 {
+				m.impactOffset--
+			}
+			return m, nil
+		case "down":
+			if m.impactRep != nil && m.impactOffset < len(m.impactRep.BlastRadius)-1 {
+				m.impactOffset++
+			}
+			return m, nil
 		}
 		m.impact, cmd = m.impact.Update(msg)
 		return m, cmd
@@ -319,6 +347,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.graphSel < len(m.graphHubs)-1 {
 				m.graphSel++
 				return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
+			}
+		case "enter":
+			// drill into the selected hub's full impact analysis
+			if len(m.graphHubs) > 0 {
+				sym := m.graphHubs[m.graphSel].Symbol
+				m.active = tabImpact
+				m.impact.SetValue(sym)
+				m.syncFocus()
+				m.impactOffset = 0
+				m.statusMsg = "analyzing…"
+				return m, m.impactCmd(sym)
 			}
 		case "q":
 			return m, tea.Quit

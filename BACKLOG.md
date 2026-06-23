@@ -222,6 +222,15 @@
   and the hand-rolled LSP client note (superseding go.lsp.dev/TD6). Verified: no stale refs
   remain; build/tests green. COMMIT+PUSH. **NEXT (polish):** TUI Impact/Search result scrolling
   + selection; then LSP edge wiring (E2.2b). CLAUDE.md is still accurate (spot-checked).
+- 2026-06-23 #21 (cron, polish-first) — TUI navigation polish. (1) Cross-tab DRILL-DOWN:
+  enter on a Graph hub jumps to the Impact tab and runs impact for that symbol (explore→drill
+  workflow). (2) SCROLLABLE results: ↑/↓ scroll Search hits and Impact blast-radius lists
+  (single-line inputs ignore ↑/↓, so no focus-mode needed), with ▲/▼ "N more" indicators.
+  (3) Per-tab footer hints. 2 new TUI tests (drill-to-impact, search scroll). Extended
+  specs/studio.yml to drill Graph→Impact and snapshot the Impact tab (verified: Helper → 2
+  callers/3 blast/0 tests/⚠untested, full-screen). All units + 4 E2E green, fmt/vet clean.
+  COMMIT+PUSH. **NEXT (polish):** Search hit → enter to drill into impact (per-row select);
+  then LSP edge wiring (E2.2b) for precise hubs; E0.5 VitePress docs scaffold.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

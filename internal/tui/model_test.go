@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -133,6 +134,43 @@ func TestMetricsRendersBars(t *testing.T) {
 	}
 	if !strings.Contains(out, "function") || !strings.Contains(out, "█") {
 		t.Error("metrics missing bar chart")
+	}
+}
+
+func TestGraphEnterDrillsToImpact(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", InDegree: 38}}})
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm := u.(Model)
+	if mm.active != tabImpact {
+		t.Errorf("enter on hub: active=%v, want Impact", mm.active)
+	}
+	if mm.impact.Value() != "Close" {
+		t.Errorf("impact input = %q, want Close", mm.impact.Value())
+	}
+	if cmd == nil {
+		t.Error("drill-down should fire an impact command")
+	}
+}
+
+func TestSearchScroll(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	hits := make([]app.SemanticHit, 30)
+	for i := range hits {
+		hits[i] = app.SemanticHit{Symbol: fmt.Sprintf("S%d", i)}
+	}
+	m, _ = applyMsg(m, semanticMsg{query: "x", hits: hits})
+	if m.searchOffset != 0 {
+		t.Fatalf("offset after results = %d, want 0", m.searchOffset)
+	}
+	u, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	if u.(Model).searchOffset != 1 {
+		t.Errorf("after down: offset=%d, want 1", u.(Model).searchOffset)
+	}
+	u2, _ := u.(Model).Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	if u2.(Model).searchOffset != 0 {
+		t.Errorf("after up: offset=%d, want 0", u2.(Model).searchOffset)
 	}
 }
 
