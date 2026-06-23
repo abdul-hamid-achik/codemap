@@ -20,39 +20,42 @@ instead of dozens of file reads.
   SQLite, queryable offline.
 - **Semantic search** — every node's source is embedded (Ollama `nomic-embed-text`, 768-dim)
   into [veclite](https://github.com/abdul-hamid-achik/veclite); vector + BM25 hybrid search.
-- **Hybrid queries** — `impact` (blast radius + test coverage + untested paths),
-  `semantic_callers` (semantic match, then expand up the call graph), `refactor_plan`.
+- **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
+  transitive blast radius (everything affected by a change), and which tests cover those
+  paths (flagging untested code).
 - **Cross-project** — the graph spans every registered project, not just one repo.
-- **Precise + broad** — headless **LSP** (gopls, ts_ls, …) for precision; stdlib parsers and
-  (optional) tree-sitter for coverage. LSP edges outrank heuristic edges.
+- **Precise + broad** — a pure-Go `go/parser` backend for Go today, plus a headless **LSP**
+  client (validated against gopls) for precise, multi-language extraction. (tree-sitter for
+  more languages is planned.)
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider/model/dimension changes instead of corrupting the vector space.
 - **Three surfaces, one store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
   server**, and the **studio** TUI for humans.
-- **Graph analytics** — hotspots (hubs), orphans (dead-code candidates), shortest call path,
-  circular-dependency detection.
+- **Graph analytics** — `hotspots` (hubs), `orphans` (dead-code candidates), and `path`
+  (shortest call path between two symbols).
 - **Local-first & private** — everything runs on your machine; no cloud, no uploads.
 - **Single binary** — pure-Go, `CGO_ENABLED=0`, cross-compiled and shipped via Homebrew.
 
 ## studio (TUI)
 
-`codemap studio` opens an interactive map of your code (Charm v2 — Bubble Tea / Lip Gloss /
-Bubbles, charts via ntcharts):
+`codemap studio` opens an interactive, full-screen explorer of your code (Charm v2 — Bubble
+Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`4` or `tab`; navigate with `↑`/`↓`.
 
 ```
- codemap studio ── myproject
- [1] Graph   [2] Metrics   [3] Impact   [4] Search
- ────────────────────────────────────────────────────
-   authSvc ──▶ login ──▶ handler        Hotspots
-       │  ╲                                auth  ███████ 42
-       ▼   ╲──▶ guard                      db    █████   31
-   authTest                               http  ████    24
+ codemap studio                        myproject · 411 nodes · 1414 edges · 35 files
+  1 Graph   2 Metrics   3 Impact   4 Search
+ Hubs                          │ Close
+    38  Close                  │  Called by (38)
+    21  Error                  │    indexFile   internal/index/indexer.go:182
+    18  NewService             │    Index       internal/app/service.go:81
+                               │  Calls (0)
 ```
 
-- **Graph** — node-link call/dependency map.
-- **Metrics** — hotspots, blast-radius sizes, test-coverage gaps, language breakdown.
-- **Impact** — pick a symbol, see callers, tests, blast radius, and similar code.
-- **Search** — semantic + structural search with filters.
+- **Graph** — a call-graph explorer: the hubs (most-referenced symbols) on the left, the
+  selected hub's callers and callees on the right.
+- **Metrics** — node/edge/file counts and bar charts by kind and language, plus top hubs.
+- **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
+- **Search** — semantic search by meaning (ranked results).
 
 ## Installation
 
@@ -88,21 +91,42 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 
 ```bash
 # 1. Register and index a project
-codemap init                     # registers the current directory
-codemap index                    # extract graph + embed nodes (incremental)
+codemap init                       # registers the current directory
+codemap index                      # extract graph + embed nodes (incremental)
+codemap index --no-embed           # structure only (no Ollama needed)
 
-# 2. Ask structural questions
-codemap callers authenticateUser
-codemap impact  authenticateUser --depth 3
-codemap blast-radius UserService --depth 3
+# 2. Navigate the call graph
+codemap callers authenticateUser   # who calls it
+codemap callees authenticateUser   # what it calls
+codemap path     Handler Login     # shortest call path between two symbols
 
-# 3. Ask semantic questions
-codemap semantic "jwt validation middleware"
-codemap search   "error handling without checking" --kind function --json
+# 3. Analyze impact and structure
+codemap impact   authenticateUser --depth 3   # callers + blast radius + tests
+codemap hotspots --top 20          # most-referenced symbols (hubs)
+codemap orphans                    # functions with no callers (dead-code candidates)
 
-# 4. Explore visually
+# 4. Search by meaning (needs an embedded index)
+codemap semantic "jwt validation middleware" --top 10
+
+# 5. Explore visually
 codemap studio
 ```
+
+Add `--json` to any query command for machine-readable output (for agents/scripts).
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`), show stats |
+| `callers` / `callees` / `path` | call-graph navigation |
+| `impact` | blast radius + test coverage for a symbol (`--depth`) |
+| `hotspots` / `orphans` | hubs / dead-code candidates (`--top`) |
+| `semantic` | meaning-based search (`--top`) |
+| `serve` | run the MCP server (stdio) |
+| `studio` | open the interactive TUI |
+
+All query commands accept `--json`.
 
 ## Use it from an agent (MCP)
 
@@ -124,13 +148,13 @@ claude mcp add codemap -- codemap serve
 }
 ```
 
-Tools (initial set): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_symbols`,
-`codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_blast_radius`,
-`codemap_test_coverage`, `codemap_path`, `codemap_semantic`, `codemap_similar`,
-`codemap_impact`, `codemap_search`, `codemap_dependencies`.
+Tools (10): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
+`codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
+`codemap_orphans`, `codemap_path`. Each takes an optional `path` (the project directory) and
+returns JSON.
 
-The flagship is `codemap_impact` — one call returns a symbol's callers, the tests that cover
-them, the untested paths, and semantically similar code, replacing 10–15 file reads.
+The flagship is `codemap_impact` — one call returns a symbol's definition sites, callers, the
+transitive blast radius, and which tests cover those paths, replacing many file reads.
 
 ## Configuration
 
@@ -144,7 +168,7 @@ $XDG_CACHE_HOME/codemap/                  # caches
 
 If `~/.codemap/` already exists it is used (back-compat with vecgrep/noted). Use
 `codemap init --local` to keep repo-local state. Precedence and all keys are documented in
-[AGENTS.md](./AGENTS.md) and via `codemap config show`.
+[AGENTS.md](./AGENTS.md). Override paths with `CODEMAP_CONFIG` / `CODEMAP_DATA`.
 
 ## How it fits the ecosystem
 

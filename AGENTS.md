@@ -40,40 +40,34 @@ codemap/
 │   │   ├── service.go         #   business logic (index, query, impact …)
 │   │   └── session.go         #   open/close store + veclite + provider (lazy)
 │   ├── config/                # XDG-style hierarchical config (see "Config")
-│   │   ├── config.go          #   types + DefaultConfig
-│   │   ├── resolution.go      #   precedence chain + FindProjectRoot
-│   │   └── global.go          #   ~/.config + ~/.local/share registry, ExpandPath
+│   │   ├── config.go          #   types + DefaultConfig + Load + env overrides
+│   │   ├── paths.go           #   XDG dirs + ~/.codemap fallback + ExpandPath
+│   │   └── project.go         #   FindProjectRoot + DeriveProjectName
 │   ├── graph/                 # SQLite graph store (pure Go, modernc.org/sqlite)
-│   │   ├── store.go           #   Open/Close, CRUD for nodes/edges/projects
-│   │   ├── schema.go          #   SQL schema + migrations
-│   │   └── queries.go         #   BFS/DFS traversal, shortest path, hotspots/orphans
+│   │   ├── store.go           #   Open/Close, CRUD for nodes/edges/projects, stats
+│   │   ├── schema.go          #   SQL schema + migrations (PRAGMA user_version)
+│   │   └── queries.go         #   callers/callees, blast radius, hotspots/orphans/path
 │   ├── extract/               # code structure extraction (pluggable backends)
-│   │   ├── extractor.go       #   Extractor interface + Result types
+│   │   ├── extractor.go       #   Extractor interface + Symbol/Reference/FileResult
 │   │   ├── gosrc/             #   stdlib go/parser backend (pure Go, default for Go)
-│   │   ├── lsp/               #   headless LSP client (gopls, ts_ls, …) — precise
-│   │   ├── treesitter/        #   OPTIONAL, build tag `treesitter` (CGO) — broad coverage
-│   │   ├── scip/              #   OPTIONAL SCIP index import (scip-code/scip)
-│   │   └── unified.go         #   merge backends, dedupe by FQN, LSP edges win
+│   │   └── lspsrc/            #   LSP-backed extractor (DocumentSymbols → symbols)
+│   ├── lsp/                   # headless LSP client (no deps; Content-Length JSON-RPC)
+│   │   ├── jsonrpc.go         #   framed conn: read loop, Call/Notify, handler
+│   │   └── client.go          #   Spawn/Initialize/DidOpen/DocumentSymbols/References
 │   ├── embed/                 # embedding providers
 │   │   ├── provider.go        #   Provider interface + EmbeddingProfile guard
 │   │   └── ollama.go          #   POST /api/embed (net/http + json, no SDK)
-│   ├── index/                 # indexing engine
-│   │   ├── indexer.go         #   walk → extract → embed → store (worker pool)
-│   │   ├── incremental.go     #   hash-based reindex (skip unchanged files)
-│   │   └── chunker.go         #   code chunker (adapted from vecgrep)
-│   ├── search/                # query engine
-│   │   ├── structural.go      #   graph traversal queries
-│   │   ├── semantic.go        #   veclite hybrid search
-│   │   ├── hybrid.go          #   semantic + structural fusion
-│   │   └── impact.go          #   impact analysis (blast radius + tests)
+│   ├── vector/store.go        # veclite wrapper: collection + profile guard + hybrid
+│   ├── index/indexer.go       # walk → extract → embed → store; incremental + resolve edges
 │   ├── mcp/server.go          # stdio MCP server — THIN pass-through to internal/app
-│   ├── tui/                   # studio TUI (Charm v2): Elm split model/update/view
-│   │   ├── app.go view.go update.go model.go styles.go
-│   │   ├── tab_graph.go       #   [1] call/dep node-link map (Sugiyama on canvas)
-│   │   ├── tab_metrics.go     #   [2] hotspots/coverage charts (ntcharts)
-│   │   ├── tab_impact.go      #   [3] symbol → callers/tests/blast radius
-│   │   └── tab_search.go      #   [4] semantic + structural search
+│   ├── tui/                   # studio TUI (Charm v2): model/update/view/run/theme
+│   │   ├── model.go           #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search)
+│   │   ├── view.go            #   full-screen layout, call-graph explorer, bar charts
+│   │   ├── theme.go           #   lipgloss v2 styles
+│   │   └── run.go             #   tea.NewProgram entry
 │   └── version/version.go     # Version/Commit/Date (ldflags-injected)
+│
+│   # planned: extract/treesitter (CGO, build-tagged), extract/scip, search/* fusion
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
 ├── specs/                     # glyphrun E2E behavior specs (*.yml)
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
@@ -135,10 +129,12 @@ task install         # go install ./cmd/codemap
 - **tree-sitter is OPTIONAL**, gated behind the `treesitter` build tag (it needs CGO via
   `github.com/tree-sitter/go-tree-sitter`). Release builds do not include it; it rounds out
   long-tail language coverage in 0.2 (built with a `zig cc` matrix or the purego path).
-- LSP queries: `documentSymbol`, `definition`, `references`, `callHierarchy/{incoming,
-  outgoing}Calls`, `typeDefinition`, `implementation`, `hover`. Client:
-  `go.lsp.dev/protocol` + `go.lsp.dev/jsonrpc2` (both v1.0.0). **LSP uses Content-Length
-  framing — that is correct for LSP and must NOT leak into the MCP transport.**
+- LSP client is **hand-rolled in `internal/lsp`** (no third-party deps): a Content-Length
+  framed JSON-RPC 2.0 conn + `Initialize`/`DidOpen`/`DocumentSymbols`/`References`. The
+  `internal/extract/lspsrc` backend maps `documentSymbol` → codemap symbols. Planned: wire it
+  into the indexer (per-language sessions) + `references`/callHierarchy for precise edges
+  (weight `1.0`; parser edges `0.7`). **LSP uses Content-Length framing — correct for LSP, and
+  it must NOT leak into the MCP transport (which is newline-delimited).**
 
 ### Storage
 - Graph: `modernc.org/sqlite` (pure Go), WAL mode, batch inserts. Tables: `nodes`, `edges`,
@@ -170,9 +166,13 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Initial set: `init, index, status, symbols, callers,
-  callees, references, blast_radius, test_coverage, path, semantic, similar, impact, search,
-  dependencies`.
+- Tool names are `codemap_`-prefixed. Current set (10): `init, index, status, semantic,
+  callers, callees, impact, hotspots, orphans, path`. Each takes an optional `path` (project
+  dir, defaults to cwd) and returns JSON. (Planned: `references`, `symbols`, `dependencies`,
+  `semantic_callers`.)
+- CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`), `status`, `callers`,
+  `callees`, `path`, `impact` (`--depth`), `hotspots`/`orphans` (`--top`), `semantic`
+  (`--top`), `serve`, `studio` — all query commands accept `--json`.
 
 ### Config precedence (highest → lowest)
 1. Env vars `CODEMAP_*` (e.g. `CODEMAP_CONFIG`, `CODEMAP_DATA`, `CODEMAP_EMBEDDING_MODEL`,

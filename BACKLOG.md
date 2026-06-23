@@ -212,6 +212,16 @@
   COMMIT+PUSH. **NEXT (polish-first):** TUI Impact/Search visual parity + result navigation;
   README/AGENTS accuracy pass (commands now incl callers/callees/impact/hotspots/orphans/path/
   studio); then LSP edge wiring (E2.2b) for precise hubs (fixes same-name inflation), E0.5 docs.
+- 2026-06-23 #20 (cron, polish-first) — DOCS ACCURACY PASS. README + AGENTS were stale (listed
+  MCP tools that don't exist: codemap_symbols/_search/_blast_radius/_test_coverage/_similar/
+  _dependencies; commands that don't exist: blast-radius, search --kind). Fixed both to the
+  REAL surface: 10 MCP tools (init/index/status/semantic/callers/callees/impact/hotspots/
+  orphans/path), 13 CLI commands (+ a Commands table + --json note in README), accurate studio
+  description (call-graph explorer, not node-link/ntcharts), real directory tree (internal/lsp,
+  extract/lspsrc, vector, tui files; dropped planned-but-absent search/treesitter/scip dirs),
+  and the hand-rolled LSP client note (superseding go.lsp.dev/TD6). Verified: no stale refs
+  remain; build/tests green. COMMIT+PUSH. **NEXT (polish):** TUI Impact/Search result scrolling
+  + selection; then LSP edge wiring (E2.2b). CLAUDE.md is still accurate (spot-checked).
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
