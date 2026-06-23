@@ -5,13 +5,30 @@ agents can query your code graph directly instead of reading dozens of files.
 
 ## Register it
 
+Install codemap (`brew install abdul-hamid-achik/tap/codemap`, or `go install
+github.com/abdul-hamid-achik/codemap/cmd/codemap@latest`), then register `codemap serve` with your
+agent. Most CLIs have a one-liner:
+
 **Claude Code**
 
 ```bash
-claude mcp add codemap -- codemap serve
+claude mcp add codemap -- codemap serve        # add --scope user to share across all projects
 ```
 
-**Generic MCP config**
+**OpenAI Codex**
+
+```bash
+codex mcp add codemap -- codemap serve
+```
+
+**GitHub Copilot CLI**
+
+```bash
+copilot mcp add codemap -- codemap serve
+```
+
+**Any other MCP client** — add a stdio server to its config (the key may be `mcpServers`, `mcp`, or
+`context_servers` depending on the client):
 
 ```json
 {
@@ -20,6 +37,9 @@ claude mcp add codemap -- codemap serve
   }
 }
 ```
+
+Once connected, an agent can call **`codemap_docs`** to learn the tools and the
+index → understand → read workflow on its own.
 
 ## Tools
 

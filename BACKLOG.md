@@ -686,6 +686,18 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   Agent guide notes the inline surfacing. (Precise/`--lsp` callers don't surface yet — minor.) Full
   suite + lint v2 (0) + E2E green; fmt clean. COMMIT+PUSH.
   **NEXT:** studio Graph/Search panes annotation indicator; precise-path annotations; then harness wiring.
+- 2026-06-23 RELEASE+OPS — **v0.1.0 tagged & published** (pre-release audit GO). `brew install
+  abdul-hamid-achik/tap/codemap` → /opt/homebrew/bin/codemap 0.1.0 (release installs cleanly).
+  Then **registered codemap's MCP across the user's agents** (per user ask): Claude Code (✔ Connected),
+  Codex, Copilot CLI, Hermes, Forge via first-party CLIs; coder (~/.config/agents), opencode, crush,
+  zed via validated JSON/JSONC merges (each backed up). Functional smoke test: `codemap serve` exposes
+  all 17 tools over newline-delimited JSON-RPC.
+- 2026-06-23 #65 (docs) — **Documented agent registration.** Expanded docs/mcp.md + README "Use it from
+  an agent" with the validated one-liners (`claude/codex/copilot mcp add codemap -- codemap serve`) +
+  the generic stdio config (noting the `mcpServers`/`mcp`/`context_servers` key varies), and a pointer
+  that agents can call `codemap_docs` to self-onboard. Captures the MCP-registration work as reusable
+  docs. Docs-only (CI green trivially). COMMIT+PUSH.
+  **NEXT:** studio Graph-pane annotation indicator (the deferred product polish).
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

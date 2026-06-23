@@ -197,15 +197,16 @@ reach for `--lsp`; precise, graph-wide resolution (pure-Go `go/types`) is planne
 
 ## Use it from an agent (MCP)
 
-codemap is a stdio MCP server. Register it with any MCP client:
-
-**Claude Code**
+codemap is a stdio MCP server. Register `codemap serve` with your agent — most CLIs have a one-liner:
 
 ```bash
-claude mcp add codemap -- codemap serve
+claude mcp add codemap -- codemap serve     # Claude Code (add --scope user for all projects)
+codex mcp add  codemap -- codemap serve     # OpenAI Codex
+copilot mcp add codemap -- codemap serve    # GitHub Copilot CLI
 ```
 
-**Generic MCP config**
+For any other MCP client, add a stdio server to its config (the key may be `mcpServers`, `mcp`, or
+`context_servers`):
 
 ```json
 {
@@ -214,6 +215,8 @@ claude mcp add codemap -- codemap serve
   }
 }
 ```
+
+Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
 Tools (17): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
