@@ -389,10 +389,22 @@ func (m Model) renderImpact(w, h int) string {
 		if rep.Untested {
 			cover += "   " + errorStyle.Render("⚠ untested")
 		}
-		b.WriteString("\n" + countStyle.Render(cover) + "\n\n")
+		b.WriteString("\n" + countStyle.Render(cover) + "\n")
+		// Name the covering tests outright (the "what do I run" answer), not just
+		// the ✓ markers buried in the blast radius below.
+		reserve := 14
+		if len(rep.Tests) > 0 {
+			names := make([]string, len(rep.Tests))
+			for i, t := range rep.Tests {
+				names[i] = displayName(t.FQN, t.Symbol)
+			}
+			b.WriteString(mutedStyle.Render("covered by ") + symStyle.Render(truncate(strings.Join(names, ", "), w-12)) + "\n")
+			reserve++
+		}
+		b.WriteString("\n")
 		b.WriteString(sectionStyle.Render("Blast radius") + "\n")
 		br := rep.BlastRadius
-		budget := clamp(h-14, 1, 40)
+		budget := clamp(h-reserve, 1, 40)
 		start := windowStart(m.impactSel, budget, len(br))
 		end := clamp(start+budget, 0, len(br))
 		if start > 0 {

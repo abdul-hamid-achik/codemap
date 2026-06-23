@@ -411,6 +411,22 @@ func TestMetricsNavigationDrills(t *testing.T) {
 	}
 }
 
+func TestImpactNamesCoveringTests(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabImpact
+	m.impact.SetValue("Foo")
+	rep := &app.ImpactReport{
+		Symbol: "Foo", Found: true,
+		BlastRadius: []app.ImpactNode{{Symbol: "TestFoo", Kind: "test", Depth: 1}},
+		Tests:       []app.ImpactNode{{Symbol: "TestFoo", FQN: "app.TestFoo", Kind: "test"}},
+	}
+	m, _ = applyMsg(m, impactMsg{symbol: "Foo", rep: rep})
+	out := m.render()
+	if !strings.Contains(out, "covered by") || !strings.Contains(out, "app.TestFoo") {
+		t.Errorf("impact should name the covering tests:\n%s", out)
+	}
+}
+
 func TestImpactShowsSignaturePreview(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabImpact

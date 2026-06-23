@@ -590,6 +590,12 @@
   actually exercised) with a `covering_tests_listed` outcome — all 5 pass; re-stamped. Full suite +
   lint v2 (0) + fmt clean. COMMIT+PUSH.
   **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
+- 2026-06-23 #56 (cron, polish-first) — **studio Impact names the covering tests** (consistency with
+  #55's CLI change). The TUI showed tests only as ✓ markers in the blast radius; it now prints a
+  compact "covered by TestX, TestY" line under the cover summary (the "what do I run" answer), with
+  the blast budget reserving an extra line when tests exist. Test: `TestImpactNamesCoveringTests`.
+  Full suite + lint v2 (0) + studio E2E green; fmt clean. COMMIT+PUSH.
+  **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
