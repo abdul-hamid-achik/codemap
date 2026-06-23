@@ -208,7 +208,7 @@ func (svc *Service) embeddedCount(name string) (n int, ok bool) {
 	if _, err := os.Stat(config.VeclitePath()); err != nil {
 		return 0, true // no veclite file → definitely no embeddings
 	}
-	v, err := svc.s.Vectors()
+	v, err := svc.s.VectorsReadOnly()
 	if err != nil {
 		return 0, false
 	}
@@ -760,7 +760,7 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if len(vecs) == 0 {
 		return rep, nil
 	}
-	vstore, err := svc.s.Vectors()
+	vstore, err := svc.s.VectorsReadOnly()
 	if err != nil {
 		return nil, err
 	}

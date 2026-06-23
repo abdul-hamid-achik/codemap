@@ -18,9 +18,10 @@ import (
 type Session struct {
 	Config *config.Config
 
-	graph    *graph.Store
-	vectors  *vector.Store
-	embedder embed.Provider // optional override (tests)
+	graph     *graph.Store
+	vectors   *vector.Store
+	vectorsRO *vector.Store
+	embedder  embed.Provider // optional override (tests)
 }
 
 // Open loads configuration (honoring the --config path / CODEMAP_CONFIG) and
@@ -76,12 +77,35 @@ func (s *Session) Vectors() (*vector.Store, error) {
 	return s.vectors, nil
 }
 
+// VectorsReadOnly opens (once) the vector store in read-only mode with a shared
+// flock. Use for search-only paths so they don't block a concurrent index.
+// If the RW store is already open in this process, it is returned directly
+// (flock is per-file-description, so a second open in the same process would
+// conflict with the existing RW handle).
+func (s *Session) VectorsReadOnly() (*vector.Store, error) {
+	if s.vectors != nil {
+		return s.vectors, nil
+	}
+	if s.vectorsRO == nil {
+		v, err := vector.OpenReadOnly(config.VeclitePath(), s.Embedder().Profile())
+		if err != nil {
+			return nil, err
+		}
+		s.vectorsRO = v
+	}
+	return s.vectorsRO, nil
+}
+
 // Close closes any stores that were opened.
 func (s *Session) Close() error {
 	var err error
 	if s.vectors != nil {
 		err = errors.Join(err, s.vectors.Close())
 		s.vectors = nil
+	}
+	if s.vectorsRO != nil {
+		err = errors.Join(err, s.vectorsRO.Close())
+		s.vectorsRO = nil
 	}
 	if s.graph != nil {
 		err = errors.Join(err, s.graph.Close())

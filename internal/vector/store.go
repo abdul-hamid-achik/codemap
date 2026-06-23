@@ -61,7 +61,22 @@ type Store struct {
 // collection already exists with an incompatible profile, it returns an
 // *embed.IncompatibleError. Use ":memory:" for a non-persistent store.
 func Open(path string, profile embed.EmbeddingProfile) (*Store, error) {
-	db, err := veclite.Open(path)
+	return open(path, profile, false)
+}
+
+// OpenReadOnly opens the vector store in read-only mode with a shared flock,
+// allowing multiple readers while a writer holds the exclusive lock. The
+// collection must already exist (ensureCollection will not create it).
+func OpenReadOnly(path string, profile embed.EmbeddingProfile) (*Store, error) {
+	return open(path, profile, true)
+}
+
+func open(path string, profile embed.EmbeddingProfile, readOnly bool) (*Store, error) {
+	opts := []veclite.Option{}
+	if readOnly {
+		opts = append(opts, veclite.WithReadOnly(true), veclite.WithSharedRead(true))
+	}
+	db, err := veclite.Open(path, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +90,7 @@ func Open(path string, profile embed.EmbeddingProfile) (*Store, error) {
 
 func (s *Store) ensureCollection(want embed.EmbeddingProfile) error {
 	if s.db.HasCollection(CollectionName) {
+		// Collection exists — get it (works for both RW and RO).
 		coll, err := s.db.GetCollection(CollectionName)
 		if err != nil {
 			return err
