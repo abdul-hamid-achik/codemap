@@ -727,6 +727,14 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #70 (status polish) — **`status` now reports embedded-vector count** so you can tell at a
+  glance whether semantic search is available. New `vector.Store.CountByProject` (filtered Find,
+  mirrors DeleteByProject); `StatusReport.Vectors`; `Status()` fills it best-effort (only if the
+  veclite file exists — never creates it for structure-only projects; per-project count handles the
+  shared store). CLI prints `vectors: N (semantic search ready)` or `vectors: 0 (structure-only — run
+  'codemap index' with Ollama …)`; `codemap_status` JSON carries it for agents. Test
+  `TestStatusReportsVectors` (0 structure-only → >0 after embedded reindex). Full suite + lint v2 (0)
+  + index_status/query E2E green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #69 (annotation follow-up) — **studio Search now shows the SELECTED hit's annotations**
   (not just the `⟐` row marker), consistent with the Graph/Impact panes — using `hit.Annotations`
   already enriched in #68 (no extra query): ⟐ note/data lines under the sig/doc preview (capped 2).

@@ -175,6 +175,17 @@ func (s *Store) DeleteByProject(project string) (int, error) {
 	return len(recs), nil
 }
 
+// CountByProject returns how many embeddings a project has (0 = no semantic
+// index, so semantic search won't return results until `index` runs with an
+// embedding provider).
+func (s *Store) CountByProject(project string) (int, error) {
+	recs, err := s.coll.Find(veclite.Equal(keyProject, project))
+	if err != nil {
+		return 0, err
+	}
+	return len(recs), nil
+}
+
 // Search returns the topK nearest embeddings to query. If project is non-empty
 // results are restricted to that project.
 func (s *Store) Search(query []float32, topK int, project string) ([]Hit, error) {

@@ -452,6 +452,37 @@ func TestServiceSource(t *testing.T) {
 	}
 }
 
+func TestStatusReportsVectors(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Authenticate() {}\n\nfunc Render() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.SetEmbedder(fakeEmbedder{dims: 8}) // embed without Ollama
+	svc := NewService(sess)
+
+	// structure-only first: no vectors.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := svc.Status(proj); st.Vectors != 0 {
+		t.Errorf("structure-only status vectors = %d, want 0", st.Vectors)
+	}
+	// reindex with embeddings: vectors reported.
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true}, true); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := svc.Status(proj); st.Vectors == 0 {
+		t.Errorf("embedded status should report vectors > 0, got %d", st.Vectors)
+	}
+}
+
 func TestServiceSemantic(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

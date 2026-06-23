@@ -57,6 +57,7 @@ type StatusReport struct {
 	Nodes      int            `json:"nodes"`
 	Edges      int            `json:"edges"`
 	Files      int            `json:"files"`
+	Vectors    int            `json:"vectors"` // embedded nodes (0 = no semantic index)
 	Languages  map[string]int `json:"languages,omitempty"`
 	Kinds      map[string]int `json:"kinds,omitempty"`
 }
@@ -191,6 +192,15 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	rep.Files = st.Files
 	rep.Languages = st.Languages
 	rep.Kinds = st.Kinds
+	// Best-effort: how many of this project's nodes are embedded (so callers know
+	// whether semantic search is available). Don't create the store if absent.
+	if _, statErr := os.Stat(config.VeclitePath()); statErr == nil {
+		if v, vErr := svc.s.Vectors(); vErr == nil {
+			if n, cErr := v.CountByProject(name); cErr == nil {
+				rep.Vectors = n
+			}
+		}
+	}
 	return rep, nil
 }
 

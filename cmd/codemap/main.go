@@ -296,6 +296,11 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("Project: %s\n  path:  %s\n  nodes: %d\n  edges: %d\n  files: %d\n",
 		rep.Project, rep.Path, rep.Nodes, rep.Edges, rep.Files)
+	if rep.Vectors > 0 {
+		fmt.Printf("  vectors: %d (semantic search ready)\n", rep.Vectors)
+	} else {
+		fmt.Println("  vectors: 0 (structure-only — run 'codemap index' with Ollama for semantic search)")
+	}
 	if len(rep.Languages) > 0 {
 		fmt.Printf("  languages: %s\n", formatCounts(rep.Languages))
 	}
