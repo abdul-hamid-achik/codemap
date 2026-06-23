@@ -348,7 +348,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		if n.Kind == "test" {
 			marker = "✓"
 		}
-		fmt.Printf("   %s [%d] %-28s %s:%d\n", marker, n.Depth, n.Symbol, n.File, n.StartLine)
+		fmt.Printf("   %s [%d] %-36s %s:%d\n", marker, n.Depth, disp(n.FQN, n.Symbol), n.File, n.StartLine)
 	}
 	return nil
 }
@@ -373,7 +373,7 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	for _, h := range rep.Hits {
-		fmt.Printf("  %.3f  %-30s %s:%d\n", h.Score, h.Symbol, h.File, h.StartLine)
+		fmt.Printf("  %.3f  %-36s %s:%d\n", h.Score, disp(h.FQN, h.Symbol), h.File, h.StartLine)
 	}
 	return nil
 }
@@ -399,7 +399,7 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("Hotspots in %s:\n", rep.Project)
 	for _, h := range rep.Hotspots {
-		fmt.Printf("  %4d  %-30s %s:%d\n", h.InDegree, h.Symbol, h.File, h.StartLine)
+		fmt.Printf("  %4d  %-36s %s:%d\n", h.InDegree, disp(h.FQN, h.Symbol), h.File, h.StartLine)
 	}
 	return nil
 }
@@ -459,8 +459,16 @@ func renderRefs(label string, refs []app.SymbolRef) {
 	}
 	fmt.Printf("%s:\n", label)
 	for _, r := range refs {
-		fmt.Printf("  %-30s %s:%d\n", r.Symbol, r.File, r.StartLine)
+		fmt.Printf("  %-36s %s:%d\n", disp(r.FQN, r.Symbol), r.File, r.StartLine)
 	}
+}
+
+// disp prefers the fully-qualified name so same-named symbols are distinguishable.
+func disp(fqn, symbol string) string {
+	if fqn != "" {
+		return fqn
+	}
+	return symbol
 }
 
 func openSession(cmd *cobra.Command) (*app.Session, error) {

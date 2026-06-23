@@ -105,11 +105,14 @@ func TestRenderFillsScreen(t *testing.T) {
 		Kinds:     map[string]int{"method": 133, "function": 107, "type": 70},
 		Languages: map[string]int{"go": 411},
 	}})
-	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", InDegree: 38, File: "x.go"}}})
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", FQN: "graph.Store.Close", InDegree: 38, File: "x.go"}}})
 
 	out := m.render()
 	if got := lipgloss.Height(out); got != 40 {
 		t.Errorf("render height = %d, want 40 (should fill the screen)", got)
+	}
+	if !strings.Contains(out, "graph.Store.Close") {
+		t.Error("hub list should show the FQN to disambiguate same-named symbols")
 	}
 	for i, line := range strings.Split(out, "\n") {
 		if w := lipgloss.Width(line); w > 120 {

@@ -231,6 +231,15 @@
   callers/3 blast/0 tests/⚠untested, full-screen). All units + 4 E2E green, fmt/vet clean.
   COMMIT+PUSH. **NEXT (polish):** Search hit → enter to drill into impact (per-row select);
   then LSP edge wiring (E2.2b) for precise hubs; E0.5 VitePress docs scaffold.
+- 2026-06-23 #22 (cron, polish-first) — FQN display polish (fixes the visible "3× identical
+  Close" confusion). TUI now shows fully-qualified names everywhere (hub list/detail, search,
+  impact locations + blast radius, metrics top hubs) via displayName(fqn,symbol); CLI too
+  (hotspots/callers/callees/impact/semantic via disp()). Now hubs read graph.Store.Close vs
+  app.Session.Close vs lsp.Client.Close — distinguishable. Added FQN render assertion. All
+  units + 4 E2E green, fmt clean. COMMIT+PUSH. NOTE: indegree is still by-name-inflated
+  (46/45) — disambiguation is a display fix; precise DE-inflation needs LSP edges (E2.2b).
+  **NEXT:** LSP edge wiring (E2.2b) to fix indegree precision; or Search per-row drill
+  (focus-mode); or E0.5 VitePress docs scaffold.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

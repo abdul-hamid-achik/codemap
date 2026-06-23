@@ -135,7 +135,7 @@ func (m Model) hubList(w, h int) string {
 	}
 	for i := start; i < end; i++ {
 		hub := m.graphHubs[i]
-		line := truncate(fmt.Sprintf("%4d  %s", hub.InDegree, hub.Symbol), w)
+		line := truncate(fmt.Sprintf("%4d  %s", hub.InDegree, displayName(hub.FQN, hub.Symbol)), w)
 		if i == m.graphSel {
 			b.WriteString(selectedStyle.Width(w).Render(line))
 		} else {
@@ -151,7 +151,11 @@ func (m Model) hubDetail(w, h int) string {
 		return mutedStyle.Render("select a hub")
 	}
 	var b strings.Builder
-	b.WriteString(symStyle.Render(m.graphSym) + "\n\n")
+	header := m.graphSym
+	if m.graphSel < len(m.graphHubs) {
+		header = displayName(m.graphHubs[m.graphSel].FQN, m.graphHubs[m.graphSel].Symbol)
+	}
+	b.WriteString(symStyle.Render(header) + "\n\n")
 	budget := (h - 5) / 2
 	if budget < 1 {
 		budget = 1
@@ -190,8 +194,8 @@ func (m Model) renderMetrics(w, h int) string {
 		n := h - lipgloss.Height(b.String()) - 1
 		n = clamp(n, 0, 15)
 		for _, hub := range firstN(m.graphHubs, n) {
-			fmt.Fprintf(&b, "  %4d  %s %s\n", hub.InDegree, padRight(hub.Symbol, 28),
-				mutedStyle.Render(truncate(hub.File, w-40)))
+			fmt.Fprintf(&b, "  %4d  %s %s\n", hub.InDegree, padRight(truncate(displayName(hub.FQN, hub.Symbol), 32), 32),
+				mutedStyle.Render(truncate(hub.File, w-44)))
 		}
 	}
 	return b.String()
@@ -210,7 +214,7 @@ func (m Model) renderImpact(w, h int) string {
 		b.WriteString(mutedStyle.Render(fmt.Sprintf("symbol %q not found", m.impactSymbol)))
 	default:
 		for _, l := range rep.Locations {
-			b.WriteString(mutedStyle.Render("defined  ") + symStyle.Render(rep.Symbol) + "  " +
+			b.WriteString(mutedStyle.Render("defined  ") + symStyle.Render(displayName(l.FQN, l.Symbol)) + "  " +
 				mutedStyle.Render(fmt.Sprintf("%s:%d", l.File, l.StartLine)) + "\n")
 		}
 		cover := fmt.Sprintf("%d direct callers · %d in blast radius · %d covering tests",
@@ -232,8 +236,8 @@ func (m Model) renderImpact(w, h int) string {
 			if n.Kind == "test" {
 				marker = symStyle.Render("✓ ")
 			}
-			fmt.Fprintf(&b, " %s[%d] %s %s\n", marker, n.Depth, padRight(n.Symbol, 28),
-				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", n.File, n.StartLine), w-40)))
+			fmt.Fprintf(&b, " %s[%d] %s %s\n", marker, n.Depth, padRight(truncate(displayName(n.FQN, n.Symbol), 32), 32),
+				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", n.File, n.StartLine), w-44)))
 		}
 		if end < len(br) {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(br)-end)))
@@ -262,8 +266,8 @@ func (m Model) renderSearch(w, h int) string {
 		}
 		for _, hit := range hits[start:end] {
 			fmt.Fprintf(&b, "  %s  %s %s\n", countStyle.Render(fmt.Sprintf("%.3f", hit.Score)),
-				symStyle.Render(padRight(hit.Symbol, 28)),
-				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-44)))
+				symStyle.Render(padRight(truncate(displayName(hit.FQN, hit.Symbol), 32), 32)),
+				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-48)))
 		}
 		if end < len(hits) {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(hits)-end)))
@@ -276,13 +280,22 @@ func (m Model) renderSearch(w, h int) string {
 
 func title(s string) string { return panelTitleStyle.Render(s) }
 
+// displayName prefers the fully-qualified name (which distinguishes same-named
+// symbols across packages, e.g. graph.Store.Close vs app.Session.Close).
+func displayName(fqn, symbol string) string {
+	if fqn != "" {
+		return fqn
+	}
+	return symbol
+}
+
 func refLines(refs []app.SymbolRef, budget, w int) string {
 	if len(refs) == 0 {
 		return mutedStyle.Render("  (none)") + "\n"
 	}
 	var b strings.Builder
 	for _, r := range firstN(refs, budget) {
-		b.WriteString("  " + truncate(fmt.Sprintf("%s  %s:%d", r.Symbol, r.File, r.StartLine), w-2) + "\n")
+		b.WriteString("  " + truncate(fmt.Sprintf("%s  %s:%d", displayName(r.FQN, r.Symbol), r.File, r.StartLine), w-2) + "\n")
 	}
 	if len(refs) > budget {
 		fmt.Fprintf(&b, "  %s\n", mutedStyle.Render(fmt.Sprintf("… +%d more", len(refs)-budget)))
