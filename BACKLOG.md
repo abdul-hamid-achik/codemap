@@ -174,6 +174,19 @@
   (e.g. 3× Close@38) — LSP (E2) will disambiguate. **NEXT: LSP backend (E2)** — the remaining
   big differentiator (precise weight-1.0 cross-file edges). Or E4.2 ntcharts / E4.3 graph view
   / E0.5 docs / E3.2 semantic_callers. Leaning E2.
+- 2026-06-23 #17 (cron) — LSP client core (E2.1). Hand-rolled internal/lsp (no go.lsp.dev,
+  no new deps): jsonrpc.go = Content-Length framed JSON-RPC 2.0 conn (bg read-loop, id→pending
+  response routing, server-request handler so the server doesn't stall, cycle/close handling);
+  client.go = Client (Spawn subprocess, Initialize/Initialized/DidOpen/DocumentSymbols/
+  References/Shutdown/Exit/Close) + LSP types (Position/Range/Location/DocumentSymbol) + URI.
+  Tests: fake-server full round-trip (initialize+documentSymbol+references over io.Pipe) + REAL
+  gopls v0.21.0 integration (Foo/Bar symbols, 1.17s; skips when gopls absent → CI-safe) +
+  `-race` clean. CRITICAL: LSP uses Content-Length framing, kept strictly separate from MCP's
+  newline framing (documented in package doc). All green. COMMIT+PUSH.
+  **NEXT (E2.2/E2.3):** wire the LSP client into extraction — an lsp Extractor (DocumentSymbols
+  for TS/Python; References/callHierarchy → precise edges weight 1.0), unified merge w/ go/parser
+  (LSP precedence, dedupe by FQN), graceful skip when no server. Then E4.2 charts/E4.3 graph/
+  E0.5 docs.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -271,11 +284,17 @@
       framing; go-sdk v1.6.1; end-to-end test via in-memory client. **EPIC 1 COMPLETE.**
 
 ## Epic 2 — LSP integration
-- [ ] E2.1 headless LSP client (go.lsp.dev) — start gopls/ts_ls subprocess, JSON-RPC, init
-- [ ] E2.2 LSP extraction (documentSymbol/definition/references/callHierarchy/impl)
-- [ ] E2.3 unified extractor (merge LSP precedence over parser, dedupe by FQN)
-- [ ] E2.4 incremental hash-based reindex
-- [ ] E2.5 MCP tools: callees, references, blast_radius, test_coverage, symbols, dependencies
+- [x] E2.1 headless LSP client (internal/lsp) — HAND-ROLLED (not go.lsp.dev; no new deps):
+      Content-Length JSON-RPC 2.0 conn w/ bg read-loop + response correlation + server-request
+      handler; Client Spawn/Initialize/DidOpen/DocumentSymbols/References/Shutdown/Exit + LSP
+      types. Tests: fake-server round-trip + REAL gopls v0.21.0 integration (skips in CI) +
+      race-clean. (Supersedes TD6's go.lsp.dev plan.)
+- [ ] E2.2 LSP extraction backend — wire DocumentSymbols as an Extractor for non-Go langs
+      (TS/Python); References/callHierarchy → precise cross-file edges (weight 1.0)
+- [ ] E2.3 unified extractor (merge LSP precedence over go/parser, dedupe by FQN)
+- [x] E2.4 incremental hash-based reindex — already done in the indexer (E1.10)
+- [~] E2.5 MCP query tools — callees/blast_radius(via impact)/path/hotspots/orphans done;
+      references/symbols/dependencies still TODO
 
 ## Epic 3 — Hybrid queries
 - [x] E3.1 codemap_impact (blast radius + test coverage + untested) — graph.BlastRadius
