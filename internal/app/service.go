@@ -169,6 +169,7 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 }
 
 // SymbolRef is a lightweight reference to a graph node (for query results).
+// Signature lets callers understand each result without a follow-up file read.
 type SymbolRef struct {
 	Symbol    string `json:"symbol"`
 	FQN       string `json:"fqn,omitempty"`
@@ -176,10 +177,12 @@ type SymbolRef struct {
 	File      string `json:"file"`
 	StartLine int    `json:"start_line"`
 	EndLine   int    `json:"end_line"`
+	Signature string `json:"signature,omitempty"`
 }
 
 func nodeToRef(n graph.Node) SymbolRef {
-	return SymbolRef{Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath, StartLine: n.StartLine, EndLine: n.EndLine}
+	return SymbolRef{Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
+		StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature}
 }
 
 // RelationReport is returned by Callers/Callees.
@@ -198,6 +201,7 @@ type SemanticHit struct {
 	StartLine int     `json:"start_line"`
 	EndLine   int     `json:"end_line"`
 	Score     float32 `json:"score"`
+	Signature string  `json:"signature,omitempty"`
 }
 
 // SemanticReport is returned by Semantic / FindSymbols / Search.
@@ -468,6 +472,7 @@ type ImpactNode struct {
 	File      string `json:"file"`
 	StartLine int    `json:"start_line"`
 	Depth     int    `json:"depth"`
+	Signature string `json:"signature,omitempty"`
 }
 
 // ImpactReport is the flagship impact analysis: who is affected by changing a
@@ -539,6 +544,7 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		in := ImpactNode{
 			Symbol: nd.Node.Symbol, FQN: nd.Node.FQN, Kind: nd.Node.Kind,
 			File: nd.Node.FilePath, StartLine: nd.Node.StartLine, Depth: nd.Depth,
+			Signature: nd.Node.Signature,
 		}
 		rep.BlastRadius = append(rep.BlastRadius, in)
 		if nd.Node.Kind == graph.KindTest {
@@ -739,7 +745,7 @@ func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, 
 	for _, n := range nodes {
 		rep.Hits = append(rep.Hits, SemanticHit{
 			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
-			StartLine: n.StartLine, EndLine: n.EndLine,
+			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature,
 		})
 	}
 	return rep, nil

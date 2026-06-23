@@ -168,7 +168,7 @@ func (m Model) hubDetail(w, h int) string {
 		hdr += "  " + mutedStyle.Render(fmt.Sprintf("· depth %d (⌫ back)", len(m.graphStack)))
 	}
 	b.WriteString(hdr + "\n\n")
-	budget := (h - 5) / 2
+	budget := (h - 7) / 2
 	if budget < 1 {
 		budget = 1
 	}
@@ -177,6 +177,13 @@ func (m Model) hubDetail(w, h int) string {
 	b.WriteString("\n")
 	b.WriteString(title(fmt.Sprintf("Calls (%d)%s", len(m.graphCallees), mark)) + "\n")
 	b.WriteString(m.refBlock(m.graphCallees, len(m.graphCallers), budget, w))
+	if m.graphFocus == focusRefs {
+		if refs := m.graphRefs(); m.graphRefSel < len(refs) {
+			if p := sigPreview(refs[m.graphRefSel].Signature, w); p != "" {
+				b.WriteString("\n" + p)
+			}
+		}
+	}
 	return b.String()
 }
 
@@ -275,7 +282,7 @@ func (m Model) renderImpact(w, h int) string {
 		b.WriteString("\n" + countStyle.Render(cover) + "\n\n")
 		b.WriteString(sectionStyle.Render("Blast radius") + "\n")
 		br := rep.BlastRadius
-		budget := clamp(h-11, 1, 40)
+		budget := clamp(h-13, 1, 40)
 		start := windowStart(m.impactSel, budget, len(br))
 		end := clamp(start+budget, 0, len(br))
 		if start > 0 {
@@ -301,7 +308,12 @@ func (m Model) renderImpact(w, h int) string {
 			}
 		}
 		if end < len(br) {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(br)-end)))
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(br)-end)) + "\n")
+		}
+		if m.impactSel < len(br) {
+			if p := sigPreview(br[m.impactSel].Signature, w); p != "" {
+				b.WriteString("\n" + p)
+			}
 		}
 	}
 	return b.String()
@@ -323,7 +335,7 @@ func (m Model) renderSearch(w, h int) string {
 		b.WriteString(mutedStyle.Render("no matches"))
 	default:
 		hits := m.searchHits
-		budget := clamp(h-6, 1, 50)
+		budget := clamp(h-8, 1, 50)
 		start := windowStart(m.searchSel, budget, len(hits))
 		end := clamp(start+budget, 0, len(hits))
 		if start > 0 {
@@ -342,7 +354,12 @@ func (m Model) renderSearch(w, h int) string {
 			}
 		}
 		if end < len(hits) {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(hits)-end)))
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(hits)-end)) + "\n")
+		}
+		if m.searchSel < len(hits) {
+			if p := sigPreview(hits[m.searchSel].Signature, w); p != "" {
+				b.WriteString("\n" + p)
+			}
 		}
 	}
 	return b.String()
@@ -351,6 +368,17 @@ func (m Model) renderSearch(w, h int) string {
 // ---- helpers ----
 
 func title(s string) string { return panelTitleStyle.Render(s) }
+
+// sigPreview renders a one-line signature for the selected item so a pane is
+// self-contained — you see what a symbol is without opening the file. Multi-line
+// signatures (types) are collapsed to a single line. Empty when there's none.
+func sigPreview(sig string, w int) string {
+	sig = strings.Join(strings.Fields(sig), " ")
+	if sig == "" {
+		return ""
+	}
+	return mutedStyle.Render("⟩ ") + symStyle.Render(truncate(sig, w-2))
+}
 
 // displayName prefers the fully-qualified name (which distinguishes same-named
 // symbols across packages, e.g. graph.Store.Close vs app.Session.Close).

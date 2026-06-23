@@ -126,6 +126,64 @@ func TestServiceCallers(t *testing.T) {
 	}
 }
 
+func TestQueryResultsCarrySignature(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run(x int) int { return Helper(x) }\n\nfunc Helper(n int) int { return n }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// callers carry the caller's signature (no follow-up file read needed).
+	cr, err := svc.Callers(proj, "Helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cr.Results) != 1 || cr.Results[0].Signature != "func Run(x int) int" {
+		t.Errorf("caller signature = %q, want %q", sigOf(cr.Results), "func Run(x int) int")
+	}
+
+	// blast-radius nodes carry signatures too.
+	ir, err := svc.Impact(proj, "Helper", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, n := range ir.BlastRadius {
+		if n.Symbol == "Run" && n.Signature == "func Run(x int) int" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("blast radius missing Run's signature: %+v", ir.BlastRadius)
+	}
+
+	// offline name search carries it as well.
+	fr, err := svc.FindSymbols(proj, "Helper", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.Hits) == 0 || fr.Hits[0].Signature != "func Helper(n int) int" {
+		t.Errorf("find signature = %+v, want func Helper(n int) int", fr.Hits)
+	}
+}
+
+func sigOf(refs []SymbolRef) string {
+	if len(refs) == 0 {
+		return "(no results)"
+	}
+	return refs[0].Signature
+}
+
 func TestServiceSemantic(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

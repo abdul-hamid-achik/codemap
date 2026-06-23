@@ -351,6 +351,36 @@ func TestGraphEnterStillDrillsFromHubFocus(t *testing.T) {
 	}
 }
 
+func TestImpactShowsSignaturePreview(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabImpact
+	m.impact.SetValue("Foo")
+	rep := &app.ImpactReport{
+		Symbol: "Foo", Found: true,
+		BlastRadius: []app.ImpactNode{
+			{Symbol: "Run", Depth: 1, Signature: "func Run(x int) error"},
+		},
+	}
+	m, _ = applyMsg(m, impactMsg{symbol: "Foo", rep: rep})
+	out := m.render()
+	if !strings.Contains(out, "func Run(x int) error") {
+		t.Errorf("impact should preview the selected node's signature:\n%s", out)
+	}
+}
+
+func TestSearchShowsSignaturePreview(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m.search.SetValue("auth")
+	m, _ = applyMsg(m, semanticMsg{query: "auth", mode: "name", hits: []app.SemanticHit{
+		{Symbol: "Authenticate", Signature: "func Authenticate(tok string) bool"},
+	}})
+	out := m.render()
+	if !strings.Contains(out, "func Authenticate(tok string) bool") {
+		t.Errorf("search should preview the selected hit's signature:\n%s", out)
+	}
+}
+
 func TestSemanticErrorShown(t *testing.T) {
 	m := sized(t, 100, 30)
 	u, _ := m.Update(semanticMsg{query: "x", err: fakeErr("ollama unreachable")})

@@ -376,6 +376,21 @@
   snapshot — PTY-driven `esc`/`backspace` proved flaky (lone ESC ambiguous over a PTY) so the
   flow uses vim `l`/`h` focus keys. Docs (README + docs/studio.md keys table) updated. COMMIT+PUSH.
   **NEXT:** references/dependencies tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #38 (cron, polish-first) — **Query results now carry the symbol's `signature`** —
+  free (already loaded by `scanNode`), high-value for BOTH audiences. Added `Signature` to
+  `SymbolRef`, `ImpactNode`, `SemanticHit` (json `signature,omitempty`); populated everywhere the
+  source is a graph node (callers/callees/symbols/orphans/path/impact locations+direct_callers+
+  blast_radius+tests, and offline `find`/name search). Agents calling `callers`/`impact`/`find`
+  now understand each result without a follow-up file read, and same-named symbols disambiguate by
+  signature (dogfood: `find Hotspots --json` → service vs store `Hotspots` distinct). studio
+  previews the selected symbol's signature at the bottom of the Graph (refs pane), Impact, and
+  Search panes (`⟩ func …`) so panes are self-contained — verified in the studio E2E snapshots
+  (`graph_walk` → `⟩ func Top()`, `impact` → `⟩ func Run()`). Semantic-mode hits (veclite payload)
+  stay blank for now (no signature in payload) — name-mode + all graph-sourced results covered.
+  3 new tests (results-carry-signature, Impact preview, Search preview); race-clean; E2E green.
+  Docs (README agent section + docs/studio.md) updated. COMMIT+PUSH.
+  **NEXT:** signature in semantic-mode hits (payload or graph lookup), references/dependencies
+  tools, full precise (gopls) edges in the indexer.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
