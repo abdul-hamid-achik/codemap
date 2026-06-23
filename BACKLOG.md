@@ -488,6 +488,19 @@
   a.go:1-1`) → `q`. Full suite + race + all 5 E2E green; fmt/vet clean. Docs/studio.md updated.
   COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #47 (cron, polish-first) — **`projects` command + `codemap_projects` tool, and fixed the
+  cross-project overclaim.** Audit found the README touted cross-project blast radius ("across all my
+  projects") + "the graph spans every registered project", but queries are single-project AND the
+  registry wasn't even discoverable (no way to list indexed projects). Added `Service.Projects()`
+  (ListProjects + per-project Stats → name/path/lang/nodes/edges/files; surfaces existing registry, no
+  new backend), CLI `projects` (aligned text table or `--json`) and `codemap_projects` (no-arg, new
+  `emptyInput`). → **14 MCP tools, 18 CLI commands.** Dogfood: `projects` → `codemap 534 nodes 1950
+  edges 35 files`. Corrected docs to match reality: README intro drops "across all my projects";
+  "Cross-project" bullet → "Multi-project registry — one shared store indexes all repos; `projects`
+  lists them; queries target one project (cwd/`--path`)". Tests: app `TestServiceProjects`; mcp
+  presence (+projects). Docs (README count+table, AGENTS set(14), cli.md, mcp.md) updated. Full suite +
+  help/query E2E green; fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

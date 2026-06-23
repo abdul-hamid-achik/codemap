@@ -188,6 +188,36 @@ func sigOf(refs []SymbolRef) string {
 	return refs[0].Signature
 }
 
+func TestServiceProjects(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() {}\n\nfunc B() { A() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Projects) != 1 {
+		t.Fatalf("Projects() = %d, want 1: %+v", len(rep.Projects), rep.Projects)
+	}
+	p := rep.Projects[0]
+	if p.Nodes == 0 || p.Files == 0 {
+		t.Errorf("registered project should report index sizes: %+v", p)
+	}
+}
+
 func TestServiceSource(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

@@ -9,6 +9,7 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap init [--local]` | Register the current directory as a project |
 | `codemap index [--reindex] [--no-embed]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
+| `codemap projects` | List all registered projects and their index sizes |
 
 ## Navigation
 

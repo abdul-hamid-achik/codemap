@@ -162,6 +162,12 @@ var (
 		Args:  cobra.ExactArgs(1),
 		RunE:  runSource,
 	}
+	projectsCmd = &cobra.Command{
+		Use:   "projects",
+		Short: "List all projects registered with codemap and their index sizes",
+		Args:  cobra.NoArgs,
+		RunE:  runProjects,
+	}
 )
 
 func init() {
@@ -184,7 +190,7 @@ func init() {
 	findCmd.Flags().Int("top", 50, "maximum results")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd)
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, projectsCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -572,6 +578,42 @@ func runSource(cmd *cobra.Command, args []string) error {
 		fmt.Println(mch.Source)
 	}
 	return nil
+}
+
+func runProjects(cmd *cobra.Command, _ []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	rep, err := app.NewService(sess).Projects()
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if len(rep.Projects) == 0 {
+		fmt.Println("no projects registered yet — run 'codemap init' in a project")
+		return nil
+	}
+	fmt.Printf("%-20s %8s %8s %7s  %s\n", "PROJECT", "NODES", "EDGES", "FILES", "PATH")
+	for _, p := range rep.Projects {
+		fmt.Printf("%-20s %8d %8d %7d  %s\n", truncStr(p.Name, 20), p.Nodes, p.Edges, p.Files, p.Path)
+	}
+	return nil
+}
+
+// truncStr shortens s to at most n runes (for fixed-width columns).
+func truncStr(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func renderRefs(label string, refs []app.SymbolRef) {

@@ -168,6 +168,47 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	return rep, nil
 }
 
+// ProjectInfo is one registered project with its index size.
+type ProjectInfo struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Language string `json:"language,omitempty"`
+	Nodes    int    `json:"nodes"`
+	Edges    int    `json:"edges"`
+	Files    int    `json:"files"`
+}
+
+// ProjectsReport lists every project registered with codemap.
+type ProjectsReport struct {
+	Projects []ProjectInfo `json:"projects"`
+}
+
+// Projects lists all registered projects with their index sizes — the registry
+// is shared across repos, so this shows everything codemap has indexed. (Queries
+// still target one project at a time, resolved from cwd or an explicit path.)
+func (svc *Service) Projects() (*ProjectsReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	projs, err := g.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	rep := &ProjectsReport{Projects: []ProjectInfo{}}
+	for _, p := range projs {
+		st, err := g.Stats(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		rep.Projects = append(rep.Projects, ProjectInfo{
+			Name: p.Name, Path: p.Path, Language: p.Language,
+			Nodes: st.Nodes, Edges: st.Edges, Files: st.Files,
+		})
+	}
+	return rep, nil
+}
+
 // SymbolRef is a lightweight reference to a graph node (for query results).
 // Signature and Doc let callers understand each result without a file read.
 type SymbolRef struct {

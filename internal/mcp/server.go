@@ -111,6 +111,9 @@ type sourceInput struct {
 	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+// emptyInput is for tools that take no arguments (e.g. codemap_projects).
+type emptyInput struct{}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -164,6 +167,10 @@ func (s *Server) register() {
 		Name:        "codemap_source",
 		Description: "Return a symbol's source code (the implementation behind its signature), read from the indexed file's line range — so you can read a definition without opening the whole file.",
 	}, s.handleSource)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_projects",
+		Description: "List every project registered with codemap and its index size (nodes, edges, files) — discover what's indexed. Queries target one project at a time (via path/cwd).",
+	}, s.handleProjects)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -238,6 +245,11 @@ func (s *Server) handleFind(_ context.Context, _ *sdkmcp.CallToolRequest, in fin
 
 func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in sourceInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol)
+	return result(rep, err)
+}
+
+func (s *Server) handleProjects(_ context.Context, _ *sdkmcp.CallToolRequest, _ emptyInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Projects()
 	return result(rep, err)
 }
 

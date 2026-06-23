@@ -8,8 +8,8 @@ exposed through a CLI, an MCP server, and an interactive terminal UI.
 > conventions, architecture, and gotchas.
 
 codemap answers questions that grep and a single LSP call can't: *who calls this function and
-which tests cover it*, *what's the blast radius of changing this type across all my projects*,
-*find auth-like code and then show me everything that calls into it*. It precomputes the
+which tests cover it*, *what's the blast radius of changing this type*, *find auth-like code and
+then show me everything that calls into it*. It precomputes the
 structure once, then serves narrow, structured answers — so an agent spends a few tool calls
 instead of dozens of file reads.
 
@@ -23,7 +23,8 @@ instead of dozens of file reads.
 - **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
   transitive blast radius (everything affected by a change), and which tests cover those
   paths (flagging untested code).
-- **Cross-project** — the graph spans every registered project, not just one repo.
+- **Multi-project registry** — one shared store indexes all your repos; `projects` lists what's
+  indexed, and any query targets one project (resolved from cwd, or `--path`).
 - **Precise navigation (LSP)** — the fast name-based graph for everyday queries, plus
   `callers --lsp` / `callees --lsp` that use gopls `callHierarchy` for **exact** results — the
   specific resolved method, not every same-named one (e.g. `callers Close --lsp` returns the 7
@@ -133,6 +134,7 @@ Add `--json` to any query command for machine-readable output (for agents/script
 | Command | What it does |
 |---|---|
 | `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`), show stats |
+| `projects` | list all registered projects and their index sizes |
 | `callers` / `callees` / `path` | call-graph navigation (`--lsp` on callers/callees for exact gopls results) |
 | `symbols` | list a file's symbols (structured alternative to reading it) |
 | `find` | find symbols by name (offline) |
@@ -165,12 +167,13 @@ claude mcp add codemap -- codemap serve
 }
 ```
 
-Tools (13): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
+Tools (14): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
-`codemap_orphans`, `codemap_path`, `codemap_symbols`, `codemap_find`, `codemap_source`. Each takes an optional `path` (the project directory) and
+`codemap_orphans`, `codemap_path`, `codemap_symbols`, `codemap_find`, `codemap_source`,
+`codemap_projects`. Each takes an optional `path` (the project directory) and
 returns JSON. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
 gopls-resolved results (Go); `codemap_source` returns a symbol's body so an agent can read a
-definition without opening the file.
+definition without opening the file; `codemap_projects` lists what's indexed.
 
 Results carry each symbol's **signature** (e.g. `func (s *Store) Hotspots(projectID int64, limit
 int) ([]Hotspot, error)`) and **docstring**, so an agent understands what callers/callees/hits are
