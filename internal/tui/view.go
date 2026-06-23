@@ -173,7 +173,7 @@ func (m Model) renderGraph(w, h int) string {
 		return title("Graph") + "\n\n" + mutedStyle.Render("loading call graph…")
 	}
 	if len(m.graphHubs) == 0 {
-		return title("Graph") + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
+		return notIndexedHint("Graph")
 	}
 	leftW := 38
 	if leftW > w/2 {
@@ -312,12 +312,19 @@ func (m Model) refBlock(refs []app.SymbolRef, base, budget, w int) string {
 
 // ---- Metrics tab ----
 
+// notIndexedHint is the shared cold-start message: when the project hasn't been
+// indexed yet, every tab shows it instead of inviting an action that can't
+// succeed (e.g. Impact/Search prompting for input that would only return nothing).
+func notIndexedHint(tabName string) string {
+	return title(tabName) + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
+}
+
 func (m Model) renderMetrics(w, h int) string {
 	if m.status == nil {
 		return title("Metrics") + "\n\n" + mutedStyle.Render("loading…")
 	}
 	if !m.status.Registered {
-		return title("Metrics") + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
+		return notIndexedHint("Metrics")
 	}
 
 	vec := "no embeddings — name search only"
@@ -425,6 +432,9 @@ func metricBlock(b *strings.Builder, title string, rows []string, localSel, budg
 // ---- Impact tab ----
 
 func (m Model) renderImpact(w, h int) string {
+	if m.status != nil && !m.status.Registered {
+		return notIndexedHint("Impact")
+	}
 	var b strings.Builder
 	b.WriteString(title("Impact") + "   " + m.impact.View() + "\n\n")
 	rep := m.impactRep
@@ -515,6 +525,9 @@ func (m Model) renderImpact(w, h int) string {
 // ---- Search tab ----
 
 func (m Model) renderSearch(w, h int) string {
+	if m.status != nil && !m.status.Registered {
+		return notIndexedHint("Search")
+	}
 	var b strings.Builder
 	hdr := title("Search")
 	if m.searchMode != "" {

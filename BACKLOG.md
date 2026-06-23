@@ -727,6 +727,16 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #75 (studio polish) — **studio Impact & Search tabs show the cold-start hint too.** Graph
+  and Metrics already short-circuited to "no index yet — press ctrl+r to index, or run 'codemap index'"
+  on an un-indexed project, but Impact and Search did not: they invited you to "type a symbol and press
+  enter" / "type and press enter" — input that could only ever return "not found" / "no matches" with
+  nothing indexed (the studio counterpart of #74's misleading CLI empties). Added the same
+  `!status.Registered` guard to both, factored the shared message into a `notIndexedHint(tab)` helper
+  (Graph/Metrics now reuse it — 4 literals → 1). Test `TestColdStartTabsHintToIndex` (Impact + Search
+  both render the hint when Registered=false). Full suite + lint v2 (0) + studio E2E green; fmt clean.
+  COMMIT+PUSH. **All four studio tabs now give a consistent, actionable cold-start instead of inviting
+  doomed input.**
 - 2026-06-23 #74 (correctness) — **query commands say "not indexed" instead of misleading empties on a
   cold repo.** A probe of an un-indexed project showed `callers`/`callees` → "none" (as if the symbol
   genuinely had no callers), `impact` → "symbol X not found" (as if that symbol specifically was

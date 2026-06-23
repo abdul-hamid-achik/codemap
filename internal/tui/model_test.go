@@ -539,6 +539,24 @@ func TestSearchPaneMarksAnnotated(t *testing.T) {
 	}
 }
 
+func TestColdStartTabsHintToIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		active tab
+	}{
+		{"Impact", tabImpact},
+		{"Search", tabSearch},
+	} {
+		m := sized(t, 120, 40)
+		m.active = tc.active
+		m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{Project: "p", Registered: false}})
+		out := m.render()
+		if !strings.Contains(out, "no index yet") {
+			t.Errorf("%s tab on an unindexed project should hint to index instead of inviting input, got:\n%s", tc.name, out)
+		}
+	}
+}
+
 func TestSearchNameModeNoEmbeddingsHint(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch
