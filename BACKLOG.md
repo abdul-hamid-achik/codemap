@@ -542,6 +542,16 @@
   go/types fix. Docs-only (CI green trivially). **TOP NEXT priority: pure-Go `go/types` call
   resolution** to make the default graph accurate (replaces by-name method edges with precise ones;
   falls back to by-name where a package doesn't type-check) — the clear highest-value backend item.
+- 2026-06-23 #51 (cron, polish-first) — **studio list page-navigation** (validated by #50's dogfood:
+  blueprint's Graph hub list had ~200 entries, navigable only one row at a time). Added `pgup`/`pgdn`
+  to every selection list (Graph hubs + refs, Metrics, Search, Impact) jumping by a screenful
+  (`pageStep` ≈ height), plus `home`/`end` on the non-input tabs (Graph/Metrics; skipped on
+  Search/Impact where the text input owns those keys). Refactored hub up/down through a shared
+  `selectHub`/`clampIdx`/`blastLen`; behavior preserved. Tests: `TestGraphHubPageNavigation` (page
+  jump + clamp + home), `TestSearchPageNavigation` (confirms the "pgup"/"pgdown" key strings match).
+  Ran the improved `task lint` (golangci-lint v2) → 0 issues; full suite + race + studio E2E green;
+  fmt clean. Docs/studio.md keys updated. COMMIT+PUSH.
+  **NEXT:** pure-Go `go/types` call resolution (top accuracy item), references/dependencies tools.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

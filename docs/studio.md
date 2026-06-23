@@ -42,6 +42,7 @@
 |---|---|
 | `1`–`4` / `tab` / `shift+tab` | Switch tabs |
 | `↑` / `↓` | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), or a blast-radius node (Impact) |
+| `pgup` / `pgdn` | Jump a page through any of those lists (plus `home`/`end` on Graph and Metrics) |
 | `→` / `←` (`l` / `h`) | (Graph) move focus between the hub list and the callers/callees pane |
 | `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection · or run the query after editing the text |
 | `backspace` | (Graph) step back to the previous centered node while walking |

@@ -522,6 +522,53 @@ func TestSourceViewerScrollAndClose(t *testing.T) {
 	}
 }
 
+func TestGraphHubPageNavigation(t *testing.T) {
+	m := sized(t, 120, 40) // pageStep = clamp(40-6,1,40) = 34
+	hubs := make([]app.HotspotRef, 50)
+	for i := range hubs {
+		hubs[i] = app.HotspotRef{Symbol: fmt.Sprintf("H%d", i)}
+	}
+	m, _ = applyMsg(m, graphHubsMsg{hubs: hubs})
+
+	// pgdown jumps by a page and loads the landed hub's detail.
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
+	mm := u.(Model)
+	if mm.graphSel != 34 {
+		t.Errorf("pgdown graphSel = %d, want 34 (one page)", mm.graphSel)
+	}
+	if cmd == nil {
+		t.Error("page jump should load the landed hub's detail")
+	}
+	// pgdown again clamps to the last hub.
+	mm, _ = applyMsg(mm, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
+	if mm.graphSel != 49 {
+		t.Errorf("pgdown clamp = %d, want 49", mm.graphSel)
+	}
+	// home jumps to the top.
+	mm, _ = applyMsg(mm, tea.KeyPressMsg(tea.Key{Code: tea.KeyHome}))
+	if mm.graphSel != 0 {
+		t.Errorf("home graphSel = %d, want 0", mm.graphSel)
+	}
+}
+
+func TestSearchPageNavigation(t *testing.T) {
+	m := sized(t, 100, 30) // pageStep = 24
+	m.active = tabSearch
+	hits := make([]app.SemanticHit, 40)
+	for i := range hits {
+		hits[i] = app.SemanticHit{Symbol: fmt.Sprintf("S%d", i)}
+	}
+	m, _ = applyMsg(m, semanticMsg{query: "x", hits: hits})
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
+	if m.searchSel != 24 {
+		t.Errorf("pgdown searchSel = %d, want 24", m.searchSel)
+	}
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyPgUp}))
+	if m.searchSel != 0 {
+		t.Errorf("pgup searchSel = %d, want 0", m.searchSel)
+	}
+}
+
 func TestSemanticErrorShown(t *testing.T) {
 	m := sized(t, 100, 30)
 	u, _ := m.Update(semanticMsg{query: "x", err: fakeErr("ollama unreachable")})

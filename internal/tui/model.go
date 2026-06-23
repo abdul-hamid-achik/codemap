@@ -551,14 +551,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "up": // single-line input ignores up/down, so use them to move the selection
-			if m.searchSel > 0 {
-				m.searchSel--
-			}
+			m.searchSel = clampIdx(m.searchSel-1, len(m.searchHits))
 			return m, nil
 		case "down":
-			if m.searchSel < len(m.searchHits)-1 {
-				m.searchSel++
-			}
+			m.searchSel = clampIdx(m.searchSel+1, len(m.searchHits))
+			return m, nil
+		case "pgup":
+			m.searchSel = clampIdx(m.searchSel-m.pageStep(), len(m.searchHits))
+			return m, nil
+		case "pgdown":
+			m.searchSel = clampIdx(m.searchSel+m.pageStep(), len(m.searchHits))
 			return m, nil
 		}
 		m.search, cmd = m.search.Update(msg)
@@ -587,14 +589,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "up":
-			if m.impactSel > 0 {
-				m.impactSel--
-			}
+			m.impactSel = clampIdx(m.impactSel-1, m.blastLen())
 			return m, nil
 		case "down":
-			if m.impactRep != nil && m.impactSel < len(m.impactRep.BlastRadius)-1 {
-				m.impactSel++
-			}
+			m.impactSel = clampIdx(m.impactSel+1, m.blastLen())
+			return m, nil
+		case "pgup":
+			m.impactSel = clampIdx(m.impactSel-m.pageStep(), m.blastLen())
+			return m, nil
+		case "pgdown":
+			m.impactSel = clampIdx(m.impactSel+m.pageStep(), m.blastLen())
 			return m, nil
 		}
 		m.impact, cmd = m.impact.Update(msg)
@@ -636,13 +640,17 @@ func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "up", "k":
-		if m.metricsSel > 0 {
-			m.metricsSel--
-		}
+		m.metricsSel = clampIdx(m.metricsSel-1, m.metricsCount())
 	case "down", "j":
-		if m.metricsSel < m.metricsCount()-1 {
-			m.metricsSel++
-		}
+		m.metricsSel = clampIdx(m.metricsSel+1, m.metricsCount())
+	case "pgup":
+		m.metricsSel = clampIdx(m.metricsSel-m.pageStep(), m.metricsCount())
+	case "pgdown":
+		m.metricsSel = clampIdx(m.metricsSel+m.pageStep(), m.metricsCount())
+	case "home":
+		m.metricsSel = 0
+	case "end":
+		m.metricsSel = clampIdx(m.metricsCount()-1, m.metricsCount())
 	case "enter":
 		if sym, _, _, _, ok := m.metricsItem(m.metricsSel); ok {
 			m.active = tabImpact
@@ -654,6 +662,40 @@ func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// pageStep is roughly one screenful of list rows, for pgup/pgdn jumps.
+func (m Model) pageStep() int { return clamp(m.height-6, 1, 40) }
+
+// blastLen is the number of selectable blast-radius rows on the Impact tab.
+func (m Model) blastLen() int {
+	if m.impactRep == nil {
+		return 0
+	}
+	return len(m.impactRep.BlastRadius)
+}
+
+// clampIdx keeps a selection index within [0, n-1] (0 when the list is empty).
+func clampIdx(i, n int) int {
+	if n <= 0 || i < 0 {
+		return 0
+	}
+	if i > n-1 {
+		return n - 1
+	}
+	return i
+}
+
+// selectHub moves the Graph hub selection to idx (clamped) and loads its detail.
+func (m Model) selectHub(idx int) (tea.Model, tea.Cmd) {
+	idx = clampIdx(idx, len(m.graphHubs))
+	if len(m.graphHubs) == 0 || idx == m.graphSel {
+		return m, nil
+	}
+	m.graphSel = idx
+	m.graphPrecise = false
+	m.graphCenter = centerOfHub(m.graphHubs[idx])
+	return m, m.detailCmd(m.graphHubs[idx].Symbol)
 }
 
 // handleGraphKey drives the call-graph explorer. The left pane (focusHubs)
@@ -705,19 +747,17 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 	// focusHubs: browse hubs (jump points).
 	switch key {
 	case "up", "k":
-		if m.graphSel > 0 {
-			m.graphSel--
-			m.graphPrecise = false
-			m.graphCenter = centerOfHub(m.graphHubs[m.graphSel])
-			return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
-		}
+		return m.selectHub(m.graphSel - 1)
 	case "down", "j":
-		if m.graphSel < len(m.graphHubs)-1 {
-			m.graphSel++
-			m.graphPrecise = false
-			m.graphCenter = centerOfHub(m.graphHubs[m.graphSel])
-			return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
-		}
+		return m.selectHub(m.graphSel + 1)
+	case "pgup":
+		return m.selectHub(m.graphSel - m.pageStep())
+	case "pgdown":
+		return m.selectHub(m.graphSel + m.pageStep())
+	case "home":
+		return m.selectHub(0)
+	case "end":
+		return m.selectHub(len(m.graphHubs) - 1)
 	case "enter":
 		// drill the centered hub into full impact analysis
 		if len(m.graphHubs) > 0 {
@@ -738,13 +778,17 @@ func (m Model) handleGraphRefsKey(key string) (tea.Model, tea.Cmd) {
 	refs := m.graphRefs()
 	switch key {
 	case "up", "k":
-		if m.graphRefSel > 0 {
-			m.graphRefSel--
-		}
+		m.graphRefSel = clampIdx(m.graphRefSel-1, len(refs))
 	case "down", "j":
-		if m.graphRefSel < len(refs)-1 {
-			m.graphRefSel++
-		}
+		m.graphRefSel = clampIdx(m.graphRefSel+1, len(refs))
+	case "pgup":
+		m.graphRefSel = clampIdx(m.graphRefSel-m.pageStep(), len(refs))
+	case "pgdown":
+		m.graphRefSel = clampIdx(m.graphRefSel+m.pageStep(), len(refs))
+	case "home":
+		m.graphRefSel = 0
+	case "end":
+		m.graphRefSel = clampIdx(len(refs)-1, len(refs))
 	case "enter":
 		// re-center the explorer on the selected ref (walk the graph).
 		if m.graphRefSel < len(refs) {
