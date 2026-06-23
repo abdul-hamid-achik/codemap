@@ -348,6 +348,19 @@
   commands.** Demo: `find Precise` → PreciseCallers/Callees/RelationsAt etc. (offline). Docs
   (README/AGENTS/cli/mcp) updated. All units + 5 E2E green, fmt/vet clean. COMMIT+PUSH.
   **NEXT:** references/dependencies tools, precise edges in the indexer, or polish.
+- 2026-06-23 #36 (cron, polish-first) — **Default-graph accuracy (no type-checker, no gopls):**
+  an unqualified call `Foo()` in Go ALWAYS resolves within the caller's package, so the indexer
+  now resolves those precisely (same-directory target only) instead of linking to every
+  same-named symbol across packages. Selector calls `x.Foo()`/`pkg.Foo()` stay by-name (can't
+  resolve without types). Added `extract.Reference.Qualified` (set by gosrc via `isQualifiedCall`,
+  unwrapping generic IndexExpr); indexer `resolveEdges` filters unqualified refs to `samePackage`
+  and weights them `WeightLSP` (precise), falling back to all matches only if same-package is
+  empty. New test `TestIndexUnqualifiedCallSamePackage` proves two same-named `Helper`s in
+  different packages no longer cross-link (Run→pkga.Helper only). Dogfood on codemap itself:
+  new `samePackage` helper resolves precisely; callers/callees consistent. This shrinks
+  by-name inflation for the common intra-package case without the cost/dependency of indexing
+  with gopls. All units + fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** references/dependencies tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

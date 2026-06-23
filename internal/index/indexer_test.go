@@ -177,6 +177,35 @@ func TestIndexReindexIsStable(t *testing.T) {
 	}
 }
 
+// TestIndexUnqualifiedCallSamePackage verifies that a bare-identifier call
+// (Helper()) resolves only within the caller's package, not to a same-named
+// symbol in another package — eliminating cross-package false edges that the
+// old by-name resolution produced.
+func TestIndexUnqualifiedCallSamePackage(t *testing.T) {
+	g, v := newStores(t)
+	dir := t.TempDir()
+	// Two packages, each defining Helper. pkga.Run calls Helper() unqualified.
+	writeFile(t, dir, "pkga/a.go", "package pkga\n\nfunc Helper() {}\n\nfunc Run() {\n\tHelper()\n}\n")
+	writeFile(t, dir, "pkgb/b.go", "package pkgb\n\nfunc Helper() {}\n")
+	pid, _ := g.UpsertProject("app", dir, "go")
+
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	callees, err := g.Callees(pid, "Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callees) != 1 {
+		t.Fatalf("Run callees = %d, want 1 (same-package Helper only): %+v", len(callees), callees)
+	}
+	if got := filepath.ToSlash(callees[0].FilePath); got != "pkga/a.go" {
+		t.Errorf("Run calls Helper in %q, want pkga/a.go", got)
+	}
+}
+
 func TestIndexStructureOnly(t *testing.T) {
 	g, err := graph.Open(filepath.Join(t.TempDir(), "graph.db"))
 	if err != nil {

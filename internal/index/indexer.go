@@ -302,6 +302,7 @@ func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int,
 	}
 	fqnTo := make(map[string]int64, len(nodes))
 	symTo := make(map[string][]int64, len(nodes))
+	dirOf := make(map[int64]string, len(nodes))
 	for _, n := range nodes {
 		if n.FQN != "" {
 			fqnTo[n.FQN] = n.ID
@@ -309,6 +310,7 @@ func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int,
 		if n.Symbol != "" {
 			symTo[n.Symbol] = append(symTo[n.Symbol], n.ID)
 		}
+		dirOf[n.ID] = filepath.Dir(n.FilePath)
 	}
 
 	count := 0
@@ -317,17 +319,41 @@ func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int,
 		if !ok {
 			continue
 		}
-		for _, to := range symTo[ref.To] {
+		candidates := symTo[ref.To]
+		// An unqualified call (Foo()) resolves within the caller's package, so
+		// restrict to same-directory targets — precise, and avoids cross-package
+		// false edges to same-named symbols. Fall back to all matches only if the
+		// same-package restriction finds nothing.
+		if !ref.Qualified {
+			if same := samePackage(candidates, dirOf, dirOf[from]); len(same) > 0 {
+				candidates = same
+			}
+		}
+		weight := graph.WeightTreeSitter
+		if !ref.Qualified {
+			weight = graph.WeightLSP // same-package resolution is precise
+		}
+		for _, to := range candidates {
 			if to == from {
 				continue
 			}
-			if _, err := ix.graph.AddEdge(from, to, ref.Kind, graph.WeightTreeSitter); err != nil {
+			if _, err := ix.graph.AddEdge(from, to, ref.Kind, weight); err != nil {
 				return count, err
 			}
 			count++
 		}
 	}
 	return count, nil
+}
+
+func samePackage(ids []int64, dirOf map[int64]string, dir string) []int64 {
+	var out []int64
+	for _, id := range ids {
+		if dirOf[id] == dir {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // embedText builds the text embedded for a symbol: docstring + signature +

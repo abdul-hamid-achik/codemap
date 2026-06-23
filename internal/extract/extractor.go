@@ -46,6 +46,10 @@ type Reference struct {
 	To   string // referenced name (e.g. the callee)
 	Kind string
 	Line int
+	// Qualified is true for selector calls (x.Foo(), pkg.Foo()) which may cross
+	// packages. False for bare-identifier calls (Foo()), which — in Go — always
+	// resolve within the same package, so the indexer can resolve them precisely.
+	Qualified bool
 }
 
 // FileResult is everything extracted from one file.

@@ -155,14 +155,31 @@ func callRefs(fset *token.FileSet, from string, d *ast.FuncDecl) []extract.Refer
 		}
 		seen[name] = true
 		refs = append(refs, extract.Reference{
-			From: from,
-			To:   name,
-			Kind: extract.RefCalls,
-			Line: fset.Position(call.Pos()).Line,
+			From:      from,
+			To:        name,
+			Kind:      extract.RefCalls,
+			Line:      fset.Position(call.Pos()).Line,
+			Qualified: isQualifiedCall(call.Fun),
 		})
 		return true
 	})
 	return refs
+}
+
+// isQualifiedCall reports whether a call uses a selector (x.Foo(), pkg.Foo()),
+// which may cross packages — as opposed to a bare identifier (Foo()), which Go
+// resolves within the same package.
+func isQualifiedCall(fun ast.Expr) bool {
+	switch t := fun.(type) {
+	case *ast.SelectorExpr:
+		return true
+	case *ast.IndexExpr:
+		return isQualifiedCall(t.X)
+	case *ast.IndexListExpr:
+		return isQualifiedCall(t.X)
+	default:
+		return false
+	}
 }
 
 func calleeName(fun ast.Expr) string {
