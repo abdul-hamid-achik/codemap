@@ -741,6 +741,17 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #97 (precise epic — discoverability at index) — **plain `codemap index` nudges toward
+  `--precise`.** Dogfooding showed a new user indexing a Go project never learns `--precise` exists at
+  the moment they'd benefit (status hints, but only if run). Now a name-based index of a non-empty
+  project prints `tip: add --precise to resolve Go call edges exactly (eliminates same-named
+  over-matching)` — gated on `exec.LookPath("go")` so it's only shown when actionable (no go ⇒
+  `--precise` would just degrade to this same graph), and suppressed when `--precise` was used or under
+  `--json`. Tested in `specs/precise.yml` (new `tip_suggests_precise` outcome; the flow's name-based
+  phase now surfaces the tip, re-stamped). Existing flows pipe index to /dev/null so are unaffected.
+  Full suite + lint v2 (0) + index_status/query/studio/precise E2E green; fmt clean. COMMIT+PUSH.
+  **Precise is now discoverable at index (#97), in status (#95), and in the docs (#91) — the feature
+  surfaces everywhere a user or agent would look.**
 - 2026-06-23 #96 (precise epic — note consistency) — **`impact`/`callers`/`callees` ambiguity notes are
   provenance-aware**, closing the last spot where the precise feature and the honest-messaging notes
   (#79/#80) disagreed: on a `--precise` index those notes still said "(name-based) … use --lsp", which

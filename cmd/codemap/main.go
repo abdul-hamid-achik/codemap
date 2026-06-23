@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sort"
 	"strings"
@@ -274,6 +275,13 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 			fmt.Printf("  precise: %s\n", rep.PreciseNote)
 		} else {
 			fmt.Printf("  precise: %d call edges resolved exactly via go/types (%d unresolved)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
+		}
+	} else if rep.Nodes > 0 {
+		// Surface --precise at the moment a user would most benefit — but only when
+		// the go toolchain is present, so the tip is actionable (it would otherwise
+		// just degrade to this same name-based graph).
+		if _, lookErr := exec.LookPath("go"); lookErr == nil {
+			fmt.Println("  tip: add --precise to resolve Go call edges exactly (eliminates same-named over-matching)")
 		}
 	}
 	for _, e := range rep.Errors {
