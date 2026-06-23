@@ -320,8 +320,13 @@ func (m Model) renderMetrics(w, h int) string {
 		return title("Metrics") + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
 	}
 
+	vec := "no embeddings — name search only"
+	if m.status.Vectors > 0 {
+		vec = fmt.Sprintf("%d embedded · semantic search ready", m.status.Vectors)
+	}
 	header := title("Metrics") + "   " +
-		countStyle.Render(fmt.Sprintf("%d nodes · %d edges · %d files", m.status.Nodes, m.status.Edges, m.status.Files))
+		countStyle.Render(fmt.Sprintf("%d nodes · %d edges · %d files · %s",
+			m.status.Nodes, m.status.Edges, m.status.Files, vec))
 
 	// Two columns under the header: distributions on the left, the graph's
 	// extremes (most-referenced hubs vs unreferenced dead-code) on the right.

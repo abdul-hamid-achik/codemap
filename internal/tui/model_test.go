@@ -360,6 +360,27 @@ func TestGraphEnterStillDrillsFromHubFocus(t *testing.T) {
 	}
 }
 
+func TestMetricsShowsEmbeddingState(t *testing.T) {
+	base := app.StatusReport{Project: "d", Registered: true, Nodes: 5, Edges: 3,
+		Kinds: map[string]int{"function": 2}, Languages: map[string]int{"go": 5}}
+
+	m := sized(t, 120, 40)
+	m.active = tabMetrics
+	embedded := base
+	embedded.Vectors = 5
+	m, _ = applyMsg(m, statusMsg{st: &embedded})
+	if !strings.Contains(m.render(), "semantic search ready") {
+		t.Error("metrics should show semantic-search-ready when vectors > 0")
+	}
+
+	m2 := sized(t, 120, 40)
+	m2.active = tabMetrics
+	m2, _ = applyMsg(m2, statusMsg{st: &base}) // Vectors == 0
+	if !strings.Contains(m2.render(), "no embeddings") {
+		t.Error("metrics should note no embeddings when vectors == 0")
+	}
+}
+
 func TestMetricsDashboardShowsHubsAndDeadCode(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabMetrics

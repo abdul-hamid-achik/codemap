@@ -727,6 +727,11 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #71 (status polish) — **studio Metrics shows embedding state too** (consistency with #70).
+  The Metrics header now reads `… · N embedded · semantic search ready` or `… · no embeddings — name
+  search only`, reusing `m.status.Vectors` already loaded by statusCmd (no new fetch). So a studio user
+  knows whether the Search tab will do semantic vs name search. Test `TestMetricsShowsEmbeddingState`
+  (both states). Full suite + lint v2 (0) + studio E2E green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #70 (status polish) — **`status` now reports embedded-vector count** so you can tell at a
   glance whether semantic search is available. New `vector.Store.CountByProject` (filtered Find,
   mirrors DeleteByProject); `StatusReport.Vectors`; `Status()` fills it best-effort (only if the
