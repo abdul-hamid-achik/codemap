@@ -66,13 +66,13 @@ func (m Model) footer() string {
 	var hint string
 	switch m.active {
 	case tabGraph:
-		hint = "↑/↓ select hub · enter → impact · 1-4 tabs · ctrl+c quit"
+		hint = "↑/↓ select · enter → impact · ctrl+r reindex · 1-4 tabs · ctrl+c quit"
 	case tabSearch:
-		hint = "type · enter search · ↑/↓ scroll · tab switch · ctrl+c quit"
+		hint = "type · enter search · ↑/↓ scroll · ctrl+r reindex · tab · ctrl+c quit"
 	case tabImpact:
-		hint = "type symbol · enter · ↑/↓ scroll · tab switch · ctrl+c quit"
+		hint = "type symbol · enter · ↑/↓ scroll · ctrl+r reindex · tab · ctrl+c quit"
 	default:
-		hint = "1-4 tabs · ctrl+c quit"
+		hint = "ctrl+r reindex · 1-4 tabs · ctrl+c quit"
 	}
 	status := m.statusMsg
 	if m.errMsg != "" {
@@ -102,7 +102,7 @@ func (m Model) renderGraph(w, h int) string {
 		return title("Graph") + "\n\n" + mutedStyle.Render("loading call graph…")
 	}
 	if len(m.graphHubs) == 0 {
-		return title("Graph") + "\n\n" + mutedStyle.Render("no graph yet — run 'codemap index' in this project")
+		return title("Graph") + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
 	}
 	leftW := 38
 	if leftW > w/2 {
@@ -175,7 +175,7 @@ func (m Model) renderMetrics(w, h int) string {
 		return title("Metrics") + "\n\n" + mutedStyle.Render("loading…")
 	}
 	if !m.status.Registered {
-		return title("Metrics") + "\n\n" + mutedStyle.Render("no index yet — run 'codemap index' in this project")
+		return title("Metrics") + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
 	}
 	barW := w - 44
 	barW = clamp(barW, 16, 100)

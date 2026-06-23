@@ -177,6 +177,29 @@ func TestSearchScroll(t *testing.T) {
 	}
 }
 
+func TestReindexKey(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.graphLoaded = true
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	if u.(Model).graphLoaded {
+		t.Error("ctrl+r should reset graphLoaded to force a refresh")
+	}
+	if cmd == nil {
+		t.Error("ctrl+r should fire a reindex command")
+	}
+}
+
+func TestIndexedMsgRefreshes(t *testing.T) {
+	m := sized(t, 120, 40)
+	u, cmd := m.Update(indexedMsg{rep: &app.IndexReport{FilesIndexed: 3, Nodes: 10, Edges: 7}})
+	if cmd == nil {
+		t.Error("indexedMsg should trigger a status+hubs refresh")
+	}
+	if !strings.Contains(u.(Model).statusMsg, "reindexed") {
+		t.Errorf("status = %q, want a 'reindexed' summary", u.(Model).statusMsg)
+	}
+}
+
 func TestSemanticErrorShown(t *testing.T) {
 	m := sized(t, 100, 30)
 	u, _ := m.Update(semanticMsg{query: "x", err: fakeErr("ollama unreachable")})

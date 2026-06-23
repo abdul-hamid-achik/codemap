@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
 type tab int
@@ -61,6 +62,10 @@ type graphDetailMsg struct {
 	callers []app.SymbolRef
 	callees []app.SymbolRef
 	err     error
+}
+type indexedMsg struct {
+	rep *app.IndexReport
+	err error
 }
 
 // Model is the studio TUI state.
@@ -171,6 +176,15 @@ func (m Model) semanticCmd(q string) tea.Cmd {
 	}
 }
 
+func (m Model) reindexCmd() tea.Cmd {
+	ctx, svc, dir := m.ctx, m.service, m.startDir
+	return func() tea.Msg {
+		// Structure-only: fast and needs no Ollama, so a refresh always works.
+		rep, err := svc.Index(ctx, dir, index.Options{}, false)
+		return indexedMsg{rep: rep, err: err}
+	}
+}
+
 func (m Model) impactCmd(sym string) tea.Cmd {
 	svc, dir := m.service, m.startDir
 	return func() tea.Msg {
@@ -227,6 +241,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphCallees = msg.callees
 		return m, nil
 
+	case indexedMsg:
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		m.errMsg = ""
+		if msg.rep != nil {
+			m.statusMsg = fmt.Sprintf("reindexed: %d files · %d nodes · %d edges",
+				msg.rep.FilesIndexed, msg.rep.Nodes, msg.rep.Edges)
+		}
+		// Refresh everything the new index affects.
+		return m, tea.Batch(m.statusCmd(), m.hubsCmd())
+
 	case semanticMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
@@ -267,6 +294,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "ctrl+r":
+		// Reindex in place (structure-only) and refresh — works on any tab.
+		m.statusMsg = "indexing…"
+		m.graphLoaded = false
+		return m, m.reindexCmd()
 	case "tab":
 		m.active = (m.active + 1) % tabCount
 		m.syncFocus()

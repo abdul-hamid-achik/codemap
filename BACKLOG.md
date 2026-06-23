@@ -250,6 +250,12 @@
   unaffected (no Go changes). COMMIT+PUSH. **NEXT:** LSP edge wiring (E2.2b) for precise
   indegree; or Search per-row drill (focus-mode); or studio Impact "direct callers/tests"
   sections.
+- 2026-06-23 #24 (cron, polish-first) — studio in-app REINDEX. ctrl+r (global, any tab)
+  runs a structure-only Service.Index then refreshes status + hubs — no quit/relaunch cycle;
+  studio is now a live workspace. Empty states + footer + docs/studio.md mention it. 2 new
+  TUI tests (ctrl+r fires reindex + resets graphLoaded; indexedMsg refreshes). All units + 4
+  E2E green, fmt clean. COMMIT+PUSH. **NEXT:** LSP edge wiring (E2.2b) for precise indegree;
+  or Search per-row drill; or studio Impact callers/tests sections.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

@@ -28,6 +28,7 @@
 | `1`–`4` / `tab` / `shift+tab` | Switch tabs |
 | `↑` / `↓` | Select a hub (Graph) or scroll results (Search / Impact) |
 | `enter` | Graph: drill into the selected hub's impact · Search/Impact: run the query |
+| `ctrl+r` | Reindex the project (structure-only) and refresh, without leaving studio |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |
 
 Symbols are shown with their fully-qualified names so same-named methods (e.g.
