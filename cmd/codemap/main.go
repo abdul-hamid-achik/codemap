@@ -103,6 +103,33 @@ JSON-RPC framing.`,
 	}
 )
 
+var (
+	callersCmd = &cobra.Command{
+		Use:   "callers <symbol>",
+		Short: "List functions/methods that call a symbol",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runCallers,
+	}
+	calleesCmd = &cobra.Command{
+		Use:   "callees <symbol>",
+		Short: "List functions/methods that a symbol calls",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runCallees,
+	}
+	impactCmd = &cobra.Command{
+		Use:   "impact <symbol>",
+		Short: "Impact analysis: blast radius (transitive callers) + test coverage",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runImpact,
+	}
+	semanticCmd = &cobra.Command{
+		Use:   "semantic <query>",
+		Short: "Semantic search across the code graph by meaning",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  runSemantic,
+	}
+)
+
 func init() {
 	rootCmd.SetVersionTemplate("codemap version {{.Version}}\n")
 
@@ -114,8 +141,11 @@ func init() {
 	indexCmd.Flags().Bool("reindex", false, "wipe and rebuild the whole project index")
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
 	initCmd.Flags().Bool("local", false, "create a .codemap directory inside the project")
+	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
+	semanticCmd.Flags().Int("top", 10, "maximum results")
 
-	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd)
+	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
+		callersCmd, calleesCmd, impactCmd, semanticCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -228,6 +258,117 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return mcpserver.NewServer(sess).Run(ctx)
+}
+
+func runCallers(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	rep, err := app.NewService(sess).Callers(cwd, args[0])
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	renderRefs(fmt.Sprintf("Callers of %s", rep.Symbol), rep.Results)
+	return nil
+}
+
+func runCallees(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	rep, err := app.NewService(sess).Callees(cwd, args[0])
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	renderRefs(fmt.Sprintf("Callees of %s", rep.Symbol), rep.Results)
+	return nil
+}
+
+func runImpact(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	depth, _ := cmd.Flags().GetInt("depth")
+	rep, err := app.NewService(sess).Impact(cwd, args[0], depth)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if !rep.Found {
+		fmt.Printf("symbol %q not found in project %s\n", rep.Symbol, rep.Project)
+		return nil
+	}
+	fmt.Printf("Impact of %s (%s)\n", rep.Symbol, rep.Project)
+	for _, l := range rep.Locations {
+		fmt.Printf("  defined:        %s:%d\n", l.File, l.StartLine)
+	}
+	fmt.Printf("  direct callers: %d\n", len(rep.DirectCallers))
+	fmt.Printf("  blast radius:   %d (depth ≤ %d)\n", len(rep.BlastRadius), depth)
+	fmt.Printf("  tests covering: %d\n", len(rep.Tests))
+	if rep.Untested {
+		fmt.Println("  ⚠ no tests reach this symbol")
+	}
+	for _, n := range rep.BlastRadius {
+		marker := " "
+		if n.Kind == "test" {
+			marker = "✓"
+		}
+		fmt.Printf("   %s [%d] %-28s %s:%d\n", marker, n.Depth, n.Symbol, n.File, n.StartLine)
+	}
+	return nil
+}
+
+func runSemantic(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	top, _ := cmd.Flags().GetInt("top")
+	rep, err := app.NewService(sess).Semantic(cmd.Context(), cwd, strings.Join(args, " "), top)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if len(rep.Hits) == 0 {
+		fmt.Println("no matches")
+		return nil
+	}
+	for _, h := range rep.Hits {
+		fmt.Printf("  %.3f  %-30s %s:%d\n", h.Score, h.Symbol, h.File, h.StartLine)
+	}
+	return nil
+}
+
+func renderRefs(label string, refs []app.SymbolRef) {
+	if len(refs) == 0 {
+		fmt.Printf("%s: none\n", label)
+		return
+	}
+	fmt.Printf("%s:\n", label)
+	for _, r := range refs {
+		fmt.Printf("  %-30s %s:%d\n", r.Symbol, r.File, r.StartLine)
+	}
 }
 
 func openSession(cmd *cobra.Command) (*app.Session, error) {

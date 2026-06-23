@@ -274,6 +274,95 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	return rep, nil
 }
 
+// ImpactNode is a node in the blast radius with its hop distance.
+type ImpactNode struct {
+	Symbol    string `json:"symbol"`
+	FQN       string `json:"fqn,omitempty"`
+	Kind      string `json:"kind"`
+	File      string `json:"file"`
+	StartLine int    `json:"start_line"`
+	Depth     int    `json:"depth"`
+}
+
+// ImpactReport is the flagship impact analysis: who is affected by changing a
+// symbol, and which tests cover those paths.
+type ImpactReport struct {
+	Symbol        string       `json:"symbol"`
+	Project       string       `json:"project"`
+	Found         bool         `json:"found"`
+	Locations     []SymbolRef  `json:"locations,omitempty"`
+	DirectCallers []SymbolRef  `json:"direct_callers"`
+	BlastRadius   []ImpactNode `json:"blast_radius"`
+	Tests         []ImpactNode `json:"tests"`
+	Untested      bool         `json:"untested"`
+}
+
+// Impact computes impact analysis for a symbol: its definition site(s), direct
+// callers, the transitive blast radius (up to depth hops), and which of those
+// are tests (coverage). depth <= 0 defaults to 3.
+func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error) {
+	if depth <= 0 {
+		depth = 3
+	}
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &ImpactReport{
+		Symbol: symbol, Project: name,
+		DirectCallers: []SymbolRef{}, BlastRadius: []ImpactNode{}, Tests: []ImpactNode{},
+	}
+
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return rep, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	locs, err := g.FindNodesBySymbol(p.ID, symbol)
+	if err != nil {
+		return nil, err
+	}
+	if len(locs) == 0 {
+		return rep, nil // symbol not in the graph
+	}
+	rep.Found = true
+	for _, n := range locs {
+		rep.Locations = append(rep.Locations, nodeToRef(n))
+	}
+
+	callers, err := g.Callers(p.ID, symbol)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range callers {
+		rep.DirectCallers = append(rep.DirectCallers, nodeToRef(n))
+	}
+
+	radius, err := g.BlastRadius(p.ID, symbol, depth)
+	if err != nil {
+		return nil, err
+	}
+	for _, nd := range radius {
+		in := ImpactNode{
+			Symbol: nd.Node.Symbol, FQN: nd.Node.FQN, Kind: nd.Node.Kind,
+			File: nd.Node.FilePath, StartLine: nd.Node.StartLine, Depth: nd.Depth,
+		}
+		rep.BlastRadius = append(rep.BlastRadius, in)
+		if nd.Node.Kind == graph.KindTest {
+			rep.Tests = append(rep.Tests, in)
+		}
+	}
+	rep.Untested = len(rep.Tests) == 0
+	return rep, nil
+}
+
 // resolveProject finds the registered project whose path is cwd or an ancestor
 // of cwd (closest wins). If none is registered it defaults to (cwd, basename).
 func (svc *Service) resolveProject(cwd string) (root, name string, err error) {

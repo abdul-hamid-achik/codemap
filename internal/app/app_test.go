@@ -151,6 +151,58 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestServiceImpact(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app; func Helper() {}; func Run() { Helper() }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main_test.go"),
+		[]byte("package app; import \"testing\"; func TestRun(t *testing.T) { Run() }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Impact(proj, "Helper", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatal("Helper should be found")
+	}
+	// Run calls Helper (direct); TestRun calls Run (depth 2).
+	if len(rep.DirectCallers) != 1 || rep.DirectCallers[0].Symbol != "Run" {
+		t.Errorf("direct callers = %+v, want [Run]", rep.DirectCallers)
+	}
+	if len(rep.BlastRadius) != 2 {
+		t.Errorf("blast radius = %+v, want 2 (Run, TestRun)", rep.BlastRadius)
+	}
+	if len(rep.Tests) != 1 || rep.Tests[0].Symbol != "TestRun" {
+		t.Errorf("tests = %+v, want [TestRun]", rep.Tests)
+	}
+	if rep.Untested {
+		t.Error("Helper is reached by TestRun, should not be untested")
+	}
+
+	// Run is reached by TestRun, so it is covered too.
+	rep2, err := svc.Impact(proj, "Run", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep2.Untested || len(rep2.Tests) != 1 {
+		t.Errorf("Run should be covered by TestRun: untested=%v tests=%d", rep2.Untested, len(rep2.Tests))
+	}
+}
+
 func TestStatusUnregistered(t *testing.T) {
 	isolate(t)
 	sess, err := Open("")

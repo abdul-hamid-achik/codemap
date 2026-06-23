@@ -77,6 +77,12 @@ type symbolInput struct {
 	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+type impactInput struct {
+	Symbol string `json:"symbol" jsonschema:"the symbol to analyze"`
+	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -98,6 +104,14 @@ func (s *Server) register() {
 		Name:        "codemap_callers",
 		Description: "List the functions/methods that call a given symbol.",
 	}, s.handleCallers)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_callees",
+		Description: "List the functions/methods that a given symbol calls.",
+	}, s.handleCallees)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_impact",
+		Description: "Impact analysis for a symbol: definition sites, direct callers, the transitive blast radius (everything affected by a change), and which tests cover those paths. The flagship query — one call replaces many file reads.",
+	}, s.handleImpact)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -124,6 +138,16 @@ func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, 
 
 func (s *Server) handleCallers(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.Callers(cwdOf(in.Path), in.Symbol)
+	return result(rep, err)
+}
+
+func (s *Server) handleCallees(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Callees(cwdOf(in.Path), in.Symbol)
+	return result(rep, err)
+}
+
+func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in impactInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
 }
 

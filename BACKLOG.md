@@ -153,6 +153,16 @@
   partial (ASCII bars). COMMIT+PUSH this increment (repo is live).
   **NEXT:** E4.2 real ntcharts v2 charts (validate R1 first) + E4.3 graph view; then LSP (E2),
   hybrid impact (E3), docs scaffold (E0.5). TUI glyphrun spec once it's richer.
+- 2026-06-23 #15 (cron) — Flagship impact query (E3.1). graph.BlastRadius (cycle-safe BFS up
+  `calls` edges, depth-limited, min-depth per node; tests for chain/depth-limit/cycle) +
+  Service.Impact (locations + direct callers + blast radius + tests-in-radius + untested flag;
+  integration test). Exposed via 4 new CLI query commands (callers/callees/impact/semantic,
+  with --depth/--top/--json) and 2 new MCP tools (codemap_callees, codemap_impact → 7 tools
+  total). All tests green, build/vet/fmt clean. ★ DEMO on codemap itself: `impact AddNode` →
+  8 direct callers, 14 blast radius, 11 covering tests with the indexFile→IndexProject→Index
+  chain. COMMIT+PUSH. **NEXT:** E4.2 ntcharts (validate R1) / E4.3 graph view; or LSP (E2);
+  or E3.4 hotspots/orphans/path (BFS helper exists); or docs (E0.5). Lean E2 LSP next for
+  precise cross-file edges (current edges are by-name weight 0.7).
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -257,10 +267,13 @@
 - [ ] E2.5 MCP tools: callees, references, blast_radius, test_coverage, symbols, dependencies
 
 ## Epic 3 — Hybrid queries
-- [ ] E3.1 codemap_impact (blast radius + test coverage + untested + similar) — flagship
+- [x] E3.1 codemap_impact (blast radius + test coverage + untested) — graph.BlastRadius
+      (cycle-safe depth-limited BFS up `calls` edges) + Service.Impact + CLI `impact` + MCP
+      `codemap_impact`; tests + real demo (AddNode: 8 callers/14 blast/11 tests). TODO: add
+      semantically-similar (needs vector.Similar).
 - [ ] E3.2 codemap_semantic_callers (semantic → graph expansion)
 - [ ] E3.3 codemap_refactor_plan
-- [ ] E3.4 codemap_path / hotspots / orphans (cycle-safe BFS)
+- [ ] E3.4 codemap_path / hotspots / orphans (cycle-safe BFS helper now exists, reuse)
 
 ## Epic 4 — studio TUI (Charm v2)
 - [x] E4.1 TUI shell (bubbletea v2 + lipgloss v2 + bubbles v2 textinput; tab bar, header/

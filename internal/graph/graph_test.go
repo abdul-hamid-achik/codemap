@@ -203,6 +203,72 @@ func TestCallersCallees(t *testing.T) {
 	}
 }
 
+func TestBlastRadius(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(file, sym, kind string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: file, Symbol: sym, FQN: "p." + sym, Kind: kind, Language: "go", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a := mk("a.go", "A", KindFunction)
+	b := mk("b.go", "B", KindFunction)
+	c := mk("c.go", "C", KindFunction)
+	tn := mk("c_test.go", "TestC", KindTest)
+	// A->B, B->C, TestC->B
+	for _, e := range [][2]int64{{a, b}, {b, c}, {tn, b}} {
+		if _, err := s.AddEdge(e[0], e[1], EdgeCalls, WeightLSP); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	br, err := s.BlastRadius(pid, "C", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	depth := map[string]int{}
+	for _, nd := range br {
+		depth[nd.Node.Symbol] = nd.Depth
+	}
+	if len(br) != 3 {
+		t.Errorf("blast radius size = %d, want 3 (B,A,TestC)", len(br))
+	}
+	if depth["B"] != 1 || depth["A"] != 2 || depth["TestC"] != 2 {
+		t.Errorf("depths = %v, want B:1 A:2 TestC:2", depth)
+	}
+
+	// depth limit
+	if br1, _ := s.BlastRadius(pid, "C", 1); len(br1) != 1 {
+		t.Errorf("depth-1 size = %d, want 1 (only B)", len(br1))
+	}
+}
+
+func TestBlastRadiusCycleSafe(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(sym string) int64 {
+		id, _ := s.AddNode(&Node{ProjectID: pid, FilePath: sym + ".go", Symbol: sym, FQN: "p." + sym, Kind: KindFunction, Language: "go", SourceHash: "h"})
+		return id
+	}
+	a, b := mk("A"), mk("B")
+	// cycle A<->B
+	if _, err := s.AddEdge(a, b, EdgeCalls, WeightLSP); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdge(b, a, EdgeCalls, WeightLSP); err != nil {
+		t.Fatal(err)
+	}
+	br, err := s.BlastRadius(pid, "A", 10) // must terminate
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(br) != 1 || br[0].Node.Symbol != "B" {
+		t.Errorf("cycle blast radius = %+v, want [B]", br)
+	}
+}
+
 func TestStats(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")
