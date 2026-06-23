@@ -727,6 +727,15 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #86 (studio metrics honesty) — **studio Metrics "Top hubs" flags inflated hubs too**, the
+  #85 follow-up on the directive's named Metrics surface. The dashboard's hub ranking showed the same
+  name-collision inflation (Close/Error topping it) silently. Now each hub row whose name is shared by
+  >1 definition gets a compact `⚠×N` suffix (reusing `HotspotRef.SharedName` already loaded via
+  hubsCmd — no new query), with a one-time `⚠=name-inflated` legend in the section title when any hub
+  is flagged. Width-safe (name budget reserved for the marker; the existing ≤120-col assertion still
+  holds). Test `TestMetricsFlagsInflatedHubs` (⚠×6 on the collision, legend present, width ok). Full
+  suite + lint v2 (0) + studio E2E green; fmt clean. COMMIT+PUSH. **Name-collision inflation is now
+  flagged everywhere it's ranked: CLI hotspots (#85) and the studio Metrics dashboard (#86).**
 - 2026-06-23 #85 (hotspots honesty) — **`hotspots` flags name-collision inflation.** Dogfooding showed
   the survey was useless: the top 8 hubs on the codemap repo were ALL `Close`/`Error` methods (71, 71,
   70, …) — not real hubs, just name collisions (name-based edges fan a `Close()` call out to all 6

@@ -404,6 +404,32 @@ func TestMetricsDashboardShowsHubsAndDeadCode(t *testing.T) {
 	}
 }
 
+func TestMetricsFlagsInflatedHubs(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabMetrics
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
+		Project: "demo", Registered: true, Nodes: 5, Edges: 3,
+		Kinds: map[string]int{"method": 2}, Languages: map[string]int{"go": 5},
+	}})
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{
+		{Symbol: "Close", FQN: "p.T.Close", InDegree: 71, SharedName: 6}, // inflated by name collision
+		{Symbol: "Unique", FQN: "p.Unique", InDegree: 4},                 // genuine hub
+	}})
+	out := m.render()
+	if !strings.Contains(out, "⚠×6") {
+		t.Errorf("metrics should mark a name-inflated hub with ⚠×N:\n%s", out)
+	}
+	if !strings.Contains(out, "⚠=name-inflated") {
+		t.Errorf("metrics should explain the ⚠ marker via a legend:\n%s", out)
+	}
+	// Width must still be respected with the marker present.
+	for i, line := range strings.Split(out, "\n") {
+		if wd := lipgloss.Width(line); wd > 120 {
+			t.Errorf("metrics line %d width %d exceeds 120: %q", i, wd, line)
+		}
+	}
+}
+
 func TestMetricsNavigationDrills(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabMetrics

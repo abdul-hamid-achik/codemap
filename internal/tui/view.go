@@ -378,14 +378,25 @@ func (m Model) metricsLists(w, h int) string {
 	nHubs := len(m.graphHubs)
 
 	hubRows := make([]string, nHubs)
+	anyShared := false
 	for i, hub := range m.graphHubs {
-		hubRows[i] = fmt.Sprintf("  %4d  %s", hub.InDegree, truncate(displayName(hub.FQN, hub.Symbol), w-8))
+		mark, nameBudget := "", w-8
+		if hub.SharedName > 1 { // in-degree inflated by name-based fan-out across same-named defs
+			anyShared = true
+			mark = fmt.Sprintf("  ⚠×%d", hub.SharedName)
+			nameBudget = w - 14
+		}
+		hubRows[i] = fmt.Sprintf("  %4d  %s%s", hub.InDegree, truncate(displayName(hub.FQN, hub.Symbol), nameBudget), mark)
 	}
 	hubSel := -1
 	if m.metricsSel < nHubs {
 		hubSel = m.metricsSel
 	}
-	metricBlock(&b, fmt.Sprintf("Top hubs — most referenced (%d)", nHubs), hubRows, hubSel, budget, w)
+	hubTitle := fmt.Sprintf("Top hubs — most referenced (%d)", nHubs)
+	if anyShared {
+		hubTitle += "  ⚠=name-inflated"
+	}
+	metricBlock(&b, hubTitle, hubRows, hubSel, budget, w)
 
 	b.WriteString("\n")
 	orphRows := make([]string, len(m.orphans))
