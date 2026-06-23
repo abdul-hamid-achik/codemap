@@ -727,6 +727,18 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #85 (hotspots honesty) — **`hotspots` flags name-collision inflation.** Dogfooding showed
+  the survey was useless: the top 8 hubs on the codemap repo were ALL `Close`/`Error` methods (71, 71,
+  70, …) — not real hubs, just name collisions (name-based edges fan a `Close()` call out to all 6
+  Close defs, so each is credited with every Close call). Now `Hotspots` runs one grouped query
+  (`graph.Store.SymbolDefCounts`) and sets `HotspotRef.SharedName` when a name has >1 definition; CLI
+  appends `⚠ name shared by N (inflated)`, JSON carries `shared_name`. So a genuine unique-named hub
+  stands out as trustworthy while the inflated collisions are clearly labeled. One query, not N. Test
+  `TestHotspotsFlagsSharedNames` (Close→SharedName 2; unique Solo→0). Verified live: every top Close
+  row now reads `⚠ name shared by 6 (inflated)`. Full suite + lint v2 (0) + query/studio E2E green; fmt
+  clean. COMMIT+PUSH. (Scoped to CLI+MCP: the studio hub columns are width-constrained and the detail
+  pane keys off graphCenter not a HotspotRef, so marking there is a disproportionately fiddly follow-up
+  for a navigation view — `SharedName` is now on the studio's data, ready when wanted.)
 - 2026-06-23 #84 (orphans accuracy) — **`orphans` no longer flags `main`/`init` as dead code.**
   Dogfooding `codemap orphans` on the codemap repo listed `main.main` and `main.init` at the top as
   "dead-code candidates" — but Go invokes `main` and every `init` automatically, so they're never dead;

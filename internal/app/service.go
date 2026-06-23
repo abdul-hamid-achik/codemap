@@ -925,12 +925,13 @@ func nodeAnnotationsFor(g *graph.Store, projectID int64, candidates ...string) [
 
 // HotspotRef is a hub node with its incoming-usage count.
 type HotspotRef struct {
-	Symbol    string `json:"symbol"`
-	FQN       string `json:"fqn,omitempty"`
-	Kind      string `json:"kind"`
-	File      string `json:"file"`
-	StartLine int    `json:"start_line"`
-	InDegree  int    `json:"in_degree"`
+	Symbol     string `json:"symbol"`
+	FQN        string `json:"fqn,omitempty"`
+	Kind       string `json:"kind"`
+	File       string `json:"file"`
+	StartLine  int    `json:"start_line"`
+	InDegree   int    `json:"in_degree"`
+	SharedName int    `json:"shared_name,omitempty"` // defs sharing this name (>1 ⇒ in-degree inflated)
 }
 
 // HotspotsReport is returned by Hotspots.
@@ -1127,11 +1128,20 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One grouped query gives the def-count per name, so we can flag entries whose
+	// in-degree is inflated by name-based fan-out (e.g. six Close() methods each
+	// credited with every Close call) — far more useful than a ranking silently
+	// topped by name collisions.
+	shared, _ := g.SymbolDefCounts(pid)
 	for _, h := range hs {
-		rep.Hotspots = append(rep.Hotspots, HotspotRef{
+		ref := HotspotRef{
 			Symbol: h.Node.Symbol, FQN: h.Node.FQN, Kind: h.Node.Kind,
 			File: h.Node.FilePath, StartLine: h.Node.StartLine, InDegree: h.InDegree,
-		})
+		}
+		if n := shared[h.Node.Symbol]; n > 1 {
+			ref.SharedName = n
+		}
+		rep.Hotspots = append(rep.Hotspots, ref)
 	}
 	return rep, nil
 }

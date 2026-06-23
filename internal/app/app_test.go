@@ -526,6 +526,53 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestHotspotsFlagsSharedNames(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	src := "package app\n\n" +
+		"type T struct{}\ntype U struct{}\n\n" +
+		"func (T) Close() {}\nfunc (U) Close() {}\n\n" +
+		"func Solo() {}\n\n" +
+		"func A() { var t T; t.Close() }\n" +
+		"func B() { var u U; u.Close() }\n" +
+		"func C() { Solo() }\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Hotspots(proj, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawClose, sawSolo bool
+	for _, h := range rep.Hotspots {
+		switch h.Symbol {
+		case "Close":
+			sawClose = true
+			if h.SharedName != 2 {
+				t.Errorf("Close is defined twice; SharedName = %d, want 2", h.SharedName)
+			}
+		case "Solo":
+			sawSolo = true
+			if h.SharedName != 0 {
+				t.Errorf("Solo is unique; SharedName = %d, want 0 (no flag)", h.SharedName)
+			}
+		}
+	}
+	if !sawClose || !sawSolo {
+		t.Fatalf("expected both Close and Solo in hotspots (saw Close=%v Solo=%v)", sawClose, sawSolo)
+	}
+}
+
 func TestOrphansExcludesMainAndInit(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

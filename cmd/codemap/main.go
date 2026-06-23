@@ -543,7 +543,11 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("Hotspots in %s:\n", rep.Project)
 	for _, h := range rep.Hotspots {
-		fmt.Printf("  %4d  %-36s %s:%d\n", h.InDegree, disp(h.FQN, h.Symbol), h.File, h.StartLine)
+		line := fmt.Sprintf("  %4d  %-36s %s:%d", h.InDegree, disp(h.FQN, h.Symbol), h.File, h.StartLine)
+		if h.SharedName > 1 { // count fanned across same-named defs (name-based)
+			line += fmt.Sprintf("  ⚠ name shared by %d (inflated)", h.SharedName)
+		}
+		fmt.Println(line)
 	}
 	return nil
 }

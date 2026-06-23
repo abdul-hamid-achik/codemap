@@ -303,6 +303,29 @@ func (s *Store) SearchSymbols(projectID int64, query string, limit int) ([]Node,
 	return s.queryNodes(q, projectID, KindFile, like, like, limit)
 }
 
+// SymbolDefCounts returns, per symbol name, how many definition nodes share it
+// within a project. A count > 1 means name-based resolution fans calls/references
+// out across all of them, inflating in-degrees — used to flag inflated hotspots.
+func (s *Store) SymbolDefCounts(projectID int64) (map[string]int, error) {
+	rows, err := s.db.Query(
+		"SELECT symbol, COUNT(*) FROM nodes WHERE project_id = ? AND kind != ? GROUP BY symbol",
+		projectID, KindFile)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]int{}
+	for rows.Next() {
+		var sym string
+		var n int
+		if err := rows.Scan(&sym, &n); err != nil {
+			return nil, err
+		}
+		m[sym] = n
+	}
+	return m, rows.Err()
+}
+
 // Orphans returns function/method nodes with no incoming `calls` edge —
 // dead-code candidates. (Heuristic: exported API, entrypoints like main/init,
 // and externally-called code may appear here as false positives.)
