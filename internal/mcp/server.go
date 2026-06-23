@@ -83,6 +83,17 @@ type impactInput struct {
 	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
 }
 
+type limitInput struct {
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Top  int    `json:"top,omitempty" jsonschema:"maximum results"`
+}
+
+type pathQueryInput struct {
+	From string `json:"from" jsonschema:"the starting symbol"`
+	To   string `json:"to" jsonschema:"the destination symbol"`
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -112,6 +123,18 @@ func (s *Server) register() {
 		Name:        "codemap_impact",
 		Description: "Impact analysis for a symbol: definition sites, direct callers, the transitive blast radius (everything affected by a change), and which tests cover those paths. The flagship query — one call replaces many file reads.",
 	}, s.handleImpact)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_hotspots",
+		Description: "List the most-referenced symbols (hubs) in a project.",
+	}, s.handleHotspots)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_orphans",
+		Description: "List functions/methods with no callers (dead-code candidates).",
+	}, s.handleOrphans)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_path",
+		Description: "Find the shortest call path between two symbols.",
+	}, s.handlePath)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -148,6 +171,21 @@ func (s *Server) handleCallees(_ context.Context, _ *sdkmcp.CallToolRequest, in 
 
 func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in impactInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
+	return result(rep, err)
+}
+
+func (s *Server) handleHotspots(_ context.Context, _ *sdkmcp.CallToolRequest, in limitInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Hotspots(cwdOf(in.Path), in.Top)
+	return result(rep, err)
+}
+
+func (s *Server) handleOrphans(_ context.Context, _ *sdkmcp.CallToolRequest, in limitInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Orphans(cwdOf(in.Path), in.Top)
+	return result(rep, err)
+}
+
+func (s *Server) handlePath(_ context.Context, _ *sdkmcp.CallToolRequest, in pathQueryInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Path(cwdOf(in.Path), in.From, in.To)
 	return result(rep, err)
 }
 

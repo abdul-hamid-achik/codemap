@@ -269,6 +269,66 @@ func TestBlastRadiusCycleSafe(t *testing.T) {
 	}
 }
 
+func TestHotspotsOrphansPath(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(sym, kind string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: sym + ".go", Symbol: sym, FQN: "p." + sym, Kind: kind, Language: "go", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a := mk("A", KindFunction)
+	b := mk("B", KindFunction)
+	c := mk("C", KindFunction)
+	lonely := mk("Lonely", KindFunction)
+	_ = lonely
+	// A->B, A->C, B->C   => C in-degree 2 (top hotspot), B in-degree 1
+	for _, e := range [][2]int64{{a, b}, {a, c}, {b, c}} {
+		if _, err := s.AddEdge(e[0], e[1], EdgeCalls, WeightLSP); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// hotspots
+	hs, err := s.Hotspots(pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hs) == 0 || hs[0].Node.Symbol != "C" || hs[0].InDegree != 2 {
+		t.Errorf("top hotspot = %+v, want C with in-degree 2", hs[0])
+	}
+
+	// orphans: A and Lonely have no callers; B and C do.
+	orph, err := s.Orphans(pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, n := range orph {
+		got[n.Symbol] = true
+	}
+	if !got["A"] || !got["Lonely"] {
+		t.Errorf("orphans = %v, want A and Lonely", got)
+	}
+	if got["B"] || got["C"] {
+		t.Errorf("orphans should not include called nodes B/C: %v", got)
+	}
+
+	// path A -> C exists (A->B->C or A->C); C -> A does not.
+	path, err := s.Path(pid, "A", "C", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path) == 0 || path[0].Symbol != "A" || path[len(path)-1].Symbol != "C" {
+		t.Errorf("path A->C = %+v, want starting A ending C", path)
+	}
+	if rev, _ := s.Path(pid, "C", "A", 10); len(rev) != 0 {
+		t.Errorf("path C->A should be empty, got %+v", rev)
+	}
+}
+
 func TestStats(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")

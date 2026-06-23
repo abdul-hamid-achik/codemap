@@ -363,6 +363,124 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	return rep, nil
 }
 
+// HotspotRef is a hub node with its incoming-usage count.
+type HotspotRef struct {
+	Symbol    string `json:"symbol"`
+	FQN       string `json:"fqn,omitempty"`
+	Kind      string `json:"kind"`
+	File      string `json:"file"`
+	StartLine int    `json:"start_line"`
+	InDegree  int    `json:"in_degree"`
+}
+
+// HotspotsReport is returned by Hotspots.
+type HotspotsReport struct {
+	Project  string       `json:"project"`
+	Hotspots []HotspotRef `json:"hotspots"`
+}
+
+// OrphansReport is returned by Orphans.
+type OrphansReport struct {
+	Project string      `json:"project"`
+	Orphans []SymbolRef `json:"orphans"`
+}
+
+// PathReport is returned by Path.
+type PathReport struct {
+	From    string      `json:"from"`
+	To      string      `json:"to"`
+	Project string      `json:"project"`
+	Found   bool        `json:"found"`
+	Path    []SymbolRef `json:"path"`
+}
+
+// project resolves cwd to a registered project id. found is false (no error)
+// when the project isn't indexed yet.
+func (svc *Service) project(cwd string) (id int64, name string, found bool, err error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return 0, "", false, err
+	}
+	if _, name, err = svc.resolveProject(cwd); err != nil {
+		return 0, name, false, err
+	}
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return 0, name, false, nil
+	}
+	if err != nil {
+		return 0, name, false, err
+	}
+	return p.ID, name, true, nil
+}
+
+// Hotspots returns the most-referenced nodes (hubs).
+func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
+	pid, name, found, err := svc.project(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &HotspotsReport{Project: name, Hotspots: []HotspotRef{}}
+	if !found {
+		return rep, nil
+	}
+	g, _ := svc.s.Graph()
+	hs, err := g.Hotspots(pid, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range hs {
+		rep.Hotspots = append(rep.Hotspots, HotspotRef{
+			Symbol: h.Node.Symbol, FQN: h.Node.FQN, Kind: h.Node.Kind,
+			File: h.Node.FilePath, StartLine: h.Node.StartLine, InDegree: h.InDegree,
+		})
+	}
+	return rep, nil
+}
+
+// Orphans returns function/method nodes with no callers (dead-code candidates).
+func (svc *Service) Orphans(cwd string, limit int) (*OrphansReport, error) {
+	pid, name, found, err := svc.project(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &OrphansReport{Project: name, Orphans: []SymbolRef{}}
+	if !found {
+		return rep, nil
+	}
+	g, _ := svc.s.Graph()
+	nodes, err := g.Orphans(pid, limit)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		rep.Orphans = append(rep.Orphans, nodeToRef(n))
+	}
+	return rep, nil
+}
+
+// Path returns the shortest call path between two symbols.
+func (svc *Service) Path(cwd, from, to string) (*PathReport, error) {
+	pid, name, found, err := svc.project(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &PathReport{From: from, To: to, Project: name, Path: []SymbolRef{}}
+	if !found {
+		return rep, nil
+	}
+	g, _ := svc.s.Graph()
+	nodes, err := g.Path(pid, from, to, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		rep.Path = append(rep.Path, nodeToRef(n))
+	}
+	rep.Found = len(nodes) > 0
+	return rep, nil
+}
+
 // resolveProject finds the registered project whose path is cwd or an ancestor
 // of cwd (closest wins). If none is registered it defaults to (cwd, basename).
 func (svc *Service) resolveProject(cwd string) (root, name string, err error) {

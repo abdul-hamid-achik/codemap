@@ -128,6 +128,22 @@ var (
 		Args:  cobra.MinimumNArgs(1),
 		RunE:  runSemantic,
 	}
+	hotspotsCmd = &cobra.Command{
+		Use:   "hotspots",
+		Short: "List the most-referenced symbols (hubs)",
+		RunE:  runHotspots,
+	}
+	orphansCmd = &cobra.Command{
+		Use:   "orphans",
+		Short: "List functions/methods with no callers (dead-code candidates)",
+		RunE:  runOrphans,
+	}
+	pathCmd = &cobra.Command{
+		Use:   "path <from> <to>",
+		Short: "Shortest call path between two symbols",
+		Args:  cobra.ExactArgs(2),
+		RunE:  runPath,
+	}
 )
 
 func init() {
@@ -143,9 +159,11 @@ func init() {
 	initCmd.Flags().Bool("local", false, "create a .codemap directory inside the project")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
+	hotspotsCmd.Flags().Int("top", 20, "maximum results")
+	orphansCmd.Flags().Int("top", 50, "maximum results")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd)
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -356,6 +374,80 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 	}
 	for _, h := range rep.Hits {
 		fmt.Printf("  %.3f  %-30s %s:%d\n", h.Score, h.Symbol, h.File, h.StartLine)
+	}
+	return nil
+}
+
+func runHotspots(cmd *cobra.Command, _ []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	top, _ := cmd.Flags().GetInt("top")
+	rep, err := app.NewService(sess).Hotspots(cwd, top)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if len(rep.Hotspots) == 0 {
+		fmt.Println("no hotspots (is the project indexed?)")
+		return nil
+	}
+	fmt.Printf("Hotspots in %s:\n", rep.Project)
+	for _, h := range rep.Hotspots {
+		fmt.Printf("  %4d  %-30s %s:%d\n", h.InDegree, h.Symbol, h.File, h.StartLine)
+	}
+	return nil
+}
+
+func runOrphans(cmd *cobra.Command, _ []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	top, _ := cmd.Flags().GetInt("top")
+	rep, err := app.NewService(sess).Orphans(cwd, top)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	renderRefs(fmt.Sprintf("Orphans in %s (no callers — dead-code candidates)", rep.Project), rep.Orphans)
+	return nil
+}
+
+func runPath(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	rep, err := app.NewService(sess).Path(cwd, args[0], args[1])
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if !rep.Found {
+		fmt.Printf("no call path from %s to %s\n", rep.From, rep.To)
+		return nil
+	}
+	names := make([]string, 0, len(rep.Path))
+	for _, p := range rep.Path {
+		names = append(names, p.Symbol)
+	}
+	fmt.Println(strings.Join(names, " → "))
+	for _, p := range rep.Path {
+		fmt.Printf("  %-30s %s:%d\n", p.Symbol, p.File, p.StartLine)
 	}
 	return nil
 }

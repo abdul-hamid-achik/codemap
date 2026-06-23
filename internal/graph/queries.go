@@ -138,6 +138,153 @@ func (s *Store) Callees(projectID int64, symbol string) ([]Node, error) {
 	return s.queryNodes(q, projectID, symbol, EdgeCalls)
 }
 
+func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {
+	return s.scanIDs("SELECT target_id FROM edges WHERE source_id=? AND edge_type=?", sourceID, EdgeCalls)
+}
+
+// Hotspot is a node with its incoming-usage count (hub detection).
+type Hotspot struct {
+	Node     Node
+	InDegree int
+}
+
+// Hotspots returns the most-referenced nodes (highest incoming calls/references
+// count) — the hubs of the codebase. File nodes are excluded.
+func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.Query(`
+		SELECT e.target_id, COUNT(*) AS indeg
+		FROM edges e JOIN nodes n ON e.target_id = n.id
+		WHERE n.project_id = ? AND n.kind != ? AND e.edge_type IN (?, ?)
+		GROUP BY e.target_id
+		ORDER BY indeg DESC, e.target_id
+		LIMIT ?`, projectID, KindFile, EdgeCalls, EdgeReferences, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type row struct {
+		id    int64
+		indeg int
+	}
+	var raw []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.indeg); err != nil {
+			return nil, err
+		}
+		raw = append(raw, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Hotspot, 0, len(raw))
+	for _, r := range raw {
+		n, err := s.GetNode(r.id)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Hotspot{Node: *n, InDegree: r.indeg})
+	}
+	return out, nil
+}
+
+// Orphans returns function/method nodes with no incoming `calls` edge —
+// dead-code candidates. (Heuristic: exported API, entrypoints like main/init,
+// and externally-called code may appear here as false positives.)
+func (s *Store) Orphans(projectID int64, limit int) ([]Node, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	q := "SELECT " + nodeColsAs("n") + ` FROM nodes n
+		WHERE n.project_id = ? AND n.kind IN (?, ?)
+		AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.target_id = n.id AND e.edge_type = ?)
+		ORDER BY n.file_path, n.start_line
+		LIMIT ?`
+	return s.queryNodes(q, projectID, KindFunction, KindMethod, EdgeCalls, limit)
+}
+
+// Path returns the shortest call path from one symbol to another (following
+// outgoing `calls` edges), or nil if none exists within maxDepth. Cycle-safe.
+func (s *Store) Path(projectID int64, from, to string, maxDepth int) ([]Node, error) {
+	if maxDepth <= 0 {
+		maxDepth = 10
+	}
+	starts, err := s.startNodeIDs(projectID, from)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := s.startNodeIDs(projectID, to)
+	if err != nil {
+		return nil, err
+	}
+	if len(starts) == 0 || len(targets) == 0 {
+		return nil, nil
+	}
+	targetSet := make(map[int64]bool, len(targets))
+	for _, t := range targets {
+		targetSet[t] = true
+	}
+
+	parent := make(map[int64]int64) // node -> parent (-1 for a start)
+	depth := make(map[int64]int)
+	var queue []int64
+	for _, s0 := range starts {
+		parent[s0] = -1
+		depth[s0] = 0
+		queue = append(queue, s0)
+	}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if targetSet[cur] {
+			return s.reconstructPath(cur, parent)
+		}
+		if depth[cur] >= maxDepth {
+			continue
+		}
+		callees, err := s.calleeIDs(cur)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range callees {
+			if _, seen := parent[c]; seen {
+				continue
+			}
+			parent[c] = cur
+			depth[c] = depth[cur] + 1
+			queue = append(queue, c)
+		}
+	}
+	return nil, nil // no path
+}
+
+func (s *Store) reconstructPath(end int64, parent map[int64]int64) ([]Node, error) {
+	var ids []int64
+	for cur := end; cur != -1; cur = parent[cur] {
+		ids = append(ids, cur)
+	}
+	// reverse (start → end)
+	for i, j := 0, len(ids)-1; i < j; i, j = i+1, j-1 {
+		ids[i], ids[j] = ids[j], ids[i]
+	}
+	out := make([]Node, 0, len(ids))
+	for _, id := range ids {
+		n, err := s.GetNode(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *n)
+	}
+	return out, nil
+}
+
 // UpdateNodeVecID links a node to its veclite record id (for semantic search).
 func (s *Store) UpdateNodeVecID(id int64, vecID string) error {
 	_, err := s.db.Exec("UPDATE nodes SET vec_id=?, updated_at=? WHERE id=?", vecID, now(), id)

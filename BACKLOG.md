@@ -163,6 +163,17 @@
   chain. COMMIT+PUSH. **NEXT:** E4.2 ntcharts (validate R1) / E4.3 graph view; or LSP (E2);
   or E3.4 hotspots/orphans/path (BFS helper exists); or docs (E0.5). Lean E2 LSP next for
   precise cross-file edges (current edges are by-name weight 0.7).
+- 2026-06-23 #16 (cron) — Graph analytics (E3.4). graph.Hotspots (incoming calls/references
+  rank, hub detection), Orphans (func/method nodes with no caller — dead-code candidates),
+  Path (shortest call path via BFS over outgoing calls + parent-pointer reconstruction;
+  cycle-safe). Service.Hotspots/Orphans/Path (+ a `project()` resolver helper) + CLI commands
+  (hotspots --top, orphans --top, path <from> <to>) + MCP tools (codemap_hotspots/_orphans/
+  _path). **MCP now 10 tools; CLI 13 commands.** graph test for all three. All green, fmt
+  clean. DEMO: hotspots (Close/Error/NewService hubs), orphans (entrypoints, documented FP),
+  path Index→…→AddNode. COMMIT+PUSH. Note: by-name resolution inflates same-named hubs
+  (e.g. 3× Close@38) — LSP (E2) will disambiguate. **NEXT: LSP backend (E2)** — the remaining
+  big differentiator (precise weight-1.0 cross-file edges). Or E4.2 ntcharts / E4.3 graph view
+  / E0.5 docs / E3.2 semantic_callers. Leaning E2.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -273,7 +284,10 @@
       semantically-similar (needs vector.Similar).
 - [ ] E3.2 codemap_semantic_callers (semantic → graph expansion)
 - [ ] E3.3 codemap_refactor_plan
-- [ ] E3.4 codemap_path / hotspots / orphans (cycle-safe BFS helper now exists, reuse)
+- [x] E3.4 hotspots / orphans / path — graph.Hotspots (incoming-usage rank), Orphans
+      (no-caller funcs/methods), Path (shortest call path, BFS w/ parent reconstruction) +
+      Service + CLI (hotspots/orphans/path) + MCP (codemap_hotspots/_orphans/_path → 10 tools).
+      Tested + demoed on codemap (path Index→IndexProject→indexFile→AddNode).
 
 ## Epic 4 — studio TUI (Charm v2)
 - [x] E4.1 TUI shell (bubbletea v2 + lipgloss v2 + bubbles v2 textinput; tab bar, header/
