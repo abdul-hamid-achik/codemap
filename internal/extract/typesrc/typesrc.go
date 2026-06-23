@@ -15,6 +15,7 @@ import (
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -66,7 +67,7 @@ func Resolve(ctx context.Context, root string) (*Result, error) {
 		Dir:     root,
 		Context: ctx,
 		Fset:    fset,
-		Tests:   false, // match the default index scope (no _test.go callers) for slice 1
+		Tests:   true, // also resolve _test.go callers (codemap indexes test files too)
 	}
 	pkgs, err := packages.Load(cfg, "./...")
 	if err != nil {
@@ -87,13 +88,25 @@ func Resolve(ctx context.Context, root string) (*Result, error) {
 		}
 	}
 
+	// Tests:true loads several variants of each package (plain, test-augmented,
+	// external _test, synthesized .test main), so the same file appears more than
+	// once — process each real file exactly once to avoid double-counting edges.
+	seen := map[string]bool{}
 	for _, p := range pkgs {
 		if len(p.Errors) > 0 || p.TypesInfo == nil {
 			continue // not cleanly type-checked — keep its name edges
 		}
 		pkgName := p.Name
 		for _, file := range p.Syntax {
-			rel := relOf(root, fset.Position(file.Pos()).Filename)
+			abs := fset.Position(file.Pos()).Filename
+			if seen[abs] {
+				continue
+			}
+			rel := relOf(root, abs)
+			if strings.HasPrefix(rel, "..") {
+				continue // outside the module root (e.g. the generated .test main)
+			}
+			seen[abs] = true
 			res.CleanFiles[rel] = true
 			for _, decl := range file.Decls {
 				fd, ok := decl.(*ast.FuncDecl)

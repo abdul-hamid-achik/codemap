@@ -741,6 +741,24 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #90 (precise epic — slice D: test-file callers) — **precise resolution now covers
+  `_test.go` callers too** (`typesrc` flipped to `packages.Config.Tests = true`). The #89 diagnosis
+  showed the entire residual was test-file callers staying name-based (Session.Close = 18 precise + 46
+  name). Tests:true loads multiple variants of each package (plain / test-augmented / external `_test`
+  / synthesized `.test` main), so the SAME file appears several times — added a `seen[absFile]` dedup
+  (and a skip for files outside root, e.g. the generated test main) so each real file is processed
+  exactly once, preventing precise-edge double-counting. Test `TestPreciseResolvesTestCallers`: a
+  `_test.go` caller's `t.Run()` deflates T2.Run from 2→0 just like a production caller; existing
+  typesrc/integration tests stay green (dedup ⇒ no regression at Tests:false-equivalent shape).
+  **Real-repo result — the full payoff:** `--precise` now resolves **1,272** call edges (was 683),
+  total edges DROP 2295→1890 (spurious fan-out physically gone), and `Session.Close` is in-degree 50
+  **100% provenance='precise'** (was 64 = 18 precise + 46 fanned). Hotspots are finally trustworthy —
+  the top hubs (`Session.Close`, `NewService`, `tui.sized`, `Service.Index`, `Open`) are genuine, not
+  name collisions. Full suite + lint v2 (0) + query/studio E2E green; fmt clean. Live index restored to
+  embedded+precise (617 vectors). COMMIT+PUSH. **Precise call resolution is complete for all Go code
+  (production + tests).** Follow-up (slice E): the `⚠ name shared by N (inflated)` marker (#85/#86) is
+  now over-cautious on a `--precise` index — the count is accurate, not inflated — so make that flag
+  provenance-aware (only warn when the in-edges are name-based).
 - 2026-06-23 #89 (precise epic — slice C: wired + shipped) — **`codemap index --precise` eliminates
   same-named call over-matching end-to-end.** Pass 3 in the indexer (gated on `opts.Precise`, after the
   name-based Pass 2): `exec.LookPath("go")` → `typesrc.Resolve(root)` → build `fqnTo` (caller) + `posTo`

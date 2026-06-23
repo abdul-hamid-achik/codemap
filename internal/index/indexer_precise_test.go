@@ -123,6 +123,62 @@ func TestPreciseCollapsesNameFanout(t *testing.T) {
 	}
 }
 
+func TestPreciseResolvesTestCallers(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	mustWrite := func(rel, content string) {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("go.mod", "module example.com/fix\n\ngo 1.25\n")
+	mustWrite("fix.go", `package fix
+
+type T1 struct{}
+type T2 struct{}
+
+func (T1) Run() {}
+func (T2) Run() {}
+
+func Prod() { var t T1; t.Run() }
+`)
+	// An in-package test file caller: name-based fans its t.Run() to both T1.Run
+	// and T2.Run; Tests:true precise must resolve it to T1.Run alone.
+	mustWrite("fix_test.go", `package fix
+
+func useInTest() { var t T1; t.Run() }
+`)
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("fix", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+
+	// Name-based: Prod + useInTest each fan to both Run methods -> T2.Run = 2.
+	if _, err := ix.IndexProject(context.Background(), pid, "fix", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := inDegree(t, g, pid, "Run", "fix.T2.Run"); got != 2 {
+		t.Errorf("name-based T2.Run in-degree = %d, want 2 (Prod + test caller fan-out)", got)
+	}
+
+	// Precise (Tests:true): both callers, including the _test.go one, resolve to
+	// T1.Run, so T2.Run deflates to 0 and T1.Run holds both callers.
+	res, err := ix.IndexProject(context.Background(), pid, "fix", dir, Options{Reindex: true, Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.PreciseUpgraded == 0 {
+		t.Fatalf("expected precise upgrades incl. the test caller, got note %q", res.PreciseNote)
+	}
+	if got := inDegree(t, g, pid, "Run", "fix.T2.Run"); got != 0 {
+		t.Errorf("precise T2.Run in-degree = %d, want 0 (test caller resolved, not fanned)", got)
+	}
+	if got := inDegree(t, g, pid, "Run", "fix.T1.Run"); got != 2 {
+		t.Errorf("precise T1.Run in-degree = %d, want 2 (Prod + test caller)", got)
+	}
+}
+
 func TestPreciseDegradesGracefully(t *testing.T) {
 	// A non-module dir (no go.mod): --precise must degrade to name-based with a
 	// note, never error, and never wipe the name edges it can't replace.
