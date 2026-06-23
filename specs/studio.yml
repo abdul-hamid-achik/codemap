@@ -79,6 +79,15 @@ steps:
             contains: "name mode"
         timeoutMs: 8000
     - snapshot: search
+    # ctrl+s views the selected hit's source from the Search tab (where the text
+    # input would otherwise capture a plain `s`), then close it.
+    - press: "ctrl+s"
+    - wait:
+        screen:
+            contains: "esc/q close"
+        timeoutMs: 5000
+    - snapshot: source_search
+    - press: "q"
     - press: "ctrl+c"
     - wait:
         process:

@@ -477,6 +477,17 @@
   green; fmt/vet clean. COMMIT+PUSH.
   **NEXT:** source view from Impact/Search (input-key conflict to solve), references/dependencies
   tools, full precise (gopls) edges in the indexer.
+- 2026-06-23 #46 (cron, polish-first) — **Source viewer now works on every tab** (resolved #45's
+  input-key conflict). Added a universal `ctrl+s` trigger — a modifier so it works on Impact/Search
+  where the focused text input captures a plain `s`; bubbletea's raw mode clears IXON so ctrl+s
+  arrives as a key, not flow-control. Unified the selection logic in `sourceTarget()` (Graph: selected
+  ref/centered hub · Impact: selected blast node, else analyzed symbol · Search: selected hit) →
+  `viewSource()`, shared by Graph `s` and global `ctrl+s`. Footer hints updated (Impact/Search show
+  `ctrl+s source`). Tests: `TestSourceTargetAcrossTabs` (Search→selected hit, Impact→selected blast
+  node). Extended studio E2E: `ctrl+s` from the Search tab → `source_search` snapshot (`app.Run
+  a.go:1-1`) → `q`. Full suite + race + all 5 E2E green; fmt/vet clean. Docs/studio.md updated.
+  COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

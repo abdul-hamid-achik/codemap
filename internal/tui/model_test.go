@@ -431,6 +431,32 @@ func TestSearchShowsSignaturePreview(t *testing.T) {
 	}
 }
 
+func TestSourceTargetAcrossTabs(t *testing.T) {
+	// Search: ctrl+s targets the selected hit.
+	m := sized(t, 100, 30)
+	m.active = tabSearch
+	m, _ = applyMsg(m, semanticMsg{query: "x", mode: "name", hits: []app.SemanticHit{
+		{Symbol: "A", File: "a.go", StartLine: 3}, {Symbol: "B", File: "b.go", StartLine: 9},
+	}})
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown})) // select B
+	sym, file, line, ok := m.sourceTarget()
+	if !ok || sym != "B" || file != "b.go" || line != 9 {
+		t.Errorf("search source target = (%q,%q,%d,%v), want B/b.go/9/true", sym, file, line, ok)
+	}
+
+	// Impact: ctrl+s targets the selected blast node.
+	mi := sized(t, 100, 30)
+	mi.active = tabImpact
+	mi.impact.SetValue("Foo")
+	mi, _ = applyMsg(mi, impactMsg{symbol: "Foo", rep: &app.ImpactReport{
+		Symbol: "Foo", Found: true,
+		BlastRadius: []app.ImpactNode{{Symbol: "Caller", File: "c.go", StartLine: 12}},
+	}})
+	if sym, file, line, ok := mi.sourceTarget(); !ok || sym != "Caller" || file != "c.go" || line != 12 {
+		t.Errorf("impact source target = (%q,%q,%d,%v), want Caller/c.go/12/true", sym, file, line, ok)
+	}
+}
+
 func TestSourceViewerScrollAndClose(t *testing.T) {
 	m := sized(t, 80, 12) // small height so the content is scrollable
 	lines := make([]string, 30)

@@ -258,6 +258,50 @@ func (m Model) preciseDetailCmd(c graphCenter) tea.Cmd {
 	}
 }
 
+// sourceTarget is the symbol whose source `s`/ctrl+s should show, based on the
+// active tab and selection: the selected ref/hub on Graph, the selected blast
+// node (or analyzed symbol) on Impact, the selected hit on Search.
+func (m Model) sourceTarget() (sym, file string, line int, ok bool) {
+	switch m.active {
+	case tabGraph:
+		if m.graphFocus == focusRefs {
+			if refs := m.graphRefs(); m.graphRefSel < len(refs) {
+				r := refs[m.graphRefSel]
+				return r.Symbol, r.File, r.StartLine, true
+			}
+			return "", "", 0, false
+		}
+		if m.graphCenter.sym != "" {
+			return m.graphCenter.sym, m.graphCenter.file, m.graphCenter.line, true
+		}
+	case tabImpact:
+		if m.impactRep != nil {
+			if m.impactSel < len(m.impactRep.BlastRadius) {
+				n := m.impactRep.BlastRadius[m.impactSel]
+				return n.Symbol, n.File, n.StartLine, true
+			}
+			if len(m.impactRep.Locations) > 0 {
+				l := m.impactRep.Locations[0]
+				return l.Symbol, l.File, l.StartLine, true
+			}
+		}
+	case tabSearch:
+		if m.searchSel < len(m.searchHits) {
+			h := m.searchHits[m.searchSel]
+			return h.Symbol, h.File, h.StartLine, true
+		}
+	}
+	return "", "", 0, false
+}
+
+// viewSource opens the source overlay for the current selection, if any.
+func (m Model) viewSource() tea.Cmd {
+	if sym, file, line, ok := m.sourceTarget(); ok {
+		return m.sourceViewCmd(sym, file, line)
+	}
+	return nil
+}
+
 func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
 	svc, dir := m.service, m.startDir
 	return func() tea.Msg {
@@ -446,6 +490,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleSourceKey(key)
 	}
 	switch key {
+	case "ctrl+s":
+		// View the current selection's source on any tab (a modifier key so it
+		// works even where a text input would otherwise capture `s`).
+		return m, m.viewSource()
 	case "ctrl+r":
 		// Reindex in place (structure-only) and refresh — works on any tab.
 		m.statusMsg = "indexing…"
@@ -573,17 +621,7 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "s":
 		// view the selected node's source code in a scrollable overlay.
-		if m.graphFocus == focusRefs {
-			if refs := m.graphRefs(); m.graphRefSel < len(refs) {
-				r := refs[m.graphRefSel]
-				return m, m.sourceViewCmd(r.Symbol, r.File, r.StartLine)
-			}
-			return m, nil
-		}
-		if m.graphCenter.sym != "" {
-			return m, m.sourceViewCmd(m.graphCenter.sym, m.graphCenter.file, m.graphCenter.line)
-		}
-		return m, nil
+		return m, m.viewSource()
 	case "left", "h":
 		m.graphFocus = focusHubs
 		return m, nil

@@ -102,9 +102,9 @@ func (m Model) footer() string {
 			hint = "↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit"
 		}
 	case tabSearch:
-		hint = "type · enter search/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
+		hint = "type · enter search/open · ↑/↓ select · ctrl+s source · tab · ctrl+c quit"
 	case tabImpact:
-		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
+		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+s source · tab · ctrl+c quit"
 	default:
 		hint = "ctrl+r reindex · 1-4 tabs · ctrl+c quit"
 	}

@@ -29,9 +29,11 @@
   language on the left; on the right, the two ends of the call graph — the **top hubs**
   (most-referenced, load-bearing symbols) and the **dead-code candidates** (symbols with no
   callers).
-- **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
+- **Impact** — type a symbol, see its callers, blast radius, and which tests cover it. `ctrl+s`
+  reads the selected blast node's source.
 - **Search** — search by meaning (semantic, when an embedded index exists), automatically
-  falling back to fast name search otherwise; the header shows which mode is active.
+  falling back to fast name search otherwise; the header shows which mode is active. `ctrl+s`
+  reads the selected hit's source.
 
 ## Keys
 
@@ -42,7 +44,7 @@
 | `→` / `←` (`l` / `h`) | (Graph) move focus between the hub list and the callers/callees pane |
 | `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection · or run the query after editing the text |
 | `backspace` | (Graph) step back to the previous centered node while walking |
-| `s` | (Graph) view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close) |
+| `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
 | `p` | (Graph) recompute the centered node's callers/callees precisely via gopls (Go) |
 | `ctrl+r` | Reindex the project (structure-only) and refresh, without leaving studio |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |
