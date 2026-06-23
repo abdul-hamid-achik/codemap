@@ -67,9 +67,11 @@ across reindex.
        codemap annotations [<sym> | <from> <to>]   (--rm <id> to delete)
 
 'source' is a free label (note, mongosh, postgres, vidtrace, …); 'data' is stored
-opaquely (often JSON). Typical use: codemap_impact a symbol, then codemap_annotate
-it with the DB rows / repro findings that explain it, so the next step has the full
-picture pinned in place.`},
+opaquely (often JSON). Annotations on a symbol surface INLINE in codemap_impact,
+codemap_callers/callees, and codemap_source results (matched by name or resolved
+FQN) — so once pinned, the knowledge shows up wherever you look at the symbol.
+Typical use: codemap_impact a symbol, then codemap_annotate it with the DB rows /
+repro findings that explain it, so the next step has the full picture in place.`},
 
 	{"accuracy", `The graph is name-based by default: fast, offline, language-agnostic. Intra-
 package calls resolve precisely (Go), but a cross-package method call like

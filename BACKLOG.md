@@ -667,6 +667,15 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   per line). Tests: app `TestImpactSurfacesAnnotations` (FQN-match), tui `TestImpactPaneShowsAnnotations`.
   Full suite + lint v2 (0) + E2E green; fmt clean. COMMIT+PUSH.
   **NEXT:** same inline surfacing for `source`/`callers`, then studio Graph-pane annotation indicator.
+- 2026-06-23 #64 (USER ASK follow-up) — **`source`, `callers`, `callees` also surface annotations
+  inline.** `RelationReport` + `SourceReport` gain `Annotations`; populated via a shared
+  `symbolAnnotations(g, pid, symbol)` (resolves the symbol's FQNs so FQN-pinned notes match a
+  short-name query). CLI: shared `renderAnnotations` helper (refactored impact to use it too) prints
+  an "annotations:" section after callers/callees/source; JSON carries it for agents. Dogfood:
+  `callers B` and `source B` show the pinned note. Tests: app `TestSourceAndCallersSurfaceAnnotations`.
+  Agent guide notes the inline surfacing. (Precise/`--lsp` callers don't surface yet — minor.) Full
+  suite + lint v2 (0) + E2E green; fmt clean. COMMIT+PUSH.
+  **NEXT:** studio Graph/Search panes annotation indicator; precise-path annotations; then harness wiring.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

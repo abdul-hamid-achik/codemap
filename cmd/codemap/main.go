@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	mcpserver "github.com/abdul-hamid-achik/codemap/internal/mcp"
 	"github.com/abdul-hamid-achik/codemap/internal/tui"
@@ -354,6 +355,7 @@ func runCallers(cmd *cobra.Command, args []string) error {
 		label += " (precise, via gopls)"
 	}
 	renderRefs(label, rep.Results)
+	renderAnnotations(rep.Annotations)
 	return nil
 }
 
@@ -383,6 +385,7 @@ func runCallees(cmd *cobra.Command, args []string) error {
 		label += " (precise, via gopls)"
 	}
 	renderRefs(label, rep.Results)
+	renderAnnotations(rep.Annotations)
 	return nil
 }
 
@@ -415,19 +418,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if rep.Untested {
 		fmt.Println("  ⚠ no tests reach this symbol")
 	}
-	if len(rep.Annotations) > 0 {
-		fmt.Println("  annotations:")
-		for _, a := range rep.Annotations {
-			line := a.Source
-			if a.Note != "" {
-				line += ": " + a.Note
-			}
-			if a.Data != "" {
-				line += "  " + truncStr(a.Data, 80)
-			}
-			fmt.Printf("     #%d %s\n", a.ID, line)
-		}
-	}
+	renderAnnotations(rep.Annotations)
 	// List the covering tests explicitly so you know what to run — they're a
 	// subset of the blast radius, but spelling them out beats hunting for ✓.
 	if len(rep.Tests) > 0 {
@@ -624,6 +615,10 @@ func runSource(cmd *cobra.Command, args []string) error {
 		fmt.Printf("// %s  %s:%d-%d\n", disp(mch.FQN, mch.Symbol), mch.File, mch.StartLine, mch.EndLine)
 		fmt.Println(mch.Source)
 	}
+	if len(rep.Annotations) > 0 {
+		fmt.Println()
+		renderAnnotations(rep.Annotations)
+	}
 	return nil
 }
 
@@ -753,6 +748,24 @@ func truncStr(s string, n int) string {
 		return "…"
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// renderAnnotations prints pinned notes/data under a query result, if any.
+func renderAnnotations(anns []graph.Annotation) {
+	if len(anns) == 0 {
+		return
+	}
+	fmt.Println("  annotations:")
+	for _, a := range anns {
+		line := a.Source
+		if a.Note != "" {
+			line += ": " + a.Note
+		}
+		if a.Data != "" {
+			line += "  " + truncStr(a.Data, 80)
+		}
+		fmt.Printf("     #%d %s\n", a.ID, line)
+	}
 }
 
 func renderRefs(label string, refs []app.SymbolRef) {

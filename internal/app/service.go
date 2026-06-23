@@ -359,9 +359,10 @@ func nodeToRef(n graph.Node) SymbolRef {
 
 // RelationReport is returned by Callers/Callees.
 type RelationReport struct {
-	Symbol  string      `json:"symbol"`
-	Project string      `json:"project"`
-	Results []SymbolRef `json:"results"`
+	Symbol      string             `json:"symbol"`
+	Project     string             `json:"project"`
+	Results     []SymbolRef        `json:"results"`
+	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to the queried symbol
 }
 
 // SemanticHit is one semantic-search result.
@@ -419,7 +420,20 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	for _, n := range nodes {
 		rep.Results = append(rep.Results, nodeToRef(n))
 	}
+	rep.Annotations = symbolAnnotations(g, p.ID, symbol)
 	return rep, nil
+}
+
+// symbolAnnotations returns the annotations pinned to a symbol — matched by the
+// query name or any of its resolved definition FQNs/symbols.
+func symbolAnnotations(g *graph.Store, projectID int64, symbol string) []graph.Annotation {
+	candidates := []string{symbol}
+	if locs, err := g.FindNodesBySymbol(projectID, symbol); err == nil {
+		for _, n := range locs {
+			candidates = append(candidates, n.FQN, n.Symbol)
+		}
+	}
+	return nodeAnnotationsFor(g, projectID, candidates...)
 }
 
 // PreciseCallers computes exact callers of a Go symbol using gopls callHierarchy
@@ -891,9 +905,10 @@ type SourceMatch struct {
 
 // SourceReport is returned by Source.
 type SourceReport struct {
-	Symbol  string        `json:"symbol"`
-	Project string        `json:"project"`
-	Matches []SourceMatch `json:"matches"`
+	Symbol      string             `json:"symbol"`
+	Project     string             `json:"project"`
+	Matches     []SourceMatch      `json:"matches"`
+	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
 // Source returns the source code of every symbol matching name, read from the
@@ -930,6 +945,7 @@ func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
 			Signature: n.Signature, Doc: n.Docstring, Source: src,
 		})
 	}
+	rep.Annotations = symbolAnnotations(g, pid, name)
 	return rep, nil
 }
 

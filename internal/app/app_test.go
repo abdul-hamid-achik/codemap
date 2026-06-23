@@ -301,6 +301,42 @@ func TestImpactSurfacesAnnotations(t *testing.T) {
 	}
 }
 
+func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B() }\n\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AnnotateNode(proj, "app.B", "note", "check this", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	sr, err := svc.Source(proj, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sr.Annotations) != 1 {
+		t.Errorf("source should surface the symbol's annotations, got %+v", sr.Annotations)
+	}
+	cr, err := svc.Callers(proj, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cr.Annotations) != 1 {
+		t.Errorf("callers should surface the queried symbol's annotations, got %+v", cr.Annotations)
+	}
+}
+
 func TestDocs(t *testing.T) {
 	full := Docs("")
 	for _, want := range []string{"## overview", "## workflow", "## accuracy", "codemap_impact", "precise:true"} {
