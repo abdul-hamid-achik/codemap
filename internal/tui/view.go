@@ -624,13 +624,3 @@ func clamp(n, lo, hi int) int {
 	}
 	return n
 }
-
-func firstN[T any](s []T, n int) []T {
-	if n < 0 {
-		n = 0
-	}
-	if n > len(s) {
-		n = len(s)
-	}
-	return s[:n]
-}
