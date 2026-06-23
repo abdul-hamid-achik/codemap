@@ -741,6 +741,17 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #95 (precise epic — discoverability) — **`status` reports whether the index is precise or
+  name-based**, the status-enrichment pattern (cf. #70's vectors line) applied to edge accuracy. New
+  `graph.Store.CountEdgesByProvenance(pid, prov)`; `StatusReport.PreciseEdges`; `Status()` fills it.
+  CLI: `edges: 2295 (1272 precise via go/types)` on a precise index, or `edges: N (name-based; run
+  'codemap index --precise' for exact Go call edges)` otherwise — a trust signal (can I rely on these
+  counts?) plus an actionable hint, and `codemap_status` JSON carries `precise_edges` for agents. Studio
+  Metrics header mirrors it (`… · N edges (M precise) · …`), consistent with #71's embedding state.
+  Tests: `TestStatusReportsPreciseEdges` (name index→0, precise→>0, go-gated) + tui
+  `TestMetricsShowsPreciseState`. Verified live: the real precise index shows `edges: 1890 (1272
+  precise via go/types)`. Full suite + lint v2 (0) + index_status/query/studio E2E green; fmt clean.
+  COMMIT+PUSH. **Precise indexing is now discoverable from where users/agents already look (status).**
 - 2026-06-23 #94 (precise epic — robustness) — **precise callee join is collision-safe.** The #93
   follow-up: the position-keyed `(file,line)→nodeID` join in `resolvePreciseEdges` mis-resolved when
   multiple declarations share a line (last-writer-wins overwrote the map), so a call to one of two

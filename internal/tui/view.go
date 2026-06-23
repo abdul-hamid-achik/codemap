@@ -331,9 +331,13 @@ func (m Model) renderMetrics(w, h int) string {
 	if m.status.Vectors > 0 {
 		vec = fmt.Sprintf("%d embedded · semantic search ready", m.status.Vectors)
 	}
+	edges := fmt.Sprintf("%d edges", m.status.Edges)
+	if m.status.PreciseEdges > 0 { // go/types-resolved; vs name-based default
+		edges = fmt.Sprintf("%d edges (%d precise)", m.status.Edges, m.status.PreciseEdges)
+	}
 	header := title("Metrics") + "   " +
-		countStyle.Render(fmt.Sprintf("%d nodes · %d edges · %d files · %s",
-			m.status.Nodes, m.status.Edges, m.status.Files, vec))
+		countStyle.Render(fmt.Sprintf("%d nodes · %s · %d files · %s",
+			m.status.Nodes, edges, m.status.Files, vec))
 
 	// Two columns under the header: distributions on the left, the graph's
 	// extremes (most-referenced hubs vs unreferenced dead-code) on the right.

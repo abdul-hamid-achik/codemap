@@ -573,6 +573,43 @@ func TestHotspotsFlagsSharedNames(t *testing.T) {
 	}
 }
 
+func TestStatusReportsPreciseEdges(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/s\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package s\n\nfunc A() { B() }\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	// Name-based index: no precise edges.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := svc.Status(proj); st.PreciseEdges != 0 {
+		t.Errorf("name-based index PreciseEdges = %d, want 0", st.PreciseEdges)
+	}
+
+	// Precise reindex: the A->B call edge is now go/types-resolved.
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true, Precise: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := svc.Status(proj); st.PreciseEdges == 0 {
+		t.Errorf("precise index PreciseEdges = %d, want > 0", st.PreciseEdges)
+	}
+}
+
 func TestHotspotsInflationFlagIsProvenanceAware(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")

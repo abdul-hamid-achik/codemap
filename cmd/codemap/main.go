@@ -303,8 +303,14 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", rep.Project)
 		return nil
 	}
-	fmt.Printf("Project: %s\n  path:  %s\n  nodes: %d\n  edges: %d\n  files: %d\n",
-		rep.Project, rep.Path, rep.Nodes, rep.Edges, rep.Files)
+	edges := fmt.Sprintf("%d", rep.Edges)
+	if rep.PreciseEdges > 0 {
+		edges += fmt.Sprintf(" (%d precise via go/types)", rep.PreciseEdges)
+	} else {
+		edges += " (name-based; run 'codemap index --precise' for exact Go call edges)"
+	}
+	fmt.Printf("Project: %s\n  path:  %s\n  nodes: %d\n  edges: %s\n  files: %d\n",
+		rep.Project, rep.Path, rep.Nodes, edges, rep.Files)
 	if rep.Vectors > 0 {
 		fmt.Printf("  vectors: %d (semantic search ready)\n", rep.Vectors)
 	} else {

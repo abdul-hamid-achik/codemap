@@ -360,6 +360,27 @@ func TestGraphEnterStillDrillsFromHubFocus(t *testing.T) {
 	}
 }
 
+func TestMetricsShowsPreciseState(t *testing.T) {
+	base := app.StatusReport{Project: "d", Registered: true, Nodes: 5, Edges: 3,
+		Kinds: map[string]int{"function": 2}, Languages: map[string]int{"go": 5}}
+
+	m := sized(t, 120, 40)
+	m.active = tabMetrics
+	precise := base
+	precise.PreciseEdges = 3
+	m, _ = applyMsg(m, statusMsg{st: &precise})
+	if !strings.Contains(m.render(), "3 precise") {
+		t.Errorf("metrics should show precise edge count when PreciseEdges > 0:\n%s", m.render())
+	}
+
+	m2 := sized(t, 120, 40)
+	m2.active = tabMetrics
+	m2, _ = applyMsg(m2, statusMsg{st: &base}) // PreciseEdges == 0
+	if strings.Contains(m2.render(), "precise") {
+		t.Error("metrics should not claim precise edges on a name-based index")
+	}
+}
+
 func TestMetricsShowsEmbeddingState(t *testing.T) {
 	base := app.StatusReport{Project: "d", Registered: true, Nodes: 5, Edges: 3,
 		Kinds: map[string]int{"function": 2}, Languages: map[string]int{"go": 5}}

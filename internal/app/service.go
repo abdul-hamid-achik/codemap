@@ -54,16 +54,17 @@ type IndexReport struct {
 
 // StatusReport is returned by Status.
 type StatusReport struct {
-	Project    string         `json:"project"`
-	Root       string         `json:"root"`
-	Registered bool           `json:"registered"`
-	Path       string         `json:"path,omitempty"`
-	Nodes      int            `json:"nodes"`
-	Edges      int            `json:"edges"`
-	Files      int            `json:"files"`
-	Vectors    int            `json:"vectors"` // embedded nodes (0 = no semantic index)
-	Languages  map[string]int `json:"languages,omitempty"`
-	Kinds      map[string]int `json:"kinds,omitempty"`
+	Project      string         `json:"project"`
+	Root         string         `json:"root"`
+	Registered   bool           `json:"registered"`
+	Path         string         `json:"path,omitempty"`
+	Nodes        int            `json:"nodes"`
+	Edges        int            `json:"edges"`
+	Files        int            `json:"files"`
+	Vectors      int            `json:"vectors"`       // embedded nodes (0 = no semantic index)
+	PreciseEdges int            `json:"precise_edges"` // go/types-resolved call edges (0 = name-based index)
+	Languages    map[string]int `json:"languages,omitempty"`
+	Kinds        map[string]int `json:"kinds,omitempty"`
 }
 
 // Init registers cwd as a codemap project in the global registry.
@@ -203,6 +204,10 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	// whether semantic search is available).
 	if n, ok := svc.embeddedCount(name); ok {
 		rep.Vectors = n
+	}
+	// How many call edges were resolved precisely by go/types (0 ⇒ name-based index).
+	if n, cErr := g.CountEdgesByProvenance(p.ID, graph.ProvPrecise); cErr == nil {
+		rep.PreciseEdges = n
 	}
 	return rep, nil
 }

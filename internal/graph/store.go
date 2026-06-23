@@ -443,6 +443,16 @@ func (s *Store) countEdges(projectID int64, st *Stats) error {
 		projectID).Scan(&st.Edges)
 }
 
+// CountEdgesByProvenance counts the project's edges with the given provenance
+// (e.g. ProvPrecise) — used to report whether an index is name-based or precise.
+func (s *Store) CountEdgesByProvenance(projectID int64, provenance string) (int, error) {
+	var n int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM edges e JOIN nodes n ON e.source_id=n.id WHERE n.project_id=? AND e.provenance=?",
+		projectID, provenance).Scan(&n)
+	return n, err
+}
+
 func (s *Store) countBy(column, where string, args []any, dst map[string]int) error {
 	rows, err := s.db.Query("SELECT "+column+", COUNT(*) FROM nodes"+where+" GROUP BY "+column, args...)
 	if err != nil {
