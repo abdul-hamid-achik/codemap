@@ -137,21 +137,18 @@ tasks:
 
   site:deps:
     desc: Install docs (VitePress) dependencies with Bun
-    dir: docs
     cmds:
       - bun install
 
   site:dev:
     desc: Run the VitePress docs dev server
-    dir: docs
     cmds:
-      - bun run docs:dev
+      - bun run site
 
   site:build:
     desc: Build the VitePress docs site
-    dir: docs
     cmds:
-      - bun run docs:build
+      - bun run site:build
 
   ship:
     desc: Full pre-release gate (check + docs + race + build + e2e)

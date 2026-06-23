@@ -240,6 +240,16 @@
   (46/45) — disambiguation is a display fix; precise DE-inflation needs LSP edges (E2.2b).
   **NEXT:** LSP edge wiring (E2.2b) to fix indegree precision; or Search per-row drill
   (focus-mode); or E0.5 VitePress docs scaffold.
+- 2026-06-23 #23 (cron, polish-first) — E0.5 VitePress docs site (a long-deferred v0.1
+  deliverable; mirrored vecgrep's setup). Root package.json (codemap-docs, vitepress 1.6.4,
+  site/site:build/site:preview scripts, overrides) + vercel.json (framework vitepress, bun) +
+  docs/.vitepress/config.mts (nav/sidebar/search/editLink) + 6 content pages derived from the
+  accurate README (index hero, quick-start, cli, studio, mcp, configuration). Verified:
+  `bun install` (131 pkgs) + `bun run site:build` → dist with all 6 pages. Taskfile site:*
+  retargeted to root scripts. node_modules + dist/cache gitignored; bun.lock committed. Go CI
+  unaffected (no Go changes). COMMIT+PUSH. **NEXT:** LSP edge wiring (E2.2b) for precise
+  indegree; or Search per-row drill (focus-mode); or studio Impact "direct callers/tests"
+  sections.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -315,7 +325,10 @@
 ## Epic 0 — Docs & coordination
 - [x] E0.1 BACKLOG.md  · [x] E0.2 README.md  · [x] E0.3 AGENTS.md  · [x] E0.4 CLAUDE.md
 - [x] E0.5a LICENSE (MIT) + .gitignore
-- [ ] E0.5 docs/ scaffold for VitePress (Bun, Vercel deploy; no GitHub Pages)
+- [x] E0.5 docs/ VitePress site (Bun, Vercel) — root package.json (vitepress 1.6.4) + vercel.json
+      + docs/.vitepress/config.mts + 6 pages (index/quick-start/cli/studio/mcp/configuration);
+      `bun run site:build` produces dist (6 pages render). Taskfile site:* updated. node_modules/
+      dist gitignored.
 
 ## Epic 1 — Foundation (pure-Go MVP)
 - [x] E1.1 go.mod (`github.com/abdul-hamid-achik/codemap`, go 1.25.5) + cobra v1.10.2
