@@ -29,7 +29,8 @@ func TestInstructionsCoverKeyCapabilities(t *testing.T) {
 	// The instructions are an agent's first-contact playbook; keep them in sync
 	// with the actual tools and accuracy model.
 	for _, want := range []string{"codemap_index", "codemap_impact", "codemap_semantic",
-		"codemap_source", "codemap_projects", "precise:true", "name-based"} {
+		"codemap_source", "codemap_projects", "precise:true", "name-based",
+		`"indexed": false`, "degrades to name-based"} {
 		if !strings.Contains(instructions, want) {
 			t.Errorf("MCP instructions should mention %q", want)
 		}

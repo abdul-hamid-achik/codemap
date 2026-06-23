@@ -84,7 +84,9 @@ type-checker). Consequences:
   - hotspots can rank ubiquitous names (String, Error) high with inflated counts.
   - orphans can't see callers via interface dispatch or reflection — treat as candidates.
 Graph-wide precise resolution (pure-Go go/types) is planned. When you need
-exactness on Go today, reach for precise:true / --lsp.`},
+exactness on Go today, reach for precise:true / --lsp — and if gopls can't
+resolve (no toolchain, or an unbuildable project) it degrades to name-based
+results with a "note", never a hard error.`},
 
 	{"ecosystem", `codemap is one tool in a local, XDG-stored toolchain for analyzing and fixing
 code. A harness can chain them:

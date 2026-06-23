@@ -193,7 +193,9 @@ calls *within* a package precisely (Go), but a cross-package method call like `x
   reflection, so treat its output as *candidates*, not proof.
 
 This is the usual trade-off for an instant, dependency-free index. When you need exactness on Go,
-reach for `--lsp`; precise, graph-wide resolution (pure-Go `go/types`) is planned.
+reach for `--lsp` — and if gopls can't resolve (no Go toolchain, or a project it can't build) it
+**degrades to name-based results with a note**, never a hard error. Precise, graph-wide resolution
+(pure-Go `go/types`) is planned.
 
 ## Use it from an agent (MCP)
 

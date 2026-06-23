@@ -727,6 +727,19 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #78 (docs accuracy) — **documented the honest-behavior contracts from #73–#77** so the
+  people and agents who hit them understand they're expected, not bugs. Updated all four doc surfaces:
+  the MCP `instructions` playbook (query tools return `{"indexed": false}` until indexed; precise
+  degrades to name-based with a `note` when gopls is unavailable; `codemap_semantic` returns a `note`
+  not an error when unembedded), the README Accuracy section, `docs/cli.md`, and the in-tool
+  `codemap docs accuracy` guide (`internal/app/docs.go`). Extended `TestInstructionsCoverKeyCapabilities`
+  to assert the new playbook content (`"indexed": false`, "degrades to name-based") so the agent's
+  first-contact guide can't silently drift from the behavior. Confirmed while investigating that
+  `preciseRelations` already calls `WaitReady` (waits for gopls' `$/progress "end"`), so the
+  isolated-HOME "no views" is a genuine environment limitation, not a fixable race — #77's fallback is
+  the correct handling and no LSP backend change is warranted. (A standalone CLI `precise.yml` flow
+  would be flaky for the same reason; studio.yml already demonstrates precise-via-gopls reliably via
+  its persistent session.) No behavior change. Full suite + lint v2 (0) green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #77 (lsp polish) — **precise (`--lsp` / `precise:true`) degrades gracefully instead of
   erroring.** Dogfooding the LSP path surfaced a real wart: `codemap callers Foo --lsp` works when
   gopls can form a workspace view (correctly resolving `T.Process` vs `U.Process` where name-based

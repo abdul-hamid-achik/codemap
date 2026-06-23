@@ -21,7 +21,8 @@ import (
 
 const instructions = `codemap is a local code knowledge graph: code structure (calls, types,
 tests) fused with semantic vectors, queried offline. Index a project once with codemap_index,
-then query it. Every tool takes an optional "path" (project dir; defaults to cwd) and returns JSON.
+then query it — until you do, query tools return {"indexed": false} with a hint to index first.
+Every tool takes an optional "path" (project dir; defaults to cwd) and returns JSON.
 
 Find code:
 - codemap_semantic — by meaning ("jwt validation middleware"); needs an embedded index.
@@ -40,7 +41,9 @@ codemap_status (index size), codemap_projects (what's indexed).
 Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matches every method
 named Foo. Pass precise:true to codemap_callers/codemap_callees for exact gopls resolution (Go);
 treat codemap_hotspots/codemap_orphans as name-based (they can over- or under-count same-named
-methods).
+methods). Precise resolution degrades to name-based (with a "note" in the result) when gopls is
+unavailable, so precise:true is never a hard failure. Likewise codemap_semantic returns a "note"
+(not an error) when the project has no embeddings — fall back to codemap_find.
 
 Call codemap_docs for the full guide (workflow, every tool, accuracy, and how codemap fits the
 local toolchain) — useful when wiring codemap into a harness.`

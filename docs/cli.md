@@ -29,7 +29,8 @@ Every query command accepts `--json` for machine-readable output.
 The fast default uses the indexed graph (name-based resolution; same-named methods can
 over-match). `--lsp` asks the language server (gopls) for *exact* callers — e.g. `callers Close`
 might list every caller of any `Close`, while `callers Close --lsp` lists only the callers of
-the specific resolved method.
+the specific resolved method. If gopls can't resolve (no Go toolchain, or a project it can't
+build), `--lsp` falls back to name-based results with a note — never a hard error.
 
 The same name-based model affects the analysis commands: `hotspots` can rank ubiquitous method
 names (`String`, `Error`) high with inflated counts, and `orphans` can't see callers reached via
