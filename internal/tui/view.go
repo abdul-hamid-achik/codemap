@@ -234,26 +234,66 @@ func (m Model) renderMetrics(w, h int) string {
 	if !m.status.Registered {
 		return title("Metrics") + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
 	}
-	barW := w - 44
-	barW = clamp(barW, 16, 100)
 
+	header := title("Metrics") + "   " +
+		countStyle.Render(fmt.Sprintf("%d nodes · %d edges · %d files", m.status.Nodes, m.status.Edges, m.status.Files))
+
+	// Two columns under the header: distributions on the left, the graph's
+	// extremes (most-referenced hubs vs unreferenced dead-code) on the right.
+	colH := h - 2
+	if colH < 1 {
+		colH = 1
+	}
+	leftW := w / 2
+	if leftW > 52 {
+		leftW = 52
+	}
+	rightW := w - leftW - 3
+	if rightW < 16 {
+		rightW = 16
+	}
+
+	left := lipgloss.NewStyle().Width(leftW).Height(colH).Render(m.metricsBars(leftW))
+	right := lipgloss.NewStyle().Width(rightW).Height(colH).Render(m.metricsLists(rightW, colH))
+	div := dividerStyle.Render(strings.TrimRight(strings.Repeat("│\n", colH), "\n"))
+	cols := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", div, " ", right)
+	return header + "\n\n" + cols
+}
+
+func (m Model) metricsBars(w int) string {
+	// line = 2-space indent + 12-char label + space + bar + space + count digits,
+	// so keep the bar narrow enough that the count doesn't wrap the column.
+	barW := clamp(w-22, 8, 80)
 	var b strings.Builder
-	b.WriteString(title("Metrics") + "   ")
-	b.WriteString(countStyle.Render(fmt.Sprintf("%d nodes · %d edges · %d files", m.status.Nodes, m.status.Edges, m.status.Files)))
-	b.WriteString("\n\n")
 	b.WriteString(sectionStyle.Render("By kind") + "\n")
 	b.WriteString(barChart(m.status.Kinds, barW))
 	b.WriteString("\n" + sectionStyle.Render("By language") + "\n")
 	b.WriteString(barChart(m.status.Languages, barW))
+	return b.String()
+}
 
-	if len(m.graphHubs) > 0 {
-		b.WriteString("\n" + sectionStyle.Render("Top hubs (most referenced)") + "\n")
-		n := h - lipgloss.Height(b.String()) - 1
-		n = clamp(n, 0, 15)
-		for _, hub := range firstN(m.graphHubs, n) {
-			fmt.Fprintf(&b, "  %4d  %s %s\n", hub.InDegree, padRight(truncate(displayName(hub.FQN, hub.Symbol), 32), 32),
-				mutedStyle.Render(truncate(hub.File, w-44)))
-		}
+// metricsLists shows the two ends of the call graph: the load-bearing hubs and
+// the dead-code candidates, split across the available height.
+func (m Model) metricsLists(w, h int) string {
+	var b strings.Builder
+	budget := clamp((h-4)/2, 1, 30)
+
+	b.WriteString(sectionStyle.Render(fmt.Sprintf("Top hubs — most referenced (%d)", len(m.graphHubs))) + "\n")
+	if len(m.graphHubs) == 0 {
+		b.WriteString(mutedStyle.Render("  (none)") + "\n")
+	}
+	for _, hub := range firstN(m.graphHubs, budget) {
+		fmt.Fprintf(&b, "  %s  %s\n", countStyle.Render(fmt.Sprintf("%4d", hub.InDegree)),
+			truncate(displayName(hub.FQN, hub.Symbol), w-8))
+	}
+
+	b.WriteString("\n" + sectionStyle.Render(fmt.Sprintf("Dead-code candidates — no callers (%d)", len(m.orphans))) + "\n")
+	if len(m.orphans) == 0 {
+		b.WriteString(mutedStyle.Render("  (none)") + "\n")
+	}
+	for _, o := range firstN(m.orphans, budget) {
+		fmt.Fprintf(&b, "  %s %s\n", truncate(displayName(o.FQN, o.Symbol), w-10),
+			mutedStyle.Render(fmt.Sprintf("%s:%d", o.File, o.StartLine)))
 	}
 	return b.String()
 }

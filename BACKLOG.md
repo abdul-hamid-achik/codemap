@@ -413,6 +413,17 @@
   renders) — re-stamped; all 4 outcomes pass. Docs/cli.md rows updated. Full suite + all 5 E2E
   green; fmt/vet clean. COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #41 (cron, polish-first) — **studio Metrics is now a full-width overview dashboard**
+  (directly addresses the user's repeated "take better usage of the screen" — it was a single
+  left-aligned column with the right half empty). Header (counts) spans the top; below it two
+  columns split by a divider: LEFT = By-kind + By-language bar charts; RIGHT = the call graph's two
+  extremes — **Top hubs** (most-referenced/load-bearing) and **Dead-code candidates** (no callers,
+  via `Service.Orphans`). Loaded orphans into the model (`orphansCmd`/`orphansMsg`, refreshed on
+  `ctrl+r`). Fixed a column-wrap bug (bar line = indent+label+bar+count overflowed the left column,
+  spilling the count to its own line) by budgeting `barW = leftW-22`. New test
+  (`TestMetricsDashboardShowsHubsAndDeadCode`, width-bounded); race-clean; studio E2E green (metrics
+  snapshot shows the two-column layout). Docs (README + docs/studio.md) updated. COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

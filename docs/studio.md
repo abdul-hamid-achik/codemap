@@ -20,7 +20,10 @@
   right pane and **walk the graph** — `enter` re-centers on the selected caller/callee, so you
   can traverse "who calls this → who calls that → what does it call". `backspace` steps back
   along the path (the header shows the current depth), `←`/`h` returns focus to the hub list.
-- **Metrics** — node/edge/file counts and bar charts by kind and language, plus the top hubs.
+- **Metrics** — an overview dashboard: node/edge/file counts and bar charts by kind and
+  language on the left; on the right, the two ends of the call graph — the **top hubs**
+  (most-referenced, load-bearing symbols) and the **dead-code candidates** (symbols with no
+  callers).
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
 - **Search** — search by meaning (semantic, when an embedded index exists), automatically
   falling back to fast name search otherwise; the header shows which mode is active.

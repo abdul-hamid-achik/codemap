@@ -56,7 +56,9 @@ Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`4` or `tab`; navigate with `
   points, the centered node's callers and callees on the right. Press `→` to focus the right
   pane and **walk the graph** — `enter` re-centers on a caller/callee so you can traverse the
   call chain; `backspace` steps back.
-- **Metrics** — node/edge/file counts and bar charts by kind and language, plus top hubs.
+- **Metrics** — an overview dashboard: counts and bar charts (by kind/language) on the left;
+  the call graph's two extremes on the right — top hubs (most-referenced) and dead-code
+  candidates (no callers).
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
 - **Search** — semantic search by meaning, falling back to fast name search when there are no
   embeddings (so it works even without Ollama).

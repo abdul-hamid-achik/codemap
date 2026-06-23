@@ -351,6 +351,29 @@ func TestGraphEnterStillDrillsFromHubFocus(t *testing.T) {
 	}
 }
 
+func TestMetricsDashboardShowsHubsAndDeadCode(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabMetrics
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
+		Project: "demo", Registered: true, Nodes: 5, Edges: 3,
+		Kinds: map[string]int{"function": 2}, Languages: map[string]int{"go": 5},
+	}})
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Hub", FQN: "p.Hub", InDegree: 9}}})
+	m, _ = applyMsg(m, orphansMsg{orphans: []app.SymbolRef{{Symbol: "Dead", FQN: "p.Dead", File: "d.go", StartLine: 3}}})
+
+	out := m.render()
+	for _, want := range []string{"Top hubs", "p.Hub", "Dead-code candidates", "p.Dead", "By kind"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("metrics dashboard missing %q:\n%s", want, out)
+		}
+	}
+	for i, line := range strings.Split(out, "\n") {
+		if wd := lipgloss.Width(line); wd > 120 {
+			t.Errorf("metrics line %d width %d exceeds 120: %q", i, wd, line)
+		}
+	}
+}
+
 func TestImpactShowsSignaturePreview(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabImpact

@@ -58,6 +58,10 @@ type graphHubsMsg struct {
 	hubs []app.HotspotRef
 	err  error
 }
+type orphansMsg struct {
+	orphans []app.SymbolRef
+	err     error
+}
 type graphDetailMsg struct {
 	symbol  string
 	callers []app.SymbolRef
@@ -89,6 +93,7 @@ type Model struct {
 	statusMsg string
 	errMsg    string
 	status    *app.StatusReport
+	orphans   []app.SymbolRef // dead-code candidates, for the Metrics overview
 
 	// search tab
 	search      textinput.Model
@@ -169,9 +174,9 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 	}
 }
 
-// Init loads project status and the call graph.
+// Init loads project status, the call graph, and dead-code candidates.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.statusCmd(), m.hubsCmd())
+	return tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd())
 }
 
 // ---- commands ----
@@ -192,6 +197,17 @@ func (m Model) hubsCmd() tea.Cmd {
 			return graphHubsMsg{err: err}
 		}
 		return graphHubsMsg{hubs: r.Hotspots}
+	}
+}
+
+func (m Model) orphansCmd() tea.Cmd {
+	svc, dir := m.service, m.startDir
+	return func() tea.Msg {
+		r, err := svc.Orphans(dir, 50)
+		if err != nil {
+			return orphansMsg{err: err}
+		}
+		return orphansMsg{orphans: r.Orphans}
 	}
 }
 
@@ -287,6 +303,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case orphansMsg:
+		if msg.err == nil {
+			m.orphans = msg.orphans
+		}
+		return m, nil
+
 	case graphDetailMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
@@ -324,7 +346,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.rep.FilesIndexed, msg.rep.Nodes, msg.rep.Edges)
 		}
 		// Refresh everything the new index affects.
-		return m, tea.Batch(m.statusCmd(), m.hubsCmd())
+		return m, tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd())
 
 	case semanticMsg:
 		if msg.err != nil {
