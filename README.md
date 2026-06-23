@@ -66,7 +66,8 @@ the selected node's signature is previewed (`⟩ func runInit(...)`).
   scrollable overlay, without leaving studio.
 - **Metrics** — an overview dashboard: counts and bar charts (by kind/language) on the left;
   the call graph's two extremes on the right — top hubs (most-referenced) and dead-code
-  candidates (no callers).
+  candidates (no callers). Both lists are navigable — `enter` drills a row into Impact, `ctrl+s`
+  reads its source.
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
 - **Search** — semantic search by meaning, falling back to fast name search when there are no
   embeddings (so it works even without Ollama).

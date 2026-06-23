@@ -374,6 +374,35 @@ func TestMetricsDashboardShowsHubsAndDeadCode(t *testing.T) {
 	}
 }
 
+func TestMetricsNavigationDrills(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabMetrics
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
+		Project: "d", Registered: true, Nodes: 5, Edges: 3,
+		Kinds: map[string]int{"function": 2}, Languages: map[string]int{"go": 5},
+	}})
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Hub", FQN: "p.Hub", InDegree: 9}}})
+	m, _ = applyMsg(m, orphansMsg{orphans: []app.SymbolRef{{Symbol: "Dead", FQN: "p.Dead", File: "d.go", StartLine: 3}}})
+
+	// selection starts at the first hub; down moves into the orphans list.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	if m.metricsSel != 1 {
+		t.Fatalf("metricsSel = %d, want 1 (into orphans)", m.metricsSel)
+	}
+	if sym, file, line, ok := m.sourceTarget(); !ok || sym != "Dead" || file != "d.go" || line != 3 {
+		t.Errorf("metrics sourceTarget = (%q,%q,%d,%v), want Dead/d.go/3/true", sym, file, line, ok)
+	}
+	// enter drills the selected dead-code candidate into Impact.
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm := u.(Model)
+	if mm.active != tabImpact || mm.impact.Value() != "Dead" {
+		t.Errorf("enter on metrics: active=%v value=%q, want Impact/Dead", mm.active, mm.impact.Value())
+	}
+	if cmd == nil {
+		t.Error("enter should fire an impact command")
+	}
+}
+
 func TestImpactShowsSignaturePreview(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabImpact

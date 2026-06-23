@@ -95,11 +95,12 @@ type Model struct {
 	width  int
 	height int
 
-	loading   bool
-	statusMsg string
-	errMsg    string
-	status    *app.StatusReport
-	orphans   []app.SymbolRef // dead-code candidates, for the Metrics overview
+	loading    bool
+	statusMsg  string
+	errMsg     string
+	status     *app.StatusReport
+	orphans    []app.SymbolRef // dead-code candidates, for the Metrics overview
+	metricsSel int             // selected row in the Metrics right column (hubs+orphans)
 
 	// search tab
 	search      textinput.Model
@@ -290,6 +291,10 @@ func (m Model) sourceTarget() (sym, file string, line int, ok bool) {
 			h := m.searchHits[m.searchSel]
 			return h.Symbol, h.File, h.StartLine, true
 		}
+	case tabMetrics:
+		if sym, _, file, line, ok := m.metricsItem(m.metricsSel); ok {
+			return sym, file, line, true
+		}
 	}
 	return "", "", 0, false
 }
@@ -378,6 +383,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.graphHubs = msg.hubs
 		m.graphSel = 0
+		m.metricsSel = 0
 		m.graphFocus = focusHubs
 		m.graphStack = nil
 		if len(msg.hubs) > 0 {
@@ -598,8 +604,53 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleGraphKey(key)
 
 	default: // metrics
-		if key == "q" {
-			return m, tea.Quit
+		return m.handleMetricsKey(key)
+	}
+}
+
+// metricsCount is the number of selectable rows in the Metrics right column
+// (top hubs followed by dead-code candidates).
+func (m Model) metricsCount() int { return len(m.graphHubs) + len(m.orphans) }
+
+// metricsItem resolves a combined-list index to its symbol (hubs first, then
+// orphans).
+func (m Model) metricsItem(i int) (sym, fqn, file string, line int, ok bool) {
+	if i < 0 {
+		return "", "", "", 0, false
+	}
+	if i < len(m.graphHubs) {
+		h := m.graphHubs[i]
+		return h.Symbol, h.FQN, h.File, h.StartLine, true
+	}
+	if j := i - len(m.graphHubs); j < len(m.orphans) {
+		o := m.orphans[j]
+		return o.Symbol, o.FQN, o.File, o.StartLine, true
+	}
+	return "", "", "", 0, false
+}
+
+// handleMetricsKey navigates the dashboard's hubs/dead-code lists and drills the
+// selection into Impact (enter) — ctrl+s (handled globally) reads its source.
+func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q":
+		return m, tea.Quit
+	case "up", "k":
+		if m.metricsSel > 0 {
+			m.metricsSel--
+		}
+	case "down", "j":
+		if m.metricsSel < m.metricsCount()-1 {
+			m.metricsSel++
+		}
+	case "enter":
+		if sym, _, _, _, ok := m.metricsItem(m.metricsSel); ok {
+			m.active = tabImpact
+			m.impact.SetValue(sym)
+			m.syncFocus()
+			m.impactSel = 0
+			m.statusMsg = "analyzing…"
+			return m, m.impactCmd(sym)
 		}
 	}
 	return m, nil

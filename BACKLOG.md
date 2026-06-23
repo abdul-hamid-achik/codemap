@@ -511,6 +511,18 @@
   need gopls (studio) + Ollama (semantic); noted in AGENTS.md + CLAUDE.md. No Go change (CI runs
   unit tests, not flows; green). COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, Metrics-tab interactivity, full precise edges in indexer.
+- 2026-06-23 #49 (cron, polish-first) — **Metrics tab is now navigable** (was the last read-only tab;
+  serves "easy to navigate"). The right column (top hubs + dead-code candidates) is one selectable
+  list spanning both: `↑/↓` select (`metricsSel`), `enter` drills the row into Impact, `ctrl+s` reads
+  its source — so the overview is also a launchpad ("here's a dead-code candidate → enter to confirm 0
+  callers → ctrl+s to read it → delete"). New `metricsItem`/`metricsCount`/`handleMetricsKey`;
+  `sourceTarget` handles tabMetrics; `metricBlock` renders plain selectable rows with windowing +
+  highlight; `metricsSel` reset on reindex; footer hint updated. Caught a `go vet` unreachable-code
+  warning (default case now returns unconditionally → removed dead trailing return). Tests:
+  `TestMetricsNavigationDrills` (select into orphans → sourceTarget + enter→Impact). Extended studio
+  E2E: `ctrl+s` from Metrics → `metrics_source` snapshot (`app.Helper a.go:1-1`). Full suite + race +
+  all 6 E2E green; fmt/vet clean. Docs (README + docs/studio.md) updated. COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

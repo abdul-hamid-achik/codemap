@@ -105,8 +105,8 @@ func (m Model) footer() string {
 		hint = "type · enter search/open · ↑/↓ select · ctrl+s source · tab · ctrl+c quit"
 	case tabImpact:
 		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+s source · tab · ctrl+c quit"
-	default:
-		hint = "ctrl+r reindex · 1-4 tabs · ctrl+c quit"
+	default: // metrics
+		hint = "↑/↓ select · enter → impact · ctrl+s source · ctrl+r reindex · ctrl+c quit"
 	}
 	status := m.statusMsg
 	if m.errMsg != "" {
@@ -303,29 +303,63 @@ func (m Model) metricsBars(w int) string {
 }
 
 // metricsLists shows the two ends of the call graph: the load-bearing hubs and
-// the dead-code candidates, split across the available height.
+// the dead-code candidates. Rows are selectable (metricsSel spans both lists,
+// hubs first), with windowing so the selection stays visible.
 func (m Model) metricsLists(w, h int) string {
 	var b strings.Builder
 	budget := clamp((h-4)/2, 1, 30)
+	nHubs := len(m.graphHubs)
 
-	b.WriteString(sectionStyle.Render(fmt.Sprintf("Top hubs — most referenced (%d)", len(m.graphHubs))) + "\n")
-	if len(m.graphHubs) == 0 {
-		b.WriteString(mutedStyle.Render("  (none)") + "\n")
+	hubRows := make([]string, nHubs)
+	for i, hub := range m.graphHubs {
+		hubRows[i] = fmt.Sprintf("  %4d  %s", hub.InDegree, truncate(displayName(hub.FQN, hub.Symbol), w-8))
 	}
-	for _, hub := range firstN(m.graphHubs, budget) {
-		fmt.Fprintf(&b, "  %s  %s\n", countStyle.Render(fmt.Sprintf("%4d", hub.InDegree)),
-			truncate(displayName(hub.FQN, hub.Symbol), w-8))
+	hubSel := -1
+	if m.metricsSel < nHubs {
+		hubSel = m.metricsSel
 	}
+	metricBlock(&b, fmt.Sprintf("Top hubs — most referenced (%d)", nHubs), hubRows, hubSel, budget, w)
 
-	b.WriteString("\n" + sectionStyle.Render(fmt.Sprintf("Dead-code candidates — no callers (%d)", len(m.orphans))) + "\n")
-	if len(m.orphans) == 0 {
-		b.WriteString(mutedStyle.Render("  (none)") + "\n")
+	b.WriteString("\n")
+	orphRows := make([]string, len(m.orphans))
+	for i, o := range m.orphans {
+		orphRows[i] = fmt.Sprintf("  %s  %s", truncate(displayName(o.FQN, o.Symbol), w-14),
+			fmt.Sprintf("%s:%d", o.File, o.StartLine))
 	}
-	for _, o := range firstN(m.orphans, budget) {
-		fmt.Fprintf(&b, "  %s %s\n", truncate(displayName(o.FQN, o.Symbol), w-10),
-			mutedStyle.Render(fmt.Sprintf("%s:%d", o.File, o.StartLine)))
+	orphSel := -1
+	if m.metricsSel >= nHubs && m.metricsSel < nHubs+len(m.orphans) {
+		orphSel = m.metricsSel - nHubs
 	}
+	metricBlock(&b, fmt.Sprintf("Dead-code candidates — no callers (%d)", len(m.orphans)), orphRows, orphSel, budget, w)
 	return b.String()
+}
+
+// metricBlock renders a titled list of plain rows, highlighting localSel (or -1)
+// and windowing to keep it visible within budget lines.
+func metricBlock(b *strings.Builder, title string, rows []string, localSel, budget, w int) {
+	b.WriteString(sectionStyle.Render(title) + "\n")
+	if len(rows) == 0 {
+		b.WriteString(mutedStyle.Render("  (none)") + "\n")
+		return
+	}
+	start := 0
+	if localSel >= 0 {
+		start = windowStart(localSel, budget, len(rows))
+	}
+	end := clamp(start+budget, 0, len(rows))
+	if start > 0 {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more\n", start)))
+	}
+	for i := start; i < end; i++ {
+		if i == localSel {
+			b.WriteString(selectedStyle.Width(w).Render(truncate(rows[i], w)) + "\n")
+		} else {
+			b.WriteString(rows[i] + "\n")
+		}
+	}
+	if end < len(rows) {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more\n", len(rows)-end)))
+	}
 }
 
 // ---- Impact tab ----

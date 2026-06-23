@@ -28,7 +28,8 @@
 - **Metrics** — an overview dashboard: node/edge/file counts and bar charts by kind and
   language on the left; on the right, the two ends of the call graph — the **top hubs**
   (most-referenced, load-bearing symbols) and the **dead-code candidates** (symbols with no
-  callers).
+  callers). Both lists are navigable with `↑`/`↓`: `enter` drills the selected symbol into
+  Impact, `ctrl+s` reads its source — so the overview is also a launchpad.
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it. `ctrl+s`
   reads the selected blast node's source.
 - **Search** — search by meaning (semantic, when an embedded index exists), automatically
@@ -40,7 +41,7 @@
 | Key | Action |
 |---|---|
 | `1`–`4` / `tab` / `shift+tab` | Switch tabs |
-| `↑` / `↓` | Select a hub/ref (Graph), a result (Search), or a blast-radius node (Impact) |
+| `↑` / `↓` | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), or a blast-radius node (Impact) |
 | `→` / `←` (`l` / `h`) | (Graph) move focus between the hub list and the callers/callees pane |
 | `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection · or run the query after editing the text |
 | `backspace` | (Graph) step back to the previous centered node while walking |

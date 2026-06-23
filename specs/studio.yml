@@ -60,6 +60,14 @@ steps:
             contains: "By kind"
         timeoutMs: 5000
     - snapshot: metrics
+    # The dashboard is navigable: ctrl+s reads the selected row's source.
+    - press: "ctrl+s"
+    - wait:
+        screen:
+            contains: "esc/q close"
+        timeoutMs: 5000
+    - snapshot: metrics_source
+    - press: "q"
     - press: "1"
     - wait:
         screen:
