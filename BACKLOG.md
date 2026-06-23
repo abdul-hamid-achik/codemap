@@ -741,6 +741,16 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #94 (precise epic — robustness) — **precise callee join is collision-safe.** The #93
+  follow-up: the position-keyed `(file,line)→nodeID` join in `resolvePreciseEdges` mis-resolved when
+  multiple declarations share a line (last-writer-wins overwrote the map), so a call to one of two
+  same-line methods could route to the wrong node. Now the build detects colliding `(file,line)` keys
+  and deletes them, forcing the lookup to fall through to the unique FQN match (line-independent, and
+  reliable since typesrc replicates gosrc's FQN scheme exactly). Test `TestPreciseHandlesSameLineDecls`:
+  `func (Real) Handle() {}; func (Other) Handle() {}` on ONE line; a caller of `Real.Handle` resolves
+  to Real.Handle (in-degree 2), Other.Handle stays 0 — without the fix the collision routed both to
+  the same-line Other.Handle. gofmt'd code (one decl per line) was already fine; this hardens the
+  un-gofmt'd case. Full suite + lint v2 (0) + precise.yml flow green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #93 (precise epic — E2E flow) — **`specs/precise.yml` demonstrates the precise pass
   end-to-end** — the directive's "flows that demonstrate value via … LSP/types" pillar, now viable
   because `index --precise` is deterministic in-process go/types (unlike the flaky one-shot gopls

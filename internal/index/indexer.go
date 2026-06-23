@@ -415,15 +415,26 @@ func (ix *Indexer) resolvePreciseEdges(ctx context.Context, projectID int64, roo
 	}
 	fqnTo := make(map[string]int64, len(nodes))
 	posTo := make(map[precisePos]int64, len(nodes))
+	posCollide := map[precisePos]bool{} // (file,line) shared by >1 decl — ambiguous
 	var cleanSources []int64
 	for _, n := range nodes {
 		if n.FQN != "" {
 			fqnTo[n.FQN] = n.ID
 		}
-		posTo[precisePos{n.FilePath, n.StartLine}] = n.ID
+		key := precisePos{n.FilePath, n.StartLine}
+		if _, dup := posTo[key]; dup {
+			posCollide[key] = true // e.g. two decls on one line (un-gofmt'd)
+		} else {
+			posTo[key] = n.ID
+		}
 		if pr.CleanFiles[n.FilePath] {
 			cleanSources = append(cleanSources, n.ID)
 		}
+	}
+	// Remove ambiguous (file,line) keys so the position join misses for them and
+	// falls back to the unique FQN match — robust to multiple decls on one line.
+	for key := range posCollide {
+		delete(posTo, key)
 	}
 
 	// Drop the name-based call edges of every clean source, then re-insert the

@@ -179,6 +179,49 @@ func useInTest() { var t T1; t.Run() }
 	}
 }
 
+func TestPreciseHandlesSameLineDecls(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	mustWrite := func(rel, content string) {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("go.mod", "module example.com/fix\n\ngo 1.25\n")
+	// Real.Handle and Other.Handle share ONE line, so they collide in the
+	// position-keyed callee join; resolution must fall back to the unique FQN and
+	// still route A/B's calls to Real.Handle (not the same-line Other.Handle).
+	mustWrite("fix.go", `package fix
+
+type Real struct{}
+type Other struct{}
+
+func (Real) Handle() {}; func (Other) Handle() {}
+
+func A() { var r Real; r.Handle() }
+func B() { var r Real; r.Handle() }
+`)
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("fix", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+
+	res, err := ix.IndexProject(context.Background(), pid, "fix", dir, Options{Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.PreciseUpgraded == 0 {
+		t.Fatalf("expected precise upgrades, got note %q", res.PreciseNote)
+	}
+	if got := inDegree(t, g, pid, "Handle", "fix.Real.Handle"); got != 2 {
+		t.Errorf("Real.Handle in-degree = %d, want 2 (both callers, despite same-line collision)", got)
+	}
+	if got := inDegree(t, g, pid, "Handle", "fix.Other.Handle"); got != 0 {
+		t.Errorf("Other.Handle in-degree = %d, want 0 (never called; not mis-routed by the collision)", got)
+	}
+}
+
 func TestPreciseDegradesGracefully(t *testing.T) {
 	// A non-module dir (no go.mod): --precise must degrade to name-based with a
 	// note, never error, and never wipe the name edges it can't replace.
