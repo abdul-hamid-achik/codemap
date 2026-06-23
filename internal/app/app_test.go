@@ -573,6 +573,61 @@ func TestHotspotsFlagsSharedNames(t *testing.T) {
 	}
 }
 
+func TestHotspotsInflationFlagIsProvenanceAware(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/h\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := "package h\n\n" +
+		"type T struct{}\ntype U struct{}\n\n" +
+		"func (T) Close() {}\nfunc (U) Close() {}\n\n" +
+		"func A() { var t T; t.Close() }\n" +
+		"func B() { var t T; t.Close() }\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	flagOf := func(want string) int {
+		rep, err := svc.Hotspots(proj, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, h := range rep.Hotspots {
+			if h.FQN == want {
+				return h.SharedName
+			}
+		}
+		return -1 // not present
+	}
+
+	// Name-based: T.Close's in-degree is inflated by fan-out → flagged.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := flagOf("h.T.Close"); got != 2 {
+		t.Errorf("name-based T.Close SharedName = %d, want 2 (inflated, flagged)", got)
+	}
+
+	// Precise: T.Close's callers were resolved exactly → accurate count, no flag,
+	// even though the name "Close" is still shared by two definitions.
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true, Precise: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := flagOf("h.T.Close"); got != 0 {
+		t.Errorf("precise T.Close SharedName = %d, want 0 (count is accurate, must not be mislabeled inflated)", got)
+	}
+}
+
 func TestOrphansExcludesMainAndInit(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

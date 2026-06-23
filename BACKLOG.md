@@ -741,6 +741,22 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #92 (precise epic — slice E: provenance-aware flag) — **the `⚠ name shared by N
+  (inflated)` hotspots flag (#85/#86) no longer over-warns on a `--precise` index.** New
+  `graph.Store.HasNameInEdges(nodeIDs)` returns which nodes still have ≥1 name-provenance incoming
+  call/reference edge (chunked, via scanIDs). `Hotspots` now sets `SharedName` only when the name is
+  shared (>1 def) AND the node still has name-based in-edges — so a hotspot whose callers were resolved
+  exactly by the go/types pass shows its (accurate) count with no inflation warning. The CLI and studio
+  Metrics rendering are unchanged (both gate on `SharedName>1`), so the studio dashboard becomes
+  provenance-aware for free. Tests: existing `TestHotspotsFlagsSharedNames` still flags on a name-based
+  index; new `TestHotspotsInflationFlagIsProvenanceAware` (go-gated) proves T.Close is flagged
+  name-based but NOT after `--precise` (count accurate). **Real-repo dogfood: the live precise index's
+  hotspots are now clean** — Session.Close (50), NewService (49), tui.sized (36) shown as genuine hubs,
+  zero false "(inflated)". (Left as-is: the `impact`/`callers` ambiguity notes from #79/#80 — those are
+  about the *query* being name-keyed across N definitions, which is still true and useful even on a
+  precise index, independent of edge provenance.) Full suite + lint v2 (0) + studio E2E green; fmt
+  clean. COMMIT+PUSH. **Precise-resolution epic complete: built (#87–90) · documented (#91) · UX
+  reconciled (#92).**
 - 2026-06-23 #91 (precise epic — docs) — **documented `--precise` everywhere** so the major new
   capability is discoverable (an undocumented flag helps no one). The accuracy story is rewritten from
   "name-based with a per-query `--lsp` escape hatch; graph-wide go/types *planned*" to "**`codemap

@@ -326,6 +326,41 @@ func (s *Store) SymbolDefCounts(projectID int64) (map[string]int, error) {
 	return m, rows.Err()
 }
 
+// HasNameInEdges returns which of the given nodes still have at least one
+// name-provenance incoming call/reference edge — i.e. whose in-degree may be
+// inflated by name-based fan-out. A node whose callers were all resolved by the
+// go/types pass (provenance='precise') is absent, so its count is trustworthy.
+func (s *Store) HasNameInEdges(nodeIDs []int64) (map[int64]bool, error) {
+	out := make(map[int64]bool, len(nodeIDs))
+	if len(nodeIDs) == 0 {
+		return out, nil
+	}
+	const chunk = 800
+	for start := 0; start < len(nodeIDs); start += chunk {
+		end := start + chunk
+		if end > len(nodeIDs) {
+			end = len(nodeIDs)
+		}
+		batch := nodeIDs[start:end]
+		ph := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			ph[i] = "?"
+			args[i] = id
+		}
+		q := "SELECT DISTINCT target_id FROM edges WHERE target_id IN (" + strings.Join(ph, ",") +
+			") AND edge_type IN ('" + EdgeCalls + "','" + EdgeReferences + "') AND provenance = '" + ProvName + "'"
+		ids, err := s.scanIDs(q, args...)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
 // Orphans returns function/method nodes with no incoming `calls` edge —
 // dead-code candidates. (Heuristic: exported API, entrypoints like main/init,
 // and externally-called code may appear here as false positives.)

@@ -1135,17 +1135,23 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	// One grouped query gives the def-count per name, so we can flag entries whose
-	// in-degree is inflated by name-based fan-out (e.g. six Close() methods each
-	// credited with every Close call) — far more useful than a ranking silently
-	// topped by name collisions.
+	// Flag entries whose in-degree is inflated by name-based fan-out (e.g. six
+	// Close() methods each credited with every Close call). The flag is
+	// provenance-aware: it fires only when the name is shared (>1 def) AND the node
+	// still has name-based in-edges — so on a `--precise` index, where those edges
+	// were resolved exactly, an accurate count is no longer mislabeled "inflated".
 	shared, _ := g.SymbolDefCounts(pid)
+	ids := make([]int64, len(hs))
+	for i, h := range hs {
+		ids[i] = h.Node.ID
+	}
+	nameInflated, _ := g.HasNameInEdges(ids)
 	for _, h := range hs {
 		ref := HotspotRef{
 			Symbol: h.Node.Symbol, FQN: h.Node.FQN, Kind: h.Node.Kind,
 			File: h.Node.FilePath, StartLine: h.Node.StartLine, InDegree: h.InDegree,
 		}
-		if n := shared[h.Node.Symbol]; n > 1 {
+		if n := shared[h.Node.Symbol]; n > 1 && nameInflated[h.Node.ID] {
 			ref.SharedName = n
 		}
 		rep.Hotspots = append(rep.Hotspots, ref)
