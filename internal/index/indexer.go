@@ -1,0 +1,352 @@
+// Package index walks a project, extracts its structure, embeds node sources,
+// and stores the result as a graph (SQLite) plus vectors (veclite). Indexing is
+// incremental: files whose content hash is unchanged are skipped. A full
+// reindex (Options.Reindex) wipes the project and rebuilds everything.
+package index
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/embed"
+	"github.com/abdul-hamid-achik/codemap/internal/extract"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/gosrc"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
+	"github.com/abdul-hamid-achik/codemap/internal/vector"
+)
+
+// Options controls an index run.
+type Options struct {
+	// Reindex wipes the project and rebuilds all nodes, edges, and vectors.
+	// Without it, files with an unchanged content hash are skipped.
+	Reindex bool
+}
+
+// FileError records a per-file failure that didn't abort the whole run.
+type FileError struct {
+	File string `json:"file"`
+	Err  string `json:"error"`
+}
+
+// Result summarizes an index run.
+type Result struct {
+	FilesScanned int         `json:"files_scanned"`
+	FilesIndexed int         `json:"files_indexed"` // new or changed
+	FilesSkipped int         `json:"files_skipped"` // unchanged or too large
+	Nodes        int         `json:"nodes"`
+	Edges        int         `json:"edges"`
+	Errors       []FileError `json:"errors,omitempty"`
+}
+
+// Indexer turns project files into a stored graph + vectors. The vector store
+// and embedder may be nil to index structure only (no semantic search).
+type Indexer struct {
+	graph      *graph.Store
+	vectors    *vector.Store
+	embedder   embed.Provider
+	cfg        config.IndexConfig
+	extractors map[string]extract.Extractor
+}
+
+// New returns an indexer with the default backends registered (currently the
+// pure-Go go/parser Go backend).
+func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.IndexConfig) *Indexer {
+	ix := &Indexer{
+		graph:      g,
+		vectors:    vec,
+		embedder:   emb,
+		cfg:        cfg,
+		extractors: map[string]extract.Extractor{},
+	}
+	ix.Register(gosrc.New())
+	return ix
+}
+
+// Register adds (or replaces) the extractor for a language.
+func (ix *Indexer) Register(e extract.Extractor) { ix.extractors[e.Language()] = e }
+
+type fileTask struct {
+	abs  string
+	rel  string
+	lang string
+	ext  extract.Extractor
+}
+
+// IndexProject indexes root for the given registered project.
+func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectName, root string, opts Options) (*Result, error) {
+	res := &Result{}
+
+	if opts.Reindex {
+		if err := ix.graph.WipeProject(projectID); err != nil {
+			return nil, err
+		}
+		if ix.vectors != nil {
+			if _, err := ix.vectors.DeleteByProject(projectName); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	files, err := ix.walk(root)
+	if err != nil {
+		return nil, err
+	}
+	res.FilesScanned = len(files)
+
+	// Pass 1: extract + store nodes (and embeddings) for changed files. Collect
+	// the references emitted by changed files for edge resolution.
+	var pending []extract.Reference
+	for _, ft := range files {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		changed, refs, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
+		if err != nil {
+			res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
+			continue
+		}
+		if changed {
+			pending = append(pending, refs...)
+		}
+	}
+
+	// Pass 2: resolve references into edges against the project-wide symbol map.
+	if _, err := ix.resolveEdges(projectID, pending); err != nil {
+		return res, err
+	}
+
+	if ix.vectors != nil {
+		if err := ix.vectors.Sync(); err != nil {
+			return res, err
+		}
+	}
+
+	// Report authoritative project totals (correct under incremental runs too).
+	st, err := ix.graph.Stats(projectID)
+	if err != nil {
+		return res, err
+	}
+	res.Nodes = st.Nodes
+	res.Edges = st.Edges
+	return res, nil
+}
+
+func (ix *Indexer) walk(root string) ([]fileTask, error) {
+	var files []fileTask
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if path != root && (ix.excluded(name) || strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		lang := extract.LanguageForPath(path)
+		ext, ok := ix.extractors[lang]
+		if !ok || ix.excluded(name) {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
+		files = append(files, fileTask{abs: path, rel: rel, lang: lang, ext: ext})
+		return nil
+	})
+	return files, err
+}
+
+// excluded reports whether a file or directory base name matches any configured
+// exclude glob (e.g. "node_modules", "*.min.js").
+func (ix *Indexer) excluded(name string) bool {
+	for _, pat := range ix.cfg.Exclude {
+		if ok, _ := filepath.Match(pat, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result) (bool, []extract.Reference, error) {
+	content, err := os.ReadFile(ft.abs)
+	if err != nil {
+		return false, nil, err
+	}
+	if ix.cfg.MaxFileBytes > 0 && len(content) > ix.cfg.MaxFileBytes {
+		res.FilesSkipped++
+		return false, nil, nil
+	}
+
+	hash := sha256hex(content)
+	if !opts.Reindex {
+		prev, err := ix.graph.FileHash(projectID, ft.rel)
+		if err != nil {
+			return false, nil, err
+		}
+		if prev == hash {
+			res.FilesSkipped++
+			return false, nil, nil
+		}
+	}
+
+	// Changed: clear the old structure (edges cascade) and vectors for this file.
+	if err := ix.graph.DeleteNodesInFile(projectID, ft.rel); err != nil {
+		return false, nil, err
+	}
+	if ix.vectors != nil {
+		if _, err := ix.vectors.DeleteByFile(projectName, ft.rel); err != nil {
+			return false, nil, err
+		}
+	}
+
+	fr, err := ft.ext.ExtractFile(ft.rel, content)
+	if err != nil {
+		return false, nil, err
+	}
+
+	// File node.
+	lines := bytes.Count(content, []byte("\n")) + 1
+	fileID, err := ix.graph.AddNode(&graph.Node{
+		ProjectID: projectID, FilePath: ft.rel, Kind: graph.KindFile,
+		Language: ft.lang, StartLine: 1, EndLine: lines, SourceHash: hash,
+	})
+	if err != nil {
+		return false, nil, err
+	}
+
+	type embedItem struct {
+		nodeID  int64
+		content string
+		meta    vector.NodeMeta
+	}
+	var toEmbed []embedItem
+
+	for _, sym := range fr.Symbols {
+		nid, err := ix.graph.AddNode(&graph.Node{
+			ProjectID: projectID, FilePath: ft.rel, Symbol: sym.Name, FQN: sym.FQN,
+			Kind: sym.Kind, Language: sym.Language, StartLine: sym.StartLine, EndLine: sym.EndLine,
+			Signature: sym.Signature, Docstring: sym.Docstring, SourceHash: sha256hex([]byte(sym.Source)),
+		})
+		if err != nil {
+			return false, nil, err
+		}
+		if _, err := ix.graph.AddEdge(fileID, nid, graph.EdgeDefines, graph.WeightLSP); err != nil {
+			return false, nil, err
+		}
+		if ix.embedder != nil && ix.vectors != nil {
+			toEmbed = append(toEmbed, embedItem{
+				nodeID:  nid,
+				content: embedText(sym),
+				meta: vector.NodeMeta{
+					NodeID: nid, Project: projectName, File: ft.rel, Symbol: sym.Name,
+					FQN: sym.FQN, Kind: sym.Kind, Language: sym.Language,
+					StartLine: sym.StartLine, EndLine: sym.EndLine,
+				},
+			})
+		}
+	}
+
+	if len(toEmbed) > 0 {
+		texts := make([]string, len(toEmbed))
+		for i := range toEmbed {
+			texts[i] = toEmbed[i].content
+		}
+		vecs, err := ix.embedder.Embed(ctx, texts)
+		if err != nil {
+			return false, nil, fmt.Errorf("embed %s: %w", ft.rel, err)
+		}
+		if len(vecs) != len(toEmbed) {
+			return false, nil, fmt.Errorf("embed %s: got %d vectors for %d symbols", ft.rel, len(vecs), len(toEmbed))
+		}
+		for i, item := range toEmbed {
+			vid, err := ix.vectors.Insert(vecs[i], item.content, item.meta)
+			if err != nil {
+				return false, nil, err
+			}
+			if err := ix.graph.UpdateNodeVecID(item.nodeID, strconv.FormatUint(vid, 10)); err != nil {
+				return false, nil, err
+			}
+		}
+	}
+
+	if err := ix.graph.SetFileHash(projectID, ft.rel, hash); err != nil {
+		return false, nil, err
+	}
+	res.FilesIndexed++
+	return true, fr.References, nil
+}
+
+// resolveEdges links references (from changed files) to target nodes by name,
+// against the project-wide symbol index. Same-named targets all get an edge at
+// tree-sitter/parser confidence (0.7); precise resolution arrives with the LSP
+// backend. Self-edges are skipped.
+func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int, error) {
+	if len(refs) == 0 {
+		return 0, nil
+	}
+	nodes, err := ix.graph.ProjectNodes(projectID)
+	if err != nil {
+		return 0, err
+	}
+	fqnTo := make(map[string]int64, len(nodes))
+	symTo := make(map[string][]int64, len(nodes))
+	for _, n := range nodes {
+		if n.FQN != "" {
+			fqnTo[n.FQN] = n.ID
+		}
+		if n.Symbol != "" {
+			symTo[n.Symbol] = append(symTo[n.Symbol], n.ID)
+		}
+	}
+
+	count := 0
+	for _, ref := range refs {
+		from, ok := fqnTo[ref.From]
+		if !ok {
+			continue
+		}
+		for _, to := range symTo[ref.To] {
+			if to == from {
+				continue
+			}
+			if _, err := ix.graph.AddEdge(from, to, ref.Kind, graph.WeightTreeSitter); err != nil {
+				return count, err
+			}
+			count++
+		}
+	}
+	return count, nil
+}
+
+// embedText builds the text embedded for a symbol: docstring + signature +
+// source, so meaning and structure both inform the vector.
+func embedText(s extract.Symbol) string {
+	var b strings.Builder
+	if s.Docstring != "" {
+		b.WriteString(s.Docstring)
+		b.WriteByte('\n')
+	}
+	if s.Signature != "" {
+		b.WriteString(s.Signature)
+		b.WriteByte('\n')
+	}
+	b.WriteString(s.Source)
+	return b.String()
+}
+
+func sha256hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}

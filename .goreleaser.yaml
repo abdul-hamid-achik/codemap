@@ -1,0 +1,84 @@
+version: 2
+
+project_name: codemap
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: codemap
+    main: ./cmd/codemap
+    binary: codemap
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/abdul-hamid-achik/codemap/internal/version.Version={{.Version}}
+      - -X github.com/abdul-hamid-achik/codemap/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/abdul-hamid-achik/codemap/internal/version.Date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+
+brews:
+  - name: codemap
+    repository:
+      owner: abdul-hamid-achik
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/abdul-hamid-achik/codemap"
+    description: "Local-first code intelligence: a code graph + semantic search for agents and people"
+    license: "MIT"
+    dependencies:
+      - name: ollama
+        type: optional
+    install: |
+      bin.install "codemap"
+    test: |
+      system "#{bin}/codemap", "--version"
+    skip_upload: "{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}"
+
+release:
+  github:
+    owner: abdul-hamid-achik
+    name: codemap
+  draft: false
+  prerelease: auto
+  name_template: "v{{.Version}}"

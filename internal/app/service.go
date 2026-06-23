@@ -1,0 +1,332 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+
+	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
+	"github.com/abdul-hamid-achik/codemap/internal/index"
+	"github.com/abdul-hamid-achik/codemap/internal/vector"
+)
+
+// Service implements codemap's operations over a Session.
+type Service struct {
+	s *Session
+}
+
+// NewService wraps a session.
+func NewService(s *Session) *Service { return &Service{s: s} }
+
+// InitReport is returned by Init.
+type InitReport struct {
+	Project   string `json:"project"`
+	Root      string `json:"root"`
+	ProjectID int64  `json:"project_id"`
+	DataDir   string `json:"data_dir"`
+}
+
+// IndexReport is returned by Index.
+type IndexReport struct {
+	Project      string            `json:"project"`
+	Root         string            `json:"root"`
+	Embedded     bool              `json:"embedded"`
+	Warning      string            `json:"warning,omitempty"`
+	FilesScanned int               `json:"files_scanned"`
+	FilesIndexed int               `json:"files_indexed"`
+	FilesSkipped int               `json:"files_skipped"`
+	Nodes        int               `json:"nodes"`
+	Edges        int               `json:"edges"`
+	Errors       []index.FileError `json:"errors,omitempty"`
+}
+
+// StatusReport is returned by Status.
+type StatusReport struct {
+	Project    string         `json:"project"`
+	Root       string         `json:"root"`
+	Registered bool           `json:"registered"`
+	Path       string         `json:"path,omitempty"`
+	Nodes      int            `json:"nodes"`
+	Edges      int            `json:"edges"`
+	Files      int            `json:"files"`
+	Languages  map[string]int `json:"languages,omitempty"`
+	Kinds      map[string]int `json:"kinds,omitempty"`
+}
+
+// Init registers cwd as a codemap project in the global registry.
+func (svc *Service) Init(cwd string, local bool) (*InitReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	root := clean(cwd)
+	name := config.DeriveProjectName(root)
+	pid, err := g.UpsertProject(name, root, detectLanguage(root))
+	if err != nil {
+		return nil, err
+	}
+	if local {
+		if err := os.MkdirAll(filepath.Join(root, ".codemap"), 0o755); err != nil {
+			return nil, err
+		}
+	}
+	return &InitReport{Project: name, Root: root, ProjectID: pid, DataDir: config.DataDir()}, nil
+}
+
+// Index indexes the project containing cwd. When embed is true it attempts
+// semantic embeddings, falling back to structure-only (with a warning) if the
+// embedding provider is unreachable.
+func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, withEmbed bool) (*IndexReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	root, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	pid, err := g.UpsertProject(name, root, detectLanguage(root))
+	if err != nil {
+		return nil, err
+	}
+
+	rep := &IndexReport{Project: name, Root: root}
+	var vec *vector.Store
+	emb := svc.s.Embedder()
+
+	if !withEmbed {
+		emb = nil
+	} else {
+		// Availability is an optional capability; if the provider reports it's
+		// unreachable, fall back to structure-only with a warning.
+		if c, ok := emb.(interface {
+			Available(context.Context) error
+		}); ok {
+			if availErr := c.Available(ctx); availErr != nil {
+				rep.Warning = "embeddings disabled: " + availErr.Error() + " (indexed structure only)"
+				emb = nil
+			}
+		}
+		if emb != nil {
+			if vec, err = svc.s.Vectors(); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	res, err := index.New(g, vec, emb, svc.s.Config.Index).IndexProject(ctx, pid, name, root, opts)
+	if err != nil {
+		return rep, err
+	}
+	rep.Embedded = vec != nil
+	rep.FilesScanned = res.FilesScanned
+	rep.FilesIndexed = res.FilesIndexed
+	rep.FilesSkipped = res.FilesSkipped
+	rep.Nodes = res.Nodes
+	rep.Edges = res.Edges
+	rep.Errors = res.Errors
+	return rep, nil
+}
+
+// Status reports index statistics for the project containing cwd.
+func (svc *Service) Status(cwd string) (*StatusReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	root, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &StatusReport{Project: name, Root: root}
+
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return rep, nil // not registered yet
+	}
+	if err != nil {
+		return nil, err
+	}
+	st, err := g.Stats(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	rep.Registered = true
+	rep.Path = p.Path
+	rep.Nodes = st.Nodes
+	rep.Edges = st.Edges
+	rep.Files = st.Files
+	rep.Languages = st.Languages
+	rep.Kinds = st.Kinds
+	return rep, nil
+}
+
+// SymbolRef is a lightweight reference to a graph node (for query results).
+type SymbolRef struct {
+	Symbol    string `json:"symbol"`
+	FQN       string `json:"fqn,omitempty"`
+	Kind      string `json:"kind"`
+	File      string `json:"file"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+}
+
+func nodeToRef(n graph.Node) SymbolRef {
+	return SymbolRef{Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath, StartLine: n.StartLine, EndLine: n.EndLine}
+}
+
+// RelationReport is returned by Callers/Callees.
+type RelationReport struct {
+	Symbol  string      `json:"symbol"`
+	Project string      `json:"project"`
+	Results []SymbolRef `json:"results"`
+}
+
+// SemanticHit is one semantic-search result.
+type SemanticHit struct {
+	Symbol    string  `json:"symbol"`
+	FQN       string  `json:"fqn,omitempty"`
+	Kind      string  `json:"kind"`
+	File      string  `json:"file"`
+	StartLine int     `json:"start_line"`
+	EndLine   int     `json:"end_line"`
+	Score     float32 `json:"score"`
+}
+
+// SemanticReport is returned by Semantic.
+type SemanticReport struct {
+	Query   string        `json:"query"`
+	Project string        `json:"project"`
+	Hits    []SemanticHit `json:"hits"`
+}
+
+// Callers returns the functions/methods that call symbol.
+func (svc *Service) Callers(cwd, symbol string) (*RelationReport, error) {
+	return svc.relation(cwd, symbol, (*graph.Store).Callers)
+}
+
+// Callees returns the functions/methods that symbol calls.
+func (svc *Service) Callees(cwd, symbol string) (*RelationReport, error) {
+	return svc.relation(cwd, symbol, (*graph.Store).Callees)
+}
+
+func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64, string) ([]graph.Node, error)) (*RelationReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &RelationReport{Symbol: symbol, Project: name, Results: []SymbolRef{}}
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return rep, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := query(g, p.ID, symbol)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		rep.Results = append(rep.Results, nodeToRef(n))
+	}
+	return rep, nil
+}
+
+// Semantic runs a meaning-based search over the project's embedded nodes.
+func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (*SemanticReport, error) {
+	if topK <= 0 {
+		topK = 10
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &SemanticReport{Query: query, Project: name, Hits: []SemanticHit{}}
+
+	vecs, err := svc.s.Embedder().Embed(ctx, []string{query})
+	if err != nil {
+		return nil, err
+	}
+	if len(vecs) == 0 {
+		return rep, nil
+	}
+	vstore, err := svc.s.Vectors()
+	if err != nil {
+		return nil, err
+	}
+	hits, err := vstore.Search(vecs[0], topK, name)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range hits {
+		rep.Hits = append(rep.Hits, SemanticHit{
+			Symbol: h.Meta.Symbol, FQN: h.Meta.FQN, Kind: h.Meta.Kind, File: h.Meta.File,
+			StartLine: h.Meta.StartLine, EndLine: h.Meta.EndLine, Score: h.Score,
+		})
+	}
+	return rep, nil
+}
+
+// resolveProject finds the registered project whose path is cwd or an ancestor
+// of cwd (closest wins). If none is registered it defaults to (cwd, basename).
+func (svc *Service) resolveProject(cwd string) (root, name string, err error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return "", "", err
+	}
+	projs, err := g.ListProjects()
+	if err != nil {
+		return "", "", err
+	}
+	byPath := make(map[string]string, len(projs))
+	for _, p := range projs {
+		byPath[clean(p.Path)] = p.Name
+	}
+	dir := clean(cwd)
+	for {
+		if n, ok := byPath[dir]; ok {
+			return dir, n, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	root = clean(cwd)
+	return root, config.DeriveProjectName(root), nil
+}
+
+func clean(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return filepath.Clean(p)
+}
+
+// detectLanguage guesses a project's primary language from marker files.
+func detectLanguage(root string) string {
+	markers := []struct {
+		file string
+		lang string
+	}{
+		{"go.mod", "go"},
+		{"package.json", "typescript"},
+		{"pyproject.toml", "python"},
+		{"requirements.txt", "python"},
+		{"Gemfile", "ruby"},
+	}
+	for _, m := range markers {
+		if _, err := os.Stat(filepath.Join(root, m.file)); err == nil {
+			return m.lang
+		}
+	}
+	return ""
+}

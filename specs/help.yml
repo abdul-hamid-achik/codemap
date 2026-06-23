@@ -1,0 +1,42 @@
+version: 1
+name: help
+intent: |
+    codemap --help shows its positioning line and lists the core commands.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); \"$ROOT/bin/codemap\" --help"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 5000
+    - snapshot: help
+outcomes:
+    - id: tagline
+      description: shows the code-graph positioning line
+      verify:
+        screen:
+            contains: "code graph"
+    - id: index_cmd
+      description: lists the index command
+      verify:
+        screen:
+            contains: "index"
+    - id: serve_cmd
+      description: lists the serve command
+      verify:
+        screen:
+            contains: "serve"
+    - id: studio_cmd
+      description: lists the studio command
+      verify:
+        screen:
+            contains: "studio"
+contractHash: sha256:2e74f405b0c7e6ab2a390dca5ee45ac2ae11a5be3ed2162388f42385e21978dc

@@ -1,0 +1,167 @@
+version: "3"
+
+vars:
+  BINARY_NAME: codemap
+  BUILD_DIR: ./bin
+  MODULE: github.com/abdul-hamid-achik/codemap
+  MAIN: ./cmd/codemap
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  BUILD_TIME:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  LDFLAGS: >-
+    -s -w
+    -X {{.MODULE}}/internal/version.Version={{.VERSION}}
+    -X {{.MODULE}}/internal/version.Commit={{.COMMIT}}
+    -X {{.MODULE}}/internal/version.Date={{.BUILD_TIME}}
+
+env:
+  CGO_ENABLED: "0"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  doctor:
+    desc: Check the development environment
+    silent: true
+    cmds:
+      - 'echo "go:           $(go version 2>/dev/null || echo MISSING)"'
+      - 'echo "task:         $(task --version 2>/dev/null || echo MISSING)"'
+      - 'echo "golangci-lint:$(golangci-lint version 2>/dev/null | head -1 || echo missing)"'
+      - 'echo "glyph:        $(glyph --version 2>/dev/null || echo missing)"'
+      - 'echo "ollama:       $(ollama --version 2>/dev/null || echo missing)"'
+      - 'echo "ollama up:    $(curl -sf http://localhost:11434/api/tags >/dev/null 2>&1 && echo yes || echo no)"'
+      - 'echo "nomic model:  $(curl -sf http://localhost:11434/api/tags 2>/dev/null | grep -q nomic-embed-text && echo present || echo missing)"'
+      - 'echo "bun:          $(bun --version 2>/dev/null || echo missing)"'
+
+  setup:
+    desc: Install dependencies and dev tools
+    cmds:
+      - task: deps
+      - task: tools
+
+  deps:
+    desc: Download and tidy Go modules
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  tools:
+    desc: Install dev tools (air for hot reload)
+    cmds:
+      - go install github.com/air-verse/air@latest
+
+  fmt:
+    desc: Format Go code
+    aliases: [format]
+    cmds:
+      - gofmt -w .
+
+  lint:
+    desc: Lint (golangci-lint v2 if present, else go vet + gofmt check)
+    cmds:
+      - |
+        if golangci-lint version 2>/dev/null | grep -qE 'version v?2\.'; then
+          golangci-lint run ./...
+        else
+          echo "note: golangci-lint v2 not found; running go vet + gofmt (install golangci-lint v2 for the full lint set)"
+          go vet ./...
+          test -z "$(gofmt -l .)" || (echo "unformatted files:"; gofmt -l .; exit 1)
+        fi
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  race:
+    desc: Run tests with the race detector
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go test -race ./...
+
+  cov:
+    desc: Run tests with coverage
+    aliases: [coverage]
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out | tail -1
+
+  check:
+    desc: Format, lint, and test (pre-commit gate)
+    aliases: [ci, verify]
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
+
+  build:
+    desc: Build the codemap binary to ./bin
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN}}
+
+  release:
+    desc: Build an optimized, trimmed binary
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN}}
+
+  install:
+    desc: go install codemap to GOPATH/bin
+    cmds:
+      - go install -ldflags "{{.LDFLAGS}}" {{.MAIN}}
+
+  run:
+    desc: Build and run (pass args via CLI_ARGS="...")
+    cmds:
+      - task: build
+      - "{{.BUILD_DIR}}/{{.BINARY_NAME}} {{.CLI_ARGS}}"
+
+  dev:
+    desc: Hot-reload dev loop (air)
+    cmds:
+      - air
+
+  flows:
+    desc: Run glyphrun E2E behavior specs
+    aliases: [e2e]
+    deps: [build]
+    cmds:
+      - glyph run specs/*.yml --format md --progress auto
+
+  site:deps:
+    desc: Install docs (VitePress) dependencies with Bun
+    dir: docs
+    cmds:
+      - bun install
+
+  site:dev:
+    desc: Run the VitePress docs dev server
+    dir: docs
+    cmds:
+      - bun run docs:dev
+
+  site:build:
+    desc: Build the VitePress docs site
+    dir: docs
+    cmds:
+      - bun run docs:build
+
+  ship:
+    desc: Full pre-release gate (check + docs + race + build + e2e)
+    cmds:
+      - task: check
+      - task: race
+      - task: build
+      - task: flows
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}} dist coverage.out coverage.html

@@ -1,0 +1,38 @@
+version: 1
+name: index_status
+intent: |
+    a user can init a project, index a Go file (structure only), and see graph
+    statistics, all against an isolated data directory.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Run() { Helper() }; func Helper() {}' > \"$P/main.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" init >/dev/null; \"$ROOT/bin/codemap\" index --no-embed >/dev/null; \"$ROOT/bin/codemap\" status"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: status
+outcomes:
+    - id: nodes_counted
+      description: status reports a non-empty node count
+      verify:
+        screen:
+            contains: "nodes:"
+    - id: functions_counted
+      description: function kinds are tallied (Run, Helper)
+      verify:
+        screen:
+            contains: "function="
+    - id: go_language
+      description: the project is detected as Go
+      verify:
+        screen:
+            contains: "go="
+contractHash: sha256:ed335e5a0af901a2ad65c0935deaf6fc221c801ba0e2623fdc8c9fd25c11da91

@@ -1,0 +1,27 @@
+version: 1
+name: version
+intent: |
+    codemap reports its version and exits cleanly.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); \"$ROOT/bin/codemap\" version"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 5000
+    - snapshot: version
+outcomes:
+    - id: prints_name
+      description: the output includes the codemap binary name
+      verify:
+        screen:
+            contains: "codemap"
+contractHash: sha256:cfdca8971c109807ccd6730d1df71147eb8d83c38bda5b3de507fc6656e85eb0

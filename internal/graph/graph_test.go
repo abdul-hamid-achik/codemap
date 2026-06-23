@@ -1,0 +1,233 @@
+package graph
+
+import (
+	"errors"
+	"path/filepath"
+	"testing"
+)
+
+func openTest(t *testing.T) *Store {
+	t.Helper()
+	s, err := Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestOpenMigrate(t *testing.T) {
+	s := openTest(t)
+	var v int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != schemaVersion {
+		t.Errorf("user_version = %d, want %d", v, schemaVersion)
+	}
+	// Re-opening an existing DB must be a no-op migration.
+	if err := s.migrate(); err != nil {
+		t.Errorf("re-migrate: %v", err)
+	}
+}
+
+func TestUpsertProject(t *testing.T) {
+	s := openTest(t)
+	id1, err := s.UpsertProject("demo", "/tmp/demo", "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, err := s.UpsertProject("demo", "/tmp/demo2", "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id1 != id2 {
+		t.Errorf("upsert created a new row: %d vs %d", id1, id2)
+	}
+	p, err := s.GetProjectByName("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Path != "/tmp/demo2" {
+		t.Errorf("path = %q, want updated /tmp/demo2", p.Path)
+	}
+	projs, err := s.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projs) != 1 {
+		t.Errorf("ListProjects len = %d, want 1", len(projs))
+	}
+}
+
+func TestGetProjectNotFound(t *testing.T) {
+	s := openTest(t)
+	if _, err := s.GetProjectByName("nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestAddGetNode(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	n := &Node{ProjectID: pid, FilePath: "a.go", Symbol: "Foo", FQN: "pkg.Foo",
+		Kind: KindFunction, Language: "go", StartLine: 1, EndLine: 9, SourceHash: "h"}
+	id, err := s.AddNode(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNode(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Symbol != "Foo" || got.FQN != "pkg.Foo" || got.Kind != KindFunction {
+		t.Errorf("bad node: %+v", got)
+	}
+	if got.CreatedAt == "" || got.UpdatedAt == "" {
+		t.Error("timestamps not stamped")
+	}
+}
+
+func TestGetNodeNotFound(t *testing.T) {
+	s := openTest(t)
+	if _, err := s.GetNode(123); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestFindNodes(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	add := func(file, sym string, start int) {
+		if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: file, Symbol: sym,
+			Kind: KindFunction, Language: "go", StartLine: start, EndLine: start + 1, SourceHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("a.go", "Foo", 1)
+	add("b.go", "Foo", 3)
+	add("a.go", "Bar", 5)
+
+	foos, err := s.FindNodesBySymbol(pid, "Foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foos) != 2 {
+		t.Errorf("Foo count = %d, want 2", len(foos))
+	}
+	inA, err := s.NodesInFile(pid, "a.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inA) != 2 {
+		t.Errorf("a.go count = %d, want 2", len(inA))
+	}
+}
+
+func TestAddEdgeForeignKeyAndCascade(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	a, _ := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "A", Kind: KindFunction, Language: "go", SourceHash: "h"})
+	b, _ := s.AddNode(&Node{ProjectID: pid, FilePath: "b.go", Symbol: "B", Kind: KindFunction, Language: "go", SourceHash: "h"})
+
+	if _, err := s.AddEdge(a, b, EdgeCalls, WeightLSP); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdge(a, 99999, EdgeCalls, WeightLSP); err == nil {
+		t.Error("expected foreign-key error for edge to missing node")
+	}
+
+	if err := s.DeleteNodesInFile(pid, "a.go"); err != nil {
+		t.Fatal(err)
+	}
+	var edges int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM edges").Scan(&edges); err != nil {
+		t.Fatal(err)
+	}
+	if edges != 0 {
+		t.Errorf("edges = %d, want 0 after cascade delete", edges)
+	}
+}
+
+func TestFileHash(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	h, err := s.FileHash(pid, "a.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h != "" {
+		t.Errorf("initial hash = %q, want empty", h)
+	}
+	if err := s.SetFileHash(pid, "a.go", "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFileHash(pid, "a.go", "def"); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ = s.FileHash(pid, "a.go"); h != "def" {
+		t.Errorf("hash = %q, want def", h)
+	}
+}
+
+func TestCallersCallees(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(file, sym string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: file, Symbol: sym, FQN: "p." + sym, Kind: KindFunction, Language: "go", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a, b, c := mk("a.go", "A"), mk("b.go", "B"), mk("c.go", "C")
+	// A->B, C->B (two callers of B); B->C (B calls C)
+	for _, e := range [][2]int64{{a, b}, {c, b}, {b, c}} {
+		if _, err := s.AddEdge(e[0], e[1], EdgeCalls, WeightLSP); err != nil {
+			t.Fatal(err)
+		}
+	}
+	callers, err := s.Callers(pid, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callers) != 2 {
+		t.Errorf("callers of B = %d, want 2", len(callers))
+	}
+	callees, err := s.Callees(pid, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callees) != 1 || callees[0].Symbol != "C" {
+		t.Errorf("callees of B = %+v, want [C]", callees)
+	}
+}
+
+func TestStats(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	a, _ := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "A", Kind: KindFunction, Language: "go", SourceHash: "h"})
+	b, _ := s.AddNode(&Node{ProjectID: pid, FilePath: "b.ts", Symbol: "B", Kind: KindClass, Language: "typescript", SourceHash: "h"})
+	if _, err := s.AddEdge(a, b, EdgeCalls, WeightLSP); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Stats(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Nodes != 2 {
+		t.Errorf("nodes = %d, want 2", st.Nodes)
+	}
+	if st.Edges != 1 {
+		t.Errorf("edges = %d, want 1", st.Edges)
+	}
+	if st.Files != 2 {
+		t.Errorf("files = %d, want 2", st.Files)
+	}
+	if st.Languages["go"] != 1 || st.Languages["typescript"] != 1 {
+		t.Errorf("languages = %v", st.Languages)
+	}
+	if st.Kinds[KindFunction] != 1 || st.Kinds[KindClass] != 1 {
+		t.Errorf("kinds = %v", st.Kinds)
+	}
+}

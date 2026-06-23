@@ -1,0 +1,86 @@
+// Package extract turns source files into structural symbols and references
+// that the indexer stores as graph nodes and edges. Backends — go/parser (pure
+// Go), a headless LSP client, and (optionally) tree-sitter — implement
+// Extractor. The go/parser and LSP backends are pure-Go so release binaries
+// stay CGO_ENABLED=0.
+package extract
+
+import (
+	"path/filepath"
+	"strings"
+)
+
+// Symbol kinds (string values shared with internal/graph node kinds).
+const (
+	KindFile     = "file"
+	KindFunction = "function"
+	KindMethod   = "method"
+	KindType     = "type"
+	KindTest     = "test"
+)
+
+// Reference kinds (string values shared with internal/graph edge types).
+const (
+	RefCalls      = "calls"
+	RefReferences = "references"
+)
+
+// Symbol is a code entity discovered in a file.
+type Symbol struct {
+	Name      string
+	FQN       string // fully qualified name, e.g. "pkg.Type.Method"
+	Kind      string
+	Language  string
+	StartLine int
+	EndLine   int
+	Signature string
+	Docstring string
+	Source    string // raw source text (for embedding + source_hash)
+}
+
+// Reference is a relationship from an enclosing symbol to a named target. The
+// target is by name; resolving it to a concrete node (by FQN/symbol match, or
+// precisely via LSP) is the indexer's job.
+type Reference struct {
+	From string // FQN of the enclosing symbol
+	To   string // referenced name (e.g. the callee)
+	Kind string
+	Line int
+}
+
+// FileResult is everything extracted from one file.
+type FileResult struct {
+	Path       string
+	Language   string
+	Imports    []string
+	Symbols    []Symbol
+	References []Reference
+}
+
+// Extractor extracts structure from a single file's source.
+type Extractor interface {
+	// Language is the codemap language id this backend handles ("go", ...).
+	Language() string
+	// ExtractFile parses src (the contents of relPath) into a FileResult.
+	ExtractFile(relPath string, src []byte) (*FileResult, error)
+}
+
+// LanguageForPath maps a file path to a codemap language id, or "" if unknown.
+func LanguageForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go":
+		return "go"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx", ".mjs", ".cjs":
+		return "javascript"
+	case ".py":
+		return "python"
+	case ".lua":
+		return "lua"
+	case ".rb":
+		return "ruby"
+	default:
+		return ""
+	}
+}

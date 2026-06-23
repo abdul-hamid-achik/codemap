@@ -1,0 +1,45 @@
+# Binaries
+/codemap
+/bin/
+/dist/
+*.exe
+*.out
+*.test
+
+# Go
+/vendor/
+*.prof
+coverage.txt
+coverage.html
+coverage.out
+
+# codemap local data (XDG dirs live outside the repo, but ignore any local fallback/test dirs)
+/.codemap/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Glyphrun E2E artifacts / snapshots scratch
+/.glyphrun/
+*.snap.tmp
+
+# VitePress docs build
+/docs/.vitepress/dist/
+/docs/.vitepress/cache/
+node_modules/
+
+# Editor / OS / agent runtime
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+.claude/
+
+# Env / secrets — never commit
+.env
+.env.*
+!.env.example
