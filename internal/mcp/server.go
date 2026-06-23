@@ -77,6 +77,12 @@ type symbolInput struct {
 	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+type callersInput struct {
+	Symbol  string `json:"symbol" jsonschema:"the symbol name to look up"`
+	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"use the language server (gopls) for exact callers (Go) — slower, but not inflated by same-named symbols"`
+}
+
 type impactInput struct {
 	Symbol string `json:"symbol" jsonschema:"the symbol to analyze"`
 	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
@@ -113,7 +119,7 @@ func (s *Server) register() {
 	}, s.handleSemantic)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callers",
-		Description: "List the functions/methods that call a given symbol.",
+		Description: "List the functions/methods that call a given symbol. Pass precise=true for exact, gopls-resolved callers (Go) instead of the fast name-based graph.",
 	}, s.handleCallers)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callees",
@@ -159,7 +165,11 @@ func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, 
 	return result(rep, err)
 }
 
-func (s *Server) handleCallers(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, in callersInput) (*sdkmcp.CallToolResult, any, error) {
+	if in.Precise {
+		rep, err := s.svc.PreciseCallers(ctx, cwdOf(in.Path), in.Symbol)
+		return result(rep, err)
+	}
 	rep, err := s.svc.Callers(cwdOf(in.Path), in.Symbol)
 	return result(rep, err)
 }

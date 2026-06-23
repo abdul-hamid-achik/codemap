@@ -3,9 +3,11 @@ package mcp
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -102,5 +104,58 @@ func TestMCPServer(t *testing.T) {
 	}
 	if txt := textOf(res2); !strings.Contains(txt, "Run") {
 		t.Errorf("callers of Helper should include Run: %s", txt)
+	}
+}
+
+func TestMCPPreciseCallers(t *testing.T) {
+	if _, err := exec.LookPath("gopls"); err != nil {
+		t.Skip("gopls not installed")
+	}
+	// Isolate only the data dir; gopls uses the real (persistent) cache.
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/m\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package m\n\ntype T struct{}\n\nfunc (t T) Helper() {}\n\nfunc Run() { var x T; x.Helper() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := app.NewService(sess).Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_callers",
+		Arguments: map[string]any{"path": proj, "symbol": "Helper", "precise": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("precise callers tool error: %s", textOf(res))
+	}
+	if txt := textOf(res); !strings.Contains(txt, "Run") {
+		t.Errorf("precise callers of Helper should include Run: %s", txt)
 	}
 }

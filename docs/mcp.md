@@ -32,7 +32,7 @@ directory) and return JSON.
 | `codemap_index` | Index/reindex a project (`reindex`, `no_embed`) |
 | `codemap_status` | Index statistics |
 | `codemap_semantic` | Semantic search by meaning (`query`, `top_k`) |
-| `codemap_callers` | Functions/methods that call a symbol |
+| `codemap_callers` | Functions/methods that call a symbol (`precise: true` → exact gopls callers for Go) |
 | `codemap_callees` | Functions/methods a symbol calls |
 | `codemap_impact` | Callers + blast radius + covering tests (`depth`) |
 | `codemap_hotspots` | Most-referenced symbols (`top`) |

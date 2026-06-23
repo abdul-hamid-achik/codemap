@@ -292,6 +292,14 @@
   DEMO on codemap: callers Close --lsp = 7 exact vs by-name = 50 inflated; NewService/AddNode
   precise. docs/cli.md updated. All green, fmt/vet clean. COMMIT+PUSH. **NEXT:** callees --lsp,
   MCP precise option, or wire precise edges into the indexer; else polish.
+- 2026-06-23 #29 (cron) — Precise callers now available to AGENTS via MCP. codemap_callers
+  gained a `precise` param (callersInput) routing to Service.PreciseCallers (gopls). Tool
+  description + docs/mcp.md updated. New gopls-gated MCP test connects a real in-memory client,
+  calls codemap_callers precise=true on a method, asserts exact caller (skips in CI; isolates
+  only CODEMAP_DATA so gopls uses the real cache). All green, fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** callees --lsp (needs callHierarchy/outgoingCalls on the client); or wire precise
+  edges into the indexer; else polish. The three pillars (graphs/vectors/LSP) all deliver
+  user- AND agent-visible value now.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
