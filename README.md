@@ -148,6 +148,21 @@ Add `--json` to any query command for machine-readable output (for agents/script
 
 All query commands accept `--json`.
 
+## Accuracy: name-based graph vs precise (LSP)
+
+codemap's graph is **name-based** by default — fast, offline, and language-agnostic. It resolves
+calls *within* a package precisely (Go), but a cross-package method call like `x.Close()` links to
+*every* method named `Close`, because resolving the receiver's type needs a type-checker. Concretely:
+
+- `callers` / `callees` over-match same-named methods — pass `--lsp` (gopls) for **exact** results.
+- `hotspots` can rank ubiquitous method names (`String`, `Error`) high with identical, inflated
+  in-degrees (one per same-named definition).
+- `orphans` finds call-graph dead ends; it can't see callers reached via interface dispatch or
+  reflection, so treat its output as *candidates*, not proof.
+
+This is the usual trade-off for an instant, dependency-free index. When you need exactness on Go,
+reach for `--lsp`; precise, graph-wide resolution (pure-Go `go/types`) is planned.
+
 ## Use it from an agent (MCP)
 
 codemap is a stdio MCP server. Register it with any MCP client:

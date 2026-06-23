@@ -528,6 +528,20 @@
   present, else `go install` v2 into bin/ (gitignored, cached) and run it; vet+gofmt only when
   offline — so lint-only issues are caught locally before pushing.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #50 (cron, polish-first) — **Dogfood on a large real repo + honest accuracy docs.**
+  Indexed `~/projects/blueprint` (83 own files, 1941 nodes, 7144 edges) in **0.5s** — fast,
+  vendored deps correctly excluded, no errors. BUT it exposed the by-name inflation starkly: top
+  `hotspots` were 5 different `.String` methods all tied at in-degree **128** (every `x.String()`
+  call attributed to every `String` method); `orphans` flagged interface-dispatch methods
+  (`ast.File.nodeType`) as dead code. Root cause: name-based resolution has no receiver type → the
+  proper fix is graph-wide precise resolution (pure-Go `go/types`), a backend epic the directive
+  steers away from rushing; risky heuristics (same-package for methods) mis-attribute. So the SAFE,
+  directive-aligned move = **be honest**: added an "Accuracy: name-based graph vs precise (LSP)"
+  section to README + accuracy notes to AGENTS (agent guidance) and docs/cli.md, covering
+  hotspots/impact over-counting and orphans-as-candidates, pointing to `--lsp` and the planned
+  go/types fix. Docs-only (CI green trivially). **TOP NEXT priority: pure-Go `go/types` call
+  resolution** to make the default graph accurate (replaces by-name method edges with precise ones;
+  falls back to by-name where a package doesn't type-check) — the clear highest-value backend item.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

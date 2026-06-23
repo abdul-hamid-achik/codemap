@@ -175,6 +175,12 @@ task install         # go install ./cmd/codemap
 - CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`), `status`, `callers`,
   `callees`, `path`, `impact` (`--depth`), `hotspots`/`orphans` (`--top`), `semantic`
   (`--top`), `serve`, `studio` — all query commands accept `--json`.
+- **Accuracy model** (be honest with users): the graph is name-based — intra-package calls
+  resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
+  method (no type info). So `hotspots`/`impact` can over-count common names (`String`, `Error`),
+  and `orphans` misses interface-dispatch/reflection callers (results are *candidates*). Use
+  `callers`/`callees --lsp` (or `precise:true`) for exact Go resolution; graph-wide precise
+  resolution via `go/types` is the planned fix.
 
 ### Config precedence (highest → lowest)
 1. Env vars `CODEMAP_*` (e.g. `CODEMAP_CONFIG`, `CODEMAP_DATA`, `CODEMAP_EMBEDDING_MODEL`,

@@ -28,6 +28,11 @@ over-match). `--lsp` asks the language server (gopls) for *exact* callers — e.
 might list every caller of any `Close`, while `callers Close --lsp` lists only the callers of
 the specific resolved method.
 
+The same name-based model affects the analysis commands: `hotspots` can rank ubiquitous method
+names (`String`, `Error`) high with inflated counts, and `orphans` can't see callers reached via
+interface dispatch or reflection — treat its output as dead-code *candidates*. See
+[Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-graph-vs-precise-lsp).
+
 ## Analysis
 
 | Command | Description |
