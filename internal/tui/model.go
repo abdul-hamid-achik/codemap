@@ -67,6 +67,12 @@ type indexedMsg struct {
 	rep *app.IndexReport
 	err error
 }
+type preciseDetailMsg struct {
+	symbol  string
+	callers []app.SymbolRef
+	callees []app.SymbolRef
+	err     error
+}
 
 // Model is the studio TUI state.
 type Model struct {
@@ -102,6 +108,7 @@ type Model struct {
 	graphSym     string
 	graphCallers []app.SymbolRef
 	graphCallees []app.SymbolRef
+	graphPrecise bool // hub detail is showing gopls-precise relations
 }
 
 // NewModel builds the studio model over a session.
@@ -176,6 +183,14 @@ func (m Model) semanticCmd(q string) tea.Cmd {
 	}
 }
 
+func (m Model) preciseDetailCmd(hub app.HotspotRef) tea.Cmd {
+	ctx, svc, dir := m.ctx, m.service, m.startDir
+	return func() tea.Msg {
+		callers, callees, err := svc.PreciseRelationsAt(ctx, dir, hub.Symbol, hub.File, hub.StartLine)
+		return preciseDetailMsg{symbol: hub.Symbol, callers: callers, callees: callees, err: err}
+	}
+}
+
 func (m Model) reindexCmd() tea.Cmd {
 	ctx, svc, dir := m.ctx, m.service, m.startDir
 	return func() tea.Msg {
@@ -239,6 +254,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphSym = msg.symbol
 		m.graphCallers = msg.callers
 		m.graphCallees = msg.callees
+		m.graphPrecise = false
+		return m, nil
+
+	case preciseDetailMsg:
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		m.errMsg = ""
+		m.graphSym = msg.symbol
+		m.graphCallers = msg.callers
+		m.graphCallees = msg.callees
+		m.graphPrecise = true
+		m.statusMsg = fmt.Sprintf("precise via gopls: %d callers, %d callees", len(msg.callers), len(msg.callees))
 		return m, nil
 
 	case indexedMsg:
@@ -399,12 +428,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.graphSel > 0 {
 				m.graphSel--
+				m.graphPrecise = false
 				return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
 			}
 		case "down", "j":
 			if m.graphSel < len(m.graphHubs)-1 {
 				m.graphSel++
+				m.graphPrecise = false
 				return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
+			}
+		case "p":
+			// recompute the selected hub's relations precisely via gopls
+			if len(m.graphHubs) > 0 {
+				m.statusMsg = "resolving precise (gopls)…"
+				return m, m.preciseDetailCmd(m.graphHubs[m.graphSel])
 			}
 		case "enter":
 			// drill into the selected hub's full impact analysis

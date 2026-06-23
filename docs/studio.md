@@ -28,6 +28,7 @@
 | `1`–`4` / `tab` / `shift+tab` | Switch tabs |
 | `↑` / `↓` | Select a hub (Graph), a result (Search), or a blast-radius node (Impact) |
 | `enter` | Drill the selection into Impact (any of Graph / Search / Impact) · or run the query after editing the text |
+| `p` | (Graph) recompute the selected hub's callers/callees precisely via gopls (Go) |
 | `ctrl+r` | Reindex the project (structure-only) and refresh, without leaving studio |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |
 

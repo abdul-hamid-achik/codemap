@@ -316,6 +316,16 @@
   Docs-only; go build + VitePress build both green. COMMIT+PUSH. **NEXT:** studio precise
   toggle (needs node-specific resolution by file+line, not just name, to disambiguate); or
   wire precise edges into the indexer; else polish.
+- 2026-06-23 #32 (cron, polish-first) — ★ LSP now in the studio TUI. Refactored precise queries
+  into preciseRelations(hintFile,hintLine) (one gopls session, both directions, node-specific
+  resolution by file:line to disambiguate same-named hubs) + PreciseRelationsAt + nonNil helper;
+  PreciseCallers/Callees delegate (existing gopls tests still pass). studio Graph: `p` recomputes
+  the selected hub's callers/callees precisely via gopls; header/sections show "precise · gopls";
+  nav reverts to fast by-name. 1 TUI test (toggle + apply + revert). studio.yml extended (go.mod
+  added so gopls resolves; press p; wait "via gopls"; snapshot graph_precise shows the badge).
+  All units + 5 E2E green, fmt/vet clean. COMMIT+PUSH. studio now demonstrates all three pillars
+  (graphs/vectors/LSP). **NEXT:** wire precise edges into the indexer (make default graph
+  accurate), or polish; v0.1 feature-complete.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

@@ -247,107 +247,130 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 // PreciseCallers computes exact callers of a Go symbol using gopls callHierarchy
 // (no by-name inflation). Go-only for now; errors if gopls is unavailable.
 func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
-	return svc.preciseCallHierarchy(ctx, cwd, symbol, true)
+	c, _, project, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
+	if err != nil {
+		return nil, err
+	}
+	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(c)}, nil
 }
 
 // PreciseCallees computes exact callees of a Go symbol using gopls callHierarchy.
 func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
-	return svc.preciseCallHierarchy(ctx, cwd, symbol, false)
+	_, ce, project, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
+	if err != nil {
+		return nil, err
+	}
+	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(ce)}, nil
 }
 
-// preciseCallHierarchy resolves the symbol's location via the graph, then drives
-// gopls (documentSymbol → prepareCallHierarchy → in/out calls). incoming=true
-// returns callers; false returns callees.
-func (svc *Service) preciseCallHierarchy(ctx context.Context, cwd, symbol string, incoming bool) (*RelationReport, error) {
+// PreciseRelationsAt returns both exact callers and callees of the symbol whose
+// declaration is at file:line (to disambiguate same-named symbols), in one gopls
+// session. Used by the studio precise toggle.
+func (svc *Service) PreciseRelationsAt(ctx context.Context, cwd, symbol, file string, line int) (callers, callees []SymbolRef, err error) {
+	c, ce, _, err := svc.preciseRelations(ctx, cwd, symbol, file, line)
+	return c, ce, err
+}
+
+// preciseRelations resolves the symbol's node via the graph (preferring the one
+// at hintFile:hintLine), then drives gopls (documentSymbol → prepareCallHierarchy
+// → incoming + outgoing) in a single session.
+func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile string, hintLine int) (callers, callees []SymbolRef, project string, err error) {
 	g, err := svc.s.Graph()
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
-	_, name, err := svc.resolveProject(cwd)
-	if err != nil {
-		return nil, err
+	if _, project, err = svc.resolveProject(cwd); err != nil {
+		return nil, nil, project, err
 	}
-	rep := &RelationReport{Symbol: symbol, Project: name, Results: []SymbolRef{}}
-	p, err := g.GetProjectByName(name)
+	p, err := g.GetProjectByName(project)
 	if errors.Is(err, graph.ErrNotFound) {
-		return rep, nil
+		return nil, nil, project, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, project, err
 	}
 
 	nodes, err := g.FindNodesBySymbol(p.ID, symbol)
 	if err != nil {
-		return nil, err
+		return nil, nil, project, err
 	}
 	var node *graph.Node
 	for i := range nodes {
-		if nodes[i].Language == "go" {
-			node = &nodes[i]
+		if nodes[i].Language != "go" {
+			continue
+		}
+		if hintFile != "" && nodes[i].FilePath == hintFile && (hintLine == 0 || nodes[i].StartLine == hintLine) {
+			node = &nodes[i] // exact match for the requested declaration
 			break
+		}
+		if node == nil {
+			node = &nodes[i] // first Go node as fallback
 		}
 	}
 	if node == nil {
-		return nil, fmt.Errorf("precise queries currently support Go only (no Go symbol named %q)", symbol)
+		return nil, nil, project, fmt.Errorf("precise queries currently support Go only (no Go symbol named %q)", symbol)
 	}
 	if _, err := exec.LookPath("gopls"); err != nil {
-		return nil, fmt.Errorf("gopls not found on PATH (required for --lsp)")
+		return nil, nil, project, fmt.Errorf("gopls not found on PATH (required for --lsp)")
 	}
 
 	root := p.Path
 	absFile := filepath.Join(root, node.FilePath)
 	src, err := os.ReadFile(absFile)
 	if err != nil {
-		return nil, err
+		return nil, nil, project, err
 	}
 
 	cl, err := lsp.Spawn(ctx, "gopls")
 	if err != nil {
-		return nil, err
+		return nil, nil, project, err
 	}
 	defer cl.Close()
 	if err := cl.Initialize(ctx, root); err != nil {
-		return nil, err
+		return nil, nil, project, err
 	}
 	uri := lsp.URI(absFile)
 	if err := cl.DidOpen(uri, "go", string(src)); err != nil {
-		return nil, err
+		return nil, nil, project, err
 	}
-	// callHierarchy needs the whole workspace analyzed; wait for gopls to finish
-	// its initial load (or time out and try anyway).
+	// callHierarchy needs the whole workspace analyzed; wait for gopls to load.
 	cl.WaitReady(ctx, 20*time.Second)
 
 	syms, err := cl.DocumentSymbols(ctx, uri)
 	if err != nil {
-		return nil, err
+		return nil, nil, project, err
 	}
 	pos, ok := findSymbolPos(syms, symbol, node.StartLine)
 	if !ok {
-		return rep, nil
+		return nil, nil, project, nil
 	}
 	items, err := cl.PrepareCallHierarchy(ctx, uri, pos)
 	if err != nil || len(items) == 0 {
-		return rep, err
+		return nil, nil, project, err
 	}
 
-	if incoming {
-		calls, err := cl.IncomingCalls(ctx, items[0])
-		if err != nil {
-			return nil, err
-		}
-		for _, c := range calls {
-			rep.Results = append(rep.Results, itemToRef(c.From, root))
-		}
-	} else {
-		calls, err := cl.OutgoingCalls(ctx, items[0])
-		if err != nil {
-			return nil, err
-		}
-		for _, c := range calls {
-			rep.Results = append(rep.Results, itemToRef(c.To, root))
-		}
+	in, err := cl.IncomingCalls(ctx, items[0])
+	if err != nil {
+		return nil, nil, project, err
 	}
-	return rep, nil
+	out, err := cl.OutgoingCalls(ctx, items[0])
+	if err != nil {
+		return nil, nil, project, err
+	}
+	for _, c := range in {
+		callers = append(callers, itemToRef(c.From, root))
+	}
+	for _, c := range out {
+		callees = append(callees, itemToRef(c.To, root))
+	}
+	return callers, callees, project, nil
+}
+
+func nonNil(s []SymbolRef) []SymbolRef {
+	if s == nil {
+		return []SymbolRef{}
+	}
+	return s
 }
 
 func itemToRef(item lsp.CallHierarchyItem, root string) SymbolRef {

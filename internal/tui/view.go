@@ -66,7 +66,7 @@ func (m Model) footer() string {
 	var hint string
 	switch m.active {
 	case tabGraph:
-		hint = "↑/↓ select · enter → impact · ctrl+r reindex · 1-4 tabs · ctrl+c quit"
+		hint = "↑/↓ select · enter → impact · p precise(gopls) · ctrl+r reindex · ctrl+c quit"
 	case tabSearch:
 		hint = "type · enter search/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
 	case tabImpact:
@@ -155,15 +155,21 @@ func (m Model) hubDetail(w, h int) string {
 	if m.graphSel < len(m.graphHubs) {
 		header = displayName(m.graphHubs[m.graphSel].FQN, m.graphHubs[m.graphSel].Symbol)
 	}
-	b.WriteString(symStyle.Render(header) + "\n\n")
+	hdr := symStyle.Render(header)
+	mark := ""
+	if m.graphPrecise {
+		hdr += "  " + countStyle.Render("precise · gopls")
+		mark = " · gopls"
+	}
+	b.WriteString(hdr + "\n\n")
 	budget := (h - 5) / 2
 	if budget < 1 {
 		budget = 1
 	}
-	b.WriteString(title(fmt.Sprintf("Called by (%d)", len(m.graphCallers))) + "\n")
+	b.WriteString(title(fmt.Sprintf("Called by (%d)%s", len(m.graphCallers), mark)) + "\n")
 	b.WriteString(refLines(m.graphCallers, budget, w))
 	b.WriteString("\n")
-	b.WriteString(title(fmt.Sprintf("Calls (%d)", len(m.graphCallees))) + "\n")
+	b.WriteString(title(fmt.Sprintf("Calls (%d)%s", len(m.graphCallees), mark)) + "\n")
 	b.WriteString(refLines(m.graphCallees, budget, w))
 	return b.String()
 }

@@ -232,6 +232,30 @@ func TestImpactDrillIntoBlastNode(t *testing.T) {
 	}
 }
 
+func TestGraphPreciseToggle(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", FQN: "graph.Store.Close", File: "internal/graph/store.go", StartLine: 95, InDegree: 45}}})
+	// p requests a precise recompute for the selected hub.
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "p", Code: 'p'}))
+	if cmd == nil {
+		t.Error("p should fire a precise-detail command")
+	}
+	if !strings.Contains(u.(Model).statusMsg, "precise") {
+		t.Errorf("status = %q, want a 'resolving precise' note", u.(Model).statusMsg)
+	}
+	// precise results mark the detail as precise.
+	u2, _ := u.(Model).Update(preciseDetailMsg{symbol: "Close", callers: []app.SymbolRef{{Symbol: "X"}}})
+	mm := u2.(Model)
+	if !mm.graphPrecise || len(mm.graphCallers) != 1 {
+		t.Errorf("precise detail not applied: precise=%v callers=%d", mm.graphPrecise, len(mm.graphCallers))
+	}
+	// navigating away reverts to fast by-name detail.
+	u3, _ := mm.Update(graphDetailMsg{symbol: "Close", callers: []app.SymbolRef{{Symbol: "X"}, {Symbol: "Y"}}})
+	if u3.(Model).graphPrecise {
+		t.Error("graphPrecise should reset after a by-name detail update")
+	}
+}
+
 func TestReindexKey(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.graphLoaded = true

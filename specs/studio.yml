@@ -7,7 +7,7 @@ target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper(); Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Run(); Helper() }' > \"$P/b.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed >/dev/null 2>&1; \"$ROOT/bin/codemap\" studio"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'module example.com/app\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper(); Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Run(); Helper() }' > \"$P/b.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed >/dev/null 2>&1; \"$ROOT/bin/codemap\" studio"
     cwd: "."
 terminal:
     cols: 120
@@ -24,6 +24,12 @@ steps:
             contains: "Hubs"
         timeoutMs: 8000
     - snapshot: graph
+    - press: "p"
+    - wait:
+        screen:
+            contains: "via gopls"
+        timeoutMs: 15000
+    - snapshot: graph_precise
     - press: "2"
     - wait:
         screen:
