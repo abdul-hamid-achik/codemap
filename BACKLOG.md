@@ -596,6 +596,12 @@
   the blast budget reserving an extra line when tests exist. Test: `TestImpactNamesCoveringTests`.
   Full suite + lint v2 (0) + studio E2E green; fmt clean. COMMIT+PUSH.
   **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
+- 2026-06-23 #57 (cron, polish-first) — **`path` now has E2E coverage** (it was the one graph command
+  with no end-to-end demonstration). The `query` spec's project already forms a Top→Run→Helper call
+  chain, so added `codemap path Top Helper` + a `call_path_traced` outcome asserting the rendered
+  chain `Top → Run → Helper`. Demonstrates the shortest-call-path graph capability end-to-end and
+  guards its output. 6/6 query outcomes pass; re-stamped. Spec-only (no Go change; CI green). COMMIT+PUSH.
+  **NEXT:** wire the LSP backend into the indexer for TS/Python, pure-Go `go/types` resolution.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

@@ -2,13 +2,13 @@ version: 1
 name: query
 intent: |
     after indexing a small project, the call-graph query commands (callers,
-    impact, hotspots) return meaningful results, and symbols/find render an
-    outline with signatures.
+    impact, hotspots, path) return meaningful results, and symbols/find render
+    an outline with signatures.
 target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; printf '%s' 'package app; import \"testing\"; func TestHelper(t *testing.T) { Helper() }' > \"$P/a_test.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5; echo '== symbols =='; \"$CM\" symbols a.go; echo '== find =='; \"$CM\" find Run"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; printf '%s' 'package app; import \"testing\"; func TestHelper(t *testing.T) { Helper() }' > \"$P/a_test.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5; echo '== symbols =='; \"$CM\" symbols a.go; echo '== find =='; \"$CM\" find Run; echo '== path =='; \"$CM\" path Top Helper"
     cwd: "."
 terminal:
     cols: 100
@@ -46,4 +46,9 @@ outcomes:
       verify:
         screen:
             contains: "covering tests"
-contractHash: sha256:619321e6a9b10ebe395e2b3b27d37870dd34cf693814c67af38e9d8f310ae9a7
+    - id: call_path_traced
+      description: path traces the shortest call chain between two symbols
+      verify:
+        screen:
+            contains: "Top → Run → Helper"
+contractHash: sha256:0ff1726239fd6139010854ec7ff42b387a3311beb7ec9cf9f44f9804c0e27f6b
