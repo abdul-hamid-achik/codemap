@@ -118,6 +118,62 @@ func TestMCPServer(t *testing.T) {
 	}
 }
 
+func TestMCPNotIndexedSignal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// A real project that is deliberately never indexed.
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Every query tool must report the project isn't indexed rather than
+	// returning empty results that read as a real "no results" answer.
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"codemap_callers", map[string]any{"path": proj, "symbol": "Run"}},
+		{"codemap_impact", map[string]any{"path": proj, "symbol": "Run"}},
+		{"codemap_find", map[string]any{"path": proj, "query": "Run"}},
+		{"codemap_semantic", map[string]any{"path": proj, "query": "run"}},
+		{"codemap_hotspots", map[string]any{"path": proj}},
+	} {
+		res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.args})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.tool, err)
+		}
+		txt := textOf(res)
+		if !strings.Contains(txt, `"indexed": false`) || !strings.Contains(txt, "codemap_index") {
+			t.Errorf("%s on an unindexed project should signal not-indexed, got: %s", tc.tool, txt)
+		}
+	}
+}
+
 func TestMCPPreciseCallers(t *testing.T) {
 	if _, err := exec.LookPath("gopls"); err != nil {
 		t.Skip("gopls not installed")

@@ -242,11 +242,17 @@ func (s *Server) handleStatus(_ context.Context, _ *sdkmcp.CallToolRequest, in p
 }
 
 func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, in semanticInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.Semantic(ctx, cwdOf(in.Path), in.Query, in.TopK)
 	return result(rep, err)
 }
 
 func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, in symbolQueryInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	if in.Precise {
 		rep, err := s.svc.PreciseCallers(ctx, cwdOf(in.Path), in.Symbol)
 		return result(rep, err)
@@ -256,6 +262,9 @@ func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 }
 
 func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, in symbolQueryInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	if in.Precise {
 		rep, err := s.svc.PreciseCallees(ctx, cwdOf(in.Path), in.Symbol)
 		return result(rep, err)
@@ -265,36 +274,57 @@ func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 }
 
 func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in impactInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
 }
 
 func (s *Server) handleHotspots(_ context.Context, _ *sdkmcp.CallToolRequest, in limitInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.Hotspots(cwdOf(in.Path), in.Top)
 	return result(rep, err)
 }
 
 func (s *Server) handleOrphans(_ context.Context, _ *sdkmcp.CallToolRequest, in limitInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.Orphans(cwdOf(in.Path), in.Top)
 	return result(rep, err)
 }
 
 func (s *Server) handlePath(_ context.Context, _ *sdkmcp.CallToolRequest, in pathQueryInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.Path(cwdOf(in.Path), in.From, in.To)
 	return result(rep, err)
 }
 
 func (s *Server) handleSymbols(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolsInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.Symbols(cwdOf(in.Path), in.File)
 	return result(rep, err)
 }
 
 func (s *Server) handleFind(_ context.Context, _ *sdkmcp.CallToolRequest, in findInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.FindSymbols(cwdOf(in.Path), in.Query, in.Top)
 	return result(rep, err)
 }
 
 func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in sourceInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol)
 	return result(rep, err)
 }
@@ -335,6 +365,28 @@ func (s *Server) handleAnnotations(_ context.Context, _ *sdkmcp.CallToolRequest,
 }
 
 // ---- helpers ----
+
+// notIndexed short-circuits a query handler when the project at path hasn't been
+// indexed yet: it returns a structured {indexed:false,…} result so an agent gets a
+// clear "call codemap_index first" signal instead of empty results that read as
+// real "no callers" / "no matches" answers. stop is false when the project is
+// indexed and the handler should proceed normally.
+func (s *Server) notIndexed(path string) (res *sdkmcp.CallToolResult, payload any, stop bool) {
+	indexed, name, err := s.svc.Indexed(cwdOf(path))
+	if err != nil {
+		r, v, _ := result(nil, err)
+		return r, v, true
+	}
+	if !indexed {
+		r, v, _ := result(map[string]any{
+			"project": name,
+			"indexed": false,
+			"note":    "project not indexed — call codemap_index first",
+		}, nil)
+		return r, v, true
+	}
+	return nil, nil, false
+}
 
 func cwdOf(path string) string {
 	if path != "" {

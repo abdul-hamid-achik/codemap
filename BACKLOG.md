@@ -727,6 +727,19 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #76 (mcp/agent polish) — **MCP query tools signal "not indexed" instead of empty results.**
+  Completes the cold-start theme on the surface the harness vision cares most about: agents. Before,
+  `codemap_callers`/`codemap_impact`/`codemap_find`/etc. on a never-indexed project returned empty
+  arrays an agent would read as a real "no callers" / "no matches" answer (the MCP counterpart of the
+  CLI #74 and studio #75 fixes). Added an `s.notIndexed(path)` guard (reusing `Service.Indexed` from
+  #74) that short-circuits with a structured `{project, indexed:false, note:"project not indexed —
+  call codemap_index first"}`; wired into all 10 query handlers (semantic, callers, callees, impact,
+  hotspots, orphans, path, symbols, find, source). Leaves index/init/status/projects/docs/annotate
+  alone. Semantic still composes: unindexed → "call codemap_index"; indexed-but-unembedded → the #73
+  "no embeddings" note. Test `TestMCPNotIndexedSignal` drives 5 tools through the in-memory MCP
+  transport against an un-indexed project and asserts each returns `"indexed": false` + the
+  codemap_index hint. Full suite + lint v2 (0) green; fmt clean. COMMIT+PUSH. **Honest cold-start
+  messaging now complete on ALL THREE surfaces: CLI (#74), studio (#75), MCP (#76).**
 - 2026-06-23 #75 (studio polish) — **studio Impact & Search tabs show the cold-start hint too.** Graph
   and Metrics already short-circuited to "no index yet — press ctrl+r to index, or run 'codemap index'"
   on an un-indexed project, but Impact and Search did not: they invited you to "type a symbol and press
