@@ -18,6 +18,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	mcpserver "github.com/abdul-hamid-achik/codemap/internal/mcp"
+	"github.com/abdul-hamid-achik/codemap/internal/tui"
 	"github.com/abdul-hamid-achik/codemap/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -38,7 +39,10 @@ vector search (veclite) and exposes both as a unified query layer.
 Three surfaces over one store: a CLI (with --json for agents), an MCP server
 (codemap serve), and the interactive studio TUI (codemap studio).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return cmd.Help()
+		if !isInteractiveTerminal() {
+			return cmd.Help()
+		}
+		return runStudio(cmd, args)
 	},
 }
 
@@ -52,11 +56,14 @@ var versionCmd = &cobra.Command{
 	},
 }
 
-// notImplemented is a placeholder for command handlers that land in later
-// build-loop iterations (see BACKLOG.md). It keeps the CLI surface visible and
-// the binary buildable while the internals are filled in.
-func notImplemented(feature string) error {
-	return fmt.Errorf("%s is not implemented yet (see BACKLOG.md)", feature)
+// isInteractiveTerminal reports whether both stdin and stdout are TTYs.
+func isInteractiveTerminal() bool {
+	so, err1 := os.Stdout.Stat()
+	si, err2 := os.Stdin.Stat()
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return so.Mode()&os.ModeCharDevice != 0 && si.Mode()&os.ModeCharDevice != 0
 }
 
 var (
@@ -92,7 +99,7 @@ JSON-RPC framing.`,
 		Aliases: []string{"browse"},
 		Short:   "Open the interactive studio TUI (Graph / Metrics / Impact / Search)",
 		Args:    cobra.MaximumNArgs(1),
-		RunE:    func(cmd *cobra.Command, args []string) error { return notImplemented("studio") },
+		RunE:    runStudio,
 	}
 )
 
@@ -197,6 +204,19 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("  kinds:     %s\n", formatCounts(rep.Kinds))
 	}
 	return nil
+}
+
+func runStudio(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	if len(args) > 0 {
+		cwd = args[0]
+	}
+	return tui.Run(cmd.Context(), sess, cwd)
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {

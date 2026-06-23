@@ -133,6 +133,26 @@
   `snapshot:` steps are debug-only. **NEXT:** studio TUI (E4) — start E4.1 shell (Charm v2,
   charm.land paths!) + E4.4 Impact tab (easiest). Validate ntcharts v2 build EARLY (risk R1:
   replace-directive) when adding E4.2 Metrics. Then LSP (E2), hybrid queries (E3), docs (E0.5).
+- 2026-06-23 #13 (USER REQUEST) — Published the repo. git init (was not a repo), fixed
+  .gitignore to exclude /bin/ and .claude/ (caught bin/codemap staged), committed (43 files,
+  no secrets/binaries). `gh repo create abdul-hamid-achik/codemap --public --push`. Set
+  `HOMEBREW_TAP_TOKEN` Actions secret from ~/.config/secrets/env (piped via stdin, value never
+  printed/logged). ★ CI ran on push and PASSED: test+race+build+coverage (2m35s) and
+  golangci-lint v2 (48s, first real v2 run — clean). Repo PUBLIC, both workflows active.
+  → Q-publish resolved; E6.4 unblocked (tag held for everything-scope, rc on request).
+  **NEXT (resume feature build):** studio TUI (E4) — E4.1 shell + E4.4 Impact tab, charm.land
+  v2 paths, validate ntcharts v2 (R1) when adding E4.2. Then LSP (E2), hybrid (E3), docs (E0.5).
+- 2026-06-23 #14 (cron) — studio TUI (E4). Mirrored vecgrep's Bubble Tea v2 patterns
+  (tea.NewView+AltScreen, tea.KeyPressMsg/msg.String(), tea.WindowSizeMsg, lipgloss v2 styles,
+  bubbles v2 textinput). Built internal/tui: theme/model/view/run + 7 tests. Tabbed shell
+  (Graph/Metrics/Impact/Search), tab+shift+tab+ctrl+c, async status/semantic/callers via
+  tea.Cmd→Msg. Metrics = ASCII bar charts over Stats (no ntcharts dep yet). Impact = symbol→
+  callers. Search = semantic. Graph = placeholder. Wired `studio` cmd + interactive-default
+  launch (non-TTY→help, so scripts/CI safe). Deps: charm.land bubbletea v2.0.7/lipgloss
+  v2.0.4/bubbles v2.1.0. All tests green, build+vet+fmt clean. → E4.1/E4.4/E4.5 done, E4.2
+  partial (ASCII bars). COMMIT+PUSH this increment (repo is live).
+  **NEXT:** E4.2 real ntcharts v2 charts (validate R1 first) + E4.3 graph view; then LSP (E2),
+  hybrid impact (E3), docs scaffold (E0.5). TUI glyphrun spec once it's richer.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -197,9 +217,11 @@
 ## Open questions for user (non-blocking; sensible defaults taken above)
 - [!] **Q-CGO** — OK to ship v0.1 release binaries pure-Go (LSP + go/parser) with tree-sitter
   deferred to 0.2 (per TD1)? Or pull tree-sitter into 0.1 (accept CGO + zig-cc matrix)?
-- [ ] **Q-publish** — confirm repo is **public** under `abdul-hamid-achik`, and that
-  `HOMEBREW_TAP_TOKEN` is available as a GitHub Actions secret for the release. (No code
-  ships until MVP builds + specs pass, so this isn't urgent.)
+- [x] **Q-publish RESOLVED (2026-06-23)** — repo published PUBLIC at
+  github.com/abdul-hamid-achik/codemap; `HOMEBREW_TAP_TOKEN` secret set (from the user's
+  ~/.config/secrets/env); CI green (test/race/build/coverage + golangci-lint v2). Release
+  pipeline ready. Actual `v0.1.0` tag still held pending TUI+LSP (D1=everything); an
+  `v0.1.0-rc.1` tag can be cut on request to exercise goreleaser→release+homebrew-tap.
 
 ---
 
@@ -241,11 +263,13 @@
 - [ ] E3.4 codemap_path / hotspots / orphans (cycle-safe BFS)
 
 ## Epic 4 — studio TUI (Charm v2)
-- [ ] E4.1 TUI shell (bubbletea v2 + lipgloss v2, tab bar, app/model/update/view split)
-- [ ] E4.4 Impact tab (symbol → callers/tests/blast radius) — easiest, build first
-- [ ] E4.2 Metrics tab (ntcharts: hotspots/coverage/lang) — verify ntcharts build (R1)
-- [ ] E4.3 Graph tab (Sugiyama/layered DAG on canvas; fallback collapsible tree)
-- [ ] E4.x Search tab (semantic + structural, filters)
+- [x] E4.1 TUI shell (bubbletea v2 + lipgloss v2 + bubbles v2 textinput; tab bar, header/
+      footer, key handling, async status load; 7 tests). `studio` cmd + interactive-default; non-TTY→help
+- [x] E4.4 Impact tab (symbol textinput → Service.Callers, async)
+- [~] E4.2 Metrics tab — DONE as ASCII bar charts over Stats (kinds/languages/nodes/edges),
+      no deps; ntcharts v2 real charts still TODO (validate R1 replace-directive then)
+- [ ] E4.3 Graph tab (Sugiyama/layered DAG on canvas; fallback collapsible tree) — placeholder now
+- [x] E4.5 Search tab (semantic via Service.Semantic, async, score-ranked results)
 
 ## Epic 5 — Tests & quality
 - [ ] E5.1 unit tests (graph traversal/cycles, extract, search, config) — high coverage
