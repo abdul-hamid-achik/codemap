@@ -4,6 +4,16 @@
 > next unstarted task, do it, update status here. Convert relative dates to absolute.
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
+## 🏷️ Release — v0.1.0 (2026-06-23)
+First public release, tagged on user go-ahead. Pre-release audit (7-agent workflow) returned
+**GO, zero blockers**: CGO_ENABLED=0 build + full test suite + race clean; golangci-lint v2 0
+issues / gofmt / vet clean; all 7 glyphrun E2E specs pass (graphs · vectors via Ollama · LSP via
+gopls); `goreleaser check` + snapshot cross-compiled all 5 pure-Go targets with correct
+version-injection ldflags + homebrew-tap (`HOMEBREW_TAP_TOKEN`); tree clean on main. Tagging `v0.1.0`
+triggers `.github/workflows/release.yml` → goreleaser → binaries + `abdul-hamid-achik/homebrew-tap`.
+Ships: CLI (20 cmds) · MCP (17 tools) · studio TUI (Graph walker+source, Metrics dashboard, Impact,
+Search; `?` help) · graph+vectors+LSP · signatures/docstrings/source everywhere · annotations layer.
+
 ## Status legend
 `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked/needs decision
 
