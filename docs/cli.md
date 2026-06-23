@@ -15,8 +15,14 @@ Every query command accepts `--json` for machine-readable output.
 | Command | Description |
 |---|---|
 | `codemap callers <symbol>` | Functions/methods that call a symbol |
+| `codemap callers <symbol> --lsp` | **Precise** callers via gopls (Go) — exact, not inflated by same-named symbols |
 | `codemap callees <symbol>` | Functions/methods a symbol calls |
 | `codemap path <from> <to>` | Shortest call path between two symbols |
+
+The fast default uses the indexed graph (name-based resolution; same-named methods can
+over-match). `--lsp` asks the language server (gopls) for *exact* callers — e.g. `callers Close`
+might list every caller of any `Close`, while `callers Close --lsp` lists only the callers of
+the specific resolved method.
 
 ## Analysis
 

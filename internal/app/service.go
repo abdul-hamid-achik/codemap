@@ -3,12 +3,17 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
+	"github.com/abdul-hamid-achik/codemap/internal/lsp"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
 
@@ -237,6 +242,136 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 		rep.Results = append(rep.Results, nodeToRef(n))
 	}
 	return rep, nil
+}
+
+// PreciseCallers computes exact callers of a Go symbol using gopls callHierarchy
+// (no by-name inflation). Go-only for now; errors if gopls is unavailable.
+func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &RelationReport{Symbol: symbol, Project: name, Results: []SymbolRef{}}
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return rep, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := g.FindNodesBySymbol(p.ID, symbol)
+	if err != nil {
+		return nil, err
+	}
+	var node *graph.Node
+	for i := range nodes {
+		if nodes[i].Language == "go" {
+			node = &nodes[i]
+			break
+		}
+	}
+	if node == nil {
+		return nil, fmt.Errorf("precise callers currently supports Go only (no Go symbol named %q)", symbol)
+	}
+	if _, err := exec.LookPath("gopls"); err != nil {
+		return nil, fmt.Errorf("gopls not found on PATH (required for --lsp)")
+	}
+
+	root := p.Path
+	absFile := filepath.Join(root, node.FilePath)
+	src, err := os.ReadFile(absFile)
+	if err != nil {
+		return nil, err
+	}
+
+	cl, err := lsp.Spawn(ctx, "gopls")
+	if err != nil {
+		return nil, err
+	}
+	defer cl.Close()
+	if err := cl.Initialize(ctx, root); err != nil {
+		return nil, err
+	}
+	uri := lsp.URI(absFile)
+	if err := cl.DidOpen(uri, "go", string(src)); err != nil {
+		return nil, err
+	}
+	// callHierarchy needs the whole workspace analyzed; wait for gopls to finish
+	// its initial load (or time out and try anyway).
+	cl.WaitReady(ctx, 20*time.Second)
+
+	syms, err := cl.DocumentSymbols(ctx, uri)
+	if err != nil {
+		return nil, err
+	}
+	pos, ok := findSymbolPos(syms, symbol, node.StartLine)
+	if !ok {
+		return rep, nil
+	}
+	items, err := cl.PrepareCallHierarchy(ctx, uri, pos)
+	if err != nil || len(items) == 0 {
+		return rep, err
+	}
+	calls, err := cl.IncomingCalls(ctx, items[0])
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range calls {
+		rep.Results = append(rep.Results, SymbolRef{
+			Symbol:    c.From.Name,
+			File:      uriToRel(c.From.URI, root),
+			StartLine: c.From.Range.Start.Line + 1,
+		})
+	}
+	return rep, nil
+}
+
+// findSymbolPos returns the selection-range start of a symbol by name, preferring
+// the declaration whose range starts at wantLine (1-based).
+func findSymbolPos(syms []lsp.DocumentSymbol, name string, wantLine int) (lsp.Position, bool) {
+	var best lsp.Position
+	found := false
+	var walk func([]lsp.DocumentSymbol)
+	walk = func(ss []lsp.DocumentSymbol) {
+		for _, s := range ss {
+			// gopls names methods like "(*Store).AddNode"; match the base name.
+			if symbolBase(s.Name) == name {
+				if s.Range.Start.Line+1 == wantLine {
+					best = s.SelectionRange.Start
+					found = true
+					return
+				}
+				if !found {
+					best = s.SelectionRange.Start
+					found = true
+				}
+			}
+			walk(s.Children)
+		}
+	}
+	walk(syms)
+	return best, found
+}
+
+// symbolBase strips a method's receiver prefix: "(*Store).AddNode" -> "AddNode".
+func symbolBase(name string) string {
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
+func uriToRel(uri, root string) string {
+	p := strings.TrimPrefix(uri, "file://")
+	if rel, err := filepath.Rel(root, p); err == nil {
+		return rel
+	}
+	return p
 }
 
 // Semantic runs a meaning-based search over the project's embedded nodes.

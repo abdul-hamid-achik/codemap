@@ -6,6 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // LSP symbol kinds (subset we map to codemap node kinds).
@@ -46,26 +47,66 @@ type DocumentSymbol struct {
 	Children       []DocumentSymbol `json:"children,omitempty"`
 }
 
+// CallHierarchyItem identifies a symbol in the call hierarchy.
+type CallHierarchyItem struct {
+	Name           string `json:"name"`
+	Kind           int    `json:"kind"`
+	URI            string `json:"uri"`
+	Range          Range  `json:"range"`
+	SelectionRange Range  `json:"selectionRange"`
+}
+
+// CallHierarchyIncomingCall is a caller of the prepared item.
+type CallHierarchyIncomingCall struct {
+	From       CallHierarchyItem `json:"from"`
+	FromRanges []Range           `json:"fromRanges"`
+}
+
 // Client is a headless LSP client over one language-server connection.
 type Client struct {
-	conn *conn
-	cmd  *exec.Cmd
+	conn  *conn
+	cmd   *exec.Cmd
+	ready chan struct{} // signalled when a $/progress "end" arrives
 }
 
 func newClient(r io.Reader, w io.Writer, closer func() error) *Client {
-	c := &Client{}
+	c := &Client{ready: make(chan struct{}, 8)}
 	c.conn = newConn(r, w, closer, c.handle)
 	return c
 }
 
-// handle replies to server→client requests so the server doesn't stall. We have
-// no workspace config to offer, so we return empty/null.
-func (c *Client) handle(method string, _ json.RawMessage) (any, error) {
+// handle replies to server→client requests so the server doesn't stall, and
+// watches $/progress so callers can wait for the server to finish loading.
+func (c *Client) handle(method string, params json.RawMessage) (any, error) {
 	switch method {
 	case "workspace/configuration":
 		return []any{map[string]any{}}, nil
-	default:
-		return nil, nil
+	case "$/progress":
+		var p struct {
+			Value struct {
+				Kind string `json:"kind"`
+			} `json:"value"`
+		}
+		if json.Unmarshal(params, &p) == nil && p.Value.Kind == "end" {
+			select {
+			case c.ready <- struct{}{}:
+			default:
+			}
+		}
+	}
+	return nil, nil
+}
+
+// WaitReady blocks until the server reports a $/progress "end" (its initial
+// workspace load completing) or the timeout elapses — needed before whole-
+// workspace queries like callHierarchy on large projects.
+func (c *Client) WaitReady(ctx context.Context, timeout time.Duration) {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+	case <-t.C:
+	case <-c.ready:
 	}
 }
 
@@ -111,10 +152,12 @@ func (c *Client) Initialize(ctx context.Context, rootPath string) error {
 		"processId": nil,
 		"rootUri":   URI(rootPath),
 		"capabilities": map[string]any{
+			"window": map[string]any{"workDoneProgress": true},
 			"textDocument": map[string]any{
 				"documentSymbol": map[string]any{
 					"hierarchicalDocumentSymbolSupport": true,
 				},
+				"callHierarchy": map[string]any{"dynamicRegistration": true},
 			},
 		},
 	}
@@ -173,6 +216,43 @@ func (c *Client) References(ctx context.Context, uri string, pos Position, inclu
 	}
 	return locs, nil
 }
+
+// PrepareCallHierarchy returns the call-hierarchy item(s) at a position.
+func (c *Client) PrepareCallHierarchy(ctx context.Context, uri string, pos Position) ([]CallHierarchyItem, error) {
+	raw, err := c.conn.Call(ctx, "textDocument/prepareCallHierarchy", map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     pos,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if isNull(raw) {
+		return nil, nil
+	}
+	var items []CallHierarchyItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// IncomingCalls returns the callers of a prepared call-hierarchy item.
+func (c *Client) IncomingCalls(ctx context.Context, item CallHierarchyItem) ([]CallHierarchyIncomingCall, error) {
+	raw, err := c.conn.Call(ctx, "callHierarchy/incomingCalls", map[string]any{"item": item})
+	if err != nil {
+		return nil, err
+	}
+	if isNull(raw) {
+		return nil, nil
+	}
+	var calls []CallHierarchyIncomingCall
+	if err := json.Unmarshal(raw, &calls); err != nil {
+		return nil, err
+	}
+	return calls, nil
+}
+
+func isNull(raw json.RawMessage) bool { return len(raw) == 0 || string(raw) == "null" }
 
 // Shutdown asks the server to shut down.
 func (c *Client) Shutdown(ctx context.Context) error {

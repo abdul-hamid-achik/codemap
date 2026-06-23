@@ -116,3 +116,63 @@ func TestGoplsIntegration(t *testing.T) {
 	_ = cl.Shutdown(ctx)
 	_ = cl.Exit()
 }
+
+func TestGoplsCallHierarchy(t *testing.T) {
+	if _, err := exec.LookPath("gopls"); err != nil {
+		t.Skip("gopls not installed")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/m\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := "package m\n\nfunc Helper() {}\n\nfunc Run() { Helper() }\n"
+	file := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(file, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cl, err := Spawn(ctx, "gopls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	if err := cl.Initialize(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	uri := URI(file)
+	if err := cl.DidOpen(uri, "go", src); err != nil {
+		t.Fatal(err)
+	}
+
+	// Find Helper's name position from documentSymbol.
+	syms, err := cl.DocumentSymbols(ctx, uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pos Position
+	for _, s := range syms {
+		if s.Name == "Helper" {
+			pos = s.SelectionRange.Start
+		}
+	}
+	items, err := cl.PrepareCallHierarchy(ctx, uri, pos)
+	if err != nil {
+		t.Fatalf("prepareCallHierarchy: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatal("no call hierarchy item for Helper")
+	}
+	calls, err := cl.IncomingCalls(ctx, items[0])
+	if err != nil {
+		t.Fatalf("incomingCalls: %v", err)
+	}
+	names := map[string]bool{}
+	for _, c := range calls {
+		names[c.From.Name] = true
+	}
+	if !names["Run"] {
+		t.Errorf("incoming calls = %v, want Run (which calls Helper)", names)
+	}
+}

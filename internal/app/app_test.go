@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
@@ -200,6 +202,51 @@ func TestServiceImpact(t *testing.T) {
 	}
 	if rep2.Untested || len(rep2.Tests) != 1 {
 		t.Errorf("Run should be covered by TestRun: untested=%v tests=%d", rep2.Untested, len(rep2.Tests))
+	}
+}
+
+func TestPreciseCallersGopls(t *testing.T) {
+	if _, err := exec.LookPath("gopls"); err != nil {
+		t.Skip("gopls not installed")
+	}
+	// Isolate only codemap's data dir; leave HOME real so gopls uses its
+	// persistent cache (a temp HOME gets polluted with read-only Go cache files
+	// that t.TempDir can't clean up).
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/m\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Use a METHOD (gopls names it "(T).Helper") to guard receiver-prefix matching.
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package m\n\ntype T struct{}\n\nfunc (t T) Helper() {}\n\nfunc Run() { var x T; x.Helper() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rep, err := svc.PreciseCallers(ctx, proj, "Helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range rep.Results {
+		if r.Symbol == "Run" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("precise callers of Helper = %+v, want to include Run", rep.Results)
 	}
 }
 

@@ -282,6 +282,16 @@
   glyphrun specs all PASS. All docs (README/AGENTS/CLAUDE + VitePress) now match reality.
   COMMIT+PUSH. **NEXT:** the one remaining material lever is LSP edge precision (E2.2b) — a
   user-visible `callers --lsp`/callHierarchy path or lspsrc-in-indexer. Else: keep polishing.
+- 2026-06-23 #28 (cron) — ★ LSP value is now USER-VISIBLE: precise callers via gopls.
+  lsp.Client: PrepareCallHierarchy/IncomingCalls + WaitReady (waits for $/progress "end";
+  declared window.workDoneProgress so gopls actually emits it) + isNull helper. app.Service
+  PreciseCallers: graph resolves symbol→file, gopls documentSymbol→prepareCallHierarchy→
+  incomingCalls; findSymbolPos matches gopls method names "(*Store).AddNode" by base name
+  (the bug that made methods return none — root-caused via diagnostic dump). CLI `callers --lsp`.
+  Tests: gopls callHierarchy + PreciseCallers on a METHOD (regression guard), both skip in CI.
+  DEMO on codemap: callers Close --lsp = 7 exact vs by-name = 50 inflated; NewService/AddNode
+  precise. docs/cli.md updated. All green, fmt/vet clean. COMMIT+PUSH. **NEXT:** callees --lsp,
+  MCP precise option, or wire precise edges into the indexer; else polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -387,10 +397,12 @@
       handler; Client Spawn/Initialize/DidOpen/DocumentSymbols/References/Shutdown/Exit + LSP
       types. Tests: fake-server round-trip + REAL gopls v0.21.0 integration (skips in CI) +
       race-clean. (Supersedes TD6's go.lsp.dev plan.)
-- [~] E2.2 LSP extraction backend — internal/extract/lspsrc DONE: stateful LSP-session
-      Extractor mapping DocumentSymbols→extract.Symbol (recursive, nested FQN, kind map,
-      line ranges, source slice); tests + real gopls (Foo/Bar). TODO: indexer integration
-      (per-lang sessions, lifecycle) + References/callHierarchy → precise edges (weight 1.0)
+- [~] E2.2 LSP extraction backend — lspsrc DONE (DocumentSymbols→symbols). PRECISE CALLERS
+      DONE & user-visible: `callers --lsp` uses gopls callHierarchy for exact callers (funcs +
+      methods; gopls names methods "(*T).M" → match base name). lsp.Client gained
+      Prepare/IncomingCalls + WaitReady ($/progress end; window.workDoneProgress capability).
+      DEMO: `callers Close --lsp`=7 precise vs by-name=50 inflated. Tests (gopls-gated, skip CI).
+      TODO: indexer integration (precise edges at index time); callees --lsp; MCP precise flag.
 - [ ] E2.3 unified extractor (merge LSP precedence over go/parser, dedupe by FQN)
 - [x] E2.4 incremental hash-based reindex — already done in the indexer (E1.10)
 - [~] E2.5 MCP query tools — callees/blast_radius(via impact)/path/hotspots/orphans done;
