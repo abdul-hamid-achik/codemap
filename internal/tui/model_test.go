@@ -431,6 +431,42 @@ func TestSearchShowsSignaturePreview(t *testing.T) {
 	}
 }
 
+func TestSourceViewerScrollAndClose(t *testing.T) {
+	m := sized(t, 80, 12) // small height so the content is scrollable
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i)
+	}
+	m, _ = applyMsg(m, sourceMsg{title: "pkg.Foo  foo.go:1-30", lines: lines})
+	if !m.srcView {
+		t.Fatal("sourceMsg should open the source viewer")
+	}
+	out := m.render()
+	if !strings.Contains(out, "pkg.Foo  foo.go:1-30") || !strings.Contains(out, "line 0") {
+		t.Errorf("viewer should show the title and first lines:\n%s", out)
+	}
+	if m.maxSrcScroll() <= 0 {
+		t.Fatalf("expected scrollable content, maxScroll=%d", m.maxSrcScroll())
+	}
+
+	// scrolling down advances the window; a number key must NOT switch tabs.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	if m.srcScroll != 2 {
+		t.Errorf("srcScroll = %d, want 2", m.srcScroll)
+	}
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "2", Code: '2'}))
+	if m.active != tabGraph {
+		t.Error("number keys should be captured by the viewer, not switch tabs")
+	}
+
+	// q closes the viewer.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "q", Code: 'q'}))
+	if m.srcView {
+		t.Error("q should dismiss the source viewer")
+	}
+}
+
 func TestSemanticErrorShown(t *testing.T) {
 	m := sized(t, 100, 30)
 	u, _ := m.Update(semanticMsg{query: "x", err: fakeErr("ollama unreachable")})

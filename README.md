@@ -61,7 +61,8 @@ the selected node's signature is previewed (`⟩ func runInit(...)`).
 - **Graph** — a call-graph explorer: hubs (most-referenced symbols) on the left as jump
   points, the centered node's callers and callees on the right. Press `→` to focus the right
   pane and **walk the graph** — `enter` re-centers on a caller/callee so you can traverse the
-  call chain; `backspace` steps back.
+  call chain; `backspace` steps back; `s` reads the selected symbol's **source** in a
+  scrollable overlay, without leaving studio.
 - **Metrics** — an overview dashboard: counts and bar charts (by kind/language) on the left;
   the call graph's two extremes on the right — top hubs (most-referenced) and dead-code
   candidates (no callers).

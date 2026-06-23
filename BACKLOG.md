@@ -463,6 +463,20 @@
   Commands table, AGENTS set(13), docs/cli.md, docs/mcp.md) updated. Full suite + help/query/studio
   E2E green; fmt/vet clean. COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #45 (cron, polish-first) — **studio source viewer** (`s`) — makes studio a complete
+  code-reading tool: navigate the graph AND read implementations without leaving the TUI, leveraging
+  #44's `Service.Source`. From the Graph tab, `s` opens a full-screen scrollable overlay of the
+  selected node's body (centered hub when focusHubs, selected ref when focusRefs): numbered lines,
+  `↑/↓`·`pgup/pgdn`·`g/G` scroll, `esc`/`q` to close. Modal — captures keys until dismissed (handled
+  before tab dispatch; ctrl+c still quits). New model state (`srcView`/`srcTitle`/`srcLines`/
+  `srcScroll`) + `sourceViewCmd`/`sourceMsg`/`handleSourceKey` + `renderSource`; focus-aware footer.
+  Tests: `TestSourceViewerScrollAndClose` (open via sourceMsg, scroll, number-key captured, q-close).
+  Extended studio E2E with `s`→source-overlay→`q` + a `source` snapshot (real PTY path through
+  Service.Source; shows `app.Top  a.go:1-1` + numbered line). Also fixed stale **CLAUDE.md** "10
+  tools"→"13 tools". Docs (README + docs/studio.md keys/tab) updated. Full suite + race + all E2E
+  green; fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** source view from Impact/Search (input-key conflict to solve), references/dependencies
+  tools, full precise (gopls) edges in the indexer.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

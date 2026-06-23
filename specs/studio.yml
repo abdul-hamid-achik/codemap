@@ -39,6 +39,14 @@ steps:
             contains: "depth 1"
         timeoutMs: 5000
     - snapshot: graph_walk
+    # View the selected node's source in the scrollable overlay, then close it.
+    - press: "s"
+    - wait:
+        screen:
+            contains: "esc/q close"
+        timeoutMs: 5000
+    - snapshot: source
+    - press: "q"
     - press: "h"
     - press: "p"
     - wait:

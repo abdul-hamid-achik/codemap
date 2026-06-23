@@ -6,6 +6,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -78,6 +79,11 @@ type preciseDetailMsg struct {
 	callees []app.SymbolRef
 	err     error
 }
+type sourceMsg struct {
+	title string
+	lines []string
+	err   error
+}
 
 // Model is the studio TUI state.
 type Model struct {
@@ -116,6 +122,13 @@ type Model struct {
 	graphCallers []app.SymbolRef
 	graphCallees []app.SymbolRef
 	graphPrecise bool // hub detail is showing gopls-precise relations
+
+	// source viewer: a full-screen, scrollable view of a symbol's body, opened
+	// with `s` from the Graph tab and dismissed with esc/q.
+	srcView   bool
+	srcTitle  string
+	srcLines  []string
+	srcScroll int
 
 	// graph walking: the right pane can be focused to walk into callers/callees,
 	// re-centering the explorer on any node (not just hubs). graphStack records
@@ -245,6 +258,32 @@ func (m Model) preciseDetailCmd(c graphCenter) tea.Cmd {
 	}
 }
 
+func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
+	svc, dir := m.service, m.startDir
+	return func() tea.Msg {
+		rep, err := svc.Source(dir, sym)
+		if err != nil {
+			return sourceMsg{err: err}
+		}
+		// Prefer the match at the exact file:line; fall back to the first.
+		var mch *app.SourceMatch
+		for i := range rep.Matches {
+			if rep.Matches[i].File == file && rep.Matches[i].StartLine == line {
+				mch = &rep.Matches[i]
+				break
+			}
+		}
+		if mch == nil && len(rep.Matches) > 0 {
+			mch = &rep.Matches[0]
+		}
+		if mch == nil {
+			return sourceMsg{err: fmt.Errorf("no source for %q", sym)}
+		}
+		title := fmt.Sprintf("%s  %s:%d-%d", displayName(mch.FQN, mch.Symbol), mch.File, mch.StartLine, mch.EndLine)
+		return sourceMsg{title: title, lines: strings.Split(mch.Source, "\n")}
+	}
+}
+
 func (m Model) reindexCmd() tea.Cmd {
 	ctx, svc, dir := m.ctx, m.service, m.startDir
 	return func() tea.Msg {
@@ -307,6 +346,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.orphans = msg.orphans
 		}
+		return m, nil
+
+	case sourceMsg:
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		m.errMsg = ""
+		m.srcView = true
+		m.srcTitle = msg.title
+		m.srcLines = msg.lines
+		m.srcScroll = 0
 		return m, nil
 
 	case graphDetailMsg:
@@ -386,9 +437,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	switch key {
-	case "ctrl+c":
+	if key == "ctrl+c" {
 		return m, tea.Quit
+	}
+	// The source viewer is a modal overlay: it captures navigation keys until
+	// dismissed, so handle it before anything else.
+	if m.srcView {
+		return m.handleSourceKey(key)
+	}
+	switch key {
 	case "ctrl+r":
 		// Reindex in place (structure-only) and refresh — works on any tab.
 		m.statusMsg = "indexing…"
@@ -514,6 +571,19 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 			return m, m.preciseDetailCmd(m.graphCenter)
 		}
 		return m, nil
+	case "s":
+		// view the selected node's source code in a scrollable overlay.
+		if m.graphFocus == focusRefs {
+			if refs := m.graphRefs(); m.graphRefSel < len(refs) {
+				r := refs[m.graphRefSel]
+				return m, m.sourceViewCmd(r.Symbol, r.File, r.StartLine)
+			}
+			return m, nil
+		}
+		if m.graphCenter.sym != "" {
+			return m, m.sourceViewCmd(m.graphCenter.sym, m.graphCenter.file, m.graphCenter.line)
+		}
+		return m, nil
 	case "left", "h":
 		m.graphFocus = focusHubs
 		return m, nil
@@ -597,6 +667,48 @@ func (m Model) handleGraphRefsKey(key string) (tea.Model, tea.Cmd) {
 			m.statusMsg = "→ " + displayName(r.FQN, r.Symbol)
 			return m, m.detailCmd(r.Symbol)
 		}
+	}
+	return m, nil
+}
+
+// srcViewport is the number of source lines visible at once (body height minus
+// the title line and a separator).
+func (m Model) srcViewport() int {
+	vp := m.height - 3 - 2 // header/tabbar/footer, then viewer title + blank
+	if vp < 1 {
+		vp = 1
+	}
+	return vp
+}
+
+func (m Model) maxSrcScroll() int {
+	if n := len(m.srcLines) - m.srcViewport(); n > 0 {
+		return n
+	}
+	return 0
+}
+
+// handleSourceKey scrolls the source overlay or dismisses it.
+func (m Model) handleSourceKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "esc", "q", "s":
+		m.srcView = false
+	case "up", "k":
+		if m.srcScroll > 0 {
+			m.srcScroll--
+		}
+	case "down", "j":
+		if m.srcScroll < m.maxSrcScroll() {
+			m.srcScroll++
+		}
+	case "pgup", "b":
+		m.srcScroll = clamp(m.srcScroll-m.srcViewport(), 0, m.maxSrcScroll())
+	case "pgdown", "f", " ":
+		m.srcScroll = clamp(m.srcScroll+m.srcViewport(), 0, m.maxSrcScroll())
+	case "home", "g":
+		m.srcScroll = 0
+	case "end", "G":
+		m.srcScroll = m.maxSrcScroll()
 	}
 	return m, nil
 }

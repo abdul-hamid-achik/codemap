@@ -23,6 +23,8 @@
   right pane and **walk the graph** — `enter` re-centers on the selected caller/callee, so you
   can traverse "who calls this → who calls that → what does it call". `backspace` steps back
   along the path (the header shows the current depth), `←`/`h` returns focus to the hub list.
+  Press `s` to read the selected symbol's **source code** in a scrollable overlay — navigate
+  the graph and read the implementation without leaving studio.
 - **Metrics** — an overview dashboard: node/edge/file counts and bar charts by kind and
   language on the left; on the right, the two ends of the call graph — the **top hubs**
   (most-referenced, load-bearing symbols) and the **dead-code candidates** (symbols with no
@@ -40,6 +42,7 @@
 | `→` / `←` (`l` / `h`) | (Graph) move focus between the hub list and the callers/callees pane |
 | `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection · or run the query after editing the text |
 | `backspace` | (Graph) step back to the previous centered node while walking |
+| `s` | (Graph) view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close) |
 | `p` | (Graph) recompute the centered node's callers/callees precisely via gopls (Go) |
 | `ctrl+r` | Reindex the project (structure-only) and refresh, without leaving studio |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |

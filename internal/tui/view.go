@@ -31,9 +31,30 @@ func (m Model) render() string {
 	if bodyH < 3 {
 		bodyH = 3
 	}
-	body := lipgloss.NewStyle().Width(m.width).Height(bodyH).MaxHeight(bodyH).Render(m.body(m.width, bodyH))
+	content := m.body(m.width, bodyH)
+	if m.srcView {
+		content = m.renderSource(m.width, bodyH)
+	}
+	body := lipgloss.NewStyle().Width(m.width).Height(bodyH).MaxHeight(bodyH).Render(content)
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
+}
+
+// renderSource is the full-screen, scrollable source overlay (opened with `s`).
+func (m Model) renderSource(w, h int) string {
+	var b strings.Builder
+	b.WriteString(symStyle.Render(truncate(m.srcTitle, w)) + "\n\n")
+	vp := h - 2
+	if vp < 1 {
+		vp = 1
+	}
+	start := clamp(m.srcScroll, 0, len(m.srcLines))
+	end := clamp(start+vp, 0, len(m.srcLines))
+	for i := start; i < end; i++ {
+		gutter := mutedStyle.Render(fmt.Sprintf("%4d ", i+1))
+		b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
+	}
+	return b.String()
 }
 
 func (m Model) header() string {
@@ -64,12 +85,21 @@ func (m Model) tabBar() string {
 
 func (m Model) footer() string {
 	var hint string
+	switch {
+	case m.srcView:
+		hint = "↑/↓ scroll · pgup/pgdn · g/G top/bottom · esc/q close · ctrl+c quit"
+		status := m.statusMsg
+		if m.errMsg != "" {
+			status = errorStyle.Render(m.errMsg)
+		}
+		return spread(mutedStyle.Render(hint), status, m.width)
+	}
 	switch m.active {
 	case tabGraph:
 		if m.graphFocus == focusRefs {
-			hint = "↑/↓ ref · enter re-center · ⌫ back · ← hubs · p precise · ctrl+c quit"
+			hint = "↑/↓ ref · enter re-center · s source · ⌫ back · ← hubs · ctrl+c quit"
 		} else {
-			hint = "↑/↓ hub · → walk callers/calls · enter → impact · p precise · ctrl+c quit"
+			hint = "↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit"
 		}
 	case tabSearch:
 		hint = "type · enter search/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
