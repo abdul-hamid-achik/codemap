@@ -727,6 +727,17 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #81 (path honesty) — **`path` distinguishes "not a symbol" from "no path".** Dogfooding:
+  `codemap path NoSuchSymbolXYZ Status` printed "no call path from NoSuchSymbolXYZ to Status" — but the
+  symbol doesn't exist, so a typo'd name read as a merely-unconnected pair. Now `Path` checks both
+  endpoints with `FindNodesBySymbol` up front and sets `PathReport.Note` ("X is not a symbol in
+  <project>" / "neither X nor Y …") when one is missing, returning before the (pointless) search. CLI
+  prints the note instead of "no call path"; note rides JSON to MCP. When BOTH endpoints exist but
+  aren't connected, no note is set, so the CLI still shows the plain "no call path from X to Y"
+  (correct). (`source` was checked too — it already shows ALL definitions of an ambiguous symbol with
+  clear headers, no wart.) Test `TestPathReportsMissingEndpoint` (missing→note; real path→found,no
+  note; both-real-no-path→not found,no note). Verified live. Full suite + lint v2 (0) + query E2E
+  green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #80 (ambiguity honesty, cont.) — **`callers`/`callees` warn on ambiguous names too**, the
   grounded #79 follow-up. `codemap callers Close` lists 71 callers merged across 6 unrelated `Close`
   methods with no signal — same wart as impact, but here `--lsp` is the directly actionable fix. The

@@ -590,7 +590,11 @@ func runPath(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	if !rep.Found {
-		fmt.Printf("no call path from %s to %s\n", rep.From, rep.To)
+		if rep.Note != "" {
+			fmt.Println(rep.Note)
+		} else {
+			fmt.Printf("no call path from %s to %s\n", rep.From, rep.To)
+		}
 		return nil
 	}
 	names := make([]string, 0, len(rep.Path))

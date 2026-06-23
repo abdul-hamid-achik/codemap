@@ -934,6 +934,7 @@ type PathReport struct {
 	To      string      `json:"to"`
 	Project string      `json:"project"`
 	Found   bool        `json:"found"`
+	Note    string      `json:"note,omitempty"` // set when an endpoint isn't a symbol in the project
 	Path    []SymbolRef `json:"path"`
 }
 
@@ -1150,6 +1151,23 @@ func (svc *Service) Path(cwd, from, to string) (*PathReport, error) {
 		return rep, nil
 	}
 	g, _ := svc.s.Graph()
+
+	// Distinguish "this endpoint isn't a symbol here" from "no path between two
+	// real symbols" — otherwise a typo'd name reads as an unconnected pair.
+	fromDefs, _ := g.FindNodesBySymbol(pid, from)
+	toDefs, _ := g.FindNodesBySymbol(pid, to)
+	switch {
+	case len(fromDefs) == 0 && len(toDefs) == 0:
+		rep.Note = fmt.Sprintf("neither %q nor %q is a symbol in %s", from, to, name)
+		return rep, nil
+	case len(fromDefs) == 0:
+		rep.Note = fmt.Sprintf("%q is not a symbol in %s", from, name)
+		return rep, nil
+	case len(toDefs) == 0:
+		rep.Note = fmt.Sprintf("%q is not a symbol in %s", to, name)
+		return rep, nil
+	}
+
 	nodes, err := g.Path(pid, from, to, 0)
 	if err != nil {
 		return nil, err

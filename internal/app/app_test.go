@@ -526,6 +526,53 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestPathReportsMissingEndpoint(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	// A calls B: A→B has a path, B→A does not; both A and B exist.
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B() }\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Typo'd endpoint: a clear "not a symbol" note, not "no call path".
+	miss, err := svc.Path(proj, "Nope", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if miss.Found || miss.Note == "" || !strings.Contains(miss.Note, "Nope") {
+		t.Errorf("missing endpoint should be reported as not-a-symbol, got found=%v note=%q", miss.Found, miss.Note)
+	}
+
+	// Real path: found, no note.
+	hit, err := svc.Path(proj, "A", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hit.Found || hit.Note != "" {
+		t.Errorf("A→B should be found with no note, got found=%v note=%q", hit.Found, hit.Note)
+	}
+
+	// Both exist but unconnected: not found, and NO missing-endpoint note
+	// (so the CLI falls back to the plain "no call path" message).
+	none, err := svc.Path(proj, "B", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.Found || none.Note != "" {
+		t.Errorf("B→A (both real, no path) should be not-found with no note, got found=%v note=%q", none.Found, none.Note)
+	}
+}
+
 func TestCallersWarnsOnAmbiguousName(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
