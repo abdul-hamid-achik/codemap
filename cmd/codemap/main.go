@@ -509,7 +509,8 @@ func runFind(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	for _, h := range rep.Hits {
-		fmt.Printf("  %-9s %-36s %s:%d\n", h.Kind, disp(h.FQN, h.Symbol), h.File, h.StartLine)
+		fmt.Printf("  %-9s %-26s %s\n", h.Kind, fmt.Sprintf("%s:%d", h.File, h.StartLine),
+			sigOrName(h.Signature, h.FQN, h.Symbol))
 	}
 	return nil
 }
@@ -532,9 +533,9 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 		fmt.Printf("no symbols in %s (is the project indexed?)\n", rep.File)
 		return nil
 	}
-	fmt.Printf("%s:\n", rep.File)
+	fmt.Printf("%s (%d symbols):\n", rep.File, len(rep.Symbols))
 	for _, s := range rep.Symbols {
-		fmt.Printf("  %-9s %-30s %d-%d\n", s.Kind, disp(s.FQN, s.Symbol), s.StartLine, s.EndLine)
+		fmt.Printf("  %-9s %5d  %s\n", s.Kind, s.StartLine, sigOrName(s.Signature, s.FQN, s.Symbol))
 	}
 	return nil
 }
@@ -556,6 +557,16 @@ func disp(fqn, symbol string) string {
 		return fqn
 	}
 	return symbol
+}
+
+// sigOrName shows the signature (which includes the name and parameters) when
+// available, falling back to the qualified name — so list commands read like a
+// file outline rather than a bare list of names.
+func sigOrName(signature, fqn, symbol string) string {
+	if s := strings.TrimSpace(signature); s != "" {
+		return s
+	}
+	return disp(fqn, symbol)
 }
 
 func openSession(cmd *cobra.Command) (*app.Session, error) {

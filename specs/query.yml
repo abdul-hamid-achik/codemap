@@ -2,12 +2,13 @@ version: 1
 name: query
 intent: |
     after indexing a small project, the call-graph query commands (callers,
-    impact, hotspots) return meaningful results.
+    impact, hotspots) return meaningful results, and symbols/find render an
+    outline with signatures.
 target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5; echo '== symbols =='; \"$CM\" symbols a.go; echo '== find =='; \"$CM\" find Run"
     cwd: "."
 terminal:
     cols: 100
@@ -35,4 +36,9 @@ outcomes:
       verify:
         screen:
             contains: "Hotspots in"
-contractHash: sha256:75ec17b7d423bfba13ea03abfef48bdbe01479897e09bd623421fd318cf82816
+    - id: signatures_in_outline
+      description: symbols/find render signatures, not just bare names
+      verify:
+        screen:
+            contains: "func Run()"
+contractHash: sha256:cd00966db5eed3ec413530bf48c70228fb359e90ca599116b2e6bfa1217d8fb2

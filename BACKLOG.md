@@ -402,6 +402,17 @@
   fakeEmbedder); full suite + studio E2E green; fmt/vet clean. (Caught a stale-`bin/` dogfood: rebuilt
   the binary before testing.) COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #40 (cron, polish-first) — **CLI text output now shows signatures** (data already in
+  results since #38; the bare-name text was the last surface omitting it). `symbols <file>` is now a
+  real file outline — `kind · line · full signature` (e.g. `method  141  func (s *Store) Callers(
+  projectID int64, symbol string) ([]Node, error)`) — fulfilling its "structured alternative to
+  reading the file" promise; `find` shows each match's signature inline so same-named symbols
+  disambiguate (dogfood: two `Hotspots` = service vs store). New `sigOrName()` helper; callers/
+  callees keep their relationship-focused name+location format. Extended the `query` E2E to run
+  `symbols a.go` + `find Run` with a new `signatures_in_outline` outcome (asserts `func Run()`
+  renders) — re-stamped; all 4 outcomes pass. Docs/cli.md rows updated. Full suite + all 5 E2E
+  green; fmt/vet clean. COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
