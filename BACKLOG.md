@@ -741,6 +741,25 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #88 (precise epic — slice B: typesrc resolver) — **pure-Go `go/types` precise call
+  resolver** in new `internal/extract/typesrc/`, standalone + unit-tested (not yet wired into the
+  indexer). `Resolve(ctx, root)` runs one whole-module `packages.Load(LoadMode)` where `LoadMode`
+  deliberately EXCLUDES `NeedDeps` (NeedTypesInfo already resolves cross-package callees via export
+  data — the 706MB footgun, guarded by `TestLoadModeExcludesNeedDeps`). For each cleanly type-checked
+  package it walks every func/method body's CallExprs, resolves each to the exact `*types.Func` (via
+  `Info.Selections`/`Info.Uses`, generics collapsed with `.Origin()`), and emits a `PreciseEdge`
+  {CallerFQN, CalleeFQN, CalleeFile, CalleeLine, External, Interface}. FQNs use gosrc's EXACT scheme
+  (`pkgClause.Func` / `pkgClause.Recv.Method`, pointers+generics stripped) so they join existing nodes;
+  callee position is root-relative for the (file,line) join. Degrades cleanly: a package with type
+  errors is skipped (its files absent from CleanFiles ⇒ caller keeps name edges); a non-module dir or
+  missing `go` ⇒ Available=false, no edges, no panic. Tests (go-gated skip): `TestResolvePrecise` —
+  proves the crux, `t.Close()` over three same-named Close methods resolves to **exactly ONE** edge to
+  `fix.T1.Close` (name-based would fan to 3); interface dispatch → `fix.Closer.Close` (Interface=true);
+  stdlib → `fmt.Println` (External=true); **and position parity verified** (precise CalleeLine ==
+  gosrc StartLine, so slice C's join will land). `x/tools` v0.45.0 promoted indirect→direct via
+  `go mod tidy` (no download); CGO_ENABLED=0 build stays clean (go/packages is pure-Go). Full suite +
+  lint v2 (0) green; fmt clean. COMMIT+PUSH. Next: slice C wires this into the indexer behind
+  `--precise` (CLI+MCP) with the corrected N-callers→one-type integration fixture + supersede.
 - 2026-06-23 #87 (precise epic — slice A: foundation) — **`edges.provenance` column + race-safe v2→v3
   migration + store plumbing.** Additive, zero behavior change (every edge tagged `'name'`). schema.go:
   `schemaVersion` 2→3, `provenance TEXT NOT NULL DEFAULT 'name'` on edges, `ProvName`/`ProvPrecise`
