@@ -727,6 +727,20 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #82 (annotation honesty) — **`annotate` warns when the target matches no indexed symbol.**
+  Dogfooding the harness-centerpiece feature found a real footgun: `codemap annotate NoSuchSymbolZZZ
+  --note ghost` (and annotating on an un-indexed project) silently succeeded, creating an annotation
+  that can NEVER surface in queries — exactly the wrong outcome for an agent pinning DB data to symbols
+  by name (a typo is saved forever with no feedback). Now `AnnotateNode` returns `matched` (via a new
+  tiny `graph.Store.NodeExistsByName`, checking `symbol=? OR fqn=?` — both, since annotations surface
+  by either). Annotations are still SAVED when unmatched (they're reindex-durable by design and may
+  predate code), but: CLI prints `⚠ no indexed symbol named "X" — saved, but it won't surface until one
+  is (typo? not indexed yet?)`; MCP `codemap_annotate` returns `"matched": false` + an explanatory
+  `note`. A real target → matched=true, no warning (verified: `annotate Bar` still clean and surfaces
+  in impact). `source` was already fine (lists all defs). Tests: `TestAnnotateReportsUnknownTarget`
+  (app) + `TestMCPAnnotateUnknownTarget` (in-memory MCP, the agent surface). Full suite + lint v2 (0) +
+  query E2E green; fmt clean. COMMIT+PUSH. (Path annotations + CLI `annotate --json` parity are small
+  follow-ups; node annotation is the common case and the dogfooded wart.)
 - 2026-06-23 #81 (path honesty) — **`path` distinguishes "not a symbol" from "no path".** Dogfooding:
   `codemap path NoSuchSymbolXYZ Status` printed "no call path from NoSuchSymbolXYZ to Status" — but the
   symbol doesn't exist, so a typo'd name read as a merely-unconnected pair. Now `Path` checks both

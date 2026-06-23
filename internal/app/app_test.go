@@ -232,7 +232,7 @@ func TestServiceAnnotations(t *testing.T) {
 	svc := NewService(sess)
 
 	// annotate works before indexing (auto-registers the project).
-	if _, err := svc.AnnotateNode(proj, "app.B", "postgres", "hot", `{"rows":7}`); err != nil {
+	if _, _, err := svc.AnnotateNode(proj, "app.B", "postgres", "hot", `{"rows":7}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := svc.AnnotatePath(proj, "app.A", "app.B", "note", "entry chain", ""); err != nil {
@@ -290,7 +290,7 @@ func TestImpactSurfacesAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Pinned by FQN; queried by short name — surfaced via the resolved location FQN.
-	if _, err := svc.AnnotateNode(proj, "app.B", "postgres", "hot in prod", `{"rows":9}`); err != nil {
+	if _, _, err := svc.AnnotateNode(proj, "app.B", "postgres", "hot in prod", `{"rows":9}`); err != nil {
 		t.Fatal(err)
 	}
 	rep, err := svc.Impact(proj, "B", 3)
@@ -318,7 +318,7 @@ func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
 	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.AnnotateNode(proj, "app.B", "note", "check this", ""); err != nil {
+	if _, _, err := svc.AnnotateNode(proj, "app.B", "note", "check this", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -354,7 +354,7 @@ func TestFindSurfacesAnnotations(t *testing.T) {
 	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.AnnotateNode(proj, "app.Helper", "note", "look here", ""); err != nil {
+	if _, _, err := svc.AnnotateNode(proj, "app.Helper", "note", "look here", ""); err != nil {
 		t.Fatal(err)
 	}
 	rep, err := svc.FindSymbols(proj, "Helper", 10)
@@ -523,6 +523,40 @@ func TestServiceSemantic(t *testing.T) {
 	}
 	if gotDoc != "Authenticate validates a jwt token." {
 		t.Errorf("semantic hit doc = %q, want %q", gotDoc, "Authenticate validates a jwt token.")
+	}
+}
+
+func TestAnnotateReportsUnknownTarget(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Real() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Real symbol: matched.
+	if _, matched, err := svc.AnnotateNode(proj, "Real", "src", "note", ""); err != nil || !matched {
+		t.Errorf("annotating an indexed symbol should report matched=true, got matched=%v err=%v", matched, err)
+	}
+	// Ghost symbol: saved but not matched (so the caller can warn).
+	id, matched, err := svc.AnnotateNode(proj, "GhostXYZ", "src", "note", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched {
+		t.Error("annotating a nonexistent symbol should report matched=false")
+	}
+	if id == 0 {
+		t.Error("the annotation should still be saved (reindex-durable), got id 0")
 	}
 }
 
@@ -838,7 +872,7 @@ func TestPreciseCallersGopls(t *testing.T) {
 	}
 
 	// pin an annotation so we can confirm the precise path surfaces it too.
-	if _, err := svc.AnnotateNode(proj, "Helper", "note", "precise too", ""); err != nil {
+	if _, _, err := svc.AnnotateNode(proj, "Helper", "note", "precise too", ""); err != nil {
 		t.Fatal(err)
 	}
 

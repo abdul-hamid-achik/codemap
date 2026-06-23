@@ -175,6 +175,61 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 	}
 }
 
+func TestMCPAnnotateUnknownTarget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Real() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := app.NewService(sess).Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Real symbol → matched true, no warning note.
+	real, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_annotate",
+		Arguments: map[string]any{"path": proj, "symbol": "Real", "source": "s", "note": "n"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(real); !strings.Contains(txt, `"matched": true`) {
+		t.Errorf("annotating an indexed symbol should report matched true: %s", txt)
+	}
+	// Ghost symbol → matched false + an explanatory note so the agent doesn't
+	// think it pinned knowledge that can never surface.
+	ghost, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_annotate",
+		Arguments: map[string]any{"path": proj, "symbol": "GhostXYZ", "source": "s", "note": "n"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(ghost); !strings.Contains(txt, `"matched": false`) || !strings.Contains(txt, "won't surface") {
+		t.Errorf("annotating an unknown symbol should warn via matched false + note: %s", txt)
+	}
+}
+
 func TestMCPPreciseCallers(t *testing.T) {
 	if _, err := exec.LookPath("gopls"); err != nil {
 		t.Skip("gopls not installed")

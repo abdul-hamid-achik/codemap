@@ -287,15 +287,23 @@ func (svc *Service) annotateProject(cwd string) (int64, *graph.Store, error) {
 	return pid, g, nil
 }
 
-// AnnotateNode pins a note / external data to a symbol (by FQN or name).
-func (svc *Service) AnnotateNode(cwd, symbol, source, note, data string) (int64, error) {
+// AnnotateNode pins a note/data to a symbol. matched reports whether the target
+// currently matches an indexed symbol (by name or FQN); annotations are kept even
+// when it doesn't (they're reindex-durable and may predate the code), but callers
+// warn so a typo isn't silently saved to a name that can never surface.
+func (svc *Service) AnnotateNode(cwd, symbol, source, note, data string) (id int64, matched bool, err error) {
 	pid, g, err := svc.annotateProject(cwd)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return g.AddAnnotation(pid, graph.Annotation{
+	id, err = g.AddAnnotation(pid, graph.Annotation{
 		Kind: graph.AnnotationNode, Target: symbol, Source: source, Note: note, Data: data,
 	})
+	if err != nil {
+		return 0, false, err
+	}
+	matched, _ = g.NodeExistsByName(pid, symbol)
+	return id, matched, nil
 }
 
 // AnnotatePath pins a note / external data to a call path from→to. Returns the

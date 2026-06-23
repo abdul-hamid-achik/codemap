@@ -730,11 +730,14 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 	}
 	svc := app.NewService(sess)
 	if len(args) == 1 {
-		id, err := svc.AnnotateNode(cwd, args[0], source, note, data)
+		id, matched, err := svc.AnnotateNode(cwd, args[0], source, note, data)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("annotated %s  (#%d, source=%s)\n", args[0], id, source)
+		if !matched {
+			fmt.Printf("⚠ no indexed symbol named %q — saved, but it won't surface in queries until one is (typo? not indexed yet?)\n", args[0])
+		}
 		return nil
 	}
 	id, target, err := svc.AnnotatePath(cwd, args[0], args[1], source, note, data)

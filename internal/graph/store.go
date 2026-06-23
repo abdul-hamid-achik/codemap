@@ -221,6 +221,24 @@ func (s *Store) FindNodesBySymbol(projectID int64, symbol string) ([]Node, error
 	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND symbol=? ORDER BY file_path, start_line", projectID, symbol)
 }
 
+// NodeExistsByName reports whether any node in the project has the given symbol
+// name or fully-qualified name. Annotations surface by matching either, so this
+// answers "would an annotation on this target ever surface?" — used to warn on
+// annotations pinned to a name nothing is indexed under.
+func (s *Store) NodeExistsByName(projectID int64, name string) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		"SELECT 1 FROM nodes WHERE project_id=? AND (symbol=? OR fqn=?) LIMIT 1",
+		projectID, name, name).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // NodesInFile returns all nodes for a file within a project.
 func (s *Store) NodesInFile(projectID int64, file string) ([]Node, error) {
 	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND file_path=? ORDER BY start_line", projectID, file)

@@ -349,8 +349,12 @@ func (s *Server) handleAnnotate(_ context.Context, _ *sdkmcp.CallToolRequest, in
 		return result(map[string]any{"id": id, "kind": "path", "target": target}, err)
 	}
 	if in.Symbol != "" {
-		id, err := s.svc.AnnotateNode(cwdOf(in.Path), in.Symbol, in.Source, in.Note, in.Data)
-		return result(map[string]any{"id": id, "kind": "node", "target": in.Symbol}, err)
+		id, matched, err := s.svc.AnnotateNode(cwdOf(in.Path), in.Symbol, in.Source, in.Note, in.Data)
+		out := map[string]any{"id": id, "kind": "node", "target": in.Symbol, "matched": matched}
+		if err == nil && !matched {
+			out["note"] = "no indexed symbol matches this target — saved, but it won't surface in queries until one does (typo, or not indexed yet?)"
+		}
+		return result(out, err)
 	}
 	return errResult("annotate: provide 'symbol', or both 'from' and 'to'"), nil, nil
 }
