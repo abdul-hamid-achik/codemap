@@ -211,6 +211,27 @@ func TestSearchEnterRunsWhenQueryChanged(t *testing.T) {
 	}
 }
 
+func TestImpactDrillIntoBlastNode(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabImpact
+	m.impact.SetValue("Foo")
+	rep := &app.ImpactReport{
+		Symbol: "Foo", Found: true,
+		BlastRadius: []app.ImpactNode{{Symbol: "A", Depth: 1}, {Symbol: "B", Depth: 1}},
+	}
+	m, _ = applyMsg(m, impactMsg{symbol: "Foo", rep: rep})
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown})) // select B
+	// value unchanged ("Foo") → enter drills the selected blast node
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm := u.(Model)
+	if mm.impact.Value() != "B" {
+		t.Errorf("drilled symbol = %q, want B", mm.impact.Value())
+	}
+	if cmd == nil {
+		t.Error("drill should fire an impact command")
+	}
+}
+
 func TestReindexKey(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.graphLoaded = true

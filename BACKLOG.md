@@ -264,6 +264,16 @@
   drill, edited-query-runs). docs/studio.md keys updated. All units + 4 E2E green, fmt clean.
   COMMIT+PUSH. **NEXT:** Impact blast-radius row select+drill (same pattern); or LSP edge
   wiring (E2.2b); studio looks feature-complete for v0.1.
+- 2026-06-23 #26 (cron, polish-first) — Impact recursive drill. ↑/↓ select a blast-radius node
+  (highlighted, windowed); enter drills the selected node into its own impact when the input
+  is unchanged, or analyzes a newly-typed symbol (same value!=symbol disambiguation as Search).
+  Drill workflow now complete across all tabs: Graph→Impact, Search→Impact, Impact→Impact.
+  1 new TUI test; footer + docs updated. All units + 4 E2E green, fmt clean. COMMIT+PUSH.
+  ★ studio TUI is feature-complete for v0.1 (full-screen, live reindex, drillable everywhere,
+  FQN-clear). **NEXT:** the remaining material item is LSP edge precision (E2.2b) — currently
+  the LSP client/lspsrc aren't in the index path, so "LSP value" isn't user-visible yet.
+  Consider wiring lspsrc as an opt-in indexer backend (per-language servers) OR a precise
+  `callers --lsp` path via gopls callHierarchy. Otherwise: docs polish, more glyphrun specs.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

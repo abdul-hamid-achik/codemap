@@ -93,7 +93,7 @@ type Model struct {
 	impact       textinput.Model
 	impactRep    *app.ImpactReport
 	impactSymbol string
-	impactOffset int
+	impactSel    int
 
 	// graph tab (call-graph explorer)
 	graphLoaded  bool
@@ -276,7 +276,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.impactRep = msg.rep
 		m.impactSymbol = msg.symbol
-		m.impactOffset = 0
+		m.impactSel = 0
 		if msg.rep != nil {
 			m.statusMsg = fmt.Sprintf("%s: %d callers, %d blast, %d tests",
 				msg.symbol, len(msg.rep.DirectCallers), len(msg.rep.BlastRadius), len(msg.rep.Tests))
@@ -339,7 +339,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.active = tabImpact
 				m.impact.SetValue(sym)
 				m.syncFocus()
-				m.impactOffset = 0
+				m.impactSel = 0
 				m.statusMsg = "analyzing…"
 				return m, m.impactCmd(sym)
 			}
@@ -365,17 +365,29 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if s == "" {
 				return m, nil
 			}
-			m.statusMsg = "analyzing…"
-			m.impactOffset = 0
-			return m, m.impactCmd(s)
+			if s != m.impactSymbol {
+				// new symbol typed → analyze it
+				m.statusMsg = "analyzing…"
+				m.impactSel = 0
+				return m, m.impactCmd(s)
+			}
+			// query unchanged → drill the selected blast-radius node (recursive)
+			if m.impactRep != nil && m.impactSel < len(m.impactRep.BlastRadius) {
+				sym := m.impactRep.BlastRadius[m.impactSel].Symbol
+				m.impact.SetValue(sym)
+				m.impactSel = 0
+				m.statusMsg = "analyzing…"
+				return m, m.impactCmd(sym)
+			}
+			return m, nil
 		case "up":
-			if m.impactOffset > 0 {
-				m.impactOffset--
+			if m.impactSel > 0 {
+				m.impactSel--
 			}
 			return m, nil
 		case "down":
-			if m.impactRep != nil && m.impactOffset < len(m.impactRep.BlastRadius)-1 {
-				m.impactOffset++
+			if m.impactRep != nil && m.impactSel < len(m.impactRep.BlastRadius)-1 {
+				m.impactSel++
 			}
 			return m, nil
 		}
@@ -401,7 +413,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.active = tabImpact
 				m.impact.SetValue(sym)
 				m.syncFocus()
-				m.impactOffset = 0
+				m.impactSel = 0
 				m.statusMsg = "analyzing…"
 				return m, m.impactCmd(sym)
 			}

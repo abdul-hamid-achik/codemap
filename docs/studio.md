@@ -26,8 +26,8 @@
 | Key | Action |
 |---|---|
 | `1`–`4` / `tab` / `shift+tab` | Switch tabs |
-| `↑` / `↓` | Select a hub (Graph) or a result (Search); scroll the blast radius (Impact) |
-| `enter` | Graph & Search: drill the selection into Impact · run the query after editing the text |
+| `↑` / `↓` | Select a hub (Graph), a result (Search), or a blast-radius node (Impact) |
+| `enter` | Drill the selection into Impact (any of Graph / Search / Impact) · or run the query after editing the text |
 | `ctrl+r` | Reindex the project (structure-only) and refresh, without leaving studio |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |
 

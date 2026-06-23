@@ -70,7 +70,7 @@ func (m Model) footer() string {
 	case tabSearch:
 		hint = "type · enter search/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
 	case tabImpact:
-		hint = "type symbol · enter · ↑/↓ scroll · ctrl+r reindex · tab · ctrl+c quit"
+		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
 	default:
 		hint = "ctrl+r reindex · 1-4 tabs · ctrl+c quit"
 	}
@@ -226,18 +226,29 @@ func (m Model) renderImpact(w, h int) string {
 		b.WriteString(sectionStyle.Render("Blast radius") + "\n")
 		br := rep.BlastRadius
 		budget := clamp(h-11, 1, 40)
-		start := clamp(m.impactOffset, 0, maxStart(len(br), budget))
+		start := windowStart(m.impactSel, budget, len(br))
 		end := clamp(start+budget, 0, len(br))
 		if start > 0 {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more above\n", start)))
 		}
-		for _, n := range br[start:end] {
-			marker := "  "
+		for i := start; i < end; i++ {
+			n := br[i]
+			name := truncate(displayName(n.FQN, n.Symbol), 32)
+			loc := truncate(fmt.Sprintf("%s:%d", n.File, n.StartLine), w-44)
+			test := ""
 			if n.Kind == "test" {
-				marker = symStyle.Render("✓ ")
+				test = " ✓"
 			}
-			fmt.Fprintf(&b, " %s[%d] %s %s\n", marker, n.Depth, padRight(truncate(displayName(n.FQN, n.Symbol), 32), 32),
-				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", n.File, n.StartLine), w-44)))
+			if i == m.impactSel {
+				plain := fmt.Sprintf(" ▸[%d] %s %s%s", n.Depth, padRight(name, 32), loc, test)
+				b.WriteString(selectedStyle.Width(w).Render(truncate(plain, w)) + "\n")
+			} else {
+				marker := "  "
+				if n.Kind == "test" {
+					marker = symStyle.Render("✓ ")
+				}
+				fmt.Fprintf(&b, " %s[%d] %s %s\n", marker, n.Depth, padRight(name, 32), mutedStyle.Render(loc))
+			}
 		}
 		if end < len(br) {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(br)-end)))
