@@ -10,7 +10,7 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly via go/types (Go) |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
 | `codemap projects` | List all registered projects and their index sizes |
-| `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, accuracy, ecosystem) |
+| `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, annotations, accuracy, ecosystem) |
 | `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`) |
 | `codemap annotations [<sym> \| <from> <to>]` | List annotations (all/node/path); `--rm <id>` to remove |
 

@@ -140,7 +140,7 @@ type sourceInput struct {
 type emptyInput struct{}
 
 type docsInput struct {
-	Topic string `json:"topic,omitempty" jsonschema:"optional section: overview, workflow, commands, accuracy, ecosystem; empty returns the full guide"`
+	Topic string `json:"topic,omitempty" jsonschema:"optional section: overview, workflow, commands, annotations, accuracy, ecosystem; empty returns the full guide"`
 }
 
 type annotateInput struct {
@@ -219,7 +219,7 @@ func (s *Server) register() {
 	}, s.handleProjects)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_docs",
-		Description: "Learn how to use codemap effectively: an agent guide covering the index-first workflow, which tool to use for what, the accuracy model (when to pass precise:true), and how codemap fits the local toolchain. Optional 'topic' (overview/workflow/commands/accuracy/ecosystem).",
+		Description: "Learn how to use codemap effectively: an agent guide covering the index-first workflow, which tool to use for what, the accuracy model (when to pass precise:true), and how codemap fits the local toolchain. Optional 'topic' (overview/workflow/commands/annotations/accuracy/ecosystem).",
 	}, s.handleDocs)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_annotate",

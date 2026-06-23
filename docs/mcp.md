@@ -62,7 +62,7 @@ directory) and return JSON.
 | `codemap_find` | Find symbols by name (offline; no embeddings) |
 | `codemap_source` | Return a `symbol`'s source code (its body, read from the indexed line range) |
 | `codemap_projects` | List all registered projects and their index sizes |
-| `codemap_docs` | Return the agent guide (`topic`: overview/workflow/commands/accuracy/ecosystem) so a harness can learn the tool |
+| `codemap_docs` | Return the agent guide (`topic`: overview/workflow/commands/annotations/accuracy/ecosystem) so a harness can learn the tool |
 | `codemap_annotate` | Pin a note / opaque `data` to a `symbol` or a `from`→`to` path (`source` label) |
 | `codemap_annotations` | List annotations: all, for a `symbol`, or for a `from`→`to` path |
 

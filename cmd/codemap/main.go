@@ -172,7 +172,7 @@ var (
 	}
 	docsCmd = &cobra.Command{
 		Use:   "docs [topic]",
-		Short: "Print the agent guide to codemap (topics: overview, workflow, commands, accuracy, ecosystem)",
+		Short: "Print the agent guide to codemap (topics: overview, workflow, commands, annotations, accuracy, ecosystem)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runDocs,
 	}

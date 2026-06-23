@@ -741,6 +741,15 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #99 (docs surface audit) — **systematic command/tool/topic accuracy audit.** Diffed the
+  documented surface against the code: the **20 CLI commands** (docs/cli.md) and **17 MCP tools**
+  (docs/mcp.md, matches CLAUDE.md's count) are fully and accurately listed — no drift. The one gap: the
+  `annotations` docs topic *exists and is served* (the full `codemap docs` guide includes it), but was
+  **advertised in only 5 of 6 topics** in five places — the CLI `docs` help, the MCP `docsInput`
+  jsonschema, the MCP tool Description, docs/cli.md, and docs/mcp.md — so an agent reading the help
+  wouldn't know to request `docs annotations`. Added it to all five. Full suite + lint v2 (0) green
+  (the MCP playbook-sync test is unaffected — it checks the `instructions` const, not the topic
+  schema); fmt clean. COMMIT+PUSH.
 - 2026-06-23 #98 (front-page docs accuracy) — **README/AGENTS feature list now matches reality.** Two
   fixes after a front-page audit: (1) the headline `--precise` capability was invisible — the
   "Precise navigation (LSP)" bullet described only the per-query `--lsp` gopls path, never the
