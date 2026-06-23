@@ -510,6 +510,29 @@ func TestSourceTargetAcrossTabs(t *testing.T) {
 	}
 }
 
+func TestHelpOverlay(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch // a tab with a focused text input
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "?", Code: '?'}))
+	if !m.showHelp {
+		t.Fatal("? should open the help overlay")
+	}
+	out := m.render()
+	for _, want := range []string{"Global", "Graph", "re-center", "precise"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help overlay should document %q:\n%s", want, out)
+		}
+	}
+	// ? closes it, and never reached the search input.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "?", Code: '?'}))
+	if m.showHelp {
+		t.Error("? should close the help overlay")
+	}
+	if m.search.Value() != "" {
+		t.Errorf("'?' should toggle help, not type into the search input (got %q)", m.search.Value())
+	}
+}
+
 func TestSourceViewerScrollAndClose(t *testing.T) {
 	m := sized(t, 80, 12) // small height so the content is scrollable
 	lines := make([]string, 30)

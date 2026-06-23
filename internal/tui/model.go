@@ -124,6 +124,8 @@ type Model struct {
 	graphCallees []app.SymbolRef
 	graphPrecise bool // hub detail is showing gopls-precise relations
 
+	showHelp bool // a full-screen keybinding overlay, toggled with `?`
+
 	// source viewer: a full-screen, scrollable view of a symbol's body, opened
 	// with `s` from the Graph tab and dismissed with esc/q.
 	srcView   bool
@@ -493,10 +495,21 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key == "ctrl+c" {
 		return m, tea.Quit
 	}
-	// The source viewer is a modal overlay: it captures navigation keys until
-	// dismissed, so handle it before anything else.
+	// Modal overlays capture keys until dismissed. Help takes precedence; `?`
+	// works on any tab (searching for "?" isn't meaningful, so capturing it is
+	// safe even where a text input is focused).
+	if m.showHelp {
+		if key == "?" || key == "esc" || key == "q" {
+			m.showHelp = false
+		}
+		return m, nil
+	}
 	if m.srcView {
 		return m.handleSourceKey(key)
+	}
+	if key == "?" {
+		m.showHelp = true
+		return m, nil
 	}
 	switch key {
 	case "ctrl+s":

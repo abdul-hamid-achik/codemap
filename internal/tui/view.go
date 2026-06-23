@@ -32,12 +32,41 @@ func (m Model) render() string {
 		bodyH = 3
 	}
 	content := m.body(m.width, bodyH)
-	if m.srcView {
+	switch {
+	case m.showHelp:
+		content = renderHelp()
+	case m.srcView:
 		content = m.renderSource(m.width, bodyH)
 	}
 	body := lipgloss.NewStyle().Width(m.width).Height(bodyH).MaxHeight(bodyH).Render(content)
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
+}
+
+// renderHelp is the full-screen keybinding overlay (toggled with `?`).
+func renderHelp() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("codemap studio — keys") + "\n\n")
+	row := func(k, d string) {
+		b.WriteString("  " + symStyle.Render(padRight(k, 26)) + mutedStyle.Render(d) + "\n")
+	}
+	b.WriteString(sectionStyle.Render("Global") + "\n")
+	row("1–4 / tab / shift+tab", "switch tabs")
+	row("ctrl+s", "view the selected symbol's source")
+	row("ctrl+r", "reindex (structure-only) and refresh")
+	row("? / esc", "toggle this help")
+	row("ctrl+c", "quit (q also quits on Graph/Metrics)")
+	b.WriteString("\n" + sectionStyle.Render("Graph") + "\n")
+	row("↑/↓ · pgup/pgdn · home/end", "move the hub selection")
+	row("→/l · ←/h", "focus the callers/calls pane · back to hubs")
+	row("enter", "hubs → Impact · refs → re-center (walk)")
+	row("backspace", "step back along the walk")
+	row("s · p", "view source · precise relations (gopls)")
+	b.WriteString("\n" + sectionStyle.Render("Metrics / Impact / Search") + "\n")
+	row("↑/↓ · pgup/pgdn", "move the selection")
+	row("enter", "drill the selection into Impact")
+	row("type (Impact/Search)", "edit the query; enter runs it")
+	return b.String()
 }
 
 // renderSource is the full-screen, scrollable source overlay (opened with `s`).
@@ -91,6 +120,8 @@ func (m Model) tabBar() string {
 func (m Model) footer() string {
 	var hint string
 	switch {
+	case m.showHelp:
+		return spread(mutedStyle.Render("? / esc close"), m.statusMsg, m.width)
 	case m.srcView:
 		hint = "↑/↓ scroll · pgup/pgdn · g/G top/bottom · esc/q close · ctrl+c quit"
 		status := m.statusMsg
@@ -113,6 +144,7 @@ func (m Model) footer() string {
 	default: // metrics
 		hint = "↑/↓ select · enter → impact · ctrl+s source · ctrl+r reindex · ctrl+c quit"
 	}
+	hint += " · ? help"
 	status := m.statusMsg
 	if m.errMsg != "" {
 		status = errorStyle.Render(m.errMsg)

@@ -40,6 +40,7 @@
 
 | Key | Action |
 |---|---|
+| `?` | Toggle a full-screen keybinding help overlay (works on any tab) |
 | `1`–`4` / `tab` / `shift+tab` | Switch tabs |
 | `↑` / `↓` | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), or a blast-radius node (Impact) |
 | `pgup` / `pgdn` | Jump a page through any of those lists (plus `home`/`end` on Graph and Metrics) |

@@ -96,6 +96,14 @@ steps:
         timeoutMs: 5000
     - snapshot: source_search
     - press: "q"
+    # ? opens the keybinding help overlay (works even with the search input focused).
+    - press: "?"
+    - wait:
+        screen:
+            contains: "codemap studio — keys"
+        timeoutMs: 5000
+    - snapshot: help
+    - press: "?"
     - press: "ctrl+c"
     - wait:
         process:

@@ -611,6 +611,14 @@
   **NEXT:** the safe-polish surface is essentially exhausted; the next real usefulness jump is the
   deferred backend — pure-Go `go/types` call resolution (accuracy) and LSP-backend wiring (multi-
   language). Both are deliberate epics warranting a focused go-ahead, not 5-min loop increments.
+- 2026-06-23 #59 (cron, polish-first) — **studio `?` help overlay.** The TUI has many keys (tabs,
+  walk, source, precise, page-nav, drill) but no discoverability surface beyond context footers. `?`
+  now toggles a full-screen keybinding overlay (Global / Graph / Metrics·Impact·Search), reachable on
+  any tab — `?` is captured globally (searching for "?" isn't meaningful, so it's safe even with a
+  text input focused) and footers gained a "· ? help" hint. Tests: `TestHelpOverlay` (opens, documents
+  keys, closes, and does NOT leak into the search input). Studio E2E extended (`?`→help snapshot→`?`).
+  Full suite + lint v2 (0) + studio E2E (43 steps) green; fmt clean. COMMIT+PUSH.
+  **NEXT:** deferred backend epics (go/types accuracy, LSP multi-language) — warrant a focused go-ahead.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
