@@ -522,6 +522,11 @@
   `TestMetricsNavigationDrills` (select into orphans → sourceTarget + enter→Impact). Extended studio
   E2E: `ctrl+s` from Metrics → `metrics_source` snapshot (`app.Helper a.go:1-1`). Full suite + race +
   all 6 E2E green; fmt/vet clean. Docs (README + docs/studio.md) updated. COMMIT+PUSH.
+  Follow-up: CI lint (golangci-lint v2) caught `firstN` as unused (the Metrics rewrite dropped its
+  last caller) — local `go vet` doesn't check unused, so it slipped through. Removed firstN (fix
+  `a049444`, CI green). Then hardened `task lint` to mirror CI: use a v2 golangci-lint binary if
+  present, else `go install` v2 into bin/ (gitignored, cached) and run it; vet+gofmt only when
+  offline — so lint-only issues are caught locally before pushing.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)

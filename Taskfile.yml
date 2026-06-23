@@ -64,13 +64,21 @@ tasks:
       - gofmt -w .
 
   lint:
-    desc: Lint (golangci-lint v2 if present, else go vet + gofmt check)
+    desc: Lint with golangci-lint v2 to match CI (binary if present, else `go install`); vet+gofmt only when offline
     cmds:
       - |
+        # CI runs golangci-lint v2; mirror it locally so lint-only issues (e.g.
+        # unused funcs, which `go vet` misses) are caught before pushing.
+        LINT=""
         if golangci-lint version 2>/dev/null | grep -qE 'version v?2\.'; then
-          golangci-lint run ./...
+          LINT="golangci-lint"
+        elif GOBIN="$PWD/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 2>/dev/null; then
+          LINT="$PWD/bin/golangci-lint"  # cached after first install
+        fi
+        if [ -n "$LINT" ]; then
+          "$LINT" run ./...
         else
-          echo "note: golangci-lint v2 not found; running go vet + gofmt (install golangci-lint v2 for the full lint set)"
+          echo "note: golangci-lint v2 unavailable (offline?); running go vet + gofmt"
           go vet ./...
           test -z "$(gofmt -l .)" || (echo "unformatted files:"; gofmt -l .; exit 1)
         fi
