@@ -727,6 +727,18 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #84 (orphans accuracy) — **`orphans` no longer flags `main`/`init` as dead code.**
+  Dogfooding `codemap orphans` on the codemap repo listed `main.main` and `main.init` at the top as
+  "dead-code candidates" — but Go invokes `main` and every `init` automatically, so they're never dead;
+  a guaranteed false positive that undermined the command. `graph.Store.Orphans` now excludes package-
+  level functions named `main`/`init` (`AND NOT (kind = function AND symbol IN ('main','init'))` — the
+  kind guard keeps a *method* named main/init eligible, since those aren't special). Tests already showed
+  `orphans` excludes test functions (kind filter); this removes the other built-in false positive.
+  (The `runX` cobra handlers still appear — genuine name-based limitation: they're invoked via RunE
+  function-value assignment the graph can't see; docs already call orphans output *candidates*.) Test
+  `TestOrphansExcludesMainAndInit` (Orphan present; main/init absent). Verified live: top of the orphans
+  list no longer starts with main/init. Full suite + lint v2 (0) + query/studio E2E green; fmt clean.
+  COMMIT+PUSH.
 - 2026-06-23 #83 (annotate surface, finish) — **path-annotation validation + `annotate --json` parity**,
   the two #82 follow-ups. (1) `AnnotatePath` now returns `matched` (both endpoints indexed, via
   `NodeExistsByName`) — annotating a path with a ghost endpoint is saved but warns (CLI `⚠ path

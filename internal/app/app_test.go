@@ -526,6 +526,40 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestOrphansExcludesMainAndInit(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	// main and init are runtime-invoked (never dead); Orphan genuinely has no caller.
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n\nfunc init() {}\n\nfunc Orphan() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Orphans(proj, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, o := range rep.Orphans {
+		got[o.Symbol] = true
+	}
+	if !got["Orphan"] {
+		t.Errorf("Orphan (uncalled) should be a dead-code candidate, got %v", got)
+	}
+	if got["main"] || got["init"] {
+		t.Errorf("main/init are runtime-invoked and must not appear as dead-code candidates, got %v", got)
+	}
+}
+
 func TestAnnotateReportsUnknownTarget(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

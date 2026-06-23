@@ -310,12 +310,16 @@ func (s *Store) Orphans(projectID int64, limit int) ([]Node, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// main and init are invoked automatically by the Go runtime, so a package-level
+	// function with either name is never dead — excluding them keeps the dead-code
+	// list trustworthy (a method named main/init is not special, hence the kind guard).
 	q := "SELECT " + nodeColsAs("n") + ` FROM nodes n
 		WHERE n.project_id = ? AND n.kind IN (?, ?)
 		AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.target_id = n.id AND e.edge_type = ?)
+		AND NOT (n.kind = ? AND n.symbol IN ('main', 'init'))
 		ORDER BY n.file_path, n.start_line
 		LIMIT ?`
-	return s.queryNodes(q, projectID, KindFunction, KindMethod, EdgeCalls, limit)
+	return s.queryNodes(q, projectID, KindFunction, KindMethod, EdgeCalls, KindFunction, limit)
 }
 
 // Path returns the shortest call path from one symbol to another (following
