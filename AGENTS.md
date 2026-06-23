@@ -19,8 +19,10 @@ Three surfaces over one store (the ecosystem pattern, see vecgrep/noted):
 - **studio TUI** — `codemap studio` (Charm v2), interactive code map for humans.
 
 Key features:
-- **Structural graph** — nodes (files, functions, types, methods, tests) + edges (calls,
-  imports, implements, references, tests, overrides) in pure-Go SQLite.
+- **Structural graph** — nodes (files, functions, types, methods, tests) + `calls`/`defines` edges
+  in pure-Go SQLite (call edges are name-based by default, exact via `go/types` with `--precise`;
+  `imports`/`implements`/`references`/`overrides` edge types are reserved for the planned LSP/tree-sitter
+  backends).
 - **Semantic search** — node source text embedded via Ollama (`nomic-embed-text`, 768-dim)
   into veclite; vector + BM25 hybrid (RRF) search.
 - **Hybrid queries** — `codemap_impact` (blast radius + test coverage), `semantic_callers`

@@ -15,10 +15,12 @@ instead of dozens of file reads.
 
 ## Features
 
-- **Structural code graph** — files, functions, types, methods, and tests as nodes; calls,
-  imports, implements, references, overrides, and test-coverage as edges. Stored in pure-Go
-  SQLite, queryable offline. **v0.1 indexes Go** (stdlib `go/parser`); more languages (via the
-  built-in LSP backend and tree-sitter) are planned. Semantic search is language-agnostic.
+- **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
+  (name-based by default, exact via `go/types` with `--precise`) and **defines** edges (file → symbol).
+  Test coverage is derived by walking the call graph to test nodes. Stored in pure-Go SQLite,
+  queryable offline. **v0.1 indexes Go** (stdlib `go/parser`); the schema reserves
+  `imports`/`implements`/`overrides`/`references` edge types for the planned LSP and tree-sitter
+  backends. Semantic search is language-agnostic.
 - **Semantic search** — every node's source is embedded (Ollama `nomic-embed-text`, 768-dim)
   into [veclite](https://github.com/abdul-hamid-achik/veclite); vector + BM25 hybrid search.
 - **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
@@ -29,10 +31,14 @@ instead of dozens of file reads.
 - **Annotations** — pin notes and external data (DB rows from mongosh/postgres, vidtrace/vecgrep
   findings, …) to a symbol or a call path; they persist across reindex. A knowledge layer over the
   graph for agent harnesses (`annotate` / `annotations`, also on MCP).
-- **Precise navigation (LSP)** — the fast name-based graph for everyday queries, plus
-  `callers --lsp` / `callees --lsp` that use gopls `callHierarchy` for **exact** results — the
-  specific resolved method, not every same-named one (e.g. `callers Close --lsp` returns the 7
-  real callers instead of 50 inflated by name). Available on the CLI and MCP (`precise: true`).
+- **Precise call resolution (go/types)** — the fast name-based graph over-matches same-named methods
+  (`x.Close()` links to *every* `Close`). One `codemap index --precise` runs an in-process, pure-Go
+  `go/types` pass that resolves each call to the method it actually invokes and makes **every** query
+  — callers, callees, impact, hotspots, path — exact at once, no per-query flag (e.g. a `Close` method
+  that name-matching credited with 71 callers shows only its real ones). Opt-in and additive
+  (name-based stays the default); degrades to name-based **with a note** when the `go` toolchain or
+  module isn't available. For a one-off exact answer without reindexing, `callers`/`callees` also take
+  `--lsp` (gopls `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider/model/dimension changes instead of corrupting the vector space.
 - **Three surfaces, one store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP

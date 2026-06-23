@@ -741,6 +741,18 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #98 (front-page docs accuracy) — **README/AGENTS feature list now matches reality.** Two
+  fixes after a front-page audit: (1) the headline `--precise` capability was invisible — the
+  "Precise navigation (LSP)" bullet described only the per-query `--lsp` gopls path, never the
+  in-process `go/types` `index --precise` pass that makes EVERY query exact at once. Rewrote it
+  ("Precise call resolution (go/types)") to lead with `--precise` as the graph-wide fix, `--lsp` as the
+  one-off, matching the #91 Accuracy rewrite. (2) The graph bullet claimed edges "calls, imports,
+  implements, references, overrides, and test-coverage" — but the real index produces **only `calls`
+  and `defines`** (verified: `SELECT edge_type … GROUP BY` → just those two; `imports`/`implements`/
+  `overrides`/`references` are unused schema slots reserved for the planned LSP/tree-sitter backends,
+  and test-coverage is *derived* by walking the call graph to test nodes, not a stored edge). Corrected
+  both README and AGENTS.md (source of truth) to list `calls`/`defines` and reserve the rest. Docs-only
+  ⇒ CI green. COMMIT+PUSH.
 - 2026-06-23 #97 (precise epic — discoverability at index) — **plain `codemap index` nudges toward
   `--precise`.** Dogfooding showed a new user indexing a Go project never learns `--precise` exists at
   the moment they'd benefit (status hints, but only if run). Now a name-based index of a non-empty
