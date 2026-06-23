@@ -481,6 +481,22 @@ func TestImpactPaneShowsAnnotations(t *testing.T) {
 	}
 }
 
+func TestImpactPaneWarnsOnAmbiguousName(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabImpact
+	m.impact.SetValue("Close")
+	rep := &app.ImpactReport{
+		Symbol: "Close", Found: true,
+		Locations:   []app.SymbolRef{{Symbol: "Close", File: "a.go"}, {Symbol: "Close", File: "b.go"}},
+		BlastRadius: []app.ImpactNode{{Symbol: "Caller", Depth: 1}},
+		Note:        `"Close" matches 2 definitions (name-based) — direct callers, blast radius, and covering tests below merge all of them; for one exact method use callers/callees --lsp`,
+	}
+	m, _ = applyMsg(m, impactMsg{symbol: "Close", rep: rep})
+	if out := m.render(); !strings.Contains(out, "matches 2 definitions") {
+		t.Errorf("impact pane should warn when the name is ambiguous:\n%s", out)
+	}
+}
+
 func TestImpactShowsSignaturePreview(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabImpact

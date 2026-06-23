@@ -458,6 +458,9 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	for _, l := range rep.Locations {
 		fmt.Printf("  defined:        %s:%d\n", l.File, l.StartLine)
 	}
+	if rep.Note != "" {
+		fmt.Println("  ⚠ " + rep.Note)
+	}
 	fmt.Printf("  direct callers: %d\n", len(rep.DirectCallers))
 	fmt.Printf("  blast radius:   %d (depth ≤ %d)\n", len(rep.BlastRadius), depth)
 	fmt.Printf("  tests covering: %d\n", len(rep.Tests))

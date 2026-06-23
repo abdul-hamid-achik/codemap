@@ -526,6 +526,51 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestImpactWarnsOnAmbiguousName(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	// Two same-named methods make "Close" ambiguous; "Solo" is unique.
+	src := "package app\n\n" +
+		"type T struct{}\ntype U struct{}\n\n" +
+		"func (T) Close() {}\nfunc (U) Close() {}\n\n" +
+		"func RunT() { var t T; t.Close() }\n" +
+		"func RunU() { var u U; u.Close() }\n" +
+		"func Solo() {}\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ambiguous: impact merges both Close definitions and must say so.
+	amb, err := svc.Impact(proj, "Close", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(amb.Locations) < 2 {
+		t.Fatalf("expected >1 definition for Close, got %d", len(amb.Locations))
+	}
+	if amb.Note == "" || !strings.Contains(amb.Note, "definitions") {
+		t.Errorf("ambiguous impact should warn it merges same-named defs, got %q", amb.Note)
+	}
+
+	// Unambiguous: no warning.
+	solo, err := svc.Impact(proj, "Solo", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if solo.Note != "" {
+		t.Errorf("unambiguous impact should carry no note, got %q", solo.Note)
+	}
+}
+
 func TestPreciseFallbackToNameBased(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

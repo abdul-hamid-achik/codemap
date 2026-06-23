@@ -460,6 +460,9 @@ func (m Model) renderImpact(w, h int) string {
 			cover += "   " + errorStyle.Render("⚠ untested")
 		}
 		b.WriteString("\n" + countStyle.Render(cover) + "\n")
+		if rep.Note != "" { // ambiguous name: the counts above merge same-named defs
+			b.WriteString(errorStyle.Render("⚠ ") + mutedStyle.Render(truncate(rep.Note, w-2)) + "\n")
+		}
 		// Name the covering tests outright (the "what do I run" answer), not just
 		// the ✓ markers buried in the blast radius below.
 		reserve := 14

@@ -790,6 +790,7 @@ type ImpactReport struct {
 	BlastRadius   []ImpactNode       `json:"blast_radius"`
 	Tests         []ImpactNode       `json:"tests"`
 	Untested      bool               `json:"untested"`
+	Note          string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
 	Annotations   []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
@@ -831,6 +832,13 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	rep.Found = true
 	for _, n := range locs {
 		rep.Locations = append(rep.Locations, nodeToRef(n))
+	}
+	if len(locs) > 1 {
+		// Name-based lookup conflates every definition with this name, so the
+		// callers/blast-radius/tests below are the union across all of them. Say
+		// so — a "71 callers" number is misleading when it merges six unrelated
+		// Close() methods.
+		rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — direct callers, blast radius, and covering tests below merge all of them; for one exact method use callers/callees --lsp", symbol, len(locs))
 	}
 
 	callers, err := g.Callers(p.ID, symbol)

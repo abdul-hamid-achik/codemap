@@ -727,6 +727,19 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #79 (flagship honesty) — **`impact` warns when the name is ambiguous.** Dogfooding found
+  a real flagship wart: `codemap impact Close` resolves to 6 different `Close` methods across packages
+  and silently merges them into one blast radius reading "direct callers: 71" — a misleadingly huge,
+  conflated number with no signal it's name-based over-matching (contrast `impact Status` → 1 def,
+  correct). Now `Impact` sets `ImpactReport.Note` when `len(Locations) > 1`: `"Close" matches 6
+  definitions (name-based) — direct callers, blast radius, and covering tests below merge all of them;
+  for one exact method use callers/callees --lsp`. (FindNodesBySymbol matches the bare name exactly, so
+  the guidance points at precise callers/callees, not a "more specific symbol" — which wouldn't work
+  for impact.) Surfaced on all three surfaces: CLI prints a `⚠` line right after the defined-sites
+  list; the note rides JSON to MCP agents; the studio Impact pane shows it under the counts. Tests:
+  `TestImpactWarnsOnAmbiguousName` (ambiguous→note, unique→none) + tui `TestImpactPaneWarnsOnAmbiguousName`.
+  Verified live: `impact Close` shows the 6 sites + warning; `impact Status` clean. Full suite + lint v2
+  (0) + query/studio E2E green; fmt clean. COMMIT+PUSH.
 - 2026-06-23 #78 (docs accuracy) — **documented the honest-behavior contracts from #73–#77** so the
   people and agents who hit them understand they're expected, not bugs. Updated all four doc surfaces:
   the MCP `instructions` playbook (query tools return `{"indexed": false}` until indexed; precise
