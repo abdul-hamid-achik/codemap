@@ -66,7 +66,11 @@ func (m Model) footer() string {
 	var hint string
 	switch m.active {
 	case tabGraph:
-		hint = "↑/↓ select · enter → impact · p precise(gopls) · ctrl+r reindex · ctrl+c quit"
+		if m.graphFocus == focusRefs {
+			hint = "↑/↓ ref · enter re-center · ⌫ back · ← hubs · p precise · ctrl+c quit"
+		} else {
+			hint = "↑/↓ hub · → walk callers/calls · enter → impact · p precise · ctrl+c quit"
+		}
 	case tabSearch:
 		hint = "type · enter search/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
 	case tabImpact:
@@ -136,9 +140,12 @@ func (m Model) hubList(w, h int) string {
 	for i := start; i < end; i++ {
 		hub := m.graphHubs[i]
 		line := truncate(fmt.Sprintf("%4d  %s", hub.InDegree, displayName(hub.FQN, hub.Symbol)), w)
-		if i == m.graphSel {
+		switch {
+		case i == m.graphSel && m.graphFocus == focusHubs:
 			b.WriteString(selectedStyle.Width(w).Render(line))
-		} else {
+		case i == m.graphSel:
+			b.WriteString(dimSelectedStyle.Width(w).Render(line))
+		default:
 			b.WriteString(line)
 		}
 		b.WriteByte('\n')
@@ -151,15 +158,14 @@ func (m Model) hubDetail(w, h int) string {
 		return mutedStyle.Render("select a hub")
 	}
 	var b strings.Builder
-	header := m.graphSym
-	if m.graphSel < len(m.graphHubs) {
-		header = displayName(m.graphHubs[m.graphSel].FQN, m.graphHubs[m.graphSel].Symbol)
-	}
-	hdr := symStyle.Render(header)
+	hdr := symStyle.Render(displayName(m.graphCenter.fqn, m.graphCenter.sym))
 	mark := ""
 	if m.graphPrecise {
 		hdr += "  " + countStyle.Render("precise · gopls")
 		mark = " · gopls"
+	}
+	if len(m.graphStack) > 0 {
+		hdr += "  " + mutedStyle.Render(fmt.Sprintf("· depth %d (⌫ back)", len(m.graphStack)))
 	}
 	b.WriteString(hdr + "\n\n")
 	budget := (h - 5) / 2
@@ -167,10 +173,48 @@ func (m Model) hubDetail(w, h int) string {
 		budget = 1
 	}
 	b.WriteString(title(fmt.Sprintf("Called by (%d)%s", len(m.graphCallers), mark)) + "\n")
-	b.WriteString(refLines(m.graphCallers, budget, w))
+	b.WriteString(m.refBlock(m.graphCallers, 0, budget, w))
 	b.WriteString("\n")
 	b.WriteString(title(fmt.Sprintf("Calls (%d)%s", len(m.graphCallees), mark)) + "\n")
-	b.WriteString(refLines(m.graphCallees, budget, w))
+	b.WriteString(m.refBlock(m.graphCallees, len(m.graphCallers), budget, w))
+	return b.String()
+}
+
+// refBlock renders one relation list (callers or callees). base is the block's
+// offset into the combined refs list so the right pane's selection (graphRefSel)
+// highlights the correct row when focused, with windowing to keep it visible.
+func (m Model) refBlock(refs []app.SymbolRef, base, budget, w int) string {
+	if len(refs) == 0 {
+		return mutedStyle.Render("  (none)") + "\n"
+	}
+	localSel := -1
+	if m.graphFocus == focusRefs && m.graphRefSel >= base && m.graphRefSel < base+len(refs) {
+		localSel = m.graphRefSel - base
+	}
+	if budget < 1 {
+		budget = 1
+	}
+	start := 0
+	if localSel >= 0 {
+		start = windowStart(localSel, budget, len(refs))
+	}
+	end := clamp(start+budget, 0, len(refs))
+	var b strings.Builder
+	if start > 0 {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more\n", start)))
+	}
+	for i := start; i < end; i++ {
+		r := refs[i]
+		line := fmt.Sprintf("%s  %s:%d", displayName(r.FQN, r.Symbol), r.File, r.StartLine)
+		if i == localSel {
+			b.WriteString(selectedStyle.Width(w).Render(truncate(" ▸ "+line, w)) + "\n")
+		} else {
+			b.WriteString("  " + truncate(line, w-2) + "\n")
+		}
+	}
+	if end < len(refs) {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more\n", len(refs)-end)))
+	}
 	return b.String()
 }
 
@@ -315,20 +359,6 @@ func displayName(fqn, symbol string) string {
 		return fqn
 	}
 	return symbol
-}
-
-func refLines(refs []app.SymbolRef, budget, w int) string {
-	if len(refs) == 0 {
-		return mutedStyle.Render("  (none)") + "\n"
-	}
-	var b strings.Builder
-	for _, r := range firstN(refs, budget) {
-		b.WriteString("  " + truncate(fmt.Sprintf("%s  %s:%d", displayName(r.FQN, r.Symbol), r.File, r.StartLine), w-2) + "\n")
-	}
-	if len(refs) > budget {
-		fmt.Fprintf(&b, "  %s\n", mutedStyle.Render(fmt.Sprintf("… +%d more", len(refs)-budget)))
-	}
-	return b.String()
 }
 
 func spread(left, right string, width int) string {

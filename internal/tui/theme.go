@@ -21,6 +21,9 @@ var (
 	chipStyle       = lipgloss.NewStyle().Foreground(colorMuted).Background(lipgloss.Color("#252932"))
 	activeChipStyle = lipgloss.NewStyle().Foreground(colorInk).Background(colorSelect).Bold(true)
 	selectedStyle   = lipgloss.NewStyle().Foreground(colorInk).Background(colorSelect)
-	dividerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3F4B"))
-	countStyle      = lipgloss.NewStyle().Foreground(colorMuted)
+	// dimSelectedStyle marks the selection in a pane that doesn't currently have
+	// keyboard focus (e.g. the hub list while you're walking the refs pane).
+	dimSelectedStyle = lipgloss.NewStyle().Foreground(colorInk).Background(lipgloss.Color("#23323A"))
+	dividerStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3F4B"))
+	countStyle       = lipgloss.NewStyle().Foreground(colorMuted)
 )

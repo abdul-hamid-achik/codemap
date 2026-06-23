@@ -2,7 +2,9 @@ version: 1
 name: studio
 intent: |
     studio opens on the Graph tab showing call-graph hubs, fills the terminal,
-    and switches to the Metrics tab with bar charts, then quits cleanly.
+    walks into a hub's callers/callees and back, recomputes relations precisely
+    via gopls, switches to Metrics (bar charts) and Impact, searches by name,
+    then quits cleanly.
 target:
     cmd:
         - "/bin/sh"
@@ -23,7 +25,21 @@ steps:
         screen:
             contains: "Hubs"
         timeoutMs: 8000
+    - wait:
+        screen:
+            contains: "Called by"
+        timeoutMs: 8000
     - snapshot: graph
+    # Walk the call graph: focus the refs pane (l), re-center on a caller/callee
+    # (enter), then return focus to the hub list (h). Uses fast by-name detail.
+    - press: "l"
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "depth 1"
+        timeoutMs: 5000
+    - snapshot: graph_walk
+    - press: "h"
     - press: "p"
     - wait:
         screen:
@@ -66,4 +82,4 @@ outcomes:
       verify:
         process:
             exitCode: 0
-contractHash: sha256:439e4f75a0d362c76f27131ffad5d91ea75ecf2b7e38d25558867440ffc589d6
+contractHash: sha256:430b9622f34e9ddae11c493172764162f908c17c624c3eb2d253c4805bbb6c04

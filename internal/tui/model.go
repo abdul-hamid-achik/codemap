@@ -111,6 +111,42 @@ type Model struct {
 	graphCallers []app.SymbolRef
 	graphCallees []app.SymbolRef
 	graphPrecise bool // hub detail is showing gopls-precise relations
+
+	// graph walking: the right pane can be focused to walk into callers/callees,
+	// re-centering the explorer on any node (not just hubs). graphStack records
+	// the path so backspace pops back.
+	graphFocus  graphFocus
+	graphRefSel int           // selection across the combined callers+callees list
+	graphCenter graphCenter   // node the detail pane is currently centered on
+	graphStack  []graphCenter // breadcrumb of centers walked into
+}
+
+// graphFocus is which pane of the Graph tab has keyboard focus.
+type graphFocus int
+
+const (
+	focusHubs graphFocus = iota // left pane: the hub list (jump points)
+	focusRefs                   // right pane: the center's callers/callees (walk)
+)
+
+// graphCenter is the node the Graph detail pane is centered on. It carries
+// enough to re-fetch relations (by name) and resolve precisely (file:line).
+type graphCenter struct {
+	sym, fqn, file string
+	line           int
+}
+
+func centerOfHub(h app.HotspotRef) graphCenter {
+	return graphCenter{sym: h.Symbol, fqn: h.FQN, file: h.File, line: h.StartLine}
+}
+
+func centerOfRef(r app.SymbolRef) graphCenter {
+	return graphCenter{sym: r.Symbol, fqn: r.FQN, file: r.File, line: r.StartLine}
+}
+
+// graphRefs is the combined callers-then-callees list the refs pane walks over.
+func (m Model) graphRefs() []app.SymbolRef {
+	return append(append([]app.SymbolRef{}, m.graphCallers...), m.graphCallees...)
 }
 
 // NewModel builds the studio model over a session.
@@ -185,11 +221,11 @@ func (m Model) semanticCmd(q string) tea.Cmd {
 	}
 }
 
-func (m Model) preciseDetailCmd(hub app.HotspotRef) tea.Cmd {
+func (m Model) preciseDetailCmd(c graphCenter) tea.Cmd {
 	ctx, svc, dir := m.ctx, m.service, m.startDir
 	return func() tea.Msg {
-		callers, callees, err := svc.PreciseRelationsAt(ctx, dir, hub.Symbol, hub.File, hub.StartLine)
-		return preciseDetailMsg{symbol: hub.Symbol, callers: callers, callees: callees, err: err}
+		callers, callees, err := svc.PreciseRelationsAt(ctx, dir, c.sym, c.file, c.line)
+		return preciseDetailMsg{symbol: c.sym, callers: callers, callees: callees, err: err}
 	}
 }
 
@@ -243,7 +279,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.graphHubs = msg.hubs
 		m.graphSel = 0
+		m.graphFocus = focusHubs
+		m.graphStack = nil
 		if len(msg.hubs) > 0 {
+			m.graphCenter = centerOfHub(msg.hubs[0])
 			return m, m.detailCmd(msg.hubs[0].Symbol)
 		}
 		return m, nil
@@ -257,6 +296,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphCallers = msg.callers
 		m.graphCallees = msg.callees
 		m.graphPrecise = false
+		m.graphRefSel = 0
 		return m, nil
 
 	case preciseDetailMsg:
@@ -269,6 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphCallers = msg.callers
 		m.graphCallees = msg.callees
 		m.graphPrecise = true
+		m.graphRefSel = 0
 		m.statusMsg = fmt.Sprintf("precise via gopls: %d callers, %d callees", len(msg.callers), len(msg.callees))
 		return m, nil
 
@@ -427,44 +468,112 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tabGraph:
-		switch key {
-		case "up", "k":
-			if m.graphSel > 0 {
-				m.graphSel--
-				m.graphPrecise = false
-				return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
-			}
-		case "down", "j":
-			if m.graphSel < len(m.graphHubs)-1 {
-				m.graphSel++
-				m.graphPrecise = false
-				return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
-			}
-		case "p":
-			// recompute the selected hub's relations precisely via gopls
-			if len(m.graphHubs) > 0 {
-				m.statusMsg = "resolving precise (gopls)…"
-				return m, m.preciseDetailCmd(m.graphHubs[m.graphSel])
-			}
-		case "enter":
-			// drill into the selected hub's full impact analysis
-			if len(m.graphHubs) > 0 {
-				sym := m.graphHubs[m.graphSel].Symbol
-				m.active = tabImpact
-				m.impact.SetValue(sym)
-				m.syncFocus()
-				m.impactSel = 0
-				m.statusMsg = "analyzing…"
-				return m, m.impactCmd(sym)
-			}
-		case "q":
-			return m, tea.Quit
-		}
-		return m, nil
+		return m.handleGraphKey(key)
 
 	default: // metrics
 		if key == "q" {
 			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+// handleGraphKey drives the call-graph explorer. The left pane (focusHubs)
+// browses hubs as jump points; the right pane (focusRefs) walks the centered
+// node's callers/callees, re-centering on enter so you can traverse the graph.
+func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "q":
+		return m, tea.Quit
+	case "p":
+		// recompute the centered node's relations precisely via gopls
+		if m.graphCenter.sym != "" {
+			m.statusMsg = "resolving precise (gopls)…"
+			return m, m.preciseDetailCmd(m.graphCenter)
+		}
+		return m, nil
+	case "left", "h":
+		m.graphFocus = focusHubs
+		return m, nil
+	case "right", "l":
+		if len(m.graphRefs()) > 0 {
+			m.graphFocus = focusRefs
+			m.graphRefSel = 0
+		}
+		return m, nil
+	case "esc":
+		m.graphFocus = focusHubs
+		return m, nil
+	case "backspace":
+		// pop back to the previous center along the walk.
+		if n := len(m.graphStack); n > 0 {
+			prev := m.graphStack[n-1]
+			m.graphStack = m.graphStack[:n-1]
+			m.graphCenter = prev
+			m.graphPrecise = false
+			m.statusMsg = "← " + displayName(prev.fqn, prev.sym)
+			return m, m.detailCmd(prev.sym)
+		}
+		return m, nil
+	}
+
+	if m.graphFocus == focusRefs {
+		return m.handleGraphRefsKey(key)
+	}
+
+	// focusHubs: browse hubs (jump points).
+	switch key {
+	case "up", "k":
+		if m.graphSel > 0 {
+			m.graphSel--
+			m.graphPrecise = false
+			m.graphCenter = centerOfHub(m.graphHubs[m.graphSel])
+			return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
+		}
+	case "down", "j":
+		if m.graphSel < len(m.graphHubs)-1 {
+			m.graphSel++
+			m.graphPrecise = false
+			m.graphCenter = centerOfHub(m.graphHubs[m.graphSel])
+			return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
+		}
+	case "enter":
+		// drill the centered hub into full impact analysis
+		if len(m.graphHubs) > 0 {
+			sym := m.graphHubs[m.graphSel].Symbol
+			m.active = tabImpact
+			m.impact.SetValue(sym)
+			m.syncFocus()
+			m.impactSel = 0
+			m.statusMsg = "analyzing…"
+			return m, m.impactCmd(sym)
+		}
+	}
+	return m, nil
+}
+
+// handleGraphRefsKey walks the centered node's callers/callees.
+func (m Model) handleGraphRefsKey(key string) (tea.Model, tea.Cmd) {
+	refs := m.graphRefs()
+	switch key {
+	case "up", "k":
+		if m.graphRefSel > 0 {
+			m.graphRefSel--
+		}
+	case "down", "j":
+		if m.graphRefSel < len(refs)-1 {
+			m.graphRefSel++
+		}
+	case "enter":
+		// re-center the explorer on the selected ref (walk the graph).
+		if m.graphRefSel < len(refs) {
+			r := refs[m.graphRefSel]
+			m.graphStack = append(m.graphStack, m.graphCenter)
+			m.graphCenter = centerOfRef(r)
+			m.graphPrecise = false
+			m.graphRefSel = 0
+			m.statusMsg = "→ " + displayName(r.FQN, r.Symbol)
+			return m, m.detailCmd(r.Symbol)
 		}
 	}
 	return m, nil

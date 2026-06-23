@@ -361,6 +361,21 @@
   by-name inflation for the common intra-package case without the cost/dependency of indexing
   with gopls. All units + fmt/vet clean. COMMIT+PUSH.
   **NEXT:** references/dependencies tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #37 (cron, polish-first) — **studio Graph tab is now a real graph WALKER, not a
+  static detail view** (directly addresses the original "graph isn't useful" complaint). The
+  left pane stays a hub jump-list; `→`/`l` focuses the right pane and `enter` **re-centers** the
+  explorer on the selected caller/callee — so you can traverse "who calls X → who calls that →
+  what does it call". `backspace` pops back along a breadcrumb (header shows depth), `←`/`h`
+  returns focus to hubs. Decoupled the detail header/precise target from the hub selection via a
+  `graphCenter{sym,fqn,file,line}` + `graphStack` (walk path); `p` precise now works on the
+  centered node at any depth. New `refBlock` renderer highlights the focused ref with windowing;
+  hub selection dims when the refs pane is focused (`dimSelectedStyle`). Existing `enter`→Impact
+  (hub focus) preserved → E2E + TestGraphEnterDrillsToImpact intact. 3 new unit tests
+  (recenter+back, caller/callee boundary index, hub-focus enter still drills); `go test -race`
+  clean. Extended studio.yml E2E to walk the graph (`l`→`enter`→depth-1→`h`) + new `graph_walk`
+  snapshot — PTY-driven `esc`/`backspace` proved flaky (lone ESC ambiguous over a PTY) so the
+  flow uses vim `l`/`h` focus keys. Docs (README + docs/studio.md keys table) updated. COMMIT+PUSH.
+  **NEXT:** references/dependencies tools, full precise (gopls) edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

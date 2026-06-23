@@ -52,8 +52,10 @@ Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`4` or `tab`; navigate with `
                                │  Calls (0)
 ```
 
-- **Graph** — a call-graph explorer: the hubs (most-referenced symbols) on the left, the
-  selected hub's callers and callees on the right.
+- **Graph** — a call-graph explorer: hubs (most-referenced symbols) on the left as jump
+  points, the centered node's callers and callees on the right. Press `→` to focus the right
+  pane and **walk the graph** — `enter` re-centers on a caller/callee so you can traverse the
+  call chain; `backspace` steps back.
 - **Metrics** — node/edge/file counts and bar charts by kind and language, plus top hubs.
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
 - **Search** — semantic search by meaning, falling back to fast name search when there are no

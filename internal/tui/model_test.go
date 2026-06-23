@@ -279,6 +279,78 @@ func TestIndexedMsgRefreshes(t *testing.T) {
 	}
 }
 
+func TestGraphWalkRecenterAndBack(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{
+		{Symbol: "Close", FQN: "graph.Store.Close", File: "store.go", StartLine: 95, InDegree: 38},
+	}})
+	m, _ = applyMsg(m, graphDetailMsg{symbol: "Close",
+		callers: []app.SymbolRef{{Symbol: "indexFile", FQN: "index.indexFile", File: "indexer.go", StartLine: 12}},
+		callees: []app.SymbolRef{{Symbol: "WipeProject", FQN: "graph.Store.WipeProject", File: "store.go", StartLine: 40}},
+	})
+	if m.graphCenter.sym != "Close" {
+		t.Fatalf("initial center = %q, want Close", m.graphCenter.sym)
+	}
+
+	// → moves focus into the refs pane (the caller list).
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
+	if m.graphFocus != focusRefs {
+		t.Fatalf("after right: focus = %v, want refs", m.graphFocus)
+	}
+	// enter re-centers on the selected caller (refs[0] = first caller).
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm := u.(Model)
+	if mm.graphCenter.sym != "indexFile" {
+		t.Errorf("after re-center: center = %q, want indexFile", mm.graphCenter.sym)
+	}
+	if len(mm.graphStack) != 1 || mm.graphStack[0].sym != "Close" {
+		t.Errorf("breadcrumb not pushed: %+v", mm.graphStack)
+	}
+	if cmd == nil {
+		t.Error("re-center should fetch the new center's relations")
+	}
+
+	// backspace pops back to the previous center.
+	u2, cmd2 := mm.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	mm2 := u2.(Model)
+	if mm2.graphCenter.sym != "Close" {
+		t.Errorf("after back: center = %q, want Close", mm2.graphCenter.sym)
+	}
+	if len(mm2.graphStack) != 0 {
+		t.Errorf("breadcrumb should be empty after back: %+v", mm2.graphStack)
+	}
+	if cmd2 == nil {
+		t.Error("back should re-fetch the previous center's relations")
+	}
+}
+
+func TestGraphWalkSecondCalleeIndex(t *testing.T) {
+	// graphRefSel spans callers then callees: index len(callers) selects the
+	// first callee. Verify re-centering picks the right node across the boundary.
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "A", InDegree: 3}}})
+	m, _ = applyMsg(m, graphDetailMsg{symbol: "A",
+		callers: []app.SymbolRef{{Symbol: "C1"}},
+		callees: []app.SymbolRef{{Symbol: "E1"}, {Symbol: "E2"}},
+	})
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyRight})) // focus refs, sel 0 (C1)
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))  // sel 1 → E1 (first callee)
+	u, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if got := u.(Model).graphCenter.sym; got != "E1" {
+		t.Errorf("re-centered on %q, want E1 (first callee, across the caller/callee boundary)", got)
+	}
+}
+
+func TestGraphEnterStillDrillsFromHubFocus(t *testing.T) {
+	// Walking must not break the existing enter→Impact behavior on the hub pane.
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", InDegree: 9}}})
+	u, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if u.(Model).active != tabImpact {
+		t.Errorf("enter on hub focus: active=%v, want Impact", u.(Model).active)
+	}
+}
+
 func TestSemanticErrorShown(t *testing.T) {
 	m := sized(t, 100, 30)
 	u, _ := m.Update(semanticMsg{query: "x", err: fakeErr("ollama unreachable")})
