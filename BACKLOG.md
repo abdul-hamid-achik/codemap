@@ -501,6 +501,16 @@
   presence (+projects). Docs (README count+table, AGENTS set(14), cli.md, mcp.md) updated. Full suite +
   help/query E2E green; fmt/vet clean. COMMIT+PUSH.
   **NEXT:** references/dependencies MCP tools, full precise (gopls) edges in the indexer, or polish.
+- 2026-06-23 #48 (cron, polish-first) — **`semantic.yml` E2E — demonstrates the vectors pillar
+  end-to-end** (the one of graphs/vectors/LSP with no flow: query.yml=graphs, studio.yml `p`=LSP,
+  now semantic.yml=vectors). Indexes a 2-func project WITH embeddings (Ollama nomic-embed-text),
+  then `codemap semantic "verify a signed login credential"` — wording with NO lexical overlap with
+  the symbol name, so a hit proves MEANING-based retrieval (the CLI `semantic` is pure-vector, no
+  name fallback). Snapshot: `app.Authenticate 0.550` ranked above `app.RenderTemplate 0.315`. All 6
+  flows pass. `task flows` globs specs/*.yml so it's auto-included → flows are now local-only and
+  need gopls (studio) + Ollama (semantic); noted in AGENTS.md + CLAUDE.md. No Go change (CI runs
+  unit tests, not flows; green). COMMIT+PUSH.
+  **NEXT:** references/dependencies MCP tools, Metrics-tab interactivity, full precise edges in indexer.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

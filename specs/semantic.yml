@@ -1,0 +1,36 @@
+version: 1
+name: semantic
+intent: |
+    After indexing a project WITH embeddings (Ollama nomic-embed-text), semantic
+    search finds code by meaning: a query that shares no words with the symbol
+    name still surfaces the relevant function, ranked above an unrelated one.
+    Demonstrates the vector path end-to-end. Requires a local Ollama with
+    nomic-embed-text (like studio.yml requires gopls); not run in CI.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s\\n' 'package app' '' '// Authenticate validates a JSON Web Token and returns the callers claims.' 'func Authenticate(token string) bool { return token != \"\" }' '' '// RenderTemplate writes an HTML page to the response writer.' 'func RenderTemplate(name string) string { return name }' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index >/dev/null 2>&1; echo '== semantic =='; \"$CM\" semantic 'verify a signed login credential'"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 20
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 30000
+    - snapshot: semantic
+outcomes:
+    - id: relevant_hit
+      description: the auth function surfaces for a meaning-based query (no shared words with its name)
+      verify:
+        screen:
+            contains: "Authenticate"
+    - id: clean_exit
+      description: the semantic query exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:35bf6f99655826bdaa27d5771890b82d3aa76eaa072657aaf36773b5539947f5

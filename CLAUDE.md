@@ -59,7 +59,9 @@ Surfaces / key files:
 ## Validate your work
 
 `task check` (fmt + lint + test) before every commit · `task race` for TUI/indexer ·
-`task build` · `task flows` (glyphrun) when specs change.
+`task build` · `task flows` (glyphrun) when specs change. Flows are **local-only** (CI skips
+them): `studio.yml` needs `gopls` and `semantic.yml` needs a local Ollama with
+`nomic-embed-text` — the rest are pure-Go.
 
 ## Related projects
 

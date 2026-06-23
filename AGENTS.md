@@ -69,7 +69,8 @@ codemap/
 │
 │   # planned: extract/treesitter (CGO, build-tagged), extract/scip, search/* fusion
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
-├── specs/                     # glyphrun E2E behavior specs (*.yml)
+├── specs/                     # glyphrun E2E specs (*.yml): version/help/index_status/query
+│                              #   (graphs) · studio (TUI+gopls) · semantic (vectors+Ollama)
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md SPEC.md LICENSE
@@ -104,7 +105,7 @@ task race            # CGO_ENABLED=1 go test -race ./...
 task lint            # golangci-lint (or go vet + gofmt -l)
 task fmt             # gofmt -w .
 task check           # fmt + lint + test  (aliases: ci, verify)
-task flows           # glyph run specs/*.yml  (E2E)
+task flows           # glyph run specs/*.yml  (E2E; local only — not run in CI)
 task site:dev        # VitePress dev server (Bun)
 task site:build      # VitePress build
 task ship            # check + site:build + race + build + flows
