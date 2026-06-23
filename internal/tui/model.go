@@ -84,10 +84,10 @@ type Model struct {
 	status    *app.StatusReport
 
 	// search tab
-	search       textinput.Model
-	searchHits   []app.SemanticHit
-	searchQuery  string
-	searchOffset int
+	search      textinput.Model
+	searchHits  []app.SemanticHit
+	searchQuery string
+	searchSel   int
 
 	// impact tab
 	impact       textinput.Model
@@ -263,7 +263,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMsg = ""
 		m.searchHits = msg.hits
 		m.searchQuery = msg.query
-		m.searchOffset = 0
+		m.searchSel = 0
 		m.statusMsg = fmt.Sprintf("%d matches for %q", len(msg.hits), msg.query)
 		return m, nil
 
@@ -327,17 +327,31 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if q == "" {
 				return m, nil
 			}
-			m.statusMsg = "searching…"
-			m.searchOffset = 0
-			return m, m.semanticCmd(q)
-		case "up": // single-line input ignores up/down, so use them to scroll results
-			if m.searchOffset > 0 {
-				m.searchOffset--
+			if q != m.searchQuery {
+				// query edited → run a new search
+				m.statusMsg = "searching…"
+				m.searchSel = 0
+				return m, m.semanticCmd(q)
+			}
+			// query unchanged → drill the selected hit into Impact
+			if m.searchSel < len(m.searchHits) {
+				sym := m.searchHits[m.searchSel].Symbol
+				m.active = tabImpact
+				m.impact.SetValue(sym)
+				m.syncFocus()
+				m.impactOffset = 0
+				m.statusMsg = "analyzing…"
+				return m, m.impactCmd(sym)
+			}
+			return m, nil
+		case "up": // single-line input ignores up/down, so use them to move the selection
+			if m.searchSel > 0 {
+				m.searchSel--
 			}
 			return m, nil
 		case "down":
-			if m.searchOffset < len(m.searchHits)-1 {
-				m.searchOffset++
+			if m.searchSel < len(m.searchHits)-1 {
+				m.searchSel++
 			}
 			return m, nil
 		}

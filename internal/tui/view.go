@@ -68,7 +68,7 @@ func (m Model) footer() string {
 	case tabGraph:
 		hint = "↑/↓ select · enter → impact · ctrl+r reindex · 1-4 tabs · ctrl+c quit"
 	case tabSearch:
-		hint = "type · enter search · ↑/↓ scroll · ctrl+r reindex · tab · ctrl+c quit"
+		hint = "type · enter search/open · ↑/↓ select · ctrl+r reindex · tab · ctrl+c quit"
 	case tabImpact:
 		hint = "type symbol · enter · ↑/↓ scroll · ctrl+r reindex · tab · ctrl+c quit"
 	default:
@@ -259,15 +259,22 @@ func (m Model) renderSearch(w, h int) string {
 	default:
 		hits := m.searchHits
 		budget := clamp(h-6, 1, 50)
-		start := clamp(m.searchOffset, 0, maxStart(len(hits), budget))
+		start := windowStart(m.searchSel, budget, len(hits))
 		end := clamp(start+budget, 0, len(hits))
 		if start > 0 {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more above\n", start)))
 		}
-		for _, hit := range hits[start:end] {
-			fmt.Fprintf(&b, "  %s  %s %s\n", countStyle.Render(fmt.Sprintf("%.3f", hit.Score)),
-				symStyle.Render(padRight(truncate(displayName(hit.FQN, hit.Symbol), 32), 32)),
-				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-48)))
+		for i := start; i < end; i++ {
+			hit := hits[i]
+			name := truncate(displayName(hit.FQN, hit.Symbol), 32)
+			loc := truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-48)
+			if i == m.searchSel {
+				plain := fmt.Sprintf(" ▸ %.3f  %s %s", hit.Score, padRight(name, 32), loc)
+				b.WriteString(selectedStyle.Width(w).Render(truncate(plain, w)) + "\n")
+			} else {
+				fmt.Fprintf(&b, "   %s  %s %s\n", countStyle.Render(fmt.Sprintf("%.3f", hit.Score)),
+					symStyle.Render(padRight(name, 32)), mutedStyle.Render(loc))
+			}
 		}
 		if end < len(hits) {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(hits)-end)))
@@ -379,6 +386,19 @@ func maxStart(n, budget int) int {
 		return n - budget
 	}
 	return 0
+}
+
+// windowStart returns a scroll offset that keeps the selected index visible
+// within a window of the given budget.
+func windowStart(sel, budget, n int) int {
+	if budget >= n || sel < budget {
+		return 0
+	}
+	start := sel - budget + 1
+	if start > maxStart(n, budget) {
+		start = maxStart(n, budget)
+	}
+	return start
 }
 
 func clamp(n, lo, hi int) int {

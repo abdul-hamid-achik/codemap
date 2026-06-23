@@ -256,6 +256,14 @@
   TUI tests (ctrl+r fires reindex + resets graphLoaded; indexedMsg refreshes). All units + 4
   E2E green, fmt clean. COMMIT+PUSH. **NEXT:** LSP edge wiring (E2.2b) for precise indegree;
   or Search per-row drill; or studio Impact callers/tests sections.
+- 2026-06-23 #25 (cron, polish-first) — Search per-row drill (completes explore→drill
+  symmetry with Graph). ↑/↓ select a hit (highlighted, keep-visible window via windowStart);
+  enter drills the selected hit into Impact when the query is unchanged, or runs a new search
+  when the text was edited (no focus-mode needed — the value!=query check disambiguates).
+  Selected row rendered as clean plain-text highlight (no ANSI nesting). 3 TUI tests (select,
+  drill, edited-query-runs). docs/studio.md keys updated. All units + 4 E2E green, fmt clean.
+  COMMIT+PUSH. **NEXT:** Impact blast-radius row select+drill (same pattern); or LSP edge
+  wiring (E2.2b); studio looks feature-complete for v0.1.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

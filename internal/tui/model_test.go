@@ -156,7 +156,7 @@ func TestGraphEnterDrillsToImpact(t *testing.T) {
 	}
 }
 
-func TestSearchScroll(t *testing.T) {
+func TestSearchSelect(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch
 	hits := make([]app.SemanticHit, 30)
@@ -164,16 +164,50 @@ func TestSearchScroll(t *testing.T) {
 		hits[i] = app.SemanticHit{Symbol: fmt.Sprintf("S%d", i)}
 	}
 	m, _ = applyMsg(m, semanticMsg{query: "x", hits: hits})
-	if m.searchOffset != 0 {
-		t.Fatalf("offset after results = %d, want 0", m.searchOffset)
+	if m.searchSel != 0 {
+		t.Fatalf("selection after results = %d, want 0", m.searchSel)
 	}
 	u, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-	if u.(Model).searchOffset != 1 {
-		t.Errorf("after down: offset=%d, want 1", u.(Model).searchOffset)
+	if u.(Model).searchSel != 1 {
+		t.Errorf("after down: sel=%d, want 1", u.(Model).searchSel)
 	}
 	u2, _ := u.(Model).Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
-	if u2.(Model).searchOffset != 0 {
-		t.Errorf("after up: offset=%d, want 0", u2.(Model).searchOffset)
+	if u2.(Model).searchSel != 0 {
+		t.Errorf("after up: sel=%d, want 0", u2.(Model).searchSel)
+	}
+}
+
+func TestSearchDrillToImpact(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m.search.SetValue("auth")
+	m, _ = applyMsg(m, semanticMsg{query: "auth", hits: []app.SemanticHit{{Symbol: "A"}, {Symbol: "B"}}})
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown})) // select B
+	// query unchanged → enter drills the selected hit into Impact
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	mm := u.(Model)
+	if mm.active != tabImpact {
+		t.Errorf("enter on unchanged query: active=%v, want Impact", mm.active)
+	}
+	if mm.impact.Value() != "B" {
+		t.Errorf("drilled symbol = %q, want B", mm.impact.Value())
+	}
+	if cmd == nil {
+		t.Error("drill should fire an impact command")
+	}
+}
+
+func TestSearchEnterRunsWhenQueryChanged(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m, _ = applyMsg(m, semanticMsg{query: "old", hits: []app.SemanticHit{{Symbol: "A"}}})
+	m.search.SetValue("new") // edited query
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if u.(Model).active != tabSearch {
+		t.Error("editing the query then enter should run a search, not drill")
+	}
+	if cmd == nil {
+		t.Error("enter on a changed query should fire a search")
 	}
 }
 
