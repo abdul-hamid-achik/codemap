@@ -599,6 +599,56 @@ func (svc *Service) project(cwd string) (id int64, name string, found bool, err 
 	return p.ID, name, true, nil
 }
 
+// SymbolsReport is returned by Symbols.
+type SymbolsReport struct {
+	Project string      `json:"project"`
+	File    string      `json:"file"`
+	Symbols []SymbolRef `json:"symbols"`
+}
+
+// Symbols lists the symbols defined in a file (functions, types, methods, tests)
+// straight from the index — no file read needed. file may be relative to cwd or
+// absolute; it is resolved to a project-relative path.
+func (svc *Service) Symbols(cwd, file string) (*SymbolsReport, error) {
+	pid, name, found, err := svc.project(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &SymbolsReport{Project: name, File: file, Symbols: []SymbolRef{}}
+	if !found {
+		return rep, nil
+	}
+	g, _ := svc.s.Graph()
+	p, err := g.GetProjectByName(name)
+	if err != nil {
+		return nil, err
+	}
+	rel := projectRel(p.Path, cwd, file)
+	rep.File = rel
+	nodes, err := g.NodesInFile(pid, rel)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		if n.Kind == graph.KindFile {
+			continue
+		}
+		rep.Symbols = append(rep.Symbols, nodeToRef(n))
+	}
+	return rep, nil
+}
+
+func projectRel(root, cwd, file string) string {
+	abs := file
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(cwd, file)
+	}
+	if rel, err := filepath.Rel(root, abs); err == nil {
+		return rel
+	}
+	return file
+}
+
 // Hotspots returns the most-referenced nodes (hubs).
 func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 	pid, name, found, err := svc.project(cwd)

@@ -19,6 +19,7 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap callees <symbol>` | Functions/methods a symbol calls |
 | `codemap callees <symbol> --lsp` | **Precise** callees via gopls (Go) |
 | `codemap path <from> <to>` | Shortest call path between two symbols |
+| `codemap symbols <file>` | List the symbols defined in a file (a structured alternative to reading it) |
 
 The fast default uses the indexed graph (name-based resolution; same-named methods can
 over-match). `--lsp` asks the language server (gopls) for *exact* callers — e.g. `callers Close`

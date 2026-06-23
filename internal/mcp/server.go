@@ -95,6 +95,11 @@ type pathQueryInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+type symbolsInput struct {
+	File string `json:"file" jsonschema:"the file to list symbols for (relative to the project, or absolute)"`
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -136,6 +141,10 @@ func (s *Server) register() {
 		Name:        "codemap_path",
 		Description: "Find the shortest call path between two symbols.",
 	}, s.handlePath)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_symbols",
+		Description: "List the symbols defined in a file (functions, types, methods, tests) with line ranges — a structured alternative to reading the file.",
+	}, s.handleSymbols)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -195,6 +204,11 @@ func (s *Server) handleOrphans(_ context.Context, _ *sdkmcp.CallToolRequest, in 
 
 func (s *Server) handlePath(_ context.Context, _ *sdkmcp.CallToolRequest, in pathQueryInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.Path(cwdOf(in.Path), in.From, in.To)
+	return result(rep, err)
+}
+
+func (s *Server) handleSymbols(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolsInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Symbols(cwdOf(in.Path), in.File)
 	return result(rep, err)
 }
 

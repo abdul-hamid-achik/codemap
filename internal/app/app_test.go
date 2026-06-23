@@ -291,6 +291,45 @@ func TestPreciseCalleesGopls(t *testing.T) {
 	}
 }
 
+func TestServiceSymbols(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\ntype T struct{}\n\nfunc (t T) M() {}\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Symbols(proj, "main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.File != "main.go" {
+		t.Errorf("file = %q, want main.go", rep.File)
+	}
+	kinds := map[string]string{}
+	for _, s := range rep.Symbols {
+		kinds[s.Symbol] = s.Kind
+	}
+	if kinds["T"] != "type" || kinds["M"] != "method" || kinds["Run"] != "function" {
+		t.Errorf("symbols = %+v, want T:type M:method Run:function", kinds)
+	}
+	// the file node itself must not be listed
+	for _, s := range rep.Symbols {
+		if s.Kind == "file" {
+			t.Error("symbols should not include the file node")
+		}
+	}
+}
+
 func TestStatusUnregistered(t *testing.T) {
 	isolate(t)
 	sess, err := Open("")

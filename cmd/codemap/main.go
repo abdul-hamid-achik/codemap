@@ -144,6 +144,12 @@ var (
 		Args:  cobra.ExactArgs(2),
 		RunE:  runPath,
 	}
+	symbolsCmd = &cobra.Command{
+		Use:   "symbols <file>",
+		Short: "List the symbols defined in a file (functions, types, methods, tests)",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSymbols,
+	}
 )
 
 func init() {
@@ -165,7 +171,7 @@ func init() {
 	orphansCmd.Flags().Int("top", 50, "maximum results")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd)
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -472,6 +478,31 @@ func runPath(cmd *cobra.Command, args []string) error {
 	fmt.Println(strings.Join(names, " → "))
 	for _, p := range rep.Path {
 		fmt.Printf("  %-30s %s:%d\n", p.Symbol, p.File, p.StartLine)
+	}
+	return nil
+}
+
+func runSymbols(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	rep, err := app.NewService(sess).Symbols(cwd, args[0])
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if len(rep.Symbols) == 0 {
+		fmt.Printf("no symbols in %s (is the project indexed?)\n", rep.File)
+		return nil
+	}
+	fmt.Printf("%s:\n", rep.File)
+	for _, s := range rep.Symbols {
+		fmt.Printf("  %-9s %-30s %d-%d\n", s.Kind, disp(s.FQN, s.Symbol), s.StartLine, s.EndLine)
 	}
 	return nil
 }

@@ -326,6 +326,13 @@
   All units + 5 E2E green, fmt/vet clean. COMMIT+PUSH. studio now demonstrates all three pillars
   (graphs/vectors/LSP). **NEXT:** wire precise edges into the indexer (make default graph
   accurate), or polish; v0.1 feature-complete.
+- 2026-06-23 #33 (cron, polish-first) — Added `symbols` (a SPEC tool listed as planned):
+  Service.Symbols (NodesInFile, project-relative path resolution, excludes the file node) + CLI
+  `symbols <file>` + MCP codemap_symbols → **11 MCP tools, 14 CLI commands**. Lists a file's
+  functions/types/methods with FQN + line ranges — the "narrow fact instead of a file read"
+  value. Test + demo (symbols internal/embed/provider.go → Provider/EmbeddingProfile/…). Docs
+  (cli/mcp/README/AGENTS) updated. All green, fmt/vet clean. COMMIT+PUSH. **NEXT:** references/
+  dependencies tools, precise edges in the indexer, or polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

@@ -122,6 +122,7 @@ Add `--json` to any query command for machine-readable output (for agents/script
 |---|---|
 | `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`), show stats |
 | `callers` / `callees` / `path` | call-graph navigation (`--lsp` on callers/callees for exact gopls results) |
+| `symbols` | list a file's symbols (structured alternative to reading it) |
 | `impact` | blast radius + test coverage for a symbol (`--depth`) |
 | `hotspots` / `orphans` | hubs / dead-code candidates (`--top`) |
 | `semantic` | meaning-based search (`--top`) |
@@ -150,9 +151,9 @@ claude mcp add codemap -- codemap serve
 }
 ```
 
-Tools (10): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
+Tools (11): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
-`codemap_orphans`, `codemap_path`. Each takes an optional `path` (the project directory) and
+`codemap_orphans`, `codemap_path`, `codemap_symbols`. Each takes an optional `path` (the project directory) and
 returns JSON. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
 gopls-resolved results (Go).
 
