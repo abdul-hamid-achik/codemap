@@ -334,6 +334,31 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return mcpserver.NewServer(sess).Run(ctx)
 }
 
+// requireIndexed reports whether the current project has been indexed, printing a
+// clear "run codemap index" message first if not — text, or a structured
+// {indexed:false,…} object under --json so agents get the same signal. Query
+// commands gate on it so a cold repo doesn't yield misleading empty results.
+func requireIndexed(cmd *cobra.Command, svc *app.Service) (bool, error) {
+	cwd, _ := os.Getwd()
+	indexed, name, err := svc.Indexed(cwd)
+	if err != nil {
+		return false, err
+	}
+	if !indexed {
+		if jsonOut(cmd) {
+			_ = printJSON(map[string]any{
+				"project": name,
+				"indexed": false,
+				"note":    "project not indexed — run 'codemap index' first",
+			})
+		} else {
+			fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", name)
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
 func runCallers(cmd *cobra.Command, args []string) error {
 	sess, err := openSession(cmd)
 	if err != nil {
@@ -342,6 +367,9 @@ func runCallers(cmd *cobra.Command, args []string) error {
 	defer sess.Close()
 	cwd, _ := os.Getwd()
 	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
 	useLSP, _ := cmd.Flags().GetBool("lsp")
 	var rep *app.RelationReport
 	if useLSP {
@@ -372,6 +400,9 @@ func runCallees(cmd *cobra.Command, args []string) error {
 	defer sess.Close()
 	cwd, _ := os.Getwd()
 	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
 	useLSP, _ := cmd.Flags().GetBool("lsp")
 	var rep *app.RelationReport
 	if useLSP {
@@ -402,7 +433,11 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	defer sess.Close()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
-	rep, err := app.NewService(sess).Impact(cwd, args[0], depth)
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.Impact(cwd, args[0], depth)
 	if err != nil {
 		return err
 	}
@@ -453,7 +488,11 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 	defer sess.Close()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
-	rep, err := app.NewService(sess).Semantic(cmd.Context(), cwd, strings.Join(args, " "), top)
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.Semantic(cmd.Context(), cwd, strings.Join(args, " "), top)
 	if err != nil {
 		return err
 	}
@@ -508,7 +547,11 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 	defer sess.Close()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
-	rep, err := app.NewService(sess).Orphans(cwd, top)
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.Orphans(cwd, top)
 	if err != nil {
 		return err
 	}
@@ -526,7 +569,11 @@ func runPath(cmd *cobra.Command, args []string) error {
 	}
 	defer sess.Close()
 	cwd, _ := os.Getwd()
-	rep, err := app.NewService(sess).Path(cwd, args[0], args[1])
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.Path(cwd, args[0], args[1])
 	if err != nil {
 		return err
 	}

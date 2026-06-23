@@ -927,6 +927,15 @@ func (svc *Service) project(cwd string) (id int64, name string, found bool, err 
 	return p.ID, name, true, nil
 }
 
+// Indexed reports whether the project for cwd has been indexed (registered in the
+// graph) along with the resolved project name. It's a cheap registration check so
+// query commands can give a clear "run codemap index" message instead of
+// misleading empty results (e.g. "Callers of X: none") on a cold repo.
+func (svc *Service) Indexed(cwd string) (indexed bool, name string, err error) {
+	_, name, found, err := svc.project(cwd)
+	return found, name, err
+}
+
 // SymbolsReport is returned by Symbols.
 type SymbolsReport struct {
 	Project string      `json:"project"`

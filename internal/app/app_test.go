@@ -525,6 +525,33 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+func TestIndexedReportsRegistration(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Foo() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	// Cold repo: not indexed.
+	if ok, _, err := svc.Indexed(proj); err != nil || ok {
+		t.Fatalf("Indexed before index = (%v, %v), want (false, nil)", ok, err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// After indexing: registered.
+	if ok, name, err := svc.Indexed(proj); err != nil || !ok || name == "" {
+		t.Fatalf("Indexed after index = (%v, %q, %v), want (true, <name>, nil)", ok, name, err)
+	}
+}
+
 func TestSemanticNoEmbeddings(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

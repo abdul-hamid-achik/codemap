@@ -727,6 +727,21 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #74 (correctness) — **query commands say "not indexed" instead of misleading empties on a
+  cold repo.** A probe of an un-indexed project showed `callers`/`callees` → "none" (as if the symbol
+  genuinely had no callers), `impact` → "symbol X not found" (as if that symbol specifically was
+  missing), `path` → "no call path" (as if the symbols existed but weren't connected), `orphans` →
+  "none", `semantic` → "no matches" — all misleading when the truth is "this project was never
+  indexed." (`status`/`find`/`symbols`/`hotspots` already self-hinted.) Added a cheap
+  `Service.Indexed(cwd) (bool, name, err)` (registration check, no stats) + a CLI `requireIndexed`
+  guard that prints `Project %q is not indexed yet. Run 'codemap index'.` (or, under --json, a
+  structured `{project, indexed:false, note}` so agents get the same signal) and returns early. Wired
+  into the 6 misleading commands; after the guard their existing "no result" messages are now correct
+  (they only fire when the project IS indexed). Verified: cold probe → all 6 give the canonical
+  message + JSON object; post-`index` `callers` resolves normally. Test
+  `TestIndexedReportsRegistration` (false cold → true after index). Full suite + lint v2 (0) +
+  query/index_status/semantic/studio E2E green; fmt clean. COMMIT+PUSH. (find/symbols/hotspots already
+  self-hint — left as-is; unifying their wording onto this guard is an easy future follow-up.)
 - 2026-06-23 #73 (correctness) — **`semantic` answers honestly on structure-only projects.** Before,
   `codemap semantic` / `codemap_semantic` on an un-embedded project would (a) call the embedder anyway
   — erroring if Ollama was down even though the project legitimately has no vectors, (b) lazily create
