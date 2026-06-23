@@ -187,6 +187,17 @@
   for TS/Python; References/callHierarchy → precise edges weight 1.0), unified merge w/ go/parser
   (LSP precedence, dedupe by FQN), graceful skip when no server. Then E4.2 charts/E4.3 graph/
   E0.5 docs.
+- 2026-06-23 #18 (cron) — LSP→symbol mapping (E2.2a). internal/extract/lspsrc: stateful
+  Extractor owning an lsp.Client session (New spawns+initializes a server at a root; ExtractFile
+  = DidOpen+DocumentSymbols→[]extract.Symbol; Close shuts down). appendSymbols recurses children
+  building dotted FQNs (ClassName.method), maps LSP SymbolKind→codemap kind (func/method/type;
+  skips vars/fields), 0-based→1-based lines, source via line slice. Tests: mapKind, nested-FQN
+  mapping, lineSlice, + REAL gopls (Foo=function, Bar=type, 1.14s; skips in CI). All green,
+  build/vet/fmt clean. COMMIT+PUSH.
+  **NEXT (E2.2b/E2.3):** indexer integration — per-language LSP session registry + lifecycle in
+  IndexProject, use lspsrc for langs w/o go/parser (TS/Python) or as precise override; merge w/
+  go/parser (LSP precedence, dedupe by FQN); References→precise call edges (weight 1.0). Config
+  flag/server map. Then E4.2 ntcharts, E4.3 graph view, E0.5 docs.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -289,8 +300,10 @@
       handler; Client Spawn/Initialize/DidOpen/DocumentSymbols/References/Shutdown/Exit + LSP
       types. Tests: fake-server round-trip + REAL gopls v0.21.0 integration (skips in CI) +
       race-clean. (Supersedes TD6's go.lsp.dev plan.)
-- [ ] E2.2 LSP extraction backend — wire DocumentSymbols as an Extractor for non-Go langs
-      (TS/Python); References/callHierarchy → precise cross-file edges (weight 1.0)
+- [~] E2.2 LSP extraction backend — internal/extract/lspsrc DONE: stateful LSP-session
+      Extractor mapping DocumentSymbols→extract.Symbol (recursive, nested FQN, kind map,
+      line ranges, source slice); tests + real gopls (Foo/Bar). TODO: indexer integration
+      (per-lang sessions, lifecycle) + References/callHierarchy → precise edges (weight 1.0)
 - [ ] E2.3 unified extractor (merge LSP precedence over go/parser, dedupe by FQN)
 - [x] E2.4 incremental hash-based reindex — already done in the indexer (E1.10)
 - [~] E2.5 MCP query tools — callees/blast_radius(via impact)/path/hotspots/orphans done;
