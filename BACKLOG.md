@@ -619,6 +619,12 @@
   keys, closes, and does NOT leak into the search input). Studio E2E extended (`?`→help snapshot→`?`).
   Full suite + lint v2 (0) + studio E2E (43 steps) green; fmt clean. COMMIT+PUSH.
   **NEXT:** deferred backend epics (go/types accuracy, LSP multi-language) — warrant a focused go-ahead.
+- 2026-06-23 #60 (cron, polish-first) — **README: concrete `impact` example (show, don't tell).** The
+  README had a studio ASCII but no CLI output, while the flagship is `impact`. Added a real, trimmed
+  `codemap impact Stats --depth 2` block (captured from codemap on itself): defined site, 4 callers,
+  18 blast, 9 covering tests (3 listed + "… 6 more"), and the affected list with the ✓ test marker —
+  demonstrating "what breaks + what do I run" in one call. Docs-only (CI green trivially); fmt clean.
+  **NEXT:** deferred backend epics (go/types accuracy, LSP multi-language) — warrant a focused go-ahead.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

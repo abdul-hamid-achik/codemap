@@ -134,6 +134,29 @@ codemap studio
 
 Add `--json` to any query command for machine-readable output (for agents/scripts).
 
+The flagship `impact` answers *what breaks if I change this, and what do I run to check?* in one call
+(real output, from codemap on itself):
+
+```
+$ codemap impact Stats --depth 2
+Impact of Stats (codemap)
+  defined:        internal/graph/store.go:291
+  direct callers: 4
+  blast radius:   18 (depth ≤ 2)
+  tests covering: 9
+  covering tests (run these):
+     graph.TestStats            internal/graph/graph_test.go:387
+     app.TestServiceLifecycle   internal/app/app_test.go:29
+     index.TestIndexProject     internal/index/indexer_test.go:87
+     … (6 more)
+  affected (blast radius):
+     [1] app.Service.Status          internal/app/service.go:165
+     [1] index.Indexer.IndexProject  internal/index/indexer.go:89
+   ✓ [1] graph.TestStats             internal/graph/graph_test.go:387
+     [2] main.runStatus              cmd/codemap/main.go:252
+     … (14 more)
+```
+
 ## Commands
 
 | Command | What it does |
