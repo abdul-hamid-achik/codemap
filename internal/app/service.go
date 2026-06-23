@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,7 +133,32 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.Nodes = res.Nodes
 	rep.Edges = res.Edges
 	rep.Errors = res.Errors
+	// No supported (Go) files but other recognized source present → explain the
+	// empty result rather than leaving the user puzzled (v0.1 indexes Go).
+	if res.FilesScanned == 0 && len(res.Unsupported) > 0 {
+		rep.Warning = "no Go files to index (codemap v0.1 indexes Go); skipped " +
+			summarizeUnsupported(res.Unsupported) + " — support for more languages is planned"
+	}
 	return rep, nil
+}
+
+// summarizeUnsupported renders a stable "12 typescript, 3 python" summary.
+func summarizeUnsupported(m map[string]int) string {
+	langs := make([]string, 0, len(m))
+	for l := range m {
+		langs = append(langs, l)
+	}
+	sort.Slice(langs, func(i, j int) bool {
+		if m[langs[i]] != m[langs[j]] {
+			return m[langs[i]] > m[langs[j]]
+		}
+		return langs[i] < langs[j]
+	})
+	parts := make([]string, len(langs))
+	for i, l := range langs {
+		parts[i] = fmt.Sprintf("%d %s", m[l], l)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Status reports index statistics for the project containing cwd.

@@ -45,6 +45,10 @@ type Result struct {
 	Nodes        int         `json:"nodes"`
 	Edges        int         `json:"edges"`
 	Errors       []FileError `json:"errors,omitempty"`
+	// Unsupported maps a recognized source language (e.g. "typescript") to the
+	// number of files skipped because codemap has no extractor for it yet (v0.1
+	// indexes Go). Lets callers explain a "0 indexed" result.
+	Unsupported map[string]int `json:"unsupported,omitempty"`
 }
 
 // Indexer turns project files into a stored graph + vectors. The vector store
@@ -96,11 +100,14 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		}
 	}
 
-	files, err := ix.walk(root)
+	files, unsupported, err := ix.walk(root)
 	if err != nil {
 		return nil, err
 	}
 	res.FilesScanned = len(files)
+	if len(unsupported) > 0 {
+		res.Unsupported = unsupported
+	}
 
 	// Pass 1: extract + store nodes (and embeddings) for changed files. Collect
 	// the references emitted by changed files for edge resolution.
@@ -140,8 +147,9 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	return res, nil
 }
 
-func (ix *Indexer) walk(root string) ([]fileTask, error) {
+func (ix *Indexer) walk(root string) ([]fileTask, map[string]int, error) {
 	var files []fileTask
+	unsupported := map[string]int{} // recognized language → count of files with no extractor yet
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
@@ -153,9 +161,15 @@ func (ix *Indexer) walk(root string) ([]fileTask, error) {
 			}
 			return nil
 		}
+		if ix.excluded(name) {
+			return nil
+		}
 		lang := extract.LanguageForPath(path)
 		ext, ok := ix.extractors[lang]
-		if !ok || ix.excluded(name) {
+		if !ok {
+			if lang != "" {
+				unsupported[lang]++ // a source language codemap recognizes but doesn't index yet
+			}
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)
@@ -165,7 +179,7 @@ func (ix *Indexer) walk(root string) ([]fileTask, error) {
 		files = append(files, fileTask{abs: path, rel: rel, lang: lang, ext: ext})
 		return nil
 	})
-	return files, err
+	return files, unsupported, err
 }
 
 // excluded reports whether a file or directory base name matches any configured

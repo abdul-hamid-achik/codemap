@@ -123,10 +123,14 @@ task install         # go install ./cmd/codemap
 
 ## Architecture Notes
 
-### Extraction (v0.1 = pure-Go)
-- **Default backends are pure-Go** so release binaries stay `CGO_ENABLED=0` and
-  cross-compile cleanly: `go/parser` (stdlib) for Go, and the **headless LSP client** for
-  Go/TS/Python/etc. LSP edges carry weight `1.0`; heuristic/parser edges `0.7`.
+### Extraction (v0.1 = Go only)
+- **The default indexer registers ONLY the `gosrc` (`go/parser`) extractor** — so v0.1 indexes
+  **Go**. Files in other recognized languages (TS/JS/Python/Lua/Ruby) are counted and surfaced as
+  a "skipped, support planned" warning (`Result.Unsupported`), not silently ignored. The
+  **headless LSP client** (`internal/lsp` + `internal/extract/lspsrc`) is built but NOT yet wired
+  into the default indexer; wiring it (per-language sessions) is what unlocks TS/Python/etc.
+- **Default backends are pure-Go** so release binaries stay `CGO_ENABLED=0` and cross-compile
+  cleanly. LSP edges carry weight `1.0`; heuristic/parser edges `0.7`.
 - **tree-sitter is OPTIONAL**, gated behind the `treesitter` build tag (it needs CGO via
   `github.com/tree-sitter/go-tree-sitter`). Release builds do not include it; it rounds out
   long-tail language coverage in 0.2 (built with a `zig cc` matrix or the purego path).

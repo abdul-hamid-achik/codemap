@@ -562,6 +562,18 @@
   (asserts impact/source/projects/`precise:true`/`name-based` stay mentioned). Full suite + lint v2
   (0 issues) + fmt clean. COMMIT+PUSH.
   **NEXT:** pure-Go `go/types` call resolution (top accuracy item), references/dependencies tools.
+- 2026-06-23 #53 (cron, polish-first) — **Honest about Go-only v0.1 (docs + helpful warning).** Found a
+  real gap: the default indexer registers ONLY `gosrc`, so non-Go files are silently skipped, yet the
+  README/docs implied multi-language ("LSP servers for the languages you index"). A TS/Python user
+  would `index` → 0 nodes, no explanation. Fixes: (1) indexer `walk` now counts recognized-but-
+  unsupported languages (`Result.Unsupported`); `Service.Index` sets a warning when a project has no
+  Go files but other recognized source — dogfood: TS+Py dir → "no Go files to index (codemap v0.1
+  indexes Go); skipped 1 python, 1 typescript — support planned". (2) Corrected the overclaims:
+  README (Structural-graph bullet "v0.1 indexes Go", prerequisites note + gopls-optional), AGENTS
+  ("Extraction (v0.1 = Go only)" — lspsrc built but not wired), docs/quick-start.md. Tests:
+  `TestIndexNonGoWarns`. Full suite + lint v2 (0) + index_status/query E2E green; fmt clean. COMMIT+PUSH.
+  **NEXT:** wire the LSP backend into the indexer for TS/Python (unlocks multi-language), pure-Go
+  `go/types` call resolution (accuracy), references/dependencies tools.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

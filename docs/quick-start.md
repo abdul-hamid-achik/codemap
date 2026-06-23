@@ -12,7 +12,9 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 
 - **[Ollama](https://ollama.com)** with the embedding model (for semantic search):
   `ollama pull nomic-embed-text`. Structure-only indexing works without it.
-- Optionally, language servers for LSP-based extraction (`gopls`, …).
+- Optionally, **`gopls`** for `--lsp` precise Go results.
+
+> v0.1 indexes **Go**; other languages are recognized and reported as skipped (support planned).
 
 ## Index a project
 

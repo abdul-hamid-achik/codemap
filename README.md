@@ -17,7 +17,8 @@ instead of dozens of file reads.
 
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; calls,
   imports, implements, references, overrides, and test-coverage as edges. Stored in pure-Go
-  SQLite, queryable offline.
+  SQLite, queryable offline. **v0.1 indexes Go** (stdlib `go/parser`); more languages (via the
+  built-in LSP backend and tree-sitter) are planned. Semantic search is language-agnostic.
 - **Semantic search** — every node's source is embedded (Ollama `nomic-embed-text`, 768-dim)
   into [veclite](https://github.com/abdul-hamid-achik/veclite); vector + BM25 hybrid search.
 - **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
@@ -84,9 +85,12 @@ brew install abdul-hamid-achik/tap/codemap
 
 - **Go 1.25+** (only to build from source)
 - **[Ollama](https://ollama.com)** with the embedding model:
-  `ollama pull nomic-embed-text`
-- LSP servers for the languages you index (`gopls`, `typescript-language-server`, …)
+  `ollama pull nomic-embed-text` (optional — without it, indexing is structure-only)
+- **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for `--lsp` precise Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
+
+> **Languages:** v0.1 indexes **Go**. Pointing `codemap index` at a non-Go project reports what it
+> skipped; broader language support is planned.
 
 ### From source
 

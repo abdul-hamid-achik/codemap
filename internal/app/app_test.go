@@ -188,6 +188,34 @@ func sigOf(refs []SymbolRef) string {
 	return refs[0].Signature
 }
 
+func TestIndexNonGoWarns(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	// A project with only recognized non-Go source (no Go files).
+	if err := os.WriteFile(filepath.Join(proj, "app.ts"), []byte("export function a() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.py"), []byte("def a():\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	rep, err := NewService(sess).Index(context.Background(), proj, index.Options{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.FilesScanned != 0 || rep.Nodes != 0 {
+		t.Errorf("expected nothing indexed for a non-Go project, got %d files / %d nodes", rep.FilesScanned, rep.Nodes)
+	}
+	if !strings.Contains(rep.Warning, "v0.1 indexes Go") ||
+		!strings.Contains(rep.Warning, "typescript") || !strings.Contains(rep.Warning, "python") {
+		t.Errorf("expected an explanatory warning naming skipped languages, got %q", rep.Warning)
+	}
+}
+
 func TestServiceProjects(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
