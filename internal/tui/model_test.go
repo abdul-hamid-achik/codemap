@@ -428,6 +428,22 @@ func TestImpactNamesCoveringTests(t *testing.T) {
 	}
 }
 
+func TestGraphPaneShowsAnnotations(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Run", FQN: "p.Run", InDegree: 5}}})
+	m, _ = applyMsg(m, graphDetailMsg{
+		symbol:      "Run",
+		callers:     []app.SymbolRef{{Symbol: "Top"}},
+		annotations: []graph.Annotation{{ID: 1, Kind: "node", Target: "p.Run", Source: "postgres", Note: "hot path"}},
+	})
+	out := m.render()
+	for _, want := range []string{"⟐ 1", "postgres: hot path"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("graph detail should surface annotations (%q):\n%s", want, out)
+		}
+	}
+}
+
 func TestImpactPaneShowsAnnotations(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabImpact

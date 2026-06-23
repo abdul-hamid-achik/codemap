@@ -698,6 +698,16 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   that agents can call `codemap_docs` to self-onboard. Captures the MCP-registration work as reusable
   docs. Docs-only (CI green trivially). COMMIT+PUSH.
   **NEXT:** studio Graph-pane annotation indicator (the deferred product polish).
+- 2026-06-23 #66 (annotation follow-up) — **studio Graph pane surfaces the centered node's
+  annotations.** Completes "annotations show up wherever you look" in the TUI (Impact had it since
+  #63; Graph is the default/most-used tab). The header shows an at-a-glance `· ⟐ N` count, and the
+  detail pane lists up to 3 annotation lines (`⟐ source: note  data`, "+N more" if truncated) under
+  the callers/calls — reserving budget so the ref lists still fit. Free of extra queries: `detailCmd`
+  reuses `Callers().Annotations` (populated since #64). New `graphAnnotations` model field +
+  `graphDetailMsg.annotations`; preciseDetailMsg leaves it intact (same center). Test
+  `TestGraphPaneShowsAnnotations`. Full suite + lint v2 (0) + race + studio E2E green; fmt clean.
+  COMMIT+PUSH.
+  **NEXT:** precise/`--lsp`-path annotation surfacing; Search-pane indicator; then harness wiring.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

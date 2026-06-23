@@ -234,8 +234,12 @@ func (m Model) hubDetail(w, h int) string {
 	if len(m.graphStack) > 0 {
 		hdr += "  " + mutedStyle.Render(fmt.Sprintf("· depth %d (⌫ back)", len(m.graphStack)))
 	}
+	if n := len(m.graphAnnotations); n > 0 { // at-a-glance: this node has pinned knowledge
+		hdr += "  " + countStyle.Render(fmt.Sprintf("· ⟐ %d", n))
+	}
 	b.WriteString(hdr + "\n\n")
-	budget := (h - 9) / 2
+	annShown := clamp(len(m.graphAnnotations), 0, 3)
+	budget := (h - 9 - annShown) / 2
 	if budget < 1 {
 		budget = 1
 	}
@@ -250,6 +254,20 @@ func (m Model) hubDetail(w, h int) string {
 				b.WriteString("\n" + p)
 			}
 		}
+	}
+	for i, a := range m.graphAnnotations { // pinned notes/data on the centered node
+		if i >= annShown {
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ⟐ +%d more", len(m.graphAnnotations)-annShown)))
+			break
+		}
+		line := a.Source
+		if a.Note != "" {
+			line += ": " + a.Note
+		}
+		if a.Data != "" {
+			line += "  " + strings.Join(strings.Fields(a.Data), " ")
+		}
+		b.WriteString(countStyle.Render("⟐ ") + truncate(line, w-2) + "\n")
 	}
 	return b.String()
 }

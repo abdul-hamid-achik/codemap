@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
@@ -64,10 +65,11 @@ type orphansMsg struct {
 	err     error
 }
 type graphDetailMsg struct {
-	symbol  string
-	callers []app.SymbolRef
-	callees []app.SymbolRef
-	err     error
+	symbol      string
+	callers     []app.SymbolRef
+	callees     []app.SymbolRef
+	annotations []graph.Annotation
+	err         error
 }
 type indexedMsg struct {
 	rep *app.IndexReport
@@ -116,13 +118,14 @@ type Model struct {
 	impactSel    int
 
 	// graph tab (call-graph explorer)
-	graphLoaded  bool
-	graphHubs    []app.HotspotRef
-	graphSel     int
-	graphSym     string
-	graphCallers []app.SymbolRef
-	graphCallees []app.SymbolRef
-	graphPrecise bool // hub detail is showing gopls-precise relations
+	graphLoaded      bool
+	graphHubs        []app.HotspotRef
+	graphSel         int
+	graphSym         string
+	graphCallers     []app.SymbolRef
+	graphCallees     []app.SymbolRef
+	graphAnnotations []graph.Annotation // annotations pinned to the centered node
+	graphPrecise     bool               // hub detail is showing gopls-precise relations
 
 	showHelp bool // a full-screen keybinding overlay, toggled with `?`
 
@@ -238,7 +241,9 @@ func (m Model) detailCmd(sym string) tea.Cmd {
 		if err != nil {
 			return graphDetailMsg{symbol: sym, err: err}
 		}
-		return graphDetailMsg{symbol: sym, callers: ca.Results, callees: ce.Results}
+		// ca.Annotations is the queried symbol's pinned notes/data (free — already
+		// gathered by Callers), so the Graph detail shows them with no extra query.
+		return graphDetailMsg{symbol: sym, callers: ca.Results, callees: ce.Results, annotations: ca.Annotations}
 	}
 }
 
@@ -420,6 +425,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphSym = msg.symbol
 		m.graphCallers = msg.callers
 		m.graphCallees = msg.callees
+		m.graphAnnotations = msg.annotations
 		m.graphPrecise = false
 		m.graphRefSel = 0
 		return m, nil
