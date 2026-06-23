@@ -19,13 +19,28 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/version"
 )
 
-const instructions = `codemap is a local code knowledge graph (structure + semantics).
-Workflow: codemap_index a project once, then query it.
-- codemap_semantic finds code by meaning ("jwt validation middleware").
-- codemap_callers lists what calls a symbol.
-- codemap_status shows index size.
-Each tool takes an optional "path" (the project directory); it defaults to the
-server's working directory. Results are JSON.`
+const instructions = `codemap is a local code knowledge graph: code structure (calls, types,
+tests) fused with semantic vectors, queried offline. Index a project once with codemap_index,
+then query it. Every tool takes an optional "path" (project dir; defaults to cwd) and returns JSON.
+
+Find code:
+- codemap_semantic — by meaning ("jwt validation middleware"); needs an embedded index.
+- codemap_find — by name; fast and offline (no embeddings).
+
+Understand a symbol:
+- codemap_impact (flagship) — definition sites, direct callers, the transitive blast radius
+  (everything a change affects), and which tests cover it. One call replaces many file reads.
+- codemap_callers / codemap_callees — who calls a symbol / what it calls.
+- codemap_source — a symbol's source code; codemap_symbols — a file's outline.
+Results carry each symbol's signature and docstring, so you rarely need to open files.
+
+Survey a codebase: codemap_hotspots (hubs), codemap_orphans (dead-code candidates),
+codemap_status (index size), codemap_projects (what's indexed).
+
+Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matches every method
+named Foo. Pass precise:true to codemap_callers/codemap_callees for exact gopls resolution (Go);
+treat codemap_hotspots/codemap_orphans as name-based (they can over- or under-count same-named
+methods).`
 
 // Server wraps the go-sdk MCP server over a codemap session.
 type Server struct {

@@ -552,6 +552,16 @@
   Ran the improved `task lint` (golangci-lint v2) → 0 issues; full suite + race + studio E2E green;
   fmt clean. Docs/studio.md keys updated. COMMIT+PUSH.
   **NEXT:** pure-Go `go/types` call resolution (top accuracy item), references/dependencies tools.
+- 2026-06-23 #52 (cron, polish-first) — **Rewrote the MCP `instructions`** (the agent's first-contact
+  playbook — half the value prop is "used via agents"). The old text mentioned only 3 of 14 tools,
+  omitted the flagship `codemap_impact`, and gave agents no accuracy guidance. New version: index-once
+  workflow; grouped tool guide (find: semantic/find · understand: impact/callers/callees/source/
+  symbols · survey: hotspots/orphans/status/projects); notes results carry signature+docstring; and
+  — crucially — the **accuracy model** so an agent knows to pass `precise:true` for exact Go callers
+  and to treat hotspots/orphans as name-based. Guarded by `TestInstructionsCoverKeyCapabilities`
+  (asserts impact/source/projects/`precise:true`/`name-based` stay mentioned). Full suite + lint v2
+  (0 issues) + fmt clean. COMMIT+PUSH.
+  **NEXT:** pure-Go `go/types` call resolution (top accuracy item), references/dependencies tools.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
