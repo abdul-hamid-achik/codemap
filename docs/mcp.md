@@ -33,7 +33,7 @@ directory) and return JSON.
 | `codemap_status` | Index statistics |
 | `codemap_semantic` | Semantic search by meaning (`query`, `top_k`) |
 | `codemap_callers` | Functions/methods that call a symbol (`precise: true` → exact gopls callers for Go) |
-| `codemap_callees` | Functions/methods a symbol calls |
+| `codemap_callees` | Functions/methods a symbol calls (`precise: true` → exact gopls callees for Go) |
 | `codemap_impact` | Callers + blast radius + covering tests (`depth`) |
 | `codemap_hotspots` | Most-referenced symbols (`top`) |
 | `codemap_orphans` | Dead-code candidates (`top`) |

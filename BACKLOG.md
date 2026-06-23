@@ -300,6 +300,15 @@
   **NEXT:** callees --lsp (needs callHierarchy/outgoingCalls on the client); or wire precise
   edges into the indexer; else polish. The three pillars (graphs/vectors/LSP) all deliver
   user- AND agent-visible value now.
+- 2026-06-23 #30 (cron) — Precise CALLEES (symmetry with callers). lsp.Client.OutgoingCalls
+  (callHierarchy/outgoingCalls) + CallHierarchyOutgoingCall. Refactored PreciseCallers into a
+  shared preciseCallHierarchy(incoming bool) + added PreciseCallees + itemToRef helper. CLI
+  `callees --lsp`; MCP codemap_callees `precise` (unified callers/callees on symbolQueryInput,
+  dropped symbolInput). gopls-gated PreciseCallees test. DEMO: `callees IndexProject --lsp` →
+  WipeProject/Stats/walk/indexFile/resolveEdges/DeleteByProject (precise, cross-package +
+  stdlib). docs updated. All green, fmt/vet clean. COMMIT+PUSH. Precise call navigation pair
+  complete on CLI + MCP. **NEXT:** wire precise edges into the indexer, or studio precise
+  toggle, or polish; v0.1 is feature-complete.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

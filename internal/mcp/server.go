@@ -72,15 +72,10 @@ type semanticInput struct {
 	TopK  int    `json:"top_k,omitempty" jsonschema:"maximum results (default 10)"`
 }
 
-type symbolInput struct {
-	Symbol string `json:"symbol" jsonschema:"the symbol name to look up"`
-	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-}
-
-type callersInput struct {
+type symbolQueryInput struct {
 	Symbol  string `json:"symbol" jsonschema:"the symbol name to look up"`
 	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"use the language server (gopls) for exact callers (Go) — slower, but not inflated by same-named symbols"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"use the language server (gopls) for exact results (Go) — slower, but not inflated by same-named symbols"`
 }
 
 type impactInput struct {
@@ -123,7 +118,7 @@ func (s *Server) register() {
 	}, s.handleCallers)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callees",
-		Description: "List the functions/methods that a given symbol calls.",
+		Description: "List the functions/methods that a given symbol calls. Pass precise=true for exact, gopls-resolved callees (Go).",
 	}, s.handleCallees)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_impact",
@@ -165,7 +160,7 @@ func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, 
 	return result(rep, err)
 }
 
-func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, in callersInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, in symbolQueryInput) (*sdkmcp.CallToolResult, any, error) {
 	if in.Precise {
 		rep, err := s.svc.PreciseCallers(ctx, cwdOf(in.Path), in.Symbol)
 		return result(rep, err)
@@ -174,7 +169,11 @@ func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	return result(rep, err)
 }
 
-func (s *Server) handleCallees(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, in symbolQueryInput) (*sdkmcp.CallToolResult, any, error) {
+	if in.Precise {
+		rep, err := s.svc.PreciseCallees(ctx, cwdOf(in.Path), in.Symbol)
+		return result(rep, err)
+	}
 	rep, err := s.svc.Callees(cwdOf(in.Path), in.Symbol)
 	return result(rep, err)
 }

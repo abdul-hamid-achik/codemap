@@ -250,6 +250,47 @@ func TestPreciseCallersGopls(t *testing.T) {
 	}
 }
 
+func TestPreciseCalleesGopls(t *testing.T) {
+	if _, err := exec.LookPath("gopls"); err != nil {
+		t.Skip("gopls not installed")
+	}
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/m\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package m\n\ntype T struct{}\n\nfunc (t T) Helper() {}\n\nfunc Run() { var x T; x.Helper() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rep, err := svc.PreciseCallees(ctx, proj, "Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range rep.Results {
+		if r.Symbol == "Helper" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("precise callees of Run = %+v, want to include Helper", rep.Results)
+	}
+}
+
 func TestStatusUnregistered(t *testing.T) {
 	isolate(t)
 	sess, err := Open("")

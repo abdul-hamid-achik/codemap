@@ -158,6 +158,7 @@ func init() {
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
 	initCmd.Flags().Bool("local", false, "create a .codemap directory inside the project")
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
+	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
@@ -315,14 +316,25 @@ func runCallees(cmd *cobra.Command, args []string) error {
 	}
 	defer sess.Close()
 	cwd, _ := os.Getwd()
-	rep, err := app.NewService(sess).Callees(cwd, args[0])
+	svc := app.NewService(sess)
+	useLSP, _ := cmd.Flags().GetBool("lsp")
+	var rep *app.RelationReport
+	if useLSP {
+		rep, err = svc.PreciseCallees(cmd.Context(), cwd, args[0])
+	} else {
+		rep, err = svc.Callees(cwd, args[0])
+	}
 	if err != nil {
 		return err
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	renderRefs(fmt.Sprintf("Callees of %s", rep.Symbol), rep.Results)
+	label := fmt.Sprintf("Callees of %s", rep.Symbol)
+	if useLSP {
+		label += " (precise, via gopls)"
+	}
+	renderRefs(label, rep.Results)
 	return nil
 }
 

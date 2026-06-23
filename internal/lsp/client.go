@@ -62,6 +62,12 @@ type CallHierarchyIncomingCall struct {
 	FromRanges []Range           `json:"fromRanges"`
 }
 
+// CallHierarchyOutgoingCall is a callee of the prepared item.
+type CallHierarchyOutgoingCall struct {
+	To         CallHierarchyItem `json:"to"`
+	FromRanges []Range           `json:"fromRanges"`
+}
+
 // Client is a headless LSP client over one language-server connection.
 type Client struct {
 	conn  *conn
@@ -246,6 +252,22 @@ func (c *Client) IncomingCalls(ctx context.Context, item CallHierarchyItem) ([]C
 		return nil, nil
 	}
 	var calls []CallHierarchyIncomingCall
+	if err := json.Unmarshal(raw, &calls); err != nil {
+		return nil, err
+	}
+	return calls, nil
+}
+
+// OutgoingCalls returns the callees of a prepared call-hierarchy item.
+func (c *Client) OutgoingCalls(ctx context.Context, item CallHierarchyItem) ([]CallHierarchyOutgoingCall, error) {
+	raw, err := c.conn.Call(ctx, "callHierarchy/outgoingCalls", map[string]any{"item": item})
+	if err != nil {
+		return nil, err
+	}
+	if isNull(raw) {
+		return nil, nil
+	}
+	var calls []CallHierarchyOutgoingCall
 	if err := json.Unmarshal(raw, &calls); err != nil {
 		return nil, err
 	}

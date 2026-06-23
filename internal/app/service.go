@@ -247,6 +247,18 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 // PreciseCallers computes exact callers of a Go symbol using gopls callHierarchy
 // (no by-name inflation). Go-only for now; errors if gopls is unavailable.
 func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
+	return svc.preciseCallHierarchy(ctx, cwd, symbol, true)
+}
+
+// PreciseCallees computes exact callees of a Go symbol using gopls callHierarchy.
+func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
+	return svc.preciseCallHierarchy(ctx, cwd, symbol, false)
+}
+
+// preciseCallHierarchy resolves the symbol's location via the graph, then drives
+// gopls (documentSymbol → prepareCallHierarchy → in/out calls). incoming=true
+// returns callers; false returns callees.
+func (svc *Service) preciseCallHierarchy(ctx context.Context, cwd, symbol string, incoming bool) (*RelationReport, error) {
 	g, err := svc.s.Graph()
 	if err != nil {
 		return nil, err
@@ -276,7 +288,7 @@ func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*Re
 		}
 	}
 	if node == nil {
-		return nil, fmt.Errorf("precise callers currently supports Go only (no Go symbol named %q)", symbol)
+		return nil, fmt.Errorf("precise queries currently support Go only (no Go symbol named %q)", symbol)
 	}
 	if _, err := exec.LookPath("gopls"); err != nil {
 		return nil, fmt.Errorf("gopls not found on PATH (required for --lsp)")
@@ -317,18 +329,33 @@ func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*Re
 	if err != nil || len(items) == 0 {
 		return rep, err
 	}
-	calls, err := cl.IncomingCalls(ctx, items[0])
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range calls {
-		rep.Results = append(rep.Results, SymbolRef{
-			Symbol:    c.From.Name,
-			File:      uriToRel(c.From.URI, root),
-			StartLine: c.From.Range.Start.Line + 1,
-		})
+
+	if incoming {
+		calls, err := cl.IncomingCalls(ctx, items[0])
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range calls {
+			rep.Results = append(rep.Results, itemToRef(c.From, root))
+		}
+	} else {
+		calls, err := cl.OutgoingCalls(ctx, items[0])
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range calls {
+			rep.Results = append(rep.Results, itemToRef(c.To, root))
+		}
 	}
 	return rep, nil
+}
+
+func itemToRef(item lsp.CallHierarchyItem, root string) SymbolRef {
+	return SymbolRef{
+		Symbol:    symbolBase(item.Name),
+		File:      uriToRel(item.URI, root),
+		StartLine: item.Range.Start.Line + 1,
+	}
 }
 
 // findSymbolPos returns the selection-range start of a symbol by name, preferring
