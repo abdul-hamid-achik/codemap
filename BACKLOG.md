@@ -727,6 +727,17 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
 ## Post-v0.2.0 polish
+- 2026-06-23 #83 (annotate surface, finish) — **path-annotation validation + `annotate --json` parity**,
+  the two #82 follow-ups. (1) `AnnotatePath` now returns `matched` (both endpoints indexed, via
+  `NodeExistsByName`) — annotating a path with a ghost endpoint is saved but warns (CLI `⚠ path
+  endpoints "A" and "Ghost" aren't both indexed symbols …`; MCP `"matched": false` + note), mirroring
+  #82's node behavior. (2) `codemap annotate` now honors the global `--json` flag (it silently ignored
+  it while `annotations` already emitted JSON) — emits `{id, kind, target, source, matched, note?}`,
+  the same shape MCP returns, so an agent/script using the CLI gets machine-readable output incl. the
+  matched signal. Refactored runAnnotate to one node/path-shared tail. Tests:
+  `TestAnnotatePathReportsUnknownEndpoint` (both-real→matched; ghost endpoint→saved,not matched).
+  Verified live: node real/ghost `--json`, path real/ghost text. Full suite + lint v2 (0) + query E2E
+  green; fmt clean. COMMIT+PUSH. **Annotate surface now complete & honest on CLI + MCP (node & path).**
 - 2026-06-23 #82 (annotation honesty) — **`annotate` warns when the target matches no indexed symbol.**
   Dogfooding the harness-centerpiece feature found a real footgun: `codemap annotate NoSuchSymbolZZZ
   --note ghost` (and annotating on an un-indexed project) silently succeeded, creating an annotation

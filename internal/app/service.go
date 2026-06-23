@@ -308,16 +308,25 @@ func (svc *Service) AnnotateNode(cwd, symbol, source, note, data string) (id int
 
 // AnnotatePath pins a note / external data to a call path from→to. Returns the
 // new id and the canonical path target.
-func (svc *Service) AnnotatePath(cwd, from, to, source, note, data string) (int64, string, error) {
+// AnnotatePath pins a note/data to a from→to call path. matched reports whether
+// BOTH endpoints currently match an indexed symbol (the annotation surfaces on the
+// path only if they do); like AnnotateNode it's saved either way so callers warn
+// rather than block.
+func (svc *Service) AnnotatePath(cwd, from, to, source, note, data string) (id int64, target string, matched bool, err error) {
 	pid, g, err := svc.annotateProject(cwd)
 	if err != nil {
-		return 0, "", err
+		return 0, "", false, err
 	}
-	target := pathTarget(from, to)
-	id, err := g.AddAnnotation(pid, graph.Annotation{
+	target = pathTarget(from, to)
+	id, err = g.AddAnnotation(pid, graph.Annotation{
 		Kind: graph.AnnotationPath, Target: target, Source: source, Note: note, Data: data,
 	})
-	return id, target, err
+	if err != nil {
+		return 0, target, false, err
+	}
+	fromOK, _ := g.NodeExistsByName(pid, from)
+	toOK, _ := g.NodeExistsByName(pid, to)
+	return id, target, fromOK && toOK, nil
 }
 
 // AllAnnotations lists every annotation in the project.

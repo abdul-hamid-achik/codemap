@@ -345,8 +345,12 @@ func (s *Server) handleDocs(_ context.Context, _ *sdkmcp.CallToolRequest, in doc
 
 func (s *Server) handleAnnotate(_ context.Context, _ *sdkmcp.CallToolRequest, in annotateInput) (*sdkmcp.CallToolResult, any, error) {
 	if in.From != "" && in.To != "" {
-		id, target, err := s.svc.AnnotatePath(cwdOf(in.Path), in.From, in.To, in.Source, in.Note, in.Data)
-		return result(map[string]any{"id": id, "kind": "path", "target": target}, err)
+		id, target, matched, err := s.svc.AnnotatePath(cwdOf(in.Path), in.From, in.To, in.Source, in.Note, in.Data)
+		out := map[string]any{"id": id, "kind": "path", "target": target, "matched": matched}
+		if err == nil && !matched {
+			out["note"] = "one or both path endpoints aren't indexed symbols — saved, but it won't surface until they are"
+		}
+		return result(out, err)
 	}
 	if in.Symbol != "" {
 		id, matched, err := s.svc.AnnotateNode(cwdOf(in.Path), in.Symbol, in.Source, in.Note, in.Data)

@@ -235,7 +235,7 @@ func TestServiceAnnotations(t *testing.T) {
 	if _, _, err := svc.AnnotateNode(proj, "app.B", "postgres", "hot", `{"rows":7}`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := svc.AnnotatePath(proj, "app.A", "app.B", "note", "entry chain", ""); err != nil {
+	if _, _, _, err := svc.AnnotatePath(proj, "app.A", "app.B", "note", "entry chain", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -557,6 +557,40 @@ func TestAnnotateReportsUnknownTarget(t *testing.T) {
 	}
 	if id == 0 {
 		t.Error("the annotation should still be saved (reindex-durable), got id 0")
+	}
+}
+
+func TestAnnotatePathReportsUnknownEndpoint(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B() }\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both endpoints indexed → matched.
+	if _, _, matched, err := svc.AnnotatePath(proj, "A", "B", "s", "chain", ""); err != nil || !matched {
+		t.Errorf("path over two indexed symbols should be matched, got matched=%v err=%v", matched, err)
+	}
+	// One ghost endpoint → saved but not matched.
+	id, _, matched, err := svc.AnnotatePath(proj, "A", "GhostXYZ", "s", "chain", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched {
+		t.Error("a path with a nonexistent endpoint should report matched=false")
+	}
+	if id == 0 {
+		t.Error("the path annotation should still be saved, got id 0")
 	}
 }
 

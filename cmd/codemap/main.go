@@ -729,22 +729,44 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("nothing to attach: pass --note and/or --data")
 	}
 	svc := app.NewService(sess)
+	var (
+		id     int64
+		match  bool
+		warn   string
+		kind   = "node"
+		target string
+	)
 	if len(args) == 1 {
-		id, matched, err := svc.AnnotateNode(cwd, args[0], source, note, data)
-		if err != nil {
-			return err
+		target = args[0]
+		id, match, err = svc.AnnotateNode(cwd, target, source, note, data)
+		if err == nil && !match {
+			warn = fmt.Sprintf("no indexed symbol named %q — saved, but it won't surface in queries until one is (typo? not indexed yet?)", target)
 		}
-		fmt.Printf("annotated %s  (#%d, source=%s)\n", args[0], id, source)
-		if !matched {
-			fmt.Printf("⚠ no indexed symbol named %q — saved, but it won't surface in queries until one is (typo? not indexed yet?)\n", args[0])
+	} else {
+		kind = "path"
+		id, target, match, err = svc.AnnotatePath(cwd, args[0], args[1], source, note, data)
+		if err == nil && !match {
+			warn = fmt.Sprintf("path endpoints %q and %q aren't both indexed symbols — saved, but it won't surface until they are", args[0], args[1])
 		}
-		return nil
 	}
-	id, target, err := svc.AnnotatePath(cwd, args[0], args[1], source, note, data)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("annotated path %s  (#%d, source=%s)\n", target, id, source)
+	if jsonOut(cmd) {
+		out := map[string]any{"id": id, "kind": kind, "target": target, "source": source, "matched": match}
+		if warn != "" {
+			out["note"] = warn
+		}
+		return printJSON(out)
+	}
+	label := target
+	if kind == "path" {
+		label = "path " + target
+	}
+	fmt.Printf("annotated %s  (#%d, source=%s)\n", label, id, source)
+	if warn != "" {
+		fmt.Println("⚠ " + warn)
+	}
 	return nil
 }
 
