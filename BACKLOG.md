@@ -198,6 +198,20 @@
   IndexProject, use lspsrc for langs w/o go/parser (TS/Python) or as precise override; merge w/
   go/parser (LSP precedence, dedupe by FQN); References→precise call edges (weight 1.0). Config
   flag/server map. Then E4.2 ntcharts, E4.3 graph view, E0.5 docs.
+- 2026-06-23 #19 (USER FEEDBACK) — User: "graph not working, struggling to see usefulness,
+  polish, take better usage of the screen." Addressed: overhauled the studio TUI.
+  • FULL-SCREEN LAYOUT: body fills width×height via lipgloss Width/Height, footer pinned to
+    bottom, Metrics bars scaled to terminal width (was fixed 24-wide), digit 1-4 tab switching.
+  • GRAPH TAB NOW WORKS: two-column call-graph explorer — left = Hubs (most-referenced symbols),
+    right = selected hub's "Called by" + "Calls", ↑/↓ navigate, full-height divider, async load.
+  • Default tab = Graph. Verified visually via the studio glyph snapshot (graph.txt/metrics.txt
+    show full 120×40 usage). 8 TUI tests incl TestRenderFillsScreen (height==40, width-bounded).
+  • Added specs/studio.yml E2E (TUI under PTY) → 4 specs pass. All units green, fmt/vet clean.
+  ★ NEW DIRECTIVE (loop re-prioritized): favor POLISH + real USEFULNESS over new backend —
+  make the TUI/CLI/MCP genuinely demonstrate value, keep docs accurate, keep everything green.
+  COMMIT+PUSH. **NEXT (polish-first):** TUI Impact/Search visual parity + result navigation;
+  README/AGENTS accuracy pass (commands now incl callers/callees/impact/hotspots/orphans/path/
+  studio); then LSP edge wiring (E2.2b) for precise hubs (fixes same-name inflation), E0.5 docs.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
@@ -327,13 +341,18 @@
 - [x] E4.4 Impact tab (symbol textinput → Service.Callers, async)
 - [~] E4.2 Metrics tab — DONE as ASCII bar charts over Stats (kinds/languages/nodes/edges),
       no deps; ntcharts v2 real charts still TODO (validate R1 replace-directive then)
-- [ ] E4.3 Graph tab (Sugiyama/layered DAG on canvas; fallback collapsible tree) — placeholder now
+- [x] E4.3 Graph tab — WORKING call-graph explorer: two-column (Hubs list │ selected hub's
+      Called-by / Calls), ↑/↓ navigation, full-height divider, async detail load. (Future
+      enhancement: node-link/Sugiyama canvas layout; the explorer is the useful v1.)
+- [x] E4.6 Full-screen layout — body fills width×height, footer pinned to bottom, bars scaled
+      to width, digit (1-4) tab switching. Verified by TestRenderFillsScreen + studio snapshot.
 - [x] E4.5 Search tab (semantic via Service.Semantic, async, score-ranked results)
 
 ## Epic 5 — Tests & quality
 - [ ] E5.1 unit tests (graph traversal/cycles, extract, search, config) — high coverage
-- [x] E5.2 glyphrun.config.yml + specs/*.yml (version, help, index_status) — 3 specs PASS via
-      `task flows`; contractHashes stamped
+- [x] E5.2 glyphrun.config.yml + specs/*.yml (version, help, index_status, studio) — 4 specs
+      PASS via `task flows`; contractHashes stamped. studio.yml drives the TUI under a 120×40
+      PTY (Graph hubs + Metrics bars) and is also our visual-regression snapshot source.
 - [x] E5.3 .golangci.yml (v2 schema; errcheck + staticcheck) — local lint falls back to
       vet+gofmt when golangci-lint v2 absent
 - [x] E5.4 CI .github/workflows/ci.yml (test/race/build/coverage + golangci-lint-action lint)

@@ -20,4 +20,7 @@ var (
 	panelTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 	chipStyle       = lipgloss.NewStyle().Foreground(colorMuted).Background(lipgloss.Color("#252932"))
 	activeChipStyle = lipgloss.NewStyle().Foreground(colorInk).Background(colorSelect).Bold(true)
+	selectedStyle   = lipgloss.NewStyle().Foreground(colorInk).Background(colorSelect)
+	dividerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3F4B"))
+	countStyle      = lipgloss.NewStyle().Foreground(colorMuted)
 )

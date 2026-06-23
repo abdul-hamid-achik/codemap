@@ -7,9 +7,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/abdul-hamid-achik/codemap/internal/app"
 )
 
-// View renders the studio (alt-screen).
+// View renders the studio full-screen (alt-screen).
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
@@ -17,17 +19,21 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) render() string {
-	if m.width == 0 {
+	if m.width == 0 || m.height == 0 {
 		return "codemap studio\n\nloading…"
 	}
-	return lipgloss.JoinVertical(lipgloss.Left,
-		m.header(),
-		m.tabBar(),
-		"",
-		m.body(),
-		"",
-		m.footer(),
-	)
+	header := m.header()
+	tabs := m.tabBar()
+	footer := m.footer()
+
+	// Body fills everything between the tab bar and the footer.
+	bodyH := m.height - 3 // header, tab bar, footer
+	if bodyH < 3 {
+		bodyH = 3
+	}
+	body := lipgloss.NewStyle().Width(m.width).Height(bodyH).MaxHeight(bodyH).Render(m.body(m.width, bodyH))
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
 }
 
 func (m Model) header() string {
@@ -56,88 +62,207 @@ func (m Model) tabBar() string {
 	return strings.Join(chips, " ")
 }
 
-func (m Model) body() string {
-	switch m.active {
-	case tabGraph:
-		return m.renderGraph()
-	case tabMetrics:
-		return m.renderMetrics()
-	case tabImpact:
-		return m.renderImpact()
-	case tabSearch:
-		return m.renderSearch()
-	}
-	return ""
-}
-
 func (m Model) footer() string {
-	keys := mutedStyle.Render("tab/shift+tab switch · enter run · ctrl+c quit")
+	hint := "tab switch · ↑/↓ navigate · enter run · ctrl+c quit"
+	if m.active == tabGraph {
+		hint = "1-4 tabs · ↑/↓ select hub · ctrl+c quit"
+	}
 	status := m.statusMsg
 	if m.errMsg != "" {
 		status = errorStyle.Render(m.errMsg)
 	}
-	return spread(keys, status, m.width)
+	return spread(mutedStyle.Render(hint), status, m.width)
 }
 
-func (m Model) renderGraph() string {
-	return panel("Graph", mutedStyle.Render(
-		"node-link code map — coming in a later iteration.\nFor now, use Metrics, Impact, and Search."))
+func (m Model) body(w, h int) string {
+	switch m.active {
+	case tabGraph:
+		return m.renderGraph(w, h)
+	case tabMetrics:
+		return m.renderMetrics(w, h)
+	case tabImpact:
+		return m.renderImpact(w, h)
+	case tabSearch:
+		return m.renderSearch(w, h)
+	}
+	return ""
 }
 
-func (m Model) renderMetrics() string {
+// ---- Graph tab: two-column call-graph explorer ----
+
+func (m Model) renderGraph(w, h int) string {
+	if !m.graphLoaded {
+		return title("Graph") + "\n\n" + mutedStyle.Render("loading call graph…")
+	}
+	if len(m.graphHubs) == 0 {
+		return title("Graph") + "\n\n" + mutedStyle.Render("no graph yet — run 'codemap index' in this project")
+	}
+	leftW := 38
+	if leftW > w/2 {
+		leftW = w / 2
+	}
+	rightW := w - leftW - 3
+	if rightW < 10 {
+		rightW = 10
+	}
+	left := lipgloss.NewStyle().Width(leftW).Height(h).Render(m.hubList(leftW, h))
+	right := lipgloss.NewStyle().Width(rightW).Height(h).Render(m.hubDetail(rightW, h))
+	div := dividerStyle.Render(strings.TrimRight(strings.Repeat("│\n", h), "\n"))
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", div, " ", right)
+}
+
+func (m Model) hubList(w, h int) string {
+	var b strings.Builder
+	b.WriteString(title("Hubs") + "\n")
+	rows := h - 1
+	if rows < 1 {
+		rows = 1
+	}
+	start := 0
+	if m.graphSel >= rows {
+		start = m.graphSel - rows + 1
+	}
+	end := start + rows
+	if end > len(m.graphHubs) {
+		end = len(m.graphHubs)
+	}
+	for i := start; i < end; i++ {
+		hub := m.graphHubs[i]
+		line := truncate(fmt.Sprintf("%4d  %s", hub.InDegree, hub.Symbol), w)
+		if i == m.graphSel {
+			b.WriteString(selectedStyle.Width(w).Render(line))
+		} else {
+			b.WriteString(line)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func (m Model) hubDetail(w, h int) string {
+	if m.graphSym == "" {
+		return mutedStyle.Render("select a hub")
+	}
+	var b strings.Builder
+	b.WriteString(symStyle.Render(m.graphSym) + "\n\n")
+	budget := (h - 5) / 2
+	if budget < 1 {
+		budget = 1
+	}
+	b.WriteString(title(fmt.Sprintf("Called by (%d)", len(m.graphCallers))) + "\n")
+	b.WriteString(refLines(m.graphCallers, budget, w))
+	b.WriteString("\n")
+	b.WriteString(title(fmt.Sprintf("Calls (%d)", len(m.graphCallees))) + "\n")
+	b.WriteString(refLines(m.graphCallees, budget, w))
+	return b.String()
+}
+
+// ---- Metrics tab ----
+
+func (m Model) renderMetrics(w, h int) string {
 	if m.status == nil {
-		return panel("Metrics", mutedStyle.Render("loading…"))
+		return title("Metrics") + "\n\n" + mutedStyle.Render("loading…")
 	}
 	if !m.status.Registered {
-		return panel("Metrics", mutedStyle.Render("no index yet — run 'codemap index' in this project"))
+		return title("Metrics") + "\n\n" + mutedStyle.Render("no index yet — run 'codemap index' in this project")
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "nodes %d   edges %d   files %d\n\n", m.status.Nodes, m.status.Edges, m.status.Files)
-	b.WriteString(sectionStyle.Render("By kind") + "\n")
-	b.WriteString(barChart(m.status.Kinds))
-	b.WriteString("\n" + sectionStyle.Render("By language") + "\n")
-	b.WriteString(barChart(m.status.Languages))
-	return panel("Metrics", b.String())
-}
+	barW := w - 44
+	barW = clamp(barW, 16, 100)
 
-func (m Model) renderImpact() string {
 	var b strings.Builder
-	b.WriteString("Callers of: " + m.impact.View() + "\n\n")
-	switch {
-	case m.impactSymbol == "":
-		b.WriteString(mutedStyle.Render("type a symbol and press enter to see what calls it"))
-	case len(m.impactRefs) == 0:
-		b.WriteString(mutedStyle.Render("no callers found for " + m.impactSymbol))
-	default:
-		for _, r := range m.impactRefs {
-			fmt.Fprintf(&b, "  %s  %s\n", symStyle.Render(r.Symbol),
-				mutedStyle.Render(fmt.Sprintf("%s:%d", r.File, r.StartLine)))
+	b.WriteString(title("Metrics") + "   ")
+	b.WriteString(countStyle.Render(fmt.Sprintf("%d nodes · %d edges · %d files", m.status.Nodes, m.status.Edges, m.status.Files)))
+	b.WriteString("\n\n")
+	b.WriteString(sectionStyle.Render("By kind") + "\n")
+	b.WriteString(barChart(m.status.Kinds, barW))
+	b.WriteString("\n" + sectionStyle.Render("By language") + "\n")
+	b.WriteString(barChart(m.status.Languages, barW))
+
+	if len(m.graphHubs) > 0 {
+		b.WriteString("\n" + sectionStyle.Render("Top hubs (most referenced)") + "\n")
+		n := h - lipgloss.Height(b.String()) - 1
+		n = clamp(n, 0, 15)
+		for _, hub := range firstN(m.graphHubs, n) {
+			fmt.Fprintf(&b, "  %4d  %s %s\n", hub.InDegree, padRight(hub.Symbol, 28),
+				mutedStyle.Render(truncate(hub.File, w-40)))
 		}
 	}
-	return panel("Impact", b.String())
+	return b.String()
 }
 
-func (m Model) renderSearch() string {
+// ---- Impact tab ----
+
+func (m Model) renderImpact(w, h int) string {
 	var b strings.Builder
-	b.WriteString(m.search.View() + "\n\n")
+	b.WriteString(title("Impact") + "   " + m.impact.View() + "\n\n")
+	rep := m.impactRep
+	switch {
+	case rep == nil:
+		b.WriteString(mutedStyle.Render("type a symbol and press enter — see callers, blast radius, and which tests cover it"))
+	case !rep.Found:
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("symbol %q not found", m.impactSymbol)))
+	default:
+		for _, l := range rep.Locations {
+			b.WriteString(mutedStyle.Render("defined  ") + symStyle.Render(rep.Symbol) + "  " +
+				mutedStyle.Render(fmt.Sprintf("%s:%d", l.File, l.StartLine)) + "\n")
+		}
+		cover := fmt.Sprintf("%d direct callers · %d in blast radius · %d covering tests",
+			len(rep.DirectCallers), len(rep.BlastRadius), len(rep.Tests))
+		if rep.Untested {
+			cover += "   " + errorStyle.Render("⚠ untested")
+		}
+		b.WriteString("\n" + countStyle.Render(cover) + "\n\n")
+		b.WriteString(sectionStyle.Render("Blast radius") + "\n")
+		budget := clamp(h-8, 1, 30)
+		for _, n := range firstN(rep.BlastRadius, budget) {
+			marker := "  "
+			if n.Kind == "test" {
+				marker = symStyle.Render("✓ ")
+			}
+			fmt.Fprintf(&b, " %s[%d] %s %s\n", marker, n.Depth, padRight(n.Symbol, 28),
+				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", n.File, n.StartLine), w-40)))
+		}
+	}
+	return b.String()
+}
+
+// ---- Search tab ----
+
+func (m Model) renderSearch(w, h int) string {
+	var b strings.Builder
+	b.WriteString(title("Search") + "   " + m.search.View() + "\n\n")
 	switch {
 	case m.searchQuery == "":
-		b.WriteString(mutedStyle.Render("semantic search — needs an embedded index (codemap index)"))
+		b.WriteString(mutedStyle.Render("semantic search by meaning — needs an embedded index (codemap index)"))
 	case len(m.searchHits) == 0:
 		b.WriteString(mutedStyle.Render("no matches"))
 	default:
-		for _, h := range m.searchHits {
-			fmt.Fprintf(&b, "  %.2f  %s  %s\n", h.Score, symStyle.Render(h.Symbol),
-				mutedStyle.Render(fmt.Sprintf("%s:%d", h.File, h.StartLine)))
+		budget := clamp(h-3, 1, 50)
+		for _, hit := range firstN(m.searchHits, budget) {
+			fmt.Fprintf(&b, "  %s  %s %s\n", countStyle.Render(fmt.Sprintf("%.3f", hit.Score)),
+				symStyle.Render(padRight(hit.Symbol, 28)),
+				mutedStyle.Render(truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-44)))
 		}
 	}
-	return panel("Search", b.String())
+	return b.String()
 }
 
 // ---- helpers ----
 
-func panel(title, body string) string {
-	return panelTitleStyle.Render(title) + "\n\n" + body
+func title(s string) string { return panelTitleStyle.Render(s) }
+
+func refLines(refs []app.SymbolRef, budget, w int) string {
+	if len(refs) == 0 {
+		return mutedStyle.Render("  (none)") + "\n"
+	}
+	var b strings.Builder
+	for _, r := range firstN(refs, budget) {
+		b.WriteString("  " + truncate(fmt.Sprintf("%s  %s:%d", r.Symbol, r.File, r.StartLine), w-2) + "\n")
+	}
+	if len(refs) > budget {
+		fmt.Fprintf(&b, "  %s\n", mutedStyle.Render(fmt.Sprintf("… +%d more", len(refs)-budget)))
+	}
+	return b.String()
 }
 
 func spread(left, right string, width int) string {
@@ -148,7 +273,7 @@ func spread(left, right string, width int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-func barChart(counts map[string]int) string {
+func barChart(counts map[string]int, barW int) string {
 	if len(counts) == 0 {
 		return mutedStyle.Render("  (none)") + "\n"
 	}
@@ -168,13 +293,13 @@ func barChart(counts map[string]int) string {
 	})
 	var b strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&b, "  %-12s %s %d\n", k, bar(counts[k], max, 24), counts[k])
+		fmt.Fprintf(&b, "  %s %s %d\n", padRight(k, 12), bar(counts[k], max, barW), counts[k])
 	}
 	return b.String()
 }
 
 func bar(n, max, width int) string {
-	if max <= 0 {
+	if max <= 0 || width <= 0 {
 		return ""
 	}
 	filled := n * width / max
@@ -185,4 +310,48 @@ func bar(n, max, width int) string {
 		filled = width
 	}
 	return barStyle.Render(strings.Repeat("█", filled)) + strings.Repeat(" ", width-filled)
+}
+
+func padRight(s string, w int) string {
+	if lipgloss.Width(s) >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-lipgloss.Width(s))
+}
+
+func truncate(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	r := []rune(s)
+	if w == 1 {
+		return "…"
+	}
+	if len(r) > w-1 {
+		r = r[:w-1]
+	}
+	return string(r) + "…"
+}
+
+func clamp(n, lo, hi int) int {
+	if n < lo {
+		return lo
+	}
+	if n > hi {
+		return hi
+	}
+	return n
+}
+
+func firstN[T any](s []T, n int) []T {
+	if n < 0 {
+		n = 0
+	}
+	if n > len(s) {
+		n = len(s)
+	}
+	return s[:n]
 }

@@ -47,10 +47,20 @@ type semanticMsg struct {
 	hits  []app.SemanticHit
 	err   error
 }
-type callersMsg struct {
+type impactMsg struct {
 	symbol string
-	refs   []app.SymbolRef
+	rep    *app.ImpactReport
 	err    error
+}
+type graphHubsMsg struct {
+	hubs []app.HotspotRef
+	err  error
+}
+type graphDetailMsg struct {
+	symbol  string
+	callers []app.SymbolRef
+	callees []app.SymbolRef
+	err     error
 }
 
 // Model is the studio TUI state.
@@ -68,13 +78,23 @@ type Model struct {
 	errMsg    string
 	status    *app.StatusReport
 
+	// search tab
 	search      textinput.Model
 	searchHits  []app.SemanticHit
 	searchQuery string
 
+	// impact tab
 	impact       textinput.Model
-	impactRefs   []app.SymbolRef
+	impactRep    *app.ImpactReport
 	impactSymbol string
+
+	// graph tab (call-graph explorer)
+	graphLoaded  bool
+	graphHubs    []app.HotspotRef
+	graphSel     int
+	graphSym     string
+	graphCallers []app.SymbolRef
+	graphCallees []app.SymbolRef
 }
 
 // NewModel builds the studio model over a session.
@@ -90,15 +110,19 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 		ctx:      ctx,
 		service:  app.NewService(sess),
 		startDir: startDir,
-		active:   tabMetrics,
+		active:   tabGraph,
 		loading:  true,
 		search:   s,
 		impact:   i,
 	}
 }
 
-// Init loads the project status asynchronously.
-func (m Model) Init() tea.Cmd { return m.statusCmd() }
+// Init loads project status and the call graph.
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.statusCmd(), m.hubsCmd())
+}
+
+// ---- commands ----
 
 func (m Model) statusCmd() tea.Cmd {
 	svc, dir := m.service, m.startDir
@@ -108,10 +132,36 @@ func (m Model) statusCmd() tea.Cmd {
 	}
 }
 
+func (m Model) hubsCmd() tea.Cmd {
+	svc, dir := m.service, m.startDir
+	return func() tea.Msg {
+		r, err := svc.Hotspots(dir, 200)
+		if err != nil {
+			return graphHubsMsg{err: err}
+		}
+		return graphHubsMsg{hubs: r.Hotspots}
+	}
+}
+
+func (m Model) detailCmd(sym string) tea.Cmd {
+	svc, dir := m.service, m.startDir
+	return func() tea.Msg {
+		ca, err := svc.Callers(dir, sym)
+		if err != nil {
+			return graphDetailMsg{symbol: sym, err: err}
+		}
+		ce, err := svc.Callees(dir, sym)
+		if err != nil {
+			return graphDetailMsg{symbol: sym, err: err}
+		}
+		return graphDetailMsg{symbol: sym, callers: ca.Results, callees: ce.Results}
+	}
+}
+
 func (m Model) semanticCmd(q string) tea.Cmd {
 	ctx, svc, dir := m.ctx, m.service, m.startDir
 	return func() tea.Msg {
-		r, err := svc.Semantic(ctx, dir, q, 20)
+		r, err := svc.Semantic(ctx, dir, q, 50)
 		if err != nil {
 			return semanticMsg{query: q, err: err}
 		}
@@ -119,18 +169,19 @@ func (m Model) semanticCmd(q string) tea.Cmd {
 	}
 }
 
-func (m Model) callersCmd(sym string) tea.Cmd {
+func (m Model) impactCmd(sym string) tea.Cmd {
 	svc, dir := m.service, m.startDir
 	return func() tea.Msg {
-		r, err := svc.Callers(dir, sym)
+		r, err := svc.Impact(dir, sym, 3)
 		if err != nil {
-			return callersMsg{symbol: sym, err: err}
+			return impactMsg{symbol: sym, err: err}
 		}
-		return callersMsg{symbol: sym, refs: r.Results}
+		return impactMsg{symbol: sym, rep: r}
 	}
 }
 
-// Update handles messages and key input.
+// ---- update ----
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -151,6 +202,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case graphHubsMsg:
+		m.graphLoaded = true
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		m.graphHubs = msg.hubs
+		m.graphSel = 0
+		if len(msg.hubs) > 0 {
+			return m, m.detailCmd(msg.hubs[0].Symbol)
+		}
+		return m, nil
+
+	case graphDetailMsg:
+		if msg.err != nil {
+			m.errMsg = msg.err.Error()
+			return m, nil
+		}
+		m.graphSym = msg.symbol
+		m.graphCallers = msg.callers
+		m.graphCallees = msg.callees
+		return m, nil
+
 	case semanticMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
@@ -163,16 +237,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = fmt.Sprintf("%d matches for %q", len(msg.hits), msg.query)
 		return m, nil
 
-	case callersMsg:
+	case impactMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
-			m.impactRefs = nil
+			m.impactRep = nil
 			return m, nil
 		}
 		m.errMsg = ""
-		m.impactRefs = msg.refs
+		m.impactRep = msg.rep
 		m.impactSymbol = msg.symbol
-		m.statusMsg = fmt.Sprintf("%d callers of %q", len(msg.refs), msg.symbol)
+		if msg.rep != nil {
+			m.statusMsg = fmt.Sprintf("%s: %d callers, %d blast, %d tests",
+				msg.symbol, len(msg.rep.DirectCallers), len(msg.rep.BlastRadius), len(msg.rep.Tests))
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -182,23 +259,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "tab":
 		m.active = (m.active + 1) % tabCount
 		m.syncFocus()
-		return m, nil
+		return m, m.onActivate()
 	case "shift+tab":
 		m.active = (m.active + tabCount - 1) % tabCount
 		m.syncFocus()
-		return m, nil
+		return m, m.onActivate()
+	}
+
+	// Number keys switch tabs, but only when the focused tab isn't a text input.
+	if m.active != tabSearch && m.active != tabImpact {
+		if d := digitToTab(key); d >= 0 {
+			m.active = tab(d)
+			m.syncFocus()
+			return m, m.onActivate()
+		}
 	}
 
 	var cmd tea.Cmd
 	switch m.active {
 	case tabSearch:
-		if msg.String() == "enter" {
+		if key == "enter" {
 			q := m.search.Value()
 			if q == "" {
 				return m, nil
@@ -208,22 +295,64 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.search, cmd = m.search.Update(msg)
 		return m, cmd
+
 	case tabImpact:
-		if msg.String() == "enter" {
+		if key == "enter" {
 			s := m.impact.Value()
 			if s == "" {
 				return m, nil
 			}
-			return m, m.callersCmd(s)
+			m.statusMsg = "analyzing…"
+			return m, m.impactCmd(s)
 		}
 		m.impact, cmd = m.impact.Update(msg)
 		return m, cmd
-	default:
-		if msg.String() == "q" {
+
+	case tabGraph:
+		switch key {
+		case "up", "k":
+			if m.graphSel > 0 {
+				m.graphSel--
+				return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
+			}
+		case "down", "j":
+			if m.graphSel < len(m.graphHubs)-1 {
+				m.graphSel++
+				return m, m.detailCmd(m.graphHubs[m.graphSel].Symbol)
+			}
+		case "q":
+			return m, tea.Quit
+		}
+		return m, nil
+
+	default: // metrics
+		if key == "q" {
 			return m, tea.Quit
 		}
 	}
 	return m, nil
+}
+
+// onActivate fires the data load a tab needs on first view.
+func (m Model) onActivate() tea.Cmd {
+	if m.active == tabGraph && !m.graphLoaded {
+		return m.hubsCmd()
+	}
+	return nil
+}
+
+func digitToTab(key string) int {
+	switch key {
+	case "1":
+		return int(tabGraph)
+	case "2":
+		return int(tabMetrics)
+	case "3":
+		return int(tabImpact)
+	case "4":
+		return int(tabSearch)
+	}
+	return -1
 }
 
 // syncFocus focuses the active tab's input and blurs the others.
