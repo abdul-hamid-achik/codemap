@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver (no CGO)
@@ -36,12 +37,13 @@ type Node struct {
 
 // Edge is a directed relationship between two nodes.
 type Edge struct {
-	ID        int64
-	SourceID  int64
-	TargetID  int64
-	EdgeType  string
-	Weight    float64
-	CreatedAt string
+	ID         int64
+	SourceID   int64
+	TargetID   int64
+	EdgeType   string
+	Weight     float64
+	Provenance string
+	CreatedAt  string
 }
 
 // Project is a registered project whose code is in the graph.
@@ -108,10 +110,67 @@ func (s *Store) migrate() error {
 	if _, err := s.db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
+	// v2 -> v3: add edges.provenance. schemaSQL's CREATE TABLE IF NOT EXISTS is a
+	// no-op for a pre-existing edges table, so the column must be added by ALTER —
+	// then its index can be created (it can't go in schemaSQL, which runs before
+	// the column exists on an upgraded table).
+	if v < 3 {
+		if err := s.addColumnIfMissing("edges", "provenance", "TEXT NOT NULL DEFAULT 'name'"); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec("CREATE INDEX IF NOT EXISTS idx_edges_source_prov ON edges(source_id, edge_type, provenance)"); err != nil {
+			return fmt.Errorf("create provenance index: %w", err)
+		}
+	}
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
 		return fmt.Errorf("set schema version: %w", err)
 	}
 	return nil
+}
+
+// addColumnIfMissing adds a column to a table if it isn't already present. It is
+// idempotent and race-safe across the multiple processes that may open the same
+// DB (CLAUDE.md's multi-MCP model): if another process wins the race and adds the
+// column first, SQLite's "duplicate column name" error is treated as success
+// rather than relying on a TOCTOU table_info check.
+func (s *Store) addColumnIfMissing(table, col, decl string) error {
+	has, err := s.columnExists(table, col)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, col, decl))
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return nil // another process added it concurrently — success
+	}
+	if err != nil {
+		return fmt.Errorf("add column %s.%s: %w", table, col, err)
+	}
+	return nil
+}
+
+func (s *Store) columnExists(table, col string) (bool, error) {
+	rows, err := s.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		// table_info columns: cid, name, type, notnull, dflt_value, pk
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == col {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // ---- projects ----
@@ -272,13 +331,52 @@ func (s *Store) queryNodes(query string, args ...any) ([]Node, error) {
 
 // AddEdge inserts a directed edge between two existing nodes.
 func (s *Store) AddEdge(sourceID, targetID int64, edgeType string, weight float64) (int64, error) {
+	return s.AddEdgeProv(sourceID, targetID, edgeType, weight, ProvName)
+}
+
+// AddEdgeProv inserts an edge tagged with its provenance ('name' for fast
+// name-based resolution, 'precise' for the go/types pass). AddEdge defaults to
+// 'name' so existing callers (the name-based passes) need no change.
+func (s *Store) AddEdgeProv(sourceID, targetID int64, edgeType string, weight float64, provenance string) (int64, error) {
 	res, err := s.db.Exec(
-		"INSERT INTO edges(source_id, target_id, edge_type, weight, created_at) VALUES(?,?,?,?,?)",
-		sourceID, targetID, edgeType, weight, now())
+		"INSERT INTO edges(source_id, target_id, edge_type, weight, provenance, created_at) VALUES(?,?,?,?,?,?)",
+		sourceID, targetID, edgeType, weight, provenance, now())
 	if err != nil {
 		return 0, fmt.Errorf("add edge: %w", err)
 	}
 	return res.LastInsertId()
+}
+
+// DeleteCallEdgesBySource removes the calls/references edges of the given source
+// nodes that have the given provenance. The go/types pass uses it to drop the
+// name-based ('name') call edges of cleanly type-checked source nodes before
+// inserting their precise replacements — so precise supersedes name without
+// double-counting. defines edges (structural, from file nodes) are never touched.
+func (s *Store) DeleteCallEdgesBySource(sourceIDs []int64, provenance string) error {
+	if len(sourceIDs) == 0 {
+		return nil
+	}
+	const chunk = 500 // stay well under SQLite's variable limit
+	for start := 0; start < len(sourceIDs); start += chunk {
+		end := start + chunk
+		if end > len(sourceIDs) {
+			end = len(sourceIDs)
+		}
+		batch := sourceIDs[start:end]
+		ph := make([]string, len(batch))
+		args := make([]any, 0, len(batch)+1)
+		for i, id := range batch {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		args = append(args, provenance)
+		q := "DELETE FROM edges WHERE source_id IN (" + strings.Join(ph, ",") +
+			") AND edge_type IN ('" + EdgeCalls + "','" + EdgeReferences + "') AND provenance = ?"
+		if _, err := s.db.Exec(q, args...); err != nil {
+			return fmt.Errorf("delete call edges by source: %w", err)
+		}
+	}
+	return nil
 }
 
 // ---- index state ----

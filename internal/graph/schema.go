@@ -2,8 +2,16 @@ package graph
 
 // schemaVersion is bumped whenever schemaSQL changes in a way that requires a
 // migration. The current version is stored in SQLite's PRAGMA user_version.
-// v2 adds the annotations table.
-const schemaVersion = 2
+// v2 adds the annotations table. v3 adds the edges.provenance column.
+const schemaVersion = 3
+
+// Edge provenance: how an edge's target was resolved. Name-based fan-out (the
+// fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
+// physically supersedes the 'name' edges of cleanly type-checked sources.
+const (
+	ProvName    = "name"
+	ProvPrecise = "precise"
+)
 
 // Annotation target kinds.
 const (
@@ -82,6 +90,7 @@ CREATE TABLE IF NOT EXISTS edges (
     target_id   INTEGER NOT NULL,
     edge_type   TEXT NOT NULL,
     weight      REAL NOT NULL DEFAULT 1.0,
+    provenance  TEXT NOT NULL DEFAULT 'name',
     created_at  TEXT NOT NULL,
     FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE,
     FOREIGN KEY (target_id) REFERENCES nodes(id) ON DELETE CASCADE
@@ -90,6 +99,9 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_type   ON edges(edge_type);
+-- idx_edges_source_prov is created in migrate() after the provenance column is
+-- guaranteed (it can't live here: on a pre-v3 edges table the column doesn't
+-- exist yet when schemaSQL runs).
 
 CREATE TABLE IF NOT EXISTS index_state (
     project_id  INTEGER NOT NULL,

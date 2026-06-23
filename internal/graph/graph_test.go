@@ -149,6 +149,105 @@ func TestAddEdgeForeignKeyAndCascade(t *testing.T) {
 	}
 }
 
+func TestEdgeProvenance(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	a, _ := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "A", Kind: KindFunction, Language: "go", SourceHash: "h"})
+	b, _ := s.AddNode(&Node{ProjectID: pid, FilePath: "b.go", Symbol: "B", Kind: KindFunction, Language: "go", SourceHash: "h"})
+	c, _ := s.AddNode(&Node{ProjectID: pid, FilePath: "c.go", Symbol: "C", Kind: KindFunction, Language: "go", SourceHash: "h"})
+
+	// AddEdge defaults to 'name'; AddEdgeProv can tag 'precise'.
+	if _, err := s.AddEdge(a, b, EdgeCalls, WeightTreeSitter); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdgeProv(a, c, EdgeCalls, WeightLSP, ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+	prov := func(src, tgt int64) string {
+		var p string
+		if err := s.db.QueryRow("SELECT provenance FROM edges WHERE source_id=? AND target_id=?", src, tgt).Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if got := prov(a, b); got != ProvName {
+		t.Errorf("AddEdge provenance = %q, want %q", got, ProvName)
+	}
+	if got := prov(a, c); got != ProvPrecise {
+		t.Errorf("AddEdgeProv provenance = %q, want %q", got, ProvPrecise)
+	}
+
+	// DeleteCallEdgesBySource removes only the named-provenance call edges of the
+	// given sources, leaving precise edges (and other sources) intact.
+	if err := s.DeleteCallEdgesBySource([]int64{a}, ProvName); err != nil {
+		t.Fatal(err)
+	}
+	var nameLeft, preciseLeft int
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM edges WHERE provenance=?", ProvName).Scan(&nameLeft)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM edges WHERE provenance=?", ProvPrecise).Scan(&preciseLeft)
+	if nameLeft != 0 {
+		t.Errorf("name edges after delete = %d, want 0", nameLeft)
+	}
+	if preciseLeft != 1 {
+		t.Errorf("precise edges after delete = %d, want 1 (untouched)", preciseLeft)
+	}
+}
+
+func TestMigrateV2ToV3AddsProvenance(t *testing.T) {
+	// Simulate a pre-v3 database: an edges table WITHOUT the provenance column,
+	// user_version=2 — then Open must add the column and stamp version 3.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Recreate a v2-shaped edges table and roll the version back to 2.
+	for _, stmt := range []string{
+		"DROP TABLE edges",
+		`CREATE TABLE edges (id INTEGER PRIMARY KEY AUTOINCREMENT, source_id INTEGER NOT NULL,
+			target_id INTEGER NOT NULL, edge_type TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1.0,
+			created_at TEXT NOT NULL)`,
+		"INSERT INTO edges(source_id,target_id,edge_type,weight,created_at) VALUES(1,2,'calls',1.0,'t')",
+		"PRAGMA user_version=2",
+	} {
+		if _, err := old.db.Exec(stmt); err != nil {
+			t.Fatalf("setup %q: %v", stmt, err)
+		}
+	}
+	if has, _ := old.columnExists("edges", "provenance"); has {
+		t.Fatal("precondition failed: v2 edges table should lack provenance")
+	}
+	_ = old.Close()
+
+	// Re-open: migration must add the column with default 'name' for existing rows.
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("re-open/migrate: %v", err)
+	}
+	defer s.Close()
+	has, err := s.columnExists("edges", "provenance")
+	if err != nil || !has {
+		t.Fatalf("provenance column missing after migrate (has=%v err=%v)", has, err)
+	}
+	var prov string
+	if err := s.db.QueryRow("SELECT provenance FROM edges WHERE source_id=1").Scan(&prov); err != nil {
+		t.Fatal(err)
+	}
+	if prov != ProvName {
+		t.Errorf("migrated existing row provenance = %q, want %q", prov, ProvName)
+	}
+	var v int
+	_ = s.db.QueryRow("PRAGMA user_version").Scan(&v)
+	if v != schemaVersion {
+		t.Errorf("user_version = %d, want %d", v, schemaVersion)
+	}
+	// Idempotent: re-migrate is a no-op.
+	if err := s.migrate(); err != nil {
+		t.Errorf("re-migrate after upgrade: %v", err)
+	}
+}
+
 func TestFileHash(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")

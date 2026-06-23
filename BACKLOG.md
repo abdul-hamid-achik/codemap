@@ -726,6 +726,35 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   Annotations`, tui `TestSearchPaneMarksAnnotated`. Full suite + lint v2 (0) + studio/query/semantic
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
+## 🎯 Epic — precise call resolution (go/types) — GREENLIT 2026-06-23
+The name-based over-matching that #79–#86 *flag* (callers/impact/hotspots inflation) gets *eliminated*
+by resolving calls precisely with pure-Go `go/types`. Designed via a 16-agent workflow (map → research
+→ judge panel → synthesize → adversarial review). **Chosen approach:** opt-in `--precise` Pass 3 in the
+indexer using in-process `golang.org/x/tools/go/packages`+`go/types` (NOT gopls, NOT NeedDeps), in a new
+`internal/extract/typesrc/`. Name-based Pass 2 stays the byte-for-byte fast default. "Precise supersedes
+name" is made deterministic by an explicit `edges.provenance` column (verified: no query reads `weight`,
+so weight can't be the supersede key, and in-package WeightLSP=1.0 name edges would collide with precise
+1.0 — the winning design's missed double-counting bug). Supersede = physical delete-then-insert per clean
+source node, same `calls`/`references` edge_type ⇒ **zero query changes**. Degrades per-package (any
+type-check error keeps that package's name edges) and globally (no `go` toolchain ⇒ no-op). Shipping in 3
+CI-green slices: **A** schema/store foundation (done below) · **B** typesrc resolver + unit test · **C**
+indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
+the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
+and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #87 (precise epic — slice A: foundation) — **`edges.provenance` column + race-safe v2→v3
+  migration + store plumbing.** Additive, zero behavior change (every edge tagged `'name'`). schema.go:
+  `schemaVersion` 2→3, `provenance TEXT NOT NULL DEFAULT 'name'` on edges, `ProvName`/`ProvPrecise`
+  consts, `idx_edges_source_prov`. store.go: migrate() adds the column via an idempotent
+  `addColumnIfMissing` that tolerates SQLite "duplicate column" (race-safe across the multi-MCP model —
+  NOT the TOCTOU table_info check the reviewer flagged) and creates the prov index in migrate() (it
+  can't live in schemaSQL — the column doesn't exist yet on an upgraded edges table; that ordering bug
+  was caught and fixed mid-implementation). New `AddEdgeProv` (AddEdge delegates with ProvName, so the
+  9 test + 2 prod callers need no change) and `DeleteCallEdgesBySource(ids, prov)` (chunked, calls/refs
+  only, leaves defines). Tests: `TestEdgeProvenance`, `TestMigrateV2ToV3AddsProvenance` (simulated v2 DB
+  → column added, existing rows read 'name', idempotent). **Verified the REAL live v2 index migrated to
+  v3 cleanly: 30,859 edges, all now provenance='name', user_version=3, zero errors.** Full suite + lint
+  v2 (0) + query E2E green; fmt clean. COMMIT+PUSH.
+
 ## Post-v0.2.0 polish
 - 2026-06-23 #86 (studio metrics honesty) — **studio Metrics "Top hubs" flags inflated hubs too**, the
   #85 follow-up on the directive's named Metrics surface. The dashboard's hub ranking showed the same
