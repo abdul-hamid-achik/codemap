@@ -665,14 +665,15 @@ type ImpactNode struct {
 // ImpactReport is the flagship impact analysis: who is affected by changing a
 // symbol, and which tests cover those paths.
 type ImpactReport struct {
-	Symbol        string       `json:"symbol"`
-	Project       string       `json:"project"`
-	Found         bool         `json:"found"`
-	Locations     []SymbolRef  `json:"locations,omitempty"`
-	DirectCallers []SymbolRef  `json:"direct_callers"`
-	BlastRadius   []ImpactNode `json:"blast_radius"`
-	Tests         []ImpactNode `json:"tests"`
-	Untested      bool         `json:"untested"`
+	Symbol        string             `json:"symbol"`
+	Project       string             `json:"project"`
+	Found         bool               `json:"found"`
+	Locations     []SymbolRef        `json:"locations,omitempty"`
+	DirectCallers []SymbolRef        `json:"direct_callers"`
+	BlastRadius   []ImpactNode       `json:"blast_radius"`
+	Tests         []ImpactNode       `json:"tests"`
+	Untested      bool               `json:"untested"`
+	Annotations   []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
 // Impact computes impact analysis for a symbol: its definition site(s), direct
@@ -739,7 +740,39 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		}
 	}
 	rep.Untested = len(rep.Tests) == 0
+
+	// Surface any annotations pinned to this symbol — by the query name or by a
+	// resolved FQN/symbol of its definition sites — so analysis shows pinned
+	// knowledge inline.
+	targets := []string{symbol}
+	for _, l := range rep.Locations {
+		targets = append(targets, l.FQN, l.Symbol)
+	}
+	rep.Annotations = nodeAnnotationsFor(g, p.ID, targets...)
 	return rep, nil
+}
+
+// nodeAnnotationsFor returns the deduped node-annotations whose target matches
+// any of the candidates (a query name and/or resolved FQNs).
+func nodeAnnotationsFor(g *graph.Store, projectID int64, candidates ...string) []graph.Annotation {
+	seen := map[int64]bool{}
+	var out []graph.Annotation
+	for _, t := range candidates {
+		if t == "" {
+			continue
+		}
+		anns, err := g.AnnotationsByTarget(projectID, graph.AnnotationNode, t)
+		if err != nil {
+			continue
+		}
+		for _, a := range anns {
+			if !seen[a.ID] {
+				seen[a.ID] = true
+				out = append(out, a)
+			}
+		}
+	}
+	return out
 }
 
 // HotspotRef is a hub node with its incoming-usage count.

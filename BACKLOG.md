@@ -659,6 +659,14 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   agent guide) updated. Full suite + lint v2 (0) + help/query E2E green; fmt clean. COMMIT+PUSH.
   **NEXT (annotation follow-ups):** surface annotations inline in impact/callers + studio (Graph/Impact
   panes); then the broader harness wiring (vidtrace/vecgrep/fcheap orchestration is harness-side).
+- 2026-06-23 #63 (USER ASK follow-up) — **impact surfaces pinned annotations inline.** `ImpactReport`
+  gains `Annotations` (json omitempty); `Impact()` gathers node-annotations matching the query name OR
+  any resolved definition FQN/symbol (new `nodeAnnotationsFor` dedup helper) — so pinning by FQN and
+  querying by short name still surfaces (dogfood: annotate `x.B`, `impact B` shows it). CLI prints an
+  "annotations:" section; studio Impact pane shows `⟐ <source>: <note> <data>` lines (budget reserves
+  per line). Tests: app `TestImpactSurfacesAnnotations` (FQN-match), tui `TestImpactPaneShowsAnnotations`.
+  Full suite + lint v2 (0) + E2E green; fmt clean. COMMIT+PUSH.
+  **NEXT:** same inline surfacing for `source`/`callers`, then studio Graph-pane annotation indicator.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

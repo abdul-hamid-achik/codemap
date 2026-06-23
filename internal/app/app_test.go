@@ -272,6 +272,35 @@ func TestServiceAnnotations(t *testing.T) {
 	}
 }
 
+func TestImpactSurfacesAnnotations(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B() }\n\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Pinned by FQN; queried by short name — surfaced via the resolved location FQN.
+	if _, err := svc.AnnotateNode(proj, "app.B", "postgres", "hot in prod", `{"rows":9}`); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Impact(proj, "B", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Annotations) != 1 || rep.Annotations[0].Note != "hot in prod" {
+		t.Errorf("impact should surface the pinned annotation, got %+v", rep.Annotations)
+	}
+}
+
 func TestDocs(t *testing.T) {
 	full := Docs("")
 	for _, want := range []string{"## overview", "## workflow", "## accuracy", "codemap_impact", "precise:true"} {

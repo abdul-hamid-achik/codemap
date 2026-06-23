@@ -11,6 +11,7 @@ import (
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
 func testModel() Model {
@@ -424,6 +425,22 @@ func TestImpactNamesCoveringTests(t *testing.T) {
 	out := m.render()
 	if !strings.Contains(out, "covered by") || !strings.Contains(out, "app.TestFoo") {
 		t.Errorf("impact should name the covering tests:\n%s", out)
+	}
+}
+
+func TestImpactPaneShowsAnnotations(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabImpact
+	m.impact.SetValue("Foo")
+	rep := &app.ImpactReport{
+		Symbol: "Foo", Found: true,
+		BlastRadius: []app.ImpactNode{{Symbol: "Caller", Depth: 1}},
+		Annotations: []graph.Annotation{{ID: 1, Kind: "node", Target: "Foo", Source: "postgres", Note: "hot in prod"}},
+	}
+	m, _ = applyMsg(m, impactMsg{symbol: "Foo", rep: rep})
+	out := m.render()
+	if !strings.Contains(out, "hot in prod") {
+		t.Errorf("impact pane should surface pinned annotations inline:\n%s", out)
 	}
 }
 

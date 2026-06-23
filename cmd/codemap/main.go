@@ -415,6 +415,19 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if rep.Untested {
 		fmt.Println("  ⚠ no tests reach this symbol")
 	}
+	if len(rep.Annotations) > 0 {
+		fmt.Println("  annotations:")
+		for _, a := range rep.Annotations {
+			line := a.Source
+			if a.Note != "" {
+				line += ": " + a.Note
+			}
+			if a.Data != "" {
+				line += "  " + truncStr(a.Data, 80)
+			}
+			fmt.Printf("     #%d %s\n", a.ID, line)
+		}
+	}
 	// List the covering tests explicitly so you know what to run — they're a
 	// subset of the blast radius, but spelling them out beats hunting for ✓.
 	if len(rep.Tests) > 0 {

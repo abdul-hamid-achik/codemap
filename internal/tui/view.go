@@ -438,6 +438,17 @@ func (m Model) renderImpact(w, h int) string {
 			b.WriteString(mutedStyle.Render("covered by ") + symStyle.Render(truncate(strings.Join(names, ", "), w-12)) + "\n")
 			reserve++
 		}
+		for _, a := range rep.Annotations { // pinned notes/data, inline
+			line := a.Source
+			if a.Note != "" {
+				line += ": " + a.Note
+			}
+			if a.Data != "" {
+				line += "  " + strings.Join(strings.Fields(a.Data), " ")
+			}
+			b.WriteString(countStyle.Render("⟐ ") + truncate(line, w-2) + "\n")
+			reserve++
+		}
 		b.WriteString("\n")
 		b.WriteString(sectionStyle.Render("Blast radius") + "\n")
 		br := rep.BlastRadius
