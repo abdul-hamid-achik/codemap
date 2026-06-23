@@ -741,6 +741,21 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #93 (precise epic — E2E flow) — **`specs/precise.yml` demonstrates the precise pass
+  end-to-end** — the directive's "flows that demonstrate value via … LSP/types" pillar, now viable
+  because `index --precise` is deterministic in-process go/types (unlike the flaky one-shot gopls
+  path that killed the idea at #78). The flow indexes a fixture where `Other.Handle` is **never
+  called** yet shares a name with `Real.Handle`: name-based ranks the phantom `Other.Handle` as a hub
+  (in-degree 3, flagged `(inflated)`), then `index --reindex --no-embed --precise` resolves 3 edges
+  exactly and `Other.Handle` **vanishes**, leaving `Real.Handle` accurate and un-flagged. 3 positive
+  `contains` outcomes (phantom hub appears name-based / inflation flagged / "resolved exactly via
+  go/types"); contractHash stamped; `glyph run` passes. Spec only isolates `CODEMAP_DATA` not `HOME`
+  (asdf's `go` shim needs a real HOME — verified that isolating HOME makes `--precise` degrade
+  gracefully with a note, which itself proves the safety contract). CLAUDE.md flows note updated. No
+  Go change ⇒ CI green (flows are local-only). COMMIT+PUSH. **Found a latent edge case to follow up:**
+  the precise (file,line) callee join collides when multiple decls share a line (a one-line fixture
+  mis-resolved); gofmt'd code is unaffected, but the indexer's posTo should drop colliding (file,line)
+  keys and fall back to the FQN match — small, worth a test.
 - 2026-06-23 #92 (precise epic — slice E: provenance-aware flag) — **the `⚠ name shared by N
   (inflated)` hotspots flag (#85/#86) no longer over-warns on a `--precise` index.** New
   `graph.Store.HasNameInEdges(nodeIDs)` returns which nodes still have ≥1 name-provenance incoming

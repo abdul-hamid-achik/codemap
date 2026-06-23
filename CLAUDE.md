@@ -60,8 +60,9 @@ Surfaces / key files:
 
 `task check` (fmt + lint + test) before every commit · `task race` for TUI/indexer ·
 `task build` · `task flows` (glyphrun) when specs change. Flows are **local-only** (CI skips
-them): `studio.yml` needs `gopls` and `semantic.yml` needs a local Ollama with
-`nomic-embed-text` — the rest are pure-Go.
+them): `studio.yml` needs `gopls`, `semantic.yml` needs a local Ollama with `nomic-embed-text`,
+and `precise.yml` needs the `go` toolchain (it runs `index --precise`, and only isolates
+`CODEMAP_DATA` not `HOME` so an asdf/`go` shim still resolves) — the rest are pure-Go.
 
 ## Related projects
 

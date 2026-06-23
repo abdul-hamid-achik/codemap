@@ -1,0 +1,41 @@
+version: 1
+name: precise
+intent: |
+    demonstrate the go/types precise pass: with name-based resolution a method
+    that is never actually called (Other.Handle) still ranks as a hub because it
+    shares a name with one that is; `codemap index --precise` resolves every call
+    exactly, so the phantom hub vanishes and the real one keeps an accurate,
+    un-flagged count. Needs the `go` toolchain (local-only; CI skips flows).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P\"; printf 'module example.com/fix\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf 'package fix\\n\\ntype Real struct{}\\ntype Other struct{}\\n\\nfunc (Real) Handle() {}\\nfunc (Other) Handle() {}\\n\\nfunc A() { var r Real; r.Handle() }\\nfunc B() { var r Real; r.Handle() }\\nfunc C() { var r Real; r.Handle() }\\n' > \"$P/fix.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== name-based: Other.Handle is never called, yet ranks as a hub =='; \"$CM\" hotspots --top 4; echo '== reindex --precise (go/types) =='; \"$CM\" index --reindex --no-embed --precise 2>&1 | grep -i precise; echo '== precise: only the real caller survives =='; \"$CM\" hotspots --top 4"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 30000
+    - snapshot: precise
+outcomes:
+    - id: name_based_overmatches
+      description: name-based resolution ranks the never-called Other.Handle as a hub
+      verify:
+        screen:
+            contains: "fix.Other.Handle"
+    - id: inflation_flagged
+      description: codemap flags the same-named over-matching honestly
+      verify:
+        screen:
+            contains: "(inflated)"
+    - id: precise_resolved
+      description: index --precise resolves calls exactly via go/types
+      verify:
+        screen:
+            contains: "resolved exactly via go/types"
+contractHash: sha256:d520cf62940dfb783f9551f64a5c7ff36f0477ba90d84866dc1b8644e2000c9e
