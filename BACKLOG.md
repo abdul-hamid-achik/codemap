@@ -718,6 +718,20 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   **Annotation layer is now complete on every surface** (CLI by-name + precise, MCP, studio
   Graph/Impact, callers/callees/source). **NEXT:** Search-pane per-hit indicator (lower value — needs
   per-hit lookup); broader harness wiring is harness-side.
+- 2026-06-23 #68 (annotation follow-up) — **Search surfaces annotations too** (last surface). Added
+  `Annotations` to `SemanticHit`, enriched in one bulk query (`enrichHitAnnotations`: AllAnnotations →
+  target map → attach by FQN/symbol) for both `Semantic`/`Search` and `FindSymbols` — so agents get
+  annotations inline in `codemap_semantic`/`codemap_find` JSON. studio Search marks annotated rows with
+  `⟐`; CLI `find`/`semantic` text get the same marker (`annMark`). Tests: app `TestFindSurfaces
+  Annotations`, tui `TestSearchPaneMarksAnnotated`. Full suite + lint v2 (0) + studio/query/semantic
+  E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
+
+## 🏷️ Release — v0.2.0 (2026-06-23)
+Minor release (user-requested). Since v0.1.0: the **annotation layer surfaces everywhere** — added
+inline surfacing on the studio Graph pane (#66), the precise/`--lsp`+MCP-`precise` path (#67), and
+Search incl. JSON enrichment for agents (#68); plus **documented agent registration** (#65: per-CLI
+`mcp add` one-liners). Same proven pure-Go pipeline as v0.1.0 (goreleaser → 5 targets → homebrew-tap).
+Tag `v0.2.0` to publish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

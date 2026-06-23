@@ -531,13 +531,17 @@ func (m Model) renderSearch(w, h int) string {
 		}
 		for i := start; i < end; i++ {
 			hit := hits[i]
+			ann := "  "
+			if len(hit.Annotations) > 0 { // pinned-knowledge marker
+				ann = "⟐ "
+			}
 			name := truncate(displayName(hit.FQN, hit.Symbol), 32)
-			loc := truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-48)
+			loc := truncate(fmt.Sprintf("%s:%d", hit.File, hit.StartLine), w-50)
 			if i == m.searchSel {
-				plain := fmt.Sprintf(" ▸ %.3f  %s %s", hit.Score, padRight(name, 32), loc)
+				plain := fmt.Sprintf(" ▸ %s%.3f  %s %s", ann, hit.Score, padRight(name, 32), loc)
 				b.WriteString(selectedStyle.Width(w).Render(truncate(plain, w)) + "\n")
 			} else {
-				fmt.Fprintf(&b, "   %s  %s %s\n", countStyle.Render(fmt.Sprintf("%.3f", hit.Score)),
+				fmt.Fprintf(&b, "   %s%s  %s %s\n", ann, countStyle.Render(fmt.Sprintf("%.3f", hit.Score)),
 					symStyle.Render(padRight(name, 32)), mutedStyle.Render(loc))
 			}
 		}

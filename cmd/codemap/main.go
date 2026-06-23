@@ -460,7 +460,7 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	for _, h := range rep.Hits {
-		fmt.Printf("  %.3f  %-36s %s:%d\n", h.Score, disp(h.FQN, h.Symbol), h.File, h.StartLine)
+		fmt.Printf("%s%.3f  %-36s %s:%d\n", annMark(h.Annotations), h.Score, disp(h.FQN, h.Symbol), h.File, h.StartLine)
 	}
 	return nil
 }
@@ -559,7 +559,7 @@ func runFind(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	for _, h := range rep.Hits {
-		fmt.Printf("  %-9s %-26s %s\n", h.Kind, fmt.Sprintf("%s:%d", h.File, h.StartLine),
+		fmt.Printf("%s%-9s %-26s %s\n", annMark(h.Annotations), h.Kind, fmt.Sprintf("%s:%d", h.File, h.StartLine),
 			sigOrName(h.Signature, h.FQN, h.Symbol))
 	}
 	return nil
@@ -748,6 +748,14 @@ func truncStr(s string, n int) string {
 		return "…"
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// annMark is a row prefix flagging that a result carries annotations.
+func annMark(anns []graph.Annotation) string {
+	if len(anns) > 0 {
+		return "⟐ "
+	}
+	return "  "
 }
 
 // renderAnnotations prints pinned notes/data under a query result, if any.

@@ -504,6 +504,20 @@ func TestImpactHeaderShowsAnalyzedSymbol(t *testing.T) {
 	}
 }
 
+func TestSearchPaneMarksAnnotated(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m.search.SetValue("x")
+	m, _ = applyMsg(m, semanticMsg{query: "x", mode: "name", hits: []app.SemanticHit{
+		{Symbol: "Plain"},
+		{Symbol: "Pinned", Annotations: []graph.Annotation{{ID: 1, Kind: "node", Target: "Pinned", Source: "note"}}},
+	}})
+	out := m.render()
+	if !strings.Contains(out, "⟐") {
+		t.Errorf("search list should mark annotated hits with ⟐:\n%s", out)
+	}
+}
+
 func TestSearchShowsSignaturePreview(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch

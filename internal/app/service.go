@@ -367,15 +367,47 @@ type RelationReport struct {
 
 // SemanticHit is one semantic-search result.
 type SemanticHit struct {
-	Symbol    string  `json:"symbol"`
-	FQN       string  `json:"fqn,omitempty"`
-	Kind      string  `json:"kind"`
-	File      string  `json:"file"`
-	StartLine int     `json:"start_line"`
-	EndLine   int     `json:"end_line"`
-	Score     float32 `json:"score"`
-	Signature string  `json:"signature,omitempty"`
-	Doc       string  `json:"doc,omitempty"`
+	Symbol      string             `json:"symbol"`
+	FQN         string             `json:"fqn,omitempty"`
+	Kind        string             `json:"kind"`
+	File        string             `json:"file"`
+	StartLine   int                `json:"start_line"`
+	EndLine     int                `json:"end_line"`
+	Score       float32            `json:"score"`
+	Signature   string             `json:"signature,omitempty"`
+	Doc         string             `json:"doc,omitempty"`
+	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
+}
+
+// enrichHitAnnotations attaches each hit's node-annotations in one bulk query,
+// matching by the hit's FQN or symbol name.
+func enrichHitAnnotations(g *graph.Store, projectID int64, hits []SemanticHit) {
+	if len(hits) == 0 {
+		return
+	}
+	all, err := g.AllAnnotations(projectID)
+	if err != nil || len(all) == 0 {
+		return
+	}
+	byTarget := map[string][]graph.Annotation{}
+	for _, a := range all {
+		if a.Kind == graph.AnnotationNode {
+			byTarget[a.Target] = append(byTarget[a.Target], a)
+		}
+	}
+	for i := range hits {
+		seen := map[int64]bool{}
+		var out []graph.Annotation
+		for _, t := range []string{hits[i].FQN, hits[i].Symbol} {
+			for _, a := range byTarget[t] {
+				if !seen[a.ID] {
+					seen[a.ID] = true
+					out = append(out, a)
+				}
+			}
+		}
+		hits[i].Annotations = out
+	}
 }
 
 // SemanticReport is returned by Semantic / FindSymbols / Search.
@@ -676,6 +708,9 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 			StartLine: h.Meta.StartLine, EndLine: h.Meta.EndLine, Score: h.Score,
 			Signature: meta.Signature, Doc: meta.Doc,
 		})
+	}
+	if g, gerr := svc.s.Graph(); gerr == nil {
+		enrichHitAnnotations(g, pid, rep.Hits)
 	}
 	return rep, nil
 }
@@ -1076,6 +1111,7 @@ func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, 
 			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Doc: n.Docstring,
 		})
 	}
+	enrichHitAnnotations(g, pid, rep.Hits)
 	return rep, nil
 }
 

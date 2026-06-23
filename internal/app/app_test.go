@@ -337,6 +337,40 @@ func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
 	}
 }
 
+func TestFindSurfacesAnnotations(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Helper() {}\n\nfunc Other() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AnnotateNode(proj, "app.Helper", "note", "look here", ""); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.FindSymbols(proj, "Helper", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *SemanticHit
+	for i := range rep.Hits {
+		if rep.Hits[i].Symbol == "Helper" {
+			got = &rep.Hits[i]
+		}
+	}
+	if got == nil || len(got.Annotations) != 1 || got.Annotations[0].Note != "look here" {
+		t.Errorf("find hit for Helper should carry its annotation, got %+v", rep.Hits)
+	}
+}
+
 func TestDocs(t *testing.T) {
 	full := Docs("")
 	for _, want := range []string{"## overview", "## workflow", "## accuracy", "codemap_impact", "precise:true"} {
