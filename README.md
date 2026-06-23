@@ -24,9 +24,10 @@ instead of dozens of file reads.
   transitive blast radius (everything affected by a change), and which tests cover those
   paths (flagging untested code).
 - **Cross-project** — the graph spans every registered project, not just one repo.
-- **Precise + broad** — a pure-Go `go/parser` backend for Go today, plus a headless **LSP**
-  client (validated against gopls) for precise, multi-language extraction. (tree-sitter for
-  more languages is planned.)
+- **Precise navigation (LSP)** — the fast name-based graph for everyday queries, plus
+  `callers --lsp` / `callees --lsp` that use gopls `callHierarchy` for **exact** results — the
+  specific resolved method, not every same-named one (e.g. `callers Close --lsp` returns the 7
+  real callers instead of 50 inflated by name). Available on the CLI and MCP (`precise: true`).
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider/model/dimension changes instead of corrupting the vector space.
 - **Three surfaces, one store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
@@ -96,7 +97,8 @@ codemap index                      # extract graph + embed nodes (incremental)
 codemap index --no-embed           # structure only (no Ollama needed)
 
 # 2. Navigate the call graph
-codemap callers authenticateUser   # who calls it
+codemap callers authenticateUser   # who calls it (fast, name-based)
+codemap callers authenticateUser --lsp   # exact callers via gopls (Go)
 codemap callees authenticateUser   # what it calls
 codemap path     Handler Login     # shortest call path between two symbols
 
@@ -119,7 +121,7 @@ Add `--json` to any query command for machine-readable output (for agents/script
 | Command | What it does |
 |---|---|
 | `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`), show stats |
-| `callers` / `callees` / `path` | call-graph navigation |
+| `callers` / `callees` / `path` | call-graph navigation (`--lsp` on callers/callees for exact gopls results) |
 | `impact` | blast radius + test coverage for a symbol (`--depth`) |
 | `hotspots` / `orphans` | hubs / dead-code candidates (`--top`) |
 | `semantic` | meaning-based search (`--top`) |
@@ -151,7 +153,8 @@ claude mcp add codemap -- codemap serve
 Tools (10): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
 `codemap_orphans`, `codemap_path`. Each takes an optional `path` (the project directory) and
-returns JSON.
+returns JSON. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
+gopls-resolved results (Go).
 
 The flagship is `codemap_impact` — one call returns a symbol's definition sites, callers, the
 transitive blast radius, and which tests cover those paths, replacing many file reads.

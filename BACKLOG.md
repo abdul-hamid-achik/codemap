@@ -309,6 +309,13 @@
   stdlib). docs updated. All green, fmt/vet clean. COMMIT+PUSH. Precise call navigation pair
   complete on CLI + MCP. **NEXT:** wire precise edges into the indexer, or studio precise
   toggle, or polish; v0.1 is feature-complete.
+- 2026-06-23 #31 (cron, polish-first) — README now showcases the precise LSP differentiator
+  (the front door undersold it): replaced the "Precise + broad" bullet with "Precise
+  navigation (LSP)" (callers/callees --lsp; the 7-vs-50 Close example), added a `--lsp` line to
+  Quick start, noted it in the Commands table and the MCP tools paragraph (precise: true).
+  Docs-only; go build + VitePress build both green. COMMIT+PUSH. **NEXT:** studio precise
+  toggle (needs node-specific resolution by file+line, not just name, to disambiguate); or
+  wire precise edges into the indexer; else polish.
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).
