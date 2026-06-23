@@ -573,6 +573,51 @@ func TestHotspotsFlagsSharedNames(t *testing.T) {
 	}
 }
 
+func TestAmbiguityNoteIsProvenanceAware(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/a\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := "package a\n\n" +
+		"type T struct{}\ntype U struct{}\n\n" +
+		"func (T) Close() {}\nfunc (U) Close() {}\n\n" +
+		"func P() { var t T; t.Close() }\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	// Name-based index: the note flags name-based over-matching and points at --precise.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	nb, _ := svc.Callers(proj, "Close")
+	if !strings.Contains(nb.Note, "name-based") || !strings.Contains(nb.Note, "--precise") {
+		t.Errorf("name-based ambiguity note should mention name-based + --precise, got %q", nb.Note)
+	}
+
+	// Precise index: the note acknowledges exact resolution, not "name-based".
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true, Precise: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	pr, _ := svc.Callers(proj, "Close")
+	if !strings.Contains(pr.Note, "resolved precisely") {
+		t.Errorf("precise ambiguity note should acknowledge exact resolution, got %q", pr.Note)
+	}
+	if strings.Contains(pr.Note, "name-based") {
+		t.Errorf("precise ambiguity note must not call the results name-based, got %q", pr.Note)
+	}
+}
+
 func TestStatusReportsPreciseEdges(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not on PATH")

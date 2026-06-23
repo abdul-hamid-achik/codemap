@@ -741,6 +741,19 @@ CI-green slices: **A** schema/store foundation (done below) · **B** typesrc res
 indexer Pass 3 + `--precise` CLI/MCP flag + integration test. Adversarial reviews fixed two CI-RED traps
 the plan missed: migrate() isn't transactional (use idempotent duplicate-column-tolerant ALTER, done),
 and the headline fixture is wrong (need N callers→one concrete type, not 1 caller→N same-named methods).
+- 2026-06-23 #96 (precise epic — note consistency) — **`impact`/`callers`/`callees` ambiguity notes are
+  provenance-aware**, closing the last spot where the precise feature and the honest-messaging notes
+  (#79/#80) disagreed: on a `--precise` index those notes still said "(name-based) … use --lsp", which
+  is stale. New `Service.hasPreciseEdges(g, pid)` (reuses #95's `CountEdgesByProvenance`) switches the
+  note: name-based index → "matches N definitions (name-based) … reindex with 'codemap index --precise'
+  for exact edges, or --lsp for one method"; precise index → "matches N definitions — each resolved
+  precisely, but the results still merge all of them; query a more specific name to separate them". The
+  studio Impact pane and MCP JSON inherit it (they render `rep.Note`). Existing name-based tests still
+  green (note keeps "definitions"); new go-gated `TestAmbiguityNoteIsProvenanceAware` (name→mentions
+  name-based+--precise, precise→"resolved precisely", never "name-based"). Verified live: `impact Close`
+  on the precise index now reads "each resolved precisely … query a more specific name". Full suite +
+  lint v2 (0) + query/studio E2E green; fmt clean. COMMIT+PUSH. **Every honest-messaging surface
+  (hotspots #92, status #95, ambiguity notes #96) now respects the precise/name-based distinction.**
 - 2026-06-23 #95 (precise epic — discoverability) — **`status` reports whether the index is precise or
   name-based**, the status-enrichment pattern (cf. #70's vectors line) applied to edge accuracy. New
   `graph.Store.CountEdgesByProvenance(pid, prov)`; `StatusReport.PreciseEdges`; `Status()` fills it.

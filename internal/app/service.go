@@ -212,6 +212,15 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	return rep, nil
 }
 
+// hasPreciseEdges reports whether the project has any go/types-resolved call edges
+// (i.e. was indexed with --precise). Ambiguity notes use it to recommend the right
+// fix: a name-based index can be reindexed --precise; on a precise index the only
+// remaining ambiguity is the query name itself matching several definitions.
+func (svc *Service) hasPreciseEdges(g *graph.Store, pid int64) bool {
+	n, err := g.CountEdgesByProvenance(pid, graph.ProvPrecise)
+	return err == nil && n > 0
+}
+
 // embeddedCount reports how many vectors exist for the named project and whether
 // that count is known. It never creates the veclite store: if the file is absent
 // the project is structure-only, which is a known 0 — so a structure-only project
@@ -508,11 +517,15 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	for _, n := range nodes {
 		rep.Results = append(rep.Results, nodeToRef(n))
 	}
-	// Name-based resolution conflates same-named definitions, so these results are
-	// the union across all of them. Flag it (mirrors impact) and point at the
-	// precise path that disambiguates — far better than a silent over-count.
+	// Name-keyed lookup unions same-named definitions, so flag it (mirrors impact)
+	// and point at the right fix for the current index — precise reindex on a
+	// name-based graph, or a more specific name when edges are already exact.
 	if defs, derr := g.FindNodesBySymbol(p.ID, symbol); derr == nil && len(defs) > 1 {
-		rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — these results merge all of them; add --lsp (gopls) for one exact method", symbol, len(defs))
+		if svc.hasPreciseEdges(g, p.ID) {
+			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but these results still merge all of them; query a more specific name to separate them", symbol, len(defs))
+		} else {
+			rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — these results merge all of them; reindex with 'codemap index --precise' for exact per-method edges, or use --lsp for one method", symbol, len(defs))
+		}
 	}
 	rep.Annotations = symbolAnnotations(g, p.ID, symbol)
 	return rep, nil
@@ -869,11 +882,16 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		rep.Locations = append(rep.Locations, nodeToRef(n))
 	}
 	if len(locs) > 1 {
-		// Name-based lookup conflates every definition with this name, so the
-		// callers/blast-radius/tests below are the union across all of them. Say
-		// so — a "71 callers" number is misleading when it merges six unrelated
-		// Close() methods.
-		rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — direct callers, blast radius, and covering tests below merge all of them; for one exact method use callers/callees --lsp", symbol, len(locs))
+		// Lookup is by name, so the callers/blast-radius/tests below are the union
+		// across every definition with this name. Say so — a "71 callers" number is
+		// misleading when it merges six unrelated Close() methods. The fix depends
+		// on the index: name-based can be reindexed --precise; a precise index has
+		// exact per-method edges, so only the query name itself is ambiguous.
+		if svc.hasPreciseEdges(g, p.ID) {
+			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but the direct callers, blast radius, and covering tests below still merge all of them; query a more specific name to separate them", symbol, len(locs))
+		} else {
+			rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — direct callers, blast radius, and covering tests below merge all of them; reindex with 'codemap index --precise' for exact edges, or use callers/callees --lsp for one method", symbol, len(locs))
+		}
 	}
 
 	callers, err := g.Callers(p.ID, symbol)
