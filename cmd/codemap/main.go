@@ -174,6 +174,18 @@ var (
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runDocs,
 	}
+	annotateCmd = &cobra.Command{
+		Use:   "annotate <symbol> | <from> <to>",
+		Short: "Attach a note and/or external data (e.g. DB rows) to a symbol or a call path",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE:  runAnnotate,
+	}
+	annotationsCmd = &cobra.Command{
+		Use:   "annotations [symbol] | [from] [to]",
+		Short: "List annotations (all, for a symbol, or for a from→to path); --rm <id> to remove",
+		Args:  cobra.RangeArgs(0, 2),
+		RunE:  runAnnotations,
+	}
 )
 
 func init() {
@@ -194,9 +206,14 @@ func init() {
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
 	findCmd.Flags().Int("top", 50, "maximum results")
+	annotateCmd.Flags().String("source", "note", "annotation source: note, mongosh, postgres, vidtrace, …")
+	annotateCmd.Flags().String("note", "", "free-form note text")
+	annotateCmd.Flags().String("data", "", "opaque data payload (e.g. JSON from a DB query)")
+	annotationsCmd.Flags().Int64("rm", 0, "remove the annotation with this id")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, projectsCmd, docsCmd)
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, projectsCmd, docsCmd,
+		annotateCmd, annotationsCmd)
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---
@@ -617,6 +634,89 @@ func runProjects(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("%-20s %8s %8s %7s  %s\n", "PROJECT", "NODES", "EDGES", "FILES", "PATH")
 	for _, p := range rep.Projects {
 		fmt.Printf("%-20s %8d %8d %7d  %s\n", truncStr(p.Name, 20), p.Nodes, p.Edges, p.Files, p.Path)
+	}
+	return nil
+}
+
+func runAnnotate(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	source, _ := cmd.Flags().GetString("source")
+	note, _ := cmd.Flags().GetString("note")
+	data, _ := cmd.Flags().GetString("data")
+	if note == "" && data == "" {
+		return fmt.Errorf("nothing to attach: pass --note and/or --data")
+	}
+	svc := app.NewService(sess)
+	if len(args) == 1 {
+		id, err := svc.AnnotateNode(cwd, args[0], source, note, data)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("annotated %s  (#%d, source=%s)\n", args[0], id, source)
+		return nil
+	}
+	id, target, err := svc.AnnotatePath(cwd, args[0], args[1], source, note, data)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("annotated path %s  (#%d, source=%s)\n", target, id, source)
+	return nil
+}
+
+func runAnnotations(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	svc := app.NewService(sess)
+
+	if rm, _ := cmd.Flags().GetInt64("rm"); rm > 0 {
+		ok, err := svc.RemoveAnnotation(cwd, rm)
+		if err != nil {
+			return err
+		}
+		if ok {
+			fmt.Printf("removed annotation #%d\n", rm)
+		} else {
+			fmt.Printf("no annotation #%d\n", rm)
+		}
+		return nil
+	}
+
+	var rep *app.AnnotationsReport
+	switch len(args) {
+	case 0:
+		rep, err = svc.AllAnnotations(cwd)
+	case 1:
+		rep, err = svc.NodeAnnotations(cwd, args[0])
+	default:
+		rep, err = svc.PathAnnotations(cwd, args[0], args[1])
+	}
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if len(rep.Annotations) == 0 {
+		fmt.Println("no annotations")
+		return nil
+	}
+	for _, a := range rep.Annotations {
+		fmt.Printf("#%-4d %-5s %-8s %s\n", a.ID, a.Kind, a.Source, a.Target)
+		if a.Note != "" {
+			fmt.Printf("        note: %s\n", a.Note)
+		}
+		if a.Data != "" {
+			fmt.Printf("        data: %s\n", truncStr(a.Data, 100))
+		}
 	}
 	return nil
 }

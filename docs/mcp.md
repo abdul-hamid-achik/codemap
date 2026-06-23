@@ -43,6 +43,8 @@ directory) and return JSON.
 | `codemap_source` | Return a `symbol`'s source code (its body, read from the indexed line range) |
 | `codemap_projects` | List all registered projects and their index sizes |
 | `codemap_docs` | Return the agent guide (`topic`: overview/workflow/commands/accuracy/ecosystem) so a harness can learn the tool |
+| `codemap_annotate` | Pin a note / opaque `data` to a `symbol` or a `from`→`to` path (`source` label) |
+| `codemap_annotations` | List annotations: all, for a `symbol`, or for a `from`→`to` path |
 
 The flagship is **`codemap_impact`** — one call returns a symbol's definition sites, callers,
 the transitive blast radius, and which tests cover those paths, replacing many file reads.

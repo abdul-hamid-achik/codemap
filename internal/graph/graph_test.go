@@ -360,6 +360,50 @@ func TestSearchSymbols(t *testing.T) {
 	}
 }
 
+func TestAnnotations(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+
+	n1, err := s.AddAnnotation(pid, Annotation{Kind: AnnotationNode, Target: "p.Run", Source: "note", Note: "hot path"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddAnnotation(pid, Annotation{Kind: AnnotationNode, Target: "p.Run", Source: "postgres", Data: `{"rows":42}`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddAnnotation(pid, Annotation{Kind: AnnotationPath, Target: "p.Top -> p.Run", Note: "entry chain"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// by target: both node annotations on p.Run.
+	got, err := s.AnnotationsByTarget(pid, AnnotationNode, "p.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("node annotations on p.Run = %d, want 2", len(got))
+	}
+	if got[1].Source != "postgres" || got[1].Data != `{"rows":42}` {
+		t.Errorf("opaque data not round-tripped: %+v", got[1])
+	}
+
+	// all: 3 (2 node + 1 path).
+	all, _ := s.AllAnnotations(pid)
+	if len(all) != 3 {
+		t.Errorf("all annotations = %d, want 3", len(all))
+	}
+
+	// delete one; the other node annotation remains.
+	ok, err := s.DeleteAnnotation(pid, n1)
+	if err != nil || !ok {
+		t.Fatalf("delete: ok=%v err=%v", ok, err)
+	}
+	got, _ = s.AnnotationsByTarget(pid, AnnotationNode, "p.Run")
+	if len(got) != 1 {
+		t.Errorf("after delete, node annotations = %d, want 1", len(got))
+	}
+}
+
 func TestSymbolInfoIndex(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")

@@ -26,6 +26,9 @@ instead of dozens of file reads.
   paths (flagging untested code).
 - **Multi-project registry** — one shared store indexes all your repos; `projects` lists what's
   indexed, and any query targets one project (resolved from cwd, or `--path`).
+- **Annotations** — pin notes and external data (DB rows from mongosh/postgres, vidtrace/vecgrep
+  findings, …) to a symbol or a call path; they persist across reindex. A knowledge layer over the
+  graph for agent harnesses (`annotate` / `annotations`, also on MCP).
 - **Precise navigation (LSP)** — the fast name-based graph for everyday queries, plus
   `callers --lsp` / `callees --lsp` that use gopls `callHierarchy` for **exact** results — the
   specific resolved method, not every same-named one (e.g. `callers Close --lsp` returns the 7
@@ -168,6 +171,7 @@ Impact of Stats (codemap)
 | `find` | find symbols by name (offline) |
 | `source` | print a symbol's source code (the body behind its signature) |
 | `docs` | print the agent guide to codemap (`docs [topic]`) |
+| `annotate` / `annotations` | pin / list notes + external data on a symbol or call path |
 | `impact` | blast radius + test coverage for a symbol (`--depth`) |
 | `hotspots` / `orphans` | hubs / dead-code candidates (`--top`) |
 | `semantic` | meaning-based search (`--top`) |
@@ -211,14 +215,15 @@ claude mcp add codemap -- codemap serve
 }
 ```
 
-Tools (15): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
+Tools (17): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
 `codemap_orphans`, `codemap_path`, `codemap_symbols`, `codemap_find`, `codemap_source`,
-`codemap_projects`, `codemap_docs`. Each takes an optional `path` (the project directory) and
-returns JSON. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
-gopls-resolved results (Go); `codemap_source` returns a symbol's body so an agent can read a
-definition without opening the file; `codemap_projects` lists what's indexed; **`codemap_docs`
-returns an agent guide** so a harness can learn the tool and the index→understand→read workflow.
+`codemap_projects`, `codemap_docs`, `codemap_annotate`, `codemap_annotations`. Each takes an
+optional `path` (the project directory) and returns JSON. `codemap_callers` / `codemap_callees`
+accept `precise: true` for exact, gopls-resolved results (Go); `codemap_source` returns a symbol's
+body; `codemap_projects` lists what's indexed; **`codemap_docs`** returns an agent guide so a
+harness can learn the tool; **`codemap_annotate` / `codemap_annotations`** pin notes and external
+data (DB rows, findings) to symbols and call paths — a knowledge layer over the graph (see below).
 
 Results carry each symbol's **signature** (e.g. `func (s *Store) Hotspots(projectID int64, limit
 int) ([]Hotspot, error)`) and **docstring**, so an agent understands what callers/callees/hits are

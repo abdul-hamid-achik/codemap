@@ -8,7 +8,7 @@ target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; printf '%s' 'package app; import \"testing\"; func TestHelper(t *testing.T) { Helper() }' > \"$P/a_test.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5; echo '== symbols =='; \"$CM\" symbols a.go; echo '== find =='; \"$CM\" find Run; echo '== path =='; \"$CM\" path Top Helper"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Helper(); Run() }' > \"$P/b.go\"; printf '%s' 'package app; import \"testing\"; func TestHelper(t *testing.T) { Helper() }' > \"$P/a_test.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== callers =='; \"$CM\" callers Helper; echo '== impact =='; \"$CM\" impact Helper; echo '== hotspots =='; \"$CM\" hotspots --top 5; echo '== symbols =='; \"$CM\" symbols a.go; echo '== find =='; \"$CM\" find Run; echo '== path =='; \"$CM\" path Top Helper; echo '== annotate =='; \"$CM\" annotate Helper --source postgres --note 'hot in prod' --data '{\"calls\":42}' >/dev/null; \"$CM\" annotations Helper"
     cwd: "."
 terminal:
     cols: 100
@@ -51,4 +51,9 @@ outcomes:
       verify:
         screen:
             contains: "Top → Run → Helper"
-contractHash: sha256:0ff1726239fd6139010854ec7ff42b387a3311beb7ec9cf9f44f9804c0e27f6b
+    - id: annotation_roundtrip
+      description: annotate attaches a note that annotations reads back
+      verify:
+        screen:
+            contains: "hot in prod"
+contractHash: sha256:631658aa3c3ac6642e58344ef4bd45ccad3f838f3178f871a7c374b8d462d693

@@ -2,7 +2,14 @@ package graph
 
 // schemaVersion is bumped whenever schemaSQL changes in a way that requires a
 // migration. The current version is stored in SQLite's PRAGMA user_version.
-const schemaVersion = 1
+// v2 adds the annotations table.
+const schemaVersion = 2
+
+// Annotation target kinds.
+const (
+	AnnotationNode = "node" // attached to a symbol (FQN)
+	AnnotationPath = "path" // attached to a call path "<from> -> <to>"
+)
 
 // Node kinds.
 const (
@@ -92,4 +99,22 @@ CREATE TABLE IF NOT EXISTS index_state (
     PRIMARY KEY (project_id, file_path),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+
+-- User-attached knowledge: notes + external data (DB rows, findings) pinned to a
+-- symbol ('node') or a call path ('path'). Keyed by project, NOT by node row id,
+-- so annotations survive reindex (which only wipes nodes/edges).
+CREATE TABLE IF NOT EXISTS annotations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    source      TEXT NOT NULL DEFAULT 'note',
+    note        TEXT,
+    data        TEXT,
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotations_target  ON annotations(project_id, kind, target);
+CREATE INDEX IF NOT EXISTS idx_annotations_project ON annotations(project_id);
 `

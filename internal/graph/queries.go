@@ -37,6 +37,75 @@ func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+// Annotation is user-attached knowledge (a note or external data) pinned to a
+// symbol (kind="node") or a call path (kind="path").
+type Annotation struct {
+	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
+	Target    string `json:"target"`
+	Source    string `json:"source"`
+	Note      string `json:"note,omitempty"`
+	Data      string `json:"data,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+// AddAnnotation stores an annotation and returns its id.
+func (s *Store) AddAnnotation(projectID int64, a Annotation) (int64, error) {
+	if a.Source == "" {
+		a.Source = "note"
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO annotations (project_id, kind, target, source, note, data, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		projectID, a.Kind, a.Target, a.Source, a.Note, a.Data, now())
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// AnnotationsByTarget returns annotations for a specific node/path target.
+func (s *Store) AnnotationsByTarget(projectID int64, kind, target string) ([]Annotation, error) {
+	return s.scanAnnotations(
+		`SELECT id, kind, target, source, note, data, created_at FROM annotations
+		 WHERE project_id=? AND kind=? AND target=? ORDER BY id`, projectID, kind, target)
+}
+
+// AllAnnotations returns every annotation in a project, newest last.
+func (s *Store) AllAnnotations(projectID int64) ([]Annotation, error) {
+	return s.scanAnnotations(
+		`SELECT id, kind, target, source, note, data, created_at FROM annotations
+		 WHERE project_id=? ORDER BY kind, target, id`, projectID)
+}
+
+// DeleteAnnotation removes one annotation by id (scoped to the project); reports
+// whether a row was deleted.
+func (s *Store) DeleteAnnotation(projectID, id int64) (bool, error) {
+	res, err := s.db.Exec("DELETE FROM annotations WHERE project_id=? AND id=?", projectID, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *Store) scanAnnotations(query string, args ...any) ([]Annotation, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Annotation
+	for rows.Next() {
+		var a Annotation
+		if err := rows.Scan(&a.ID, &a.Kind, &a.Target, &a.Source, &a.Note, &a.Data, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // SymInfo holds the displayable text for a symbol, resolved by FQN.
 type SymInfo struct {
 	Signature string

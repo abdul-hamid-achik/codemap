@@ -11,6 +11,8 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
 | `codemap projects` | List all registered projects and their index sizes |
 | `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, accuracy, ecosystem) |
+| `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`) |
+| `codemap annotations [<sym> \| <from> <to>]` | List annotations (all/node/path); `--rm <id>` to remove |
 
 ## Navigation
 

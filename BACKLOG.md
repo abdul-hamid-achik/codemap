@@ -645,6 +645,20 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
 3. Ecosystem flow: vidtrace (repro) → vecgrep (semantic) → codemap (structure/impact) → fcheap
    (persist/search artifacts). codemap's role: structural understanding + the annotation layer.
 **NEXT:** design + build the annotations/notes layer (#2) — the core of the harness vision.
+- 2026-06-23 #62 (USER ASK — annotation layer) — **Annotations: pin notes + external data to nodes AND
+  paths** (user chose "node+path together", opaque-JSON data). New graph `annotations` table (schema
+  v2, IF NOT EXISTS + version bump → existing DBs migrate; FK to projects so it SURVIVES reindex,
+  which only wipes nodes/edges). Store CRUD (`AddAnnotation`/`AnnotationsByTarget`/`AllAnnotations`/
+  `DeleteAnnotation`); service `AnnotateNode`/`AnnotatePath` (auto-registers project so you can
+  annotate pre-index) + `NodeAnnotations`/`PathAnnotations`/`AllAnnotations`/`RemoveAnnotation`;
+  CLI `annotate <sym>|<from> <to> --source/--note/--data` + `annotations [..] [--rm id]`; MCP
+  `codemap_annotate`/`codemap_annotations`. `data` stored opaquely (JSON or anything). New docs.go
+  "annotations" topic. → **17 MCP tools, 21 CLI commands.** Tests: graph `TestAnnotations`, app
+  `TestServiceAnnotations` (incl. reindex-survival + remove), mcp presence. Query E2E gains an
+  annotate→annotations round-trip (7/7). Docs (README features+tools+table, AGENTS, cli.md, mcp.md,
+  agent guide) updated. Full suite + lint v2 (0) + help/query E2E green; fmt clean. COMMIT+PUSH.
+  **NEXT (annotation follow-ups):** surface annotations inline in impact/callers + studio (Graph/Impact
+  panes); then the broader harness wiring (vidtrace/vecgrep/fcheap orchestration is harness-side).
 
 ## Resolved product decisions (user, 2026-06-23)
 - [x] **D1. v0.1 scope = EVERYTHING** — MVP + LSP + studio TUI all ship in 0.1 (Epics 1–6).

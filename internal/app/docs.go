@@ -46,12 +46,30 @@ files; use codemap_source when you need the implementation.`},
   semantic <query>                   meaning-based search (needs an embedded index)
   source <sym>                       a symbol's source code
   hotspots / orphans [--top N]       hubs / dead-code candidates
+  annotate <sym> | <from> <to>       pin a note/data to a symbol or call path
+  annotations [sym] | [from] [to]    list annotations (--rm <id> to remove)
   serve                              run the MCP server (stdio)
   studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, projects, semantic,
-find, callers, callees, impact, path, symbols, source, hotspots, orphans). callers/
-callees accept precise:true. codemap_docs returns this guide.`},
+find, callers, callees, impact, path, symbols, source, hotspots, orphans, annotate,
+annotations). callers/callees accept precise:true. codemap_docs returns this guide.`},
+
+	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
+external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a
+symbol or a call path, then read them back alongside structure. They persist
+across reindex.
+
+  codemap_annotate {symbol|from+to, source, note, data}   attach
+  codemap_annotations {symbol|from+to|none}               read (all / node / path)
+  CLI: codemap annotate <sym> --source postgres --data '{...}' --note "..."
+       codemap annotate <from> <to> --note "entry path to fix"
+       codemap annotations [<sym> | <from> <to>]   (--rm <id> to delete)
+
+'source' is a free label (note, mongosh, postgres, vidtrace, …); 'data' is stored
+opaquely (often JSON). Typical use: codemap_impact a symbol, then codemap_annotate
+it with the DB rows / repro findings that explain it, so the next step has the full
+picture pinned in place.`},
 
 	{"accuracy", `The graph is name-based by default: fast, offline, language-agnostic. Intra-
 package calls resolve precisely (Go), but a cross-package method call like

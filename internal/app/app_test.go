@@ -216,6 +216,62 @@ func TestIndexNonGoWarns(t *testing.T) {
 	}
 }
 
+func TestServiceAnnotations(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B() }\n\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	// annotate works before indexing (auto-registers the project).
+	if _, err := svc.AnnotateNode(proj, "app.B", "postgres", "hot", `{"rows":7}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.AnnotatePath(proj, "app.A", "app.B", "note", "entry chain", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	nodeAnns, err := svc.NodeAnnotations(proj, "app.B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodeAnns.Annotations) != 1 || nodeAnns.Annotations[0].Data != `{"rows":7}` {
+		t.Errorf("node annotations = %+v, want one with opaque data", nodeAnns.Annotations)
+	}
+	pathAnns, _ := svc.PathAnnotations(proj, "app.A", "app.B")
+	if len(pathAnns.Annotations) != 1 || pathAnns.Annotations[0].Target != "app.A -> app.B" {
+		t.Errorf("path annotations = %+v, want one on app.A -> app.B", pathAnns.Annotations)
+	}
+	all, _ := svc.AllAnnotations(proj)
+	if len(all.Annotations) != 2 {
+		t.Errorf("all annotations = %d, want 2", len(all.Annotations))
+	}
+
+	// annotations survive reindex (keyed by project, not node id).
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ = svc.AllAnnotations(proj); len(all.Annotations) != 2 {
+		t.Errorf("annotations should survive reindex, got %d", len(all.Annotations))
+	}
+
+	// remove one.
+	ok, err := svc.RemoveAnnotation(proj, all.Annotations[0].ID)
+	if err != nil || !ok {
+		t.Fatalf("remove: ok=%v err=%v", ok, err)
+	}
+	if all, _ = svc.AllAnnotations(proj); len(all.Annotations) != 1 {
+		t.Errorf("after remove, annotations = %d, want 1", len(all.Annotations))
+	}
+}
+
 func TestDocs(t *testing.T) {
 	full := Docs("")
 	for _, want := range []string{"## overview", "## workflow", "## accuracy", "codemap_impact", "precise:true"} {

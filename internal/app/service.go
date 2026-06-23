@@ -235,6 +235,110 @@ func (svc *Service) Projects() (*ProjectsReport, error) {
 	return rep, nil
 }
 
+// AnnotationsReport is returned by the annotation read methods.
+type AnnotationsReport struct {
+	Project     string             `json:"project"`
+	Annotations []graph.Annotation `json:"annotations"`
+}
+
+// pathTarget is the canonical key for a path annotation.
+func pathTarget(from, to string) string { return from + " -> " + to }
+
+// annotateProject resolves cwd to a project, auto-registering it (so you can
+// annotate before indexing), and returns its id + the graph store.
+func (svc *Service) annotateProject(cwd string) (int64, *graph.Store, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return 0, nil, err
+	}
+	root, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return 0, nil, err
+	}
+	pid, err := g.UpsertProject(name, root, detectLanguage(root))
+	if err != nil {
+		return 0, nil, err
+	}
+	return pid, g, nil
+}
+
+// AnnotateNode pins a note / external data to a symbol (by FQN or name).
+func (svc *Service) AnnotateNode(cwd, symbol, source, note, data string) (int64, error) {
+	pid, g, err := svc.annotateProject(cwd)
+	if err != nil {
+		return 0, err
+	}
+	return g.AddAnnotation(pid, graph.Annotation{
+		Kind: graph.AnnotationNode, Target: symbol, Source: source, Note: note, Data: data,
+	})
+}
+
+// AnnotatePath pins a note / external data to a call path from→to. Returns the
+// new id and the canonical path target.
+func (svc *Service) AnnotatePath(cwd, from, to, source, note, data string) (int64, string, error) {
+	pid, g, err := svc.annotateProject(cwd)
+	if err != nil {
+		return 0, "", err
+	}
+	target := pathTarget(from, to)
+	id, err := g.AddAnnotation(pid, graph.Annotation{
+		Kind: graph.AnnotationPath, Target: target, Source: source, Note: note, Data: data,
+	})
+	return id, target, err
+}
+
+// AllAnnotations lists every annotation in the project.
+func (svc *Service) AllAnnotations(cwd string) (*AnnotationsReport, error) {
+	return svc.annotations(cwd, "", "")
+}
+
+// NodeAnnotations lists annotations attached to a symbol.
+func (svc *Service) NodeAnnotations(cwd, symbol string) (*AnnotationsReport, error) {
+	return svc.annotations(cwd, graph.AnnotationNode, symbol)
+}
+
+// PathAnnotations lists annotations attached to a call path from→to.
+func (svc *Service) PathAnnotations(cwd, from, to string) (*AnnotationsReport, error) {
+	return svc.annotations(cwd, graph.AnnotationPath, pathTarget(from, to))
+}
+
+// annotations lists annotations: all for the project (kind==""), or those on a
+// specific node/path target.
+func (svc *Service) annotations(cwd, kind, target string) (*AnnotationsReport, error) {
+	pid, name, found, err := svc.project(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &AnnotationsReport{Project: name, Annotations: []graph.Annotation{}}
+	if !found {
+		return rep, nil
+	}
+	g, _ := svc.s.Graph()
+	var anns []graph.Annotation
+	if kind == "" {
+		anns, err = g.AllAnnotations(pid)
+	} else {
+		anns, err = g.AnnotationsByTarget(pid, kind, target)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if anns != nil {
+		rep.Annotations = anns
+	}
+	return rep, nil
+}
+
+// RemoveAnnotation deletes one annotation by id; reports whether it existed.
+func (svc *Service) RemoveAnnotation(cwd string, id int64) (bool, error) {
+	pid, _, found, err := svc.project(cwd)
+	if err != nil || !found {
+		return false, err
+	}
+	g, _ := svc.s.Graph()
+	return g.DeleteAnnotation(pid, id)
+}
+
 // SymbolRef is a lightweight reference to a graph node (for query results).
 // Signature and Doc let callers understand each result without a file read.
 type SymbolRef struct {
