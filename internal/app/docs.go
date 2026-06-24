@@ -36,9 +36,16 @@ store, and the project registry — so other tools can inspect the same store.`}
   5. trace flow                # codemap_path <from> <to>  (shortest call chain)
   6. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
 
+Stay fresh: codemap_status returns a "stale" object (files changed/new/deleted
+since the last index) — if any are non-zero, codemap_index before trusting query
+results, which come from the indexed snapshot, not live files. (A registered-but-
+never-indexed project reports indexed:false — codemap_index first.)
+
 Every query takes an optional "path" (project dir; defaults to cwd) and returns
 JSON. Results carry each symbol's signature and docstring, so you rarely open
-files; use codemap_source when you need the implementation.`},
+files; use codemap_source when you need the implementation. codemap_context's
+callers/callees/tests are capped (see *_total); drill with codemap_callers/impact
+for the full lists.`},
 
 	{"commands", `CLI commands (all query commands accept --json):
   init / index / status / projects   register, index (--reindex, --no-embed, --precise), stats, projects
@@ -71,9 +78,14 @@ across reindex.
 
   codemap_annotate {symbol|from+to, source, note, data}   attach
   codemap_annotations {symbol|from+to|none}               read (all / node / path)
+  codemap_unannotate {id}                                 remove one (prune/correct the layer)
   CLI: codemap annotate <sym> --source postgres --data '{...}' --note "..."
        codemap annotate <from> <to> --note "entry path to fix"
        codemap annotations [<sym> | <from> <to>]   (--rm <id> to delete)
+
+codemap_annotations returns a "dangling" list of ids whose target no longer
+matches an indexed symbol (renamed/removed since) — prune those with
+codemap_unannotate, or re-add against the new name.
 
 'source' is a free label (note, mongosh, postgres, vidtrace, …); 'data' is stored
 opaquely (often JSON). Annotations on a symbol surface INLINE in EVERY query result

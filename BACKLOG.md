@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #176 (agent guide — teach freshness-check + the prune/dangling tools so agents USE them) —
+  audited `codemap_docs` (the agent's instruction manual) against shipped features and found the guide
+  hadn't kept pace: the **workflow** topic never told agents to check `status` freshness before trusting
+  results (the whole point of staleness #153/#154 — so agents wouldn't use it), and the **annotations**
+  topic omitted `codemap_unannotate` entirely (agents couldn't learn to prune) and the new `dangling`
+  detection (#169). Added: a "Stay fresh" note in the workflow (check `status` `stale` → reindex; plus
+  the registered-but-unindexed `indexed:false` case from #172) and a note that codemap_context's lists
+  are capped (drill via callers/impact, #157); added `codemap_unannotate` to the annotations tool list +
+  a line on the `dangling` list → prune via unannotate. Makes the shipped agent-trust + knowledge-layer
+  features discoverable in the manual agents actually read. Verified the rendered guide; suite + fmt +
+  help.yml flow green. COMMIT+PUSH.
 - 2026-06-24 #175 (polish — clean error output: stop dumping the usage block on runtime errors) — while
   dogfooding the malformed-config error path (found the error itself is GOOD: `Error: parse config
   <path>: yaml: line 1: …`, and confirmed no TODOs/FIXMEs in the code), noticed cobra dumps the full
