@@ -767,6 +767,19 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #124 (robustness — per-request LSP timeout; no more index hangs) — the Vue probe
+  exposed a real gap independent of Vue: `codemap index` runs on `context.Background()` (no deadline),
+  and lspsrc passed that unbounded context to LSP requests — so **a hung/misbehaving language server
+  would freeze indexing indefinitely** (the user would have to Ctrl-C). Fix: `conn.Call`
+  (`internal/lsp/jsonrpc.go`) now applies a **30s default per-request timeout when the caller sets no
+  deadline** — central, so every request (documentSymbol, callHierarchy, even initialize) from any
+  caller is bounded; callers with their own deadline keep it. A stalled request returns a deadline
+  error → the indexer skips that file (records `Result.Errors`) and continues, instead of hanging.
+  `conn.Call` already `select`ed on `ctx.Done()`, so this just supplies the missing bound. Test
+  `TestRequestTimeout` (in-memory pipe + a server that never replies → bounded at a tiny test timeout in
+  ~100ms, not forever). Full suite + `-race` (lsp) + lint(0) + fmt green; server-gated TS/Py tests still
+  pass (30s doesn't trip on normal requests). This is robustness item (3) from #123 — done; it also
+  de-risks adding any slow server (Vue, rust-analyzer) later. COMMIT+PUSH.
 - 2026-06-24 #123 (investigation — Vue SFC deferred; Volar needs special init) — user asked for Vue
   SFC support. `vue-language-server` (Volar 3.2.5) IS installed, but a probe showed it **hangs** with
   codemap's generic LSP client: `New`/initialize returns, but the first `documentSymbol` never responds

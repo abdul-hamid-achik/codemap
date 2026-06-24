@@ -141,6 +141,10 @@ task install         # go install ./cmd/codemap
 - Languages present but missing their server are recorded in `Result.MissingServers` and surfaced
   as an actionable "install X" message; genuinely-unsupported languages are still `Result.Unsupported`
   ("skipped, planned"). `--no-lsp` disables the LSP backend.
+- **Every LSP request is bounded.** `conn.Call` applies a 30s default per-request timeout when the
+  caller sets no deadline (`internal/lsp/jsonrpc.go`), so a hung/misbehaving server can't freeze the
+  index — a stalled request returns a deadline error and the file is skipped (recorded in
+  `Result.Errors`), not hung. `index` runs on `context.Background()`, so this bound is what protects it.
 - **Default backends are pure-Go** so release binaries stay `CGO_ENABLED=0` and cross-compile
   cleanly (the language server is a spawned subprocess, like gopls — never linked in). LSP edges
   carry weight `1.0`; heuristic/parser edges `0.7`.

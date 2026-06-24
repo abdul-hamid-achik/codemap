@@ -71,6 +71,40 @@ func TestClientFakeServer(t *testing.T) {
 	}
 }
 
+// TestRequestTimeout verifies a request to a stalled server (one that never
+// replies) is bounded by the connection's per-request timeout instead of hanging
+// forever — so one hung language server can't freeze the whole index.
+func TestRequestTimeout(t *testing.T) {
+	c2sR, c2sW := io.Pipe()
+	s2cR, s2cW := io.Pipe()
+	defer c2sW.Close()
+	defer s2cW.Close()
+
+	block := make(chan struct{})
+	defer close(block)
+	serverHandler := func(method string, _ json.RawMessage) (any, error) {
+		if method == "textDocument/documentSymbol" {
+			<-block // never responds while the test runs
+		}
+		return nil, nil
+	}
+	srv := newConn(c2sR, s2cW, nil, serverHandler)
+	defer srv.Close()
+
+	cl := newClient(s2cR, c2sW, nil)
+	defer cl.Close()
+	cl.conn.reqTimeout = 100 * time.Millisecond // tiny bound for the test
+
+	start := time.Now()
+	// context.Background() has no deadline → the per-request bound applies.
+	if _, err := cl.DocumentSymbols(context.Background(), "file:///a.go"); err == nil {
+		t.Fatal("expected a deadline error from a stalled server, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("request should have been bounded by reqTimeout (~100ms), took %v", elapsed)
+	}
+}
+
 // TestGoplsIntegration validates against the real gopls if it is installed
 // (skipped in CI, where gopls is absent).
 func TestGoplsIntegration(t *testing.T) {

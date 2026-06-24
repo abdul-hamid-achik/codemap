@@ -17,7 +17,15 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+// defaultRequestTimeout bounds a single JSON-RPC request when the caller's
+// context carries no deadline of its own — so a hung or misbehaving language
+// server can't stall indexing indefinitely. A request that exceeds it returns a
+// deadline error, which the indexer treats as "skip this file/symbol" and
+// continues. Callers that set their own deadline keep it.
+const defaultRequestTimeout = 30 * time.Second
 
 type rpcError struct {
 	Code    int    `json:"code"`
@@ -56,18 +64,21 @@ type conn struct {
 
 	handler handlerFunc
 
+	reqTimeout time.Duration // per-request bound applied when the caller sets no deadline
+
 	closeOnce sync.Once
 	done      chan struct{}
 }
 
 func newConn(r io.Reader, w io.Writer, closer func() error, handler handlerFunc) *conn {
 	c := &conn{
-		w:       w,
-		r:       bufio.NewReader(r),
-		closer:  closer,
-		pending: make(map[int64]chan message),
-		handler: handler,
-		done:    make(chan struct{}),
+		w:          w,
+		r:          bufio.NewReader(r),
+		closer:     closer,
+		pending:    make(map[int64]chan message),
+		handler:    handler,
+		reqTimeout: defaultRequestTimeout,
+		done:       make(chan struct{}),
 	}
 	go c.readLoop()
 	return c
@@ -90,6 +101,14 @@ func (c *conn) writeMessage(m message) error {
 
 // Call sends a request and waits for its response.
 func (c *conn) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	// Bound an otherwise-unbounded request so a stalled server can't hang forever.
+	if c.reqTimeout > 0 {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, c.reqTimeout)
+			defer cancel()
+		}
+	}
 	id := c.nextID.Add(1)
 	raw, err := marshalParams(params)
 	if err != nil {
