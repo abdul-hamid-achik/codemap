@@ -1,0 +1,46 @@
+version: 1
+name: exclude_extra
+intent: |
+    A repo-local codemap.yaml uses index.exclude_extra to skip the user's own
+    folders WITHOUT clobbering the built-in defaults (the footgun that plain
+    index.exclude has). It also exercises the path-aware glob forms: a bare name
+    matches any depth, a slash pattern is anchored at the project root, and a
+    "**/" prefix matches at any depth. Pure-Go (structure-only).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$HOME\" \"$P/db/migrations\" \"$P/other/testdata\" \"$P/node_modules\"; printf 'index:\\n  exclude_extra: [\"db/migrations\", \"**/testdata\"]\\n' > \"$P/codemap.yaml\"; printf 'package app\\nfunc Keep() {}\\n' > \"$P/a.go\"; printf 'package migrations\\nfunc MigrateDB() {}\\n' > \"$P/db/migrations/m.go\"; printf 'package testdata\\nfunc TDHelper() {}\\n' > \"$P/other/testdata/t.go\"; printf 'package dep\\nfunc DepFn() {}\\n' > \"$P/node_modules/d.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed 2>&1 | grep -iE 'files:|graph'; echo '== db/migrations excluded (anchored slash glob) =='; \"$CM\" find MigrateDB; echo '== other/testdata excluded (**/ any depth) =='; \"$CM\" find TDHelper; echo '== node_modules still excluded (exclude_extra APPENDS; defaults kept) =='; \"$CM\" find DepFn; echo '== a.go still indexed =='; \"$CM\" find Keep"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 28
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: exclude_extra
+outcomes:
+    - id: anchored_slash_excluded
+      description: a slash pattern (db/migrations) anchored at the root is skipped
+      verify:
+        screen:
+            contains: 'no symbols matching "MigrateDB"'
+    - id: anydepth_glob_excluded
+      description: a "**/" pattern (**/testdata) is skipped at depth
+      verify:
+        screen:
+            contains: 'no symbols matching "TDHelper"'
+    - id: defaults_preserved
+      description: exclude_extra APPENDS, so a built-in default (node_modules) still applies
+      verify:
+        screen:
+            contains: 'no symbols matching "DepFn"'
+    - id: other_files_indexed
+      description: files outside any exclude are still indexed
+      verify:
+        screen:
+            contains: "func Keep()"
+contractHash: sha256:3ac4af63a75e73ef9fc0ad4cef77d3da7d53571bda6bf18d0d930fb3ff22b6f2

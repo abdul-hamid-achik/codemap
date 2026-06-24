@@ -1,0 +1,48 @@
+version: 1
+name: daemon
+intent: |
+    The background daemon's lifecycle and surfacing: it starts, answers its
+    control socket as "running", `codemap status` reports it (pid + watching),
+    `daemon stop` shuts it down cleanly, and afterwards status reports it as not
+    running. Structure-only (no Ollama), pure-Go. A short /tmp data dir keeps the
+    unix socket path within the OS limit. (Auto-reindex-on-change is covered
+    deterministically by the TestDaemonIndexesOnChange unit test, not here — at the
+    E2E level fsnotify new-file detection is timing-sensitive on macOS/kqueue.)
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d /tmp/cmdflow.XXXXXX); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$HOME\" \"$P\"; printf 'module example.com/m\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf 'package m\\nfunc AlphaSym() {}\\n' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; \"$CM\" daemon start --no-embed >\"$TMP/daemon.log\" 2>&1 & for i in $(seq 1 60); do \"$CM\" daemon status >/dev/null 2>&1 && break; sleep 0.25; done; echo '== daemon status =='; \"$CM\" daemon status; echo '== codemap status surfaces the daemon =='; \"$CM\" status | grep -i daemon; echo '== stop =='; \"$CM\" daemon stop; for i in $(seq 1 60); do \"$CM\" daemon status >/dev/null 2>&1 || break; sleep 0.25; done; echo '== status after stop =='; \"$CM\" status | grep -i daemon"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 30000
+    - snapshot: daemon
+outcomes:
+    - id: daemon_running
+      description: the daemon answers its control socket as running
+      verify:
+        screen:
+            contains: "codemap daemon: running"
+    - id: status_shows_daemon
+      description: codemap status surfaces the running daemon with its pid
+      verify:
+        screen:
+            contains: "(pid "
+    - id: clean_stop
+      description: daemon stop shuts it down
+      verify:
+        screen:
+            contains: "codemap daemon: stopping"
+    - id: stopped_state
+      description: after stop, status reports the daemon as not running
+      verify:
+        screen:
+            contains: "daemon: not running"
+contractHash: sha256:3c84a7393d17e7a7093e23c828f8ed531c63d5258596c1b76520eb696071be79
