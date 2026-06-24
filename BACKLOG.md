@@ -5,6 +5,20 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #199 (FIX.md §2 — studio global back/forward nav history; restores the bar across drills) — the
+  reported daily-use pain: drilling a search hit → Impact → Graph clobbered the search/impact bar with no way
+  back to what you'd typed (graphStack was Graph-walk-local + reset on openInGraph). Added a browser-style
+  GLOBAL history layered above graphStack: a `navState` snapshot of the whole view (active tab, both bar
+  texts + selections, graph center/stack/focus/relations, overlay state — result payloads captured so restore
+  is pure in-memory, no refetch/flicker), `navHist`/`navFwd` stacks, and `snapshot/restore/pushNav/navBack/
+  navForward`. `pushNav()` fires before all 5 cross-view drills (openInGraph, Search→Impact, Impact recursive,
+  Metrics→Impact, Graph-hub→Impact). Keys: `alt+←` back, `alt+→` forward (free chords), and `esc` steps back
+  one level (yields to the Graph refs pane's esc→hubs; no-op when no history). A new drill forks history
+  (clears navFwd). Breadcrumb shows transiently in the status line on nav (kept OUT of the footer to avoid the
+  TestFooterCompactsWhenNarrow width budget). Documented in the `?` overlay + docs/studio.md. Added
+  TestGlobalNavBackForward (drill → alt+← restores Search WITH the query + highlighted hit → alt+→ forward →
+  esc back → new drill clears forward). `task check` + studio/studio_ts flows green. COMMIT+PUSH. (Next: §3
+  source highlighting.)
 - 2026-06-24 #198 (FIX.md §1 — impact/callers/callees stop confidently returning []/untested:true for TS/JS/
   Python without a call graph) — the user's 0.10.0 punch list (FIX.md, dogfooding graphite): the flagship
   blast-radius queries returned `direct_callers:[], tests:[], untested:true` for a TS function with 106 real

@@ -150,6 +150,13 @@ type Model struct {
 	graphRefSel int           // selection across the combined callers+callees list
 	graphCenter graphCenter   // node the detail pane is currently centered on
 	graphStack  []graphCenter // breadcrumb of centers walked into
+
+	// global navigation history (browser-style): each cross-view drill snapshots the
+	// WHOLE view (active tab + both bar texts + selections + graph state + overlay) so
+	// back/forward restores it exactly — including the query you'd typed. A layer above
+	// graphStack, which stays the within-Graph walk (backspace).
+	navHist []navState // back stack
+	navFwd  []navState // forward stack (cleared when a new drill forks history)
 }
 
 // graphFocus is which pane of the Graph tab has keyboard focus.
@@ -173,6 +180,97 @@ func centerOfHub(h app.HotspotRef) graphCenter {
 
 func centerOfRef(r app.SymbolRef) graphCenter {
 	return graphCenter{sym: r.Symbol, fqn: r.FQN, file: r.File, line: r.StartLine}
+}
+
+// navState is a snapshot of the whole studio view for the global back/forward
+// history. Result payloads (hits, impact report, graph relations) are captured so
+// restore is pure in-memory — no refetch, no flicker, exact selection preserved.
+type navState struct {
+	active                  tab
+	searchQuery, searchMode string
+	searchHits              []app.SemanticHit
+	searchSel               int
+	impactBar, impactSymbol string
+	impactRep               *app.ImpactReport
+	impactSel               int
+	graphSym                string
+	graphCenter             graphCenter
+	graphStack              []graphCenter
+	graphFocus              graphFocus
+	graphRefSel, graphSel   int
+	graphCallers            []app.SymbolRef
+	graphCallees            []app.SymbolRef
+	graphAnnotations        []graph.Annotation
+	graphPrecise            bool
+	srcView, srcGutter      bool
+	srcTitle                string
+	srcLines                []string
+	srcScroll               int
+}
+
+// snapshot captures the current view into a navState.
+func (m Model) snapshot() navState {
+	return navState{
+		active:      m.active,
+		searchQuery: m.search.Value(), searchMode: m.searchMode, searchHits: m.searchHits, searchSel: m.searchSel,
+		impactBar: m.impact.Value(), impactSymbol: m.impactSymbol, impactRep: m.impactRep, impactSel: m.impactSel,
+		graphSym: m.graphSym, graphCenter: m.graphCenter,
+		graphStack: append([]graphCenter(nil), m.graphStack...), // graphStack is mutated in place — copy it
+		graphFocus: m.graphFocus, graphRefSel: m.graphRefSel, graphSel: m.graphSel,
+		graphCallers: m.graphCallers, graphCallees: m.graphCallees, graphAnnotations: m.graphAnnotations,
+		graphPrecise: m.graphPrecise,
+		srcView:      m.srcView, srcGutter: m.srcGutter, srcTitle: m.srcTitle, srcLines: m.srcLines, srcScroll: m.srcScroll,
+	}
+}
+
+// restore writes a navState back into the model (including the text in both bars).
+func (m *Model) restore(s navState) {
+	m.active = s.active
+	m.search.SetValue(s.searchQuery)
+	m.searchQuery, m.searchMode, m.searchHits, m.searchSel = s.searchQuery, s.searchMode, s.searchHits, s.searchSel
+	m.impact.SetValue(s.impactBar)
+	m.impactSymbol, m.impactRep, m.impactSel = s.impactSymbol, s.impactRep, s.impactSel
+	m.graphSym, m.graphCenter, m.graphStack = s.graphSym, s.graphCenter, s.graphStack
+	m.graphFocus, m.graphRefSel, m.graphSel = s.graphFocus, s.graphRefSel, s.graphSel
+	m.graphCallers, m.graphCallees, m.graphAnnotations = s.graphCallers, s.graphCallees, s.graphAnnotations
+	m.graphPrecise = s.graphPrecise
+	m.srcView, m.srcGutter, m.srcTitle, m.srcLines, m.srcScroll = s.srcView, s.srcGutter, s.srcTitle, s.srcLines, s.srcScroll
+	m.syncFocus()
+}
+
+// pushNav records the current view onto the back stack and forks history (clears the
+// forward stack). Call BEFORE mutating state for a cross-view drill.
+func (m *Model) pushNav() {
+	m.navHist = append(m.navHist, m.snapshot())
+	m.navFwd = nil
+}
+
+// navBack restores the previous view (pushing the current onto the forward stack).
+func (m Model) navBack() (tea.Model, tea.Cmd) {
+	if len(m.navHist) == 0 {
+		m.statusMsg = "nothing to go back to"
+		return m, nil
+	}
+	m.navFwd = append(m.navFwd, m.snapshot())
+	prev := m.navHist[len(m.navHist)-1]
+	m.navHist = m.navHist[:len(m.navHist)-1]
+	m.restore(prev)
+	m.statusMsg = fmt.Sprintf("‹ back · %d back · %d fwd", len(m.navHist), len(m.navFwd))
+	return m, nil
+}
+
+// navForward re-walks a view popped by navBack.
+func (m Model) navForward() (tea.Model, tea.Cmd) {
+	if len(m.navFwd) == 0 {
+		m.statusMsg = "nothing forward"
+		return m, nil
+	}
+	m.navHist = append(m.navHist, m.snapshot())
+	nxt := m.navFwd[len(m.navFwd)-1]
+	m.navFwd = m.navFwd[:len(m.navFwd)-1]
+	m.restore(nxt)
+	m.statusMsg = fmt.Sprintf("forward › · %d back · %d fwd", len(m.navHist), len(m.navFwd))
+	return m, nil
 }
 
 // graphRefs is the combined callers-then-callees list the refs pane walks over.
@@ -347,6 +445,7 @@ func (m Model) openInGraph() (tea.Model, tea.Cmd) {
 	if !ok || c.sym == "" {
 		return m, nil
 	}
+	m.pushNav() // remember where we came from (tab + bar text) before the graph clobbers it
 	m.active = tabGraph
 	m.graphCenter = c
 	m.graphStack = nil
@@ -697,7 +796,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.showHelp = true
 		return m, nil
 	}
+	// esc steps back one global nav level — the instinctive "get me back". Yields to
+	// the Graph refs pane (esc there returns to the hub list) and only fires when
+	// there's history; otherwise it falls through (a no-op on Search/Impact/Metrics).
+	if key == "esc" && len(m.navHist) > 0 && !(m.active == tabGraph && m.graphFocus == focusRefs) {
+		return m.navBack()
+	}
 	switch key {
+	case "alt+left": // browser-style back across tabs/drills, restoring the bar text
+		return m.navBack()
+	case "alt+right":
+		return m.navForward()
 	case "ctrl+s":
 		// View the current selection's source on any tab (a modifier key so it
 		// works even where a text input would otherwise capture `s`).
@@ -752,6 +861,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// query unchanged → drill the selected hit into Impact
 			if m.searchSel < len(m.searchHits) {
 				sym := m.searchHits[m.searchSel].Symbol
+				m.pushNav() // so back returns to this Search view with the query + hit intact
 				m.active = tabImpact
 				m.impact.SetValue(sym)
 				m.syncFocus()
@@ -792,6 +902,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// query unchanged → drill the selected blast-radius node (recursive)
 			if m.impactRep != nil && m.impactSel < len(m.impactRep.BlastRadius) {
 				sym := m.impactRep.BlastRadius[m.impactSel].Symbol
+				m.pushNav() // so back returns to the symbol we drilled from, with its blast list
 				m.impact.SetValue(sym)
 				m.impactSel = 0
 				m.statusMsg = "analyzing…"
@@ -866,6 +977,7 @@ func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
 		m.metricsSel = clampIdx(m.metricsCount()-1, m.metricsCount())
 	case "enter":
 		if sym, _, _, _, ok := m.metricsItem(m.metricsSel); ok {
+			m.pushNav() // so back returns to the Metrics dashboard with this row selected
 			m.active = tabImpact
 			m.impact.SetValue(sym)
 			m.syncFocus()
@@ -984,6 +1096,7 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 		// drill the centered hub into full impact analysis
 		if len(m.graphHubs) > 0 {
 			sym := m.graphHubs[m.graphSel].Symbol
+			m.pushNav() // so back returns to the Graph tab as it was
 			m.active = tabImpact
 			m.impact.SetValue(sym)
 			m.syncFocus()

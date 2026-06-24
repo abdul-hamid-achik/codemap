@@ -211,6 +211,58 @@ func TestSearchHeaderShowsResultCount(t *testing.T) {
 	}
 }
 
+// TestGlobalNavBackForward pins FIX.md §2: drilling Search→Impact records global
+// history, alt+← returns to the exact Search view WITH the original query in the bar
+// and the prior hit highlighted, alt+→ re-walks forward, esc also steps back, and a
+// new drill clears the forward stack.
+func TestGlobalNavBackForward(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m.search.SetValue("auth")
+	m, _ = applyMsg(m, semanticMsg{query: "auth", hits: []app.SemanticHit{{Symbol: "A"}, {Symbol: "B"}}})
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown})) // select B (searchSel=1)
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if m.active != tabImpact || m.impact.Value() != "B" {
+		t.Fatalf("drill: active=%v impact=%q, want Impact/B", m.active, m.impact.Value())
+	}
+	if len(m.navHist) != 1 {
+		t.Fatalf("navHist=%d after drill, want 1", len(m.navHist))
+	}
+
+	// alt+← → back to the exact Search view, bar text + selection restored.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft, Mod: tea.ModAlt}))
+	if m.active != tabSearch {
+		t.Errorf("back: active=%v, want Search", m.active)
+	}
+	if m.search.Value() != "auth" {
+		t.Errorf("back: search bar=%q, want %q (restored)", m.search.Value(), "auth")
+	}
+	if m.searchSel != 1 {
+		t.Errorf("back: searchSel=%d, want 1 (B still highlighted)", m.searchSel)
+	}
+	if len(m.navFwd) != 1 {
+		t.Errorf("navFwd=%d after back, want 1", len(m.navFwd))
+	}
+
+	// alt+→ → forward to the Impact view.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyRight, Mod: tea.ModAlt}))
+	if m.active != tabImpact || m.impact.Value() != "B" {
+		t.Errorf("forward: active=%v impact=%q, want Impact/B", m.active, m.impact.Value())
+	}
+
+	// esc also steps back.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	if m.active != tabSearch {
+		t.Errorf("esc-back: active=%v, want Search", m.active)
+	}
+
+	// a new drill (pushNav) forks history → forward stack cleared.
+	m.pushNav()
+	if len(m.navFwd) != 0 {
+		t.Errorf("a new drill should clear the forward stack, got %d", len(m.navFwd))
+	}
+}
+
 func TestSearchDrillToImpact(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch
