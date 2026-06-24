@@ -74,24 +74,39 @@ embedder or creates an empty vector store in that case.
 
 ## Example
 
+Given a small `store` package:
+
+```go
+// store.go
+package store
+
+func openDB() error       { return nil }
+func Save(x int) error    { return openDB() }
+func Delete(id int) error { return openDB() }
+
+// store_test.go
+func TestSave(t *testing.T) { _ = Save(1) }
+```
+
+`impact` answers *what breaks if I change this, and what do I run to check?* — here,
+`openDB` is reached by `Save` and `Delete`, and `TestSave` (✓) transitively covers it:
+
 ```bash
-$ codemap impact windowStart --depth 2
-Impact of windowStart (codemap)
-  defined:        internal/tui/view.go:779
-  direct callers: 4
-  blast radius:   7 (depth ≤ 2)
-  tests covering: 0
-  ⚠ no tests reach this symbol
+$ codemap impact openDB --depth 2
+Impact of openDB (store)
+  defined:        store.go:3
+  direct callers: 2
+  blast radius:   3 (depth ≤ 2)
+  tests covering: 1
+  covering tests (run these):
+     store.TestSave                       store_test.go:5
   affected (blast radius):
-     [1] tui.Model.refBlock                   internal/tui/view.go:288
-     [1] tui.metricBlock                      internal/tui/view.go:457
-     [1] tui.Model.renderImpact               internal/tui/view.go:485
-     [1] tui.Model.renderSearch               internal/tui/view.go:581
-     [2] tui.Model.body                       internal/tui/view.go:162
-     [2] tui.Model.hubDetail                  internal/tui/view.go:230
-     [2] tui.Model.metricsLists               internal/tui/view.go:415
+     [1] store.Save                           store.go:4
+     [1] store.Delete                         store.go:5
+   ✓ [2] store.TestSave                       store_test.go:5
 ```
 
 For symbols with many dependents the human-facing lists are capped — the nearest
 blast-radius nodes and the first covering tests, with a `… (N more)` line. `--json`
-always carries the complete set.
+always carries the complete set. (The README shows the same command run on codemap
+itself.)

@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #189 (docs/cli.md — make the impact example drift-PROOF, not just re-fix the drift) — audited
+  docs/cli.md: command coverage + flags all accurate, the `codemap search` alias verified working. But the
+  Example block (`impact windowStart --depth 2`, "real output from codemap") had drifted hard (defined
+  view.go:779→833, callers 4→5, blast 7→9, two new dependents) — the 3rd doc-example drift this session
+  (after #185), because it targets view.go, the file the studio work edits most. Instead of re-patching line
+  numbers that re-drift next view.go edit, replaced it with a SELF-CONTAINED example: a 5-line `store`
+  package (openDB ← Save/Delete, covered by TestSave) shown inline + its exact `impact openDB --depth 2`
+  output (generated from a real run). Its line numbers are fixed by the shown snippet, so it can never drift,
+  and it's clearer (reader sees input+output). Noted the README still shows the command on codemap itself
+  (kept current in #185). No Go changed. COMMIT+PUSH.
 - 2026-06-24 #188 (docs accuracy — AGENTS.md MCP tool list was missing the flagship `context` tool) — audited
   AGENTS.md's claims against the binary (docs accuracy is a loop priority; hadn't checked it this session).
   Line 196 said "Current set (19)" and listed 19 tools — but `codemap_context` (the one-call orientation
