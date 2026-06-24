@@ -13,6 +13,7 @@ import (
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/daemon"
+	"github.com/abdul-hamid-achik/codemap/internal/embed"
 )
 
 var (
@@ -50,9 +51,21 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		root = args[0]
 	}
-	// Defaults; BD.13 sources these (debounce, embed throttle limits, idle timeout)
-	// from config + CODEMAP_DAEMON_* env.
-	d, err := daemon.Start(cmd.Context(), root, daemon.Config{Debounce: 500 * time.Millisecond})
+	cfgPath, _ := cmd.Flags().GetString("config")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return err
+	}
+	dc := cfg.Daemon
+	d, err := daemon.Start(cmd.Context(), root, daemon.Config{
+		Debounce:    time.Duration(dc.DebounceMS) * time.Millisecond,
+		IdleTimeout: time.Duration(dc.IdleTimeoutMin) * time.Minute,
+		Throttle: embed.ThrottleConfig{
+			RPS:         dc.EmbedRPS,
+			MaxInFlight: dc.EmbedMaxInFlight,
+			CacheSize:   dc.EmbedCacheSize,
+		},
+	})
 	if err != nil {
 		return err
 	}

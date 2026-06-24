@@ -13,6 +13,16 @@ import (
 type Config struct {
 	Embedding EmbeddingConfig `yaml:"embedding"`
 	Index     IndexConfig     `yaml:"index"`
+	Daemon    DaemonConfig    `yaml:"daemon"`
+}
+
+// DaemonConfig tunes the background daemon (`codemap daemon`).
+type DaemonConfig struct {
+	DebounceMS       int     `yaml:"debounce_ms"`         // watcher debounce (default 500)
+	IdleTimeoutMin   int     `yaml:"idle_timeout_min"`    // idle-shutdown after N minutes (0 = never)
+	EmbedRPS         float64 `yaml:"embed_rps"`           // background embed rate to Ollama (0 = unlimited)
+	EmbedMaxInFlight int     `yaml:"embed_max_in_flight"` // max concurrent embed calls (default 2)
+	EmbedCacheSize   int     `yaml:"embed_cache_size"`    // dedup cache entries (default 4096)
 }
 
 // EmbeddingConfig controls how node source text is turned into vectors.
@@ -49,6 +59,13 @@ func DefaultConfig() *Config {
 				"venv", "env", "site-packages", // Python virtualenvs / installed deps
 				"*.min.js", "*.gen.go", "*_gen.go", "*.pb.go", "*_pb.go", "*.lock",
 			},
+		},
+		Daemon: DaemonConfig{
+			DebounceMS:       500,
+			IdleTimeoutMin:   0,
+			EmbedRPS:         0,
+			EmbedMaxInFlight: 2,
+			EmbedCacheSize:   4096,
 		},
 	}
 }
@@ -129,6 +146,26 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODEMAP_EMBEDDING_DISTANCE"); v != "" {
 		cfg.Embedding.Distance = v
+	}
+	if v := os.Getenv("CODEMAP_DAEMON_DEBOUNCE_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Daemon.DebounceMS = n
+		}
+	}
+	if v := os.Getenv("CODEMAP_DAEMON_IDLE_TIMEOUT_MIN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Daemon.IdleTimeoutMin = n
+		}
+	}
+	if v := os.Getenv("CODEMAP_DAEMON_EMBED_RPS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Daemon.EmbedRPS = f
+		}
+	}
+	if v := os.Getenv("CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Daemon.EmbedMaxInFlight = n
+		}
 	}
 }
 
