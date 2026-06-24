@@ -289,12 +289,16 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 		} else {
 			fmt.Printf("  precise: %d call edges resolved exactly (%d unresolved)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
 		}
-	} else if rep.Languages["go"] > 0 {
-		// Surface --precise at the moment a user would most benefit — only when the
-		// project actually has Go (it's a go/types pass) and the go toolchain is
-		// present, so the tip is actionable.
+	} else {
+		// Surface --precise at the moment a user would most benefit: it refines Go's
+		// name-based edges, and it's the ONLY source of a call graph for the LSP
+		// languages (a TS/JS/Python project has no callers/impact without it).
+		goAvailable := false
 		if _, lookErr := exec.LookPath("go"); lookErr == nil {
-			fmt.Println("  tip: add --precise to resolve Go call edges exactly (eliminates same-named over-matching)")
+			goAvailable = true
+		}
+		for _, tip := range preciseTips(rep.Languages, goAvailable) {
+			fmt.Println("  tip: " + tip)
 		}
 	}
 	for _, e := range rep.Errors {
@@ -976,6 +980,29 @@ func printJSON(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// preciseTips returns the "add --precise" hints shown after a non-precise index,
+// tailored to the languages present: Go's name-based edges can be made exact,
+// while the LSP languages (TypeScript/JavaScript/Python) have no call graph at
+// all without --precise — so a new user isn't left with empty `callers`/`impact`
+// and no idea why. A language only appears here when its files were indexed,
+// which means its server was present, so the tip is always actionable.
+func preciseTips(languages map[string]int, goAvailable bool) []string {
+	var tips []string
+	if languages["go"] > 0 && goAvailable {
+		tips = append(tips, "Go call edges are name-based; add --precise to resolve them exactly (eliminates same-named over-matching)")
+	}
+	var lsp []string
+	for _, l := range []string{"typescript", "javascript", "python"} {
+		if languages[l] > 0 {
+			lsp = append(lsp, l)
+		}
+	}
+	if len(lsp) > 0 {
+		tips = append(tips, "no call graph for "+strings.Join(lsp, "/")+" yet — add --precise for callers/impact/hotspots/path")
+	}
+	return tips
 }
 
 // preciseEdgeNote renders the parenthetical after the edge count in `status`,

@@ -48,3 +48,40 @@ func TestSemanticSearchAlias(t *testing.T) {
 		t.Errorf("semantic command should alias \"search\", got aliases %v", semanticCmd.Aliases)
 	}
 }
+
+// TestPreciseTips pins the language-aware --precise onboarding hints: Go gets the
+// "refine name-based edges" tip; the LSP languages (which have no call graph
+// without --precise) get the "no call graph yet" tip; a Go project without the
+// toolchain gets no Go tip.
+func TestPreciseTips(t *testing.T) {
+	has := func(tips []string, sub string) bool {
+		for _, tp := range tips {
+			if strings.Contains(tp, sub) {
+				return true
+			}
+		}
+		return false
+	}
+
+	goTips := preciseTips(map[string]int{"go": 10}, true)
+	if !has(goTips, "name-based") || len(goTips) != 1 {
+		t.Errorf("Go project should get exactly the go/types tip, got %v", goTips)
+	}
+	if len(preciseTips(map[string]int{"go": 10}, false)) != 0 {
+		t.Error("Go project without the go toolchain should get no tip (not actionable)")
+	}
+
+	ts := preciseTips(map[string]int{"typescript": 4}, true)
+	if !has(ts, "no call graph for typescript") || has(ts, "name-based") {
+		t.Errorf("TS-only project should get the LSP call-graph tip only, got %v", ts)
+	}
+
+	mixed := preciseTips(map[string]int{"go": 3, "javascript": 5, "python": 2}, true)
+	if !has(mixed, "name-based") || !has(mixed, "javascript/python") {
+		t.Errorf("mixed project should get both the Go tip and the JS/Python tip, got %v", mixed)
+	}
+
+	if len(preciseTips(map[string]int{}, true)) != 0 {
+		t.Error("empty project should get no tips")
+	}
+}

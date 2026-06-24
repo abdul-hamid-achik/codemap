@@ -767,6 +767,18 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #128 (onboarding — `index` tips TS/JS/Python users toward `--precise`) — dogfooding the
+  new-user path for the LSP languages exposed a real dead-end: a TS/JS/Python project indexed with a
+  plain `codemap index` gets structure but **no call graph** (those need `--precise`), and the
+  `--precise` tip was gated on `Languages["go"]>0` — so a TS user saw no hint, then `callers validate`
+  → "none" even though `handle` calls it, and would reasonably think codemap is broken. Fix: the tip is
+  now language-aware (`preciseTips(languages, goAvailable)`): Go → "name-based; add --precise to resolve
+  exactly"; the LSP languages → "no call graph for typescript/javascript/python yet — add --precise for
+  callers/impact/hotspots/path"; both shown for a mixed repo. A language only appears once its files
+  were indexed (⇒ its server was present), so the tip is always actionable. Verified live (TS project
+  now shows the tip; Go repo unchanged). Test `TestPreciseTips` (go-only, go-without-toolchain, ts-only,
+  mixed, empty). `precise.yml` still green (its `contains: "add --precise"` holds — the Go wording still
+  includes it). Full suite + lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #127 (discoverability — `codemap search` alias for `semantic`) — small CLI/studio
   consistency fix: the studio's 4th tab is "Search" (and the universal mental model is "search"), but
   the CLI command is `semantic`, so `codemap search "…"` returned "unknown command". Added `search` as
