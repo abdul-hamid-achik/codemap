@@ -697,12 +697,19 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	fmt.Printf("Hotspots in %s:\n", rep.Project)
+	anyInflated := false
 	for _, h := range rep.Hotspots {
 		line := fmt.Sprintf("  %4d  %-36s %s:%d", h.InDegree, disp(h.FQN, h.Symbol), h.File, h.StartLine)
 		if h.SharedName > 1 { // count fanned across same-named defs (name-based)
 			line += fmt.Sprintf("  ⚠ name shared by %d (inflated)", h.SharedName)
+			anyInflated = true
 		}
 		fmt.Println(line)
+	}
+	// The ⚠ rows say WHAT is wrong; point at the fix. Inflation only happens on a
+	// name-based index (precise edges are exact), so the hint is always actionable here.
+	if anyInflated {
+		fmt.Println("  → ⚠ counts are inflated by same-named symbols; 'codemap index --precise' resolves them exactly")
 	}
 	return nil
 }

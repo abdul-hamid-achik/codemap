@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #193 (hotspots — point at the fix when counts are name-inflated; found dogfooding a real repo) —
+  first real-world test beyond codemap-on-itself: indexed a sibling 666-`.go`-file project (`blueprint`).
+  Performance is great (name-based index in 0.86s, hotspots query in 0.019s) and exclusion is correct — 583
+  of the 666 files are under `.claude/worktrees` (a dot-dir codemap auto-excludes), so it rightly indexed
+  only the ~83 real source files, no worktree pollution. The genuine gap: on that real compiler-style repo,
+  `hotspots` is dominated by inflated same-named methods (5× `String`, each `⚠ name shared by 5 (inflated)`)
+  — the rows say WHAT is wrong but the hotspots output never points at the FIX (`--precise`); only
+  `index`/`status` did. Added a trailing hint when any row is inflated: "→ ⚠ counts are inflated by
+  same-named symbols; 'codemap index --precise' resolves them exactly" (only fires on a name-based index —
+  precise edges are never flagged inflated). Same honest+actionable pattern as #181/#183. precise.yml +
+  query.yml still green (the `(inflated)` per-row marker is unchanged); `task check` green. COMMIT+PUSH.
 - 2026-06-24 #192 (release-readiness checkpoint — full E2E suite + check + CI all green) — ran the COMPLETE
   flow suite end-to-end (toolchains + Ollama local): **21/21 specs PASS** — annotations, config, context,
   help, incremental, index_progress, index_status, javascript, jsx, mcp_serve, onboarding, polyglot,
