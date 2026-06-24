@@ -132,6 +132,38 @@ func TestIndexProject(t *testing.T) {
 	}
 }
 
+// TestDefaultExcludesBuildOutput proves the default excludes catch build-output
+// directory variants (dist-chrome, build-web) and coverage — not just the exact
+// "dist"/"build" — so minified/generated code doesn't pollute the index. Found
+// dogfooding a real TS project whose dist-chrome/dist-firefox extension build
+// was getting indexed (garbage "<function>" symbols from minified JS).
+func TestDefaultExcludesBuildOutput(t *testing.T) {
+	g, _ := newStores(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "src/real.go", "package src\nfunc RealSource() {}\n")
+	writeFile(t, dir, "dist-chrome/built.go", "package x\nfunc BuiltArtifact() {}\n")
+	writeFile(t, dir, "build-web/gen.go", "package x\nfunc GeneratedWeb() {}\n")
+	writeFile(t, dir, "coverage/cov.go", "package x\nfunc CoverageJunk() {}\n")
+	pid, _ := g.UpsertProject("app", dir, "go")
+
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	res, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesIndexed != 1 {
+		t.Errorf("FilesIndexed = %d, want 1 (dist-chrome/build-web/coverage excluded)", res.FilesIndexed)
+	}
+	for _, sym := range []string{"BuiltArtifact", "GeneratedWeb", "CoverageJunk"} {
+		if nodes, _ := g.FindNodesBySymbol(pid, sym); len(nodes) != 0 {
+			t.Errorf("%s is build output and should be excluded, but it was indexed", sym)
+		}
+	}
+	if nodes, _ := g.FindNodesBySymbol(pid, "RealSource"); len(nodes) != 1 {
+		t.Errorf("RealSource should be indexed, got %d nodes", len(nodes))
+	}
+}
+
 // TestIndexProjectOnFileHook pins the progress hook: OnFile fires exactly once
 // per scanned file, 1-based and monotonic, with total == FilesScanned and a
 // non-empty rel path. This is what the CLI progress bar rides on.

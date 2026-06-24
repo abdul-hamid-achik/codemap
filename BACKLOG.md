@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #195 (exclude build-output variants — found dogfooding a real TS project) — indexed a real
+  472-file TS project (linkglow) via typescript-language-server: it works (488 files in ~95s — LSP is
+  slower than Go's go/parser, but tractable), but it INDEXED build artifacts — `apps/extension/dist-chrome/`
+  and `dist-firefox/` (minified extension builds), surfacing garbage `<function>` symbols and bloating the
+  graph (13.6k nodes). Root cause: the default excludes had `dist`/`build` (exact match, via filepath.Match)
+  but not the suffixed build-output variants `dist-chrome`/`dist-firefox`/`build-web` that real multi-target
+  builds produce. Added `dist-*`, `build-*`, and `coverage` to the default exclude list (filepath.Match
+  globs the dir basename, so `dist-*` catches `dist-chrome` while plain `dist` still matches exactly).
+  Verified on a synthetic fixture (dist-chrome/build-web/coverage .go files excluded, src kept) + added
+  TestDefaultExcludesBuildOutput. Updated docs/configuration.md. config.yml flow still green (it overrides
+  excludes entirely, unaffected); `task check` green. COMMIT+PUSH.
 - 2026-06-24 #194 (honesty — index --precise said "N unresolved" for calls it actually RESOLVED) — dogfooded
   `--precise` on the real 83-file blueprint module: works great (120 files in 5.4s; 3226 edges resolved
   exactly; hotspots transformed from name-inflated `String()` noise into the real parser hubs ParseFile/

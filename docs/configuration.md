@@ -60,9 +60,10 @@ index:
     - "*.min.js"
 ```
 
-The default exclude list also covers `build`, `.next`, `.nuxt`, `target`, `env`, `site-packages`,
-`*.gen.go`, `*.pb.go`, `*_pb.go`, and `*.lock`; any dot-prefixed directory (`.git`, `.venv`, `.tox`, …) is
-skipped automatically. Setting `exclude` replaces the defaults, so include the ones you still want.
+The default exclude list also covers `build`, build-output variants (`dist-*`, `build-*`, e.g.
+`dist-chrome`/`build-web`), `coverage`, `.next`, `.nuxt`, `target`, `env`, `site-packages`, `*.gen.go`,
+`*.pb.go`, `*_pb.go`, and `*.lock`; any dot-prefixed directory (`.git`, `.venv`, `.tox`, …) is skipped
+automatically. Setting `exclude` replaces the defaults, so include the ones you still want.
 
 ## Embedding profile guard
 
