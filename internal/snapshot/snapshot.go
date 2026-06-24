@@ -1,0 +1,375 @@
+// Package snapshot serializes a project's code-intelligence slice to a portable,
+// store-agnostic directory and restores it — the basis for stashing/restoring a
+// branch's index without re-indexing (see the BD.* epic in BACKLOG). It writes
+// graph nodes, edges, index state, and annotations as newline-delimited JSON in a
+// deterministic order, so identical slices across branches serialize byte-for-byte
+// identically and fcheap can content-dedup them. (Embedding vectors are a separate
+// slice, BD.2b.) Edges reference nodes by their position in the sorted node list,
+// not the volatile auto-increment DB id, so a snapshot is reproducible across
+// re-indexings of the same code.
+package snapshot
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
+)
+
+// SchemaVersion is bumped when the on-disk snapshot format changes incompatibly.
+const SchemaVersion = 1
+
+const (
+	fileManifest    = "snapshot.json"
+	fileNodes       = "nodes.jsonl"
+	fileEdges       = "edges.jsonl"
+	fileIndexState  = "index_state.jsonl"
+	fileAnnotations = "annotations.jsonl"
+)
+
+// Manifest is snapshot.json — the header describing a snapshot directory.
+type Manifest struct {
+	SchemaVersion    int    `json:"schema_version"`
+	Project          string `json:"project"`
+	EmbeddingProfile string `json:"embedding_profile"`
+	BaseSHA          string `json:"base_sha"`
+	Nodes            int    `json:"nodes"`
+	Edges            int    `json:"edges"`
+	IndexState       int    `json:"index_state"`
+	Annotations      int    `json:"annotations"`
+}
+
+// snapNode is a node's content without its volatile identity (DB id, project id,
+// timestamps, vec id) — those are re-assigned on import.
+type snapNode struct {
+	FilePath   string `json:"file_path"`
+	Symbol     string `json:"symbol"`
+	FQN        string `json:"fqn,omitempty"`
+	Kind       string `json:"kind"`
+	Language   string `json:"language"`
+	StartLine  int    `json:"start_line"`
+	EndLine    int    `json:"end_line"`
+	Signature  string `json:"signature,omitempty"`
+	Docstring  string `json:"docstring,omitempty"`
+	SourceHash string `json:"source_hash,omitempty"`
+}
+
+// snapEdge references its endpoints by node index (position in the sorted node
+// list), not the DB id, so the serialization is reproducible across re-indexings.
+type snapEdge struct {
+	Source     int     `json:"source"`
+	Target     int     `json:"target"`
+	EdgeType   string  `json:"edge_type"`
+	Weight     float64 `json:"weight"`
+	Provenance string  `json:"provenance,omitempty"`
+}
+
+// snapAnnotation drops the DB id and timestamp so annotations dedup by content.
+type snapAnnotation struct {
+	Kind   string `json:"kind"`
+	Target string `json:"target"`
+	Source string `json:"source"`
+	Note   string `json:"note,omitempty"`
+	Data   string `json:"data,omitempty"`
+}
+
+func nodeKey(n graph.Node) string {
+	return n.FilePath + "\x00" + itoa(n.StartLine) + "\x00" + n.Symbol + "\x00" + n.FQN + "\x00" + n.Kind + "\x00" + n.Signature
+}
+
+func itoa(i int) string { return fmt.Sprintf("%d", i) }
+
+// Export writes the project's graph slice into dir (created if needed). Rows are
+// emitted in deterministic order so identical slices hash-identically.
+func Export(g *graph.Store, projectID int64, project, dir, profile, baseSHA string) (*Manifest, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+
+	nodes, err := g.ProjectNodes(projectID)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(nodes, func(i, j int) bool { return nodeKey(nodes[i]) < nodeKey(nodes[j]) })
+	idxOf := make(map[int64]int, len(nodes))
+	for i, n := range nodes {
+		idxOf[n.ID] = i
+	}
+	snodes := make([]any, len(nodes))
+	for i, n := range nodes {
+		snodes[i] = snapNode{
+			FilePath: n.FilePath, Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, Language: n.Language,
+			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Docstring: n.Docstring, SourceHash: n.SourceHash,
+		}
+	}
+	if err := writeJSONL(filepath.Join(dir, fileNodes), snodes); err != nil {
+		return nil, err
+	}
+
+	edges, err := g.ProjectEdges(projectID)
+	if err != nil {
+		return nil, err
+	}
+	sedges := make([]snapEdge, 0, len(edges))
+	for _, e := range edges {
+		si, sok := idxOf[e.SourceID]
+		ti, tok := idxOf[e.TargetID]
+		if !sok || !tok {
+			continue // an endpoint outside the project slice — skip (shouldn't happen)
+		}
+		sedges = append(sedges, snapEdge{Source: si, Target: ti, EdgeType: e.EdgeType, Weight: e.Weight, Provenance: e.Provenance})
+	}
+	sort.SliceStable(sedges, func(i, j int) bool {
+		a, b := sedges[i], sedges[j]
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		if a.Target != b.Target {
+			return a.Target < b.Target
+		}
+		if a.EdgeType != b.EdgeType {
+			return a.EdgeType < b.EdgeType
+		}
+		return a.Provenance < b.Provenance
+	})
+	eAny := make([]any, len(sedges))
+	for i, e := range sedges {
+		eAny[i] = e
+	}
+	if err := writeJSONL(filepath.Join(dir, fileEdges), eAny); err != nil {
+		return nil, err
+	}
+
+	idx, err := g.ProjectIndexState(projectID)
+	if err != nil {
+		return nil, err
+	}
+	iAny := make([]any, len(idx))
+	for i, e := range idx {
+		iAny[i] = e
+	}
+	if err := writeJSONL(filepath.Join(dir, fileIndexState), iAny); err != nil {
+		return nil, err
+	}
+
+	anns, err := g.AllAnnotations(projectID)
+	if err != nil {
+		return nil, err
+	}
+	sanns := make([]snapAnnotation, len(anns))
+	for i, a := range anns {
+		sanns[i] = snapAnnotation{Kind: a.Kind, Target: a.Target, Source: a.Source, Note: a.Note, Data: a.Data}
+	}
+	sort.SliceStable(sanns, func(i, j int) bool { return annKey(sanns[i]) < annKey(sanns[j]) })
+	aAny := make([]any, len(sanns))
+	for i, a := range sanns {
+		aAny[i] = a
+	}
+	if err := writeJSONL(filepath.Join(dir, fileAnnotations), aAny); err != nil {
+		return nil, err
+	}
+
+	m := &Manifest{
+		SchemaVersion: SchemaVersion, Project: project, EmbeddingProfile: profile, BaseSHA: baseSHA,
+		Nodes: len(nodes), Edges: len(sedges), IndexState: len(idx), Annotations: len(anns),
+	}
+	if err := writeJSON(filepath.Join(dir, fileManifest), m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// Import restores a snapshot dir INTO the project with id projectID (already
+// registered). It wipes the project's nodes + index state, bulk-reinserts the
+// snapshot's nodes/edges/index-state, and MERGES annotations (adds those not
+// already present — never deletes existing ones). It refuses if the snapshot's
+// embedding_profile disagrees with wantProfile (never mix models). Both empty
+// profiles are treated as compatible.
+func Import(g *graph.Store, projectID int64, project, dir, wantProfile string) (*Manifest, error) {
+	var m Manifest
+	if err := readJSON(filepath.Join(dir, fileManifest), &m); err != nil {
+		return nil, fmt.Errorf("read snapshot manifest: %w", err)
+	}
+	if m.SchemaVersion != SchemaVersion {
+		return nil, fmt.Errorf("snapshot schema v%d != supported v%d", m.SchemaVersion, SchemaVersion)
+	}
+	if wantProfile != "" && m.EmbeddingProfile != "" && m.EmbeddingProfile != wantProfile {
+		return nil, fmt.Errorf("snapshot embedding profile %q != current %q — refusing to mix models", m.EmbeddingProfile, wantProfile)
+	}
+
+	var snodes []snapNode
+	if err := readJSONL(filepath.Join(dir, fileNodes), &snodes); err != nil {
+		return nil, err
+	}
+	if err := g.WipeProject(projectID); err != nil {
+		return nil, err
+	}
+	newID := make([]int64, len(snodes))
+	for i, sn := range snodes {
+		id, err := g.AddNode(&graph.Node{
+			ProjectID: projectID, FilePath: sn.FilePath, Symbol: sn.Symbol, FQN: sn.FQN, Kind: sn.Kind,
+			Language: sn.Language, StartLine: sn.StartLine, EndLine: sn.EndLine,
+			Signature: sn.Signature, Docstring: sn.Docstring, SourceHash: sn.SourceHash,
+		})
+		if err != nil {
+			return nil, err
+		}
+		newID[i] = id
+	}
+
+	var sedges []snapEdge
+	if err := readJSONL(filepath.Join(dir, fileEdges), &sedges); err != nil {
+		return nil, err
+	}
+	for _, e := range sedges {
+		if e.Source < 0 || e.Source >= len(newID) || e.Target < 0 || e.Target >= len(newID) {
+			return nil, fmt.Errorf("snapshot edge references node index out of range")
+		}
+		if _, err := g.AddEdgeProv(newID[e.Source], newID[e.Target], e.EdgeType, e.Weight, e.Provenance); err != nil {
+			return nil, err
+		}
+	}
+
+	var idx []graph.IndexEntry
+	if err := readJSONL(filepath.Join(dir, fileIndexState), &idx); err != nil {
+		return nil, err
+	}
+	for _, e := range idx {
+		if err := g.SetFileHash(projectID, e.FilePath, e.FileHash); err != nil {
+			return nil, err
+		}
+	}
+
+	var sanns []snapAnnotation
+	if err := readJSONL(filepath.Join(dir, fileAnnotations), &sanns); err != nil {
+		return nil, err
+	}
+	existing, err := g.AllAnnotations(projectID)
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(existing))
+	for _, a := range existing {
+		have[annKey(snapAnnotation{Kind: a.Kind, Target: a.Target, Source: a.Source, Note: a.Note, Data: a.Data})] = true
+	}
+	for _, a := range sanns {
+		if have[annKey(a)] {
+			continue // already present — merge, don't duplicate or blow away
+		}
+		if _, err := g.AddAnnotation(projectID, graph.Annotation{Kind: a.Kind, Target: a.Target, Source: a.Source, Note: a.Note, Data: a.Data}); err != nil {
+			return nil, err
+		}
+	}
+	return &m, nil
+}
+
+func annKey(a snapAnnotation) string {
+	return a.Kind + "\x00" + a.Target + "\x00" + a.Source + "\x00" + a.Note + "\x00" + a.Data
+}
+
+// --- jsonl/json io ---
+
+func writeJSONL(path string, items []any) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	enc := json.NewEncoder(w)
+	for _, it := range items {
+		if err := enc.Encode(it); err != nil { // Encode appends a newline
+			return err
+		}
+	}
+	return w.Flush()
+}
+
+func readJSONL(path string, out any) error {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil // an absent optional file is an empty set
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// out must be a non-nil pointer to a slice; decode line by line via reflection-
+	// free generic handling by the callers' concrete types.
+	switch v := out.(type) {
+	case *[]snapNode:
+		return decodeLines(f, func(b []byte) error {
+			var x snapNode
+			if err := json.Unmarshal(b, &x); err != nil {
+				return err
+			}
+			*v = append(*v, x)
+			return nil
+		})
+	case *[]snapEdge:
+		return decodeLines(f, func(b []byte) error {
+			var x snapEdge
+			if err := json.Unmarshal(b, &x); err != nil {
+				return err
+			}
+			*v = append(*v, x)
+			return nil
+		})
+	case *[]graph.IndexEntry:
+		return decodeLines(f, func(b []byte) error {
+			var x graph.IndexEntry
+			if err := json.Unmarshal(b, &x); err != nil {
+				return err
+			}
+			*v = append(*v, x)
+			return nil
+		})
+	case *[]snapAnnotation:
+		return decodeLines(f, func(b []byte) error {
+			var x snapAnnotation
+			if err := json.Unmarshal(b, &x); err != nil {
+				return err
+			}
+			*v = append(*v, x)
+			return nil
+		})
+	default:
+		return fmt.Errorf("readJSONL: unsupported target type %T", out)
+	}
+}
+
+func decodeLines(f *os.File, onLine func([]byte) error) error {
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024) // allow long lines (big source/docstrings)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		if err := onLine(line); err != nil {
+			return err
+		}
+	}
+	return sc.Err()
+}
+
+func writeJSON(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+func readJSON(path string, v any) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, v)
+}

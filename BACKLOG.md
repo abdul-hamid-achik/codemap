@@ -212,7 +212,16 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   [path] [--json]` (Service `BranchStatus` + CLI) reports branch/sha/detached/repoHash/key. Tests
   `TestInspect`/`TestSanitizeBranch`/`TestRepoHashStable` (init a temp repo, commit, detached-HEAD); task check
   green; dogfood-verified on codemap itself.
-- [ ] **BD.2** `internal/snapshot/snapshot.go` — `Export(graph, vectors, projectID, project, dir, profile, baseSHA)` → `nodes/edges/index_state/annotations/vectors.jsonl` + `snapshot.json` (**deterministic ordering** so fcheap dedups identical slices). `Import` = WipeProject + DeleteByProject then bulk re-insert, **gated on embeddingProfile match**. New graph helpers `ProjectEdges`/`ProjectIndexState`; new `vector.Store.IterByProject` (mirror DeleteByProject). ⚠ **Merge (don't blow away) annotations** on import.
+- [~] **BD.2** `internal/snapshot/snapshot.go` — `Export`/`Import` of a project's slice.
+  - [x] **BD.2a (graph)** — Export → `nodes/edges/index_state/annotations.jsonl` + `snapshot.json`;
+    **deterministic** (nodes sorted by content key; edges reference nodes by sorted POSITION not the volatile
+    DB id; annotations sorted) so identical slices serialize byte-identically and fcheap can content-dedup.
+    Import = WipeProject + bulk re-insert with index→new-id remapping, **gated on embeddingProfile match**,
+    and **MERGES** annotations (adds missing, never deletes/duplicates). New graph helpers `ProjectEdges` +
+    `ProjectIndexState` (+ `IndexEntry`). `TestRoundTrip` + `TestExportDeterministic` (swapped insertion
+    order → identical bytes); task check green.
+  - [ ] **BD.2b (vectors)** — add `vectors.jsonl` (veclite Record exposes `.Vector`/`.Content`/`.Payload`, so
+    no re-embed) via a new `vector.Store.IterByProject`; Import re-inserts with the remapped node ids.
 - [ ] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper: `Save(dir,tool,name,tags,sourceSHA)->stashID` (parse `--json`), `Restore(id,toDir)` (check `Verified`), `List(tags)`. fcheap binary path from config/PATH.
 - [ ] **BD.4** `internal/branchstate/state.go` — pointer file `RegistryDir()/branches/<repoHash>.json` (atomic temp+rename): branch→{stash_id, base_sha, profile, counts}. `Rebuild` from `fcheap list --tag`.
 - [ ] **BD.5** `internal/app/branchswitch.go` — `BranchSnapshot`/`BranchSwitch`/`BranchStatus` Service methods; orchestrate snapshot-old → restore-or-reindex-new; base-sha staleness via `git merge-base --is-ancestor`; reuse `Service.Index` profile gate; detect daemon lock.

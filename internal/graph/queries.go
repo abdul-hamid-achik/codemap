@@ -494,3 +494,52 @@ func (s *Store) WipeProject(projectID int64) error {
 	_, err := s.db.Exec("DELETE FROM index_state WHERE project_id=?", projectID)
 	return err
 }
+
+// ProjectEdges returns every edge whose source node is in the project, ordered by
+// id. Edges carry no project_id of their own (they belong to a project via their
+// source/target nodes, both in-project), so this is the project's full edge set —
+// used to serialize a project's graph for snapshotting.
+func (s *Store) ProjectEdges(projectID int64) ([]Edge, error) {
+	rows, err := s.db.Query(
+		`SELECT e.id, e.source_id, e.target_id, e.edge_type, e.weight, e.provenance, e.created_at
+		 FROM edges e JOIN nodes n ON e.source_id = n.id
+		 WHERE n.project_id = ? ORDER BY e.id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Edge
+	for rows.Next() {
+		var e Edge
+		if err := rows.Scan(&e.ID, &e.SourceID, &e.TargetID, &e.EdgeType, &e.Weight, &e.Provenance, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// IndexEntry is one file's recorded incremental-reindex state.
+type IndexEntry struct {
+	FilePath string `json:"file_path"`
+	FileHash string `json:"file_hash"`
+}
+
+// ProjectIndexState returns every (file_path, file_hash) recorded for the project,
+// ordered by path — the incremental-reindex hashes, for serialization.
+func (s *Store) ProjectIndexState(projectID int64) ([]IndexEntry, error) {
+	rows, err := s.db.Query("SELECT file_path, file_hash FROM index_state WHERE project_id=? ORDER BY file_path", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []IndexEntry
+	for rows.Next() {
+		var e IndexEntry
+		if err := rows.Scan(&e.FilePath, &e.FileHash); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
