@@ -726,7 +726,14 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   Annotations`, tui `TestSearchPaneMarksAnnotated`. Full suite + lint v2 (0) + studio/query/semantic
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
-## 🎯 Epic — precise call resolution (go/types) — GREENLIT 2026-06-23
+## 🏷️ Release — v0.5.0 (2026-06-23) — RELEASED
+The precise-call-resolution epic (#87–#99, the 13 commits since v0.4.0). Tagged `v0.5.0`, release.yml
+green: GitHub release with 5 pure-Go targets + checksums, homebrew-tap formula bumped to 0.5.0
+(`brew upgrade codemap`). Headline: opt-in `codemap index --precise` (in-process go/types) makes every
+query exact, eliminating same-named over-matching; name-based stays the fast default. See the epic
+below for the full slice-by-slice record.
+
+## 🎯 Epic — precise call resolution (go/types) — GREENLIT 2026-06-23 · SHIPPED in v0.5.0
 The name-based over-matching that #79–#86 *flag* (callers/impact/hotspots inflation) gets *eliminated*
 by resolving calls precisely with pure-Go `go/types`. Designed via a 16-agent workflow (map → research
 → judge panel → synthesize → adversarial review). **Chosen approach:** opt-in `--precise` Pass 3 in the
