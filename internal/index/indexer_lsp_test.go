@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
@@ -256,5 +257,37 @@ func TestIndexTypeScriptDisabledByNoLSP(t *testing.T) {
 	}
 	if res.Unsupported["typescript"] != 1 {
 		t.Errorf("expected 1 unsupported typescript file under NoLSP, got %v", res.Unsupported)
+	}
+}
+
+// TestMissingServerReportedNotSilent proves that a project with supported
+// LSP-language files but no server binary reports MissingServers (which drives the
+// actionable "install typescript-language-server …" warning) instead of silently
+// producing an empty graph. Deterministic regardless of what's installed locally:
+// it points the server spec at a binary that cannot resolve on PATH, so the
+// missing-server branch is taken even on a dev machine that has the real server.
+func TestMissingServerReportedNotSilent(t *testing.T) {
+	saved := lspsrc.DefaultServers
+	t.Cleanup(func() { lspsrc.DefaultServers = saved })
+	lspsrc.DefaultServers = []lspsrc.ServerSpec{{
+		Cmd:   "codemap-no-such-language-server",
+		Args:  []string{"--stdio"},
+		Langs: []lspsrc.LangBinding{{Lang: "typescript", LangID: "typescript"}},
+	}}
+
+	dir := t.TempDir()
+	writeFile(t, dir, "svc.ts", "export function f() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("ts", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	res, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{}) // LSP enabled
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Nodes != 0 {
+		t.Errorf("server absent: expected no TS nodes indexed, got %d", res.Nodes)
+	}
+	if res.MissingServers["typescript"] == "" {
+		t.Errorf("server absent: expected MissingServers[typescript] to be set, got %v", res.MissingServers)
 	}
 }

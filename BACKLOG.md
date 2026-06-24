@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #187 (validate the multi-language LSP flagship + CI-guard the missing-server onboarding warning)
+  — dogfooded a real TypeScript project (cross-file: main.ts run() → util.ts helper()) indexed `--precise`
+  (callHierarchy via typescript-language-server): 6 nodes/6 edges, 2 precise edges, callers/callees resolve
+  across files, impact shows "⚠ no tests reach this symbol", orphans correctly lists `top` + `unusedHelper`.
+  The flagship is solid. (Initial "0 indexed" scare was MY harness setting HOME=$(mktemp -d), breaking asdf
+  shims — the CLAUDE.md gotcha; real HOME → all indexed.) That detour confirmed the missing-server UX is
+  GOOD: `index` already prints `warning: N typescript file(s) skipped — install "typescript-language-server"
+  …` and the JSON carries a `warning` field (driven by IndexReport.MissingServers). Gap: that onboarding
+  warning had NO test (only the --no-lsp Unsupported path did), and it's the kind of thing that silently
+  regresses. Added TestMissingServerReportedNotSilent — overrides lspsrc.DefaultServers to a fake binary so
+  the missing-server branch is taken DETERMINISTICALLY (passes whether or not the dev machine has the real
+  server) and asserts MissingServers[typescript] is set with no nodes indexed. Runs in CI. `task check` green.
+  COMMIT+PUSH.
 - 2026-06-24 #186 (JSON quality — stop HTML-escaping CLI/MCP output; cleaner for agents & humans) — dogfooding
   the annotations knowledge layer (annotate node+path → surfaces inline in context/callers → list → --json,
   all working) surfaced a real wart: a path annotation's JSON target read `"runImpact -> BlastRadius"`.
