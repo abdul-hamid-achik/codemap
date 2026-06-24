@@ -54,7 +54,7 @@ func renderHelp() string {
 	row("1–4 / tab / shift+tab", "switch tabs")
 	row("ctrl+g", "open the selection in the Graph walker")
 	row("ctrl+s", "view the selected symbol's source")
-	row("ctrl+r", "reindex (structure-only) and refresh")
+	row("ctrl+r", "reindex and refresh (keeps the project's precision)")
 	row("? / esc", "toggle this help")
 	row("ctrl+c", "quit (q also quits on Graph/Metrics)")
 	b.WriteString("\n" + sectionStyle.Render("Graph") + "\n")

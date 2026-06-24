@@ -289,6 +289,24 @@ func TestReindexKey(t *testing.T) {
 	}
 }
 
+// TestReindexPreservesPrecision verifies ctrl+r reindexes with --precise exactly
+// when the project already has precise edges, so refreshing keeps the call graph
+// (TS/JS/Python have no call graph without --precise) instead of dropping it.
+func TestReindexPreservesPrecision(t *testing.T) {
+	m := sized(t, 120, 40)
+	if m.reindexPrecise() {
+		t.Error("with no status, reindex should default to structure-only (not precise)")
+	}
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{Registered: true, Edges: 5}}) // name-based
+	if m.reindexPrecise() {
+		t.Error("a name-based project should reindex structure-only")
+	}
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{Registered: true, Edges: 5, PreciseEdges: 3}})
+	if !m.reindexPrecise() {
+		t.Error("a project with precise edges should reindex --precise to keep its call graph")
+	}
+}
+
 func TestIndexedMsgRefreshes(t *testing.T) {
 	m := sized(t, 120, 40)
 	u, cmd := m.Update(indexedMsg{rep: &app.IndexReport{FilesIndexed: 3, Nodes: 10, Edges: 7}})

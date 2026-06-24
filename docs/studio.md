@@ -52,7 +52,7 @@
 | `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
 | `ctrl+g` (any tab) | **open the selection in the Graph walker** — re-centers the Graph on the selected hit/blast node/row and switches to it, focused on the callers/calls pane, so any symbol becomes a place to start walking the call graph (not just the hubs) |
 | `p` | (Graph) recompute the centered node's callers/callees precisely via gopls (Go) |
-| `ctrl+r` | Reindex the project (structure-only) and refresh, without leaving studio |
+| `ctrl+r` | Reindex the project and refresh, without leaving studio — keeps the project's precision (re-runs `--precise` when it already has a precise call graph, so the graph isn't dropped) |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |
 
 Symbols are shown with their fully-qualified names so same-named methods (e.g.

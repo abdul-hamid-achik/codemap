@@ -368,11 +368,22 @@ func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
 
 func (m Model) reindexCmd() tea.Cmd {
 	ctx, svc, dir := m.ctx, m.service, m.startDir
+	// Preserve precision: if the project currently has precise call edges, reindex
+	// with --precise so ctrl+r refreshes the call graph instead of dropping it to
+	// name-based (Go) or none (TypeScript/JS/Python need --precise for any calls).
+	// Embeddings are skipped either way, so a refresh never needs Ollama.
+	precise := m.reindexPrecise()
 	return func() tea.Msg {
-		// Structure-only: fast and needs no Ollama, so a refresh always works.
-		rep, err := svc.Index(ctx, dir, index.Options{}, false)
+		rep, err := svc.Index(ctx, dir, index.Options{Precise: precise}, false)
 		return indexedMsg{rep: rep, err: err}
 	}
+}
+
+// reindexPrecise reports whether the in-studio reindex (ctrl+r) should run
+// --precise — it does when the project already has precise edges, so refreshing
+// keeps the exact call graph the user is exploring rather than discarding it.
+func (m Model) reindexPrecise() bool {
+	return m.status != nil && m.status.PreciseEdges > 0
 }
 
 func (m Model) impactCmd(sym string) tea.Cmd {

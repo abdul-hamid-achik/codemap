@@ -767,6 +767,17 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #126 (studio — ctrl+r preserves precision instead of dropping the call graph) — a real
+  in-session regression the multi-language work exposed: the studio reindex (`ctrl+r`) was hardcoded
+  structure-only, so pressing it on a **`--precise` project** (any TS/JS/Python — they have *no* call
+  graph without `--precise` — or a precise Go index) **discarded the exact call graph the user was
+  exploring**, dropping the Graph tab to the "no call graph" hint with no way to recover from inside
+  studio. Fix: `reindexCmd` now reindexes with `--precise` exactly when the project already has precise
+  edges (`reindexPrecise()` = `status.PreciseEdges > 0`), so a refresh keeps the graph; name-based Go
+  projects stay on the fast structure-only path. Embeddings are still skipped either way (no Ollama
+  needed). Help/footer + `docs/studio.md` updated ("keeps the project's precision"). Test
+  `TestReindexPreservesPrecision` (no status / name-based → structure-only; precise edges → precise).
+  Full suite + tui lint(0) + fmt + studio E2E green. Polish-first, no backend change. COMMIT+PUSH.
 - 2026-06-24 #125 (polish — index surfaces skipped/timed-out files clearly) — two follow-ups #124
   exposed (now that a file can be *skipped* on a server timeout): (1) **accounting bug** — an errored
   file was appended to `Result.Errors` but `FilesSkipped` was never incremented, so the summary
