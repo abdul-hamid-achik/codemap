@@ -14,7 +14,7 @@ and the `studio` TUI.
 Surfaces / key files:
 - CLI + all commands: `cmd/codemap/main.go`
 - Service layer (everything routes here): `internal/app/` (service.go, session.go)
-- MCP server (thin, 17 tools): `internal/mcp/server.go`
+- MCP server (thin, 18 tools): `internal/mcp/server.go`
 - studio TUI: `internal/tui/` (model.go/view.go; tabs graph/metrics/impact/search)
 - Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`
 - Extraction: `internal/extract/` (`gosrc` = go/parser, `lspsrc` = LSP-backed)

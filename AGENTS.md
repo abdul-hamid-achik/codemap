@@ -180,9 +180,9 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (17): `init, index, status, semantic,
+- Tool names are `codemap_`-prefixed. Current set (18): `init, index, status, semantic,
   callers, callees, impact, hotspots, orphans, path, symbols, find, source, projects, docs,
-  annotate, annotations`. Each takes an optional `path` (project dir, defaults to cwd) and returns
+  annotate, annotations, unannotate`. Each takes an optional `path` (project dir, defaults to cwd) and returns
   JSON; callers/callees take `precise` (gopls); `source` returns a symbol's body; `projects` lists
   the registry; `docs` returns the agent guide (`internal/app/docs.go`); `annotate`/`annotations`
   pin/list notes + opaque data on a symbol or `from→to` path (graph `annotations` table, schema v2,

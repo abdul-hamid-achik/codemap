@@ -252,10 +252,11 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-Tools (17): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
+Tools (18): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
 `codemap_orphans`, `codemap_path`, `codemap_symbols`, `codemap_find`, `codemap_source`,
-`codemap_projects`, `codemap_docs`, `codemap_annotate`, `codemap_annotations`. Each takes an
+`codemap_projects`, `codemap_docs`, `codemap_annotate`, `codemap_annotations`,
+`codemap_unannotate`. Each takes an
 optional `path` (the project directory) and returns JSON. `codemap_callers` / `codemap_callees`
 accept `precise: true` for exact, gopls-resolved results (Go); `codemap_source` returns a symbol's
 body; `codemap_projects` lists what's indexed; **`codemap_docs`** returns an agent guide so a

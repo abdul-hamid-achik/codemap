@@ -742,6 +742,20 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #117 (agent parity — `codemap_unannotate` MCP tool) — dogfooding the annotation layer
+  surfaced a real CLI/MCP asymmetry: the CLI can create, list **and remove** annotations
+  (`annotations --rm <id>`), but the MCP exposed only `codemap_annotate` (create) + `codemap_annotations`
+  (list) — **no delete**. The annotation layer is explicitly "the harness's knowledge layer for agents,"
+  yet an agent could only *accumulate* notes, never prune a stale one. The backend already existed
+  (`Service.RemoveAnnotation`, used by the CLI), so this just exposes it: new `codemap_unannotate` tool
+  (`{id, path}`) → `{id, removed}` (+ a "no annotation with that id" note when absent, never an error).
+  18th MCP tool. Test `TestMCPUnannotate` (in-memory transport round-trip: annotate → capture id →
+  unannotate removed:true → gone from list → second remove a graceful removed:false), and added it to
+  the tools/list presence check. Swept the live "17 tools" → "18" in README/AGENTS/CLAUDE + listed
+  `codemap_unannotate` (BACKLOG release-history entries left as-is). Verified the rest of the layer is
+  solid by dogfooding: `annotate`/`annotations` round-trip and surface in `impact` (⟐), `callers Close`
+  honestly warns "matches 7 definitions … query a more specific name", nonexistent-symbol/no-path
+  errors are clean. Full suite + lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #116 (docs accuracy — `ctrl+g` + `orphans` value-following, swept consistent) — paid
   down the doc debt from the last three increments. **studio `ctrl+g`** (#115): `docs/studio.md` Keys
   table gained a `ctrl+g` row and the Metrics/Impact/Search tab blurbs now mention "open in the Graph

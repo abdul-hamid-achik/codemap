@@ -163,6 +163,11 @@ type annotationsInput struct {
 	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+type unannotateInput struct {
+	ID   int64  `json:"id" jsonschema:"id of the annotation to remove (from codemap_annotate's result or codemap_annotations)"`
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -232,6 +237,10 @@ func (s *Server) register() {
 		Name:        "codemap_annotations",
 		Description: "List annotations: all in the project (no args), on a 'symbol', or on a 'from'→'to' call path.",
 	}, s.handleAnnotations)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_unannotate",
+		Description: "Remove an annotation by 'id' (from codemap_annotate's result or codemap_annotations) — so the knowledge layer can be corrected and pruned, not only appended to.",
+	}, s.handleUnannotate)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -380,6 +389,15 @@ func (s *Server) handleAnnotations(_ context.Context, _ *sdkmcp.CallToolRequest,
 	default:
 		return result(s.svc.AllAnnotations(cwd))
 	}
+}
+
+func (s *Server) handleUnannotate(_ context.Context, _ *sdkmcp.CallToolRequest, in unannotateInput) (*sdkmcp.CallToolResult, any, error) {
+	removed, err := s.svc.RemoveAnnotation(cwdOf(in.Path), in.ID)
+	out := map[string]any{"id": in.ID, "removed": removed}
+	if err == nil && !removed {
+		out["note"] = "no annotation with that id in this project"
+	}
+	return result(out, err)
 }
 
 // ---- helpers ----

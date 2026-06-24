@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,7 +89,7 @@ func TestMCPServer(t *testing.T) {
 	for _, tool := range lt.Tools {
 		got[tool.Name] = true
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}
@@ -230,6 +231,87 @@ func TestMCPAnnotateUnknownTarget(t *testing.T) {
 	}
 	if txt := textOf(ghost); !strings.Contains(txt, `"matched": false`) || !strings.Contains(txt, "won't surface") {
 		t.Errorf("annotating an unknown symbol should warn via matched false + note: %s", txt)
+	}
+}
+
+// TestMCPUnannotate verifies agents can remove annotations, not only create
+// them — the knowledge layer must be prunable (CLI/MCP parity with `annotations
+// --rm`). Round-trip: annotate → unannotate by id → gone → second remove is a
+// graceful no-op.
+func TestMCPUnannotate(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Real() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := app.NewService(sess).Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create an annotation and capture its id.
+	ann, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_annotate",
+		Arguments: map[string]any{"path": proj, "symbol": "Real", "note": "removable-note"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(textOf(ann)), &created); err != nil || created.ID == 0 {
+		t.Fatalf("annotate should return a numeric id, got %s (%v)", textOf(ann), err)
+	}
+
+	// Remove it.
+	rm, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_unannotate",
+		Arguments: map[string]any{"path": proj, "id": created.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(rm); !strings.Contains(txt, `"removed": true`) {
+		t.Errorf("unannotate should report removed true: %s", txt)
+	}
+
+	// It's gone from the list.
+	list, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_annotations",
+		Arguments: map[string]any{"path": proj, "symbol": "Real"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(textOf(list), "removable-note") {
+		t.Errorf("annotation should be gone after unannotate: %s", textOf(list))
+	}
+
+	// Removing again is a graceful no-op (removed false + note), not an error.
+	again, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_unannotate",
+		Arguments: map[string]any{"path": proj, "id": created.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(again); !strings.Contains(txt, `"removed": false`) {
+		t.Errorf("removing a missing annotation should report removed false, not error: %s", txt)
 	}
 }
 
