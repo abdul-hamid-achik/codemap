@@ -280,6 +280,41 @@ func (s *Store) FindNodesBySymbol(projectID int64, symbol string) ([]Node, error
 	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND symbol=? ORDER BY file_path, start_line", projectID, symbol)
 }
 
+// ResolveQualifiedName maps a fully- or partially-qualified name — the form
+// hotspots/orphans/find DISPLAY (e.g. "ui.DefaultTheme", "pkg.Type.Method",
+// "Type.Method") — to the bare symbol the rest of the query layer keys on. It tries
+// an exact fqn match, then an fqn suffix (".<name>"), and returns the bare symbol +
+// true only when every match agrees on one bare symbol (so an ambiguous suffix never
+// silently picks one). Lets a user copy a name straight out of hotspots into impact.
+func (s *Store) ResolveQualifiedName(projectID int64, name string) (string, bool) {
+	nodes, err := s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND fqn=? ORDER BY file_path, start_line", projectID, name)
+	if err != nil {
+		return "", false
+	}
+	if len(nodes) == 0 {
+		nodes, err = s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND fqn LIKE ? ESCAPE '\\' ORDER BY file_path, start_line", projectID, "%."+likeEscape(name))
+		if err != nil {
+			return "", false
+		}
+	}
+	bare := ""
+	for _, n := range nodes {
+		switch {
+		case bare == "":
+			bare = n.Symbol
+		case n.Symbol != bare:
+			return "", false // suffix matched different bare symbols — ambiguous, don't guess
+		}
+	}
+	return bare, bare != ""
+}
+
+// likeEscape escapes the SQL LIKE metacharacters so a symbol/fqn fragment is matched
+// literally (paired with ESCAPE '\\'). Symbol names rarely contain these, but be safe.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
+}
+
 // NodeExistsByName reports whether any node in the project has the given symbol
 // name or fully-qualified name. Annotations surface by matching either, so this
 // answers "would an annotation on this target ever surface?" — used to warn on

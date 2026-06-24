@@ -88,6 +88,35 @@ func TestAddGetNode(t *testing.T) {
 	}
 }
 
+func TestResolveQualifiedName(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(file, sym, fqn string) {
+		if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: file, Symbol: sym, FQN: fqn,
+			Kind: KindFunction, Language: "go", SourceHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("ui/theme.go", "DefaultTheme", "ui.DefaultTheme")
+	mk("modes/save.go", "Update", "modes.SaveAsMode.Update")
+
+	cases := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"ui.DefaultTheme", "DefaultTheme", true},   // exact fqn (pkg.Sym) — copied from hotspots
+		{"modes.SaveAsMode.Update", "Update", true}, // exact fqn (pkg.Type.Method)
+		{"SaveAsMode.Update", "Update", true},       // fqn suffix (Type.Method)
+		{"NoSuch.Thing", "", false},                 // no match → caller keeps the input
+	}
+	for _, c := range cases {
+		got, ok := s.ResolveQualifiedName(pid, c.in)
+		if ok != c.ok || got != c.want {
+			t.Errorf("ResolveQualifiedName(%q) = (%q,%v), want (%q,%v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
 func TestGetNodeNotFound(t *testing.T) {
 	s := openTest(t)
 	if _, err := s.GetNode(123); !errors.Is(err, ErrNotFound) {

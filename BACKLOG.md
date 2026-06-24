@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #197 (resolve qualified names — accept the form hotspots/orphans/find PRINT; sweep finding C) —
+  hotspots/orphans/find display package-qualified names (`ui.DefaultTheme`, `pkg.Type.Method`) but
+  callers/callees/impact/context/source/path REJECTED them ("no symbol named"), so copy-pasting a name from
+  one command into the next — exactly what the agent docs workflow chains (hotspots/orphans → context/impact)
+  — dead-ended on every package/receiver-prefixed symbol. Added `graph.Store.ResolveQualifiedName` (exact
+  fqn → fqn-suffix → bare symbol, only when matches agree on one bare symbol) + an ADDITIVE service helper
+  `canonicalSymbol` that rewrites a dotted query to the bare name ONLY when the bare lookup misses (so plain
+  names are untouched and a true typo still says "no symbol named"). Injected at the 5 resolution sites
+  (relation/Impact/Source/Path×2/preciseRelations). Verified on a synthetic 3-package Go module:
+  `impact ui.DefaultTheme`, `impact modes.SaveAsMode.Update`, `impact SaveAsMode.Update` all resolve now;
+  bare names still work; `impact NoSuchZZ` still fails honestly. Added TestResolveQualifiedName. `task check`
+  + query.yml + precise.yml green. COMMIT+PUSH. (Resolves sweep finding C — teak + tinyvault. Remaining: B
+  generated-code excludes, D Go var/const indexing, E staleness on parse-error files.)
 - 2026-06-24 #196 (LSP — stop indexing anonymous inline callbacks; the biggest real-world noise source) — a
   multi-agent dogfood sweep across 8 real sibling repos (workflow) surfaced this HIGH finding: on a real Nuxt
   app (liftclub) ~34% of symbols (888/2573) were anonymous inline callbacks the language server names after

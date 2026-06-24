@@ -615,6 +615,25 @@ func (svc *Service) Callees(cwd, symbol string) (*RelationReport, error) {
 	return svc.relation(cwd, symbol, (*graph.Store).Callees)
 }
 
+// canonicalSymbol resolves a user query that may be qualified ("pkg.Sym",
+// "pkg.Type.Method", "Type.Method") — the form hotspots/orphans/find DISPLAY — to the
+// bare symbol the graph keys on, so a name can be copied straight from one command
+// into another (the agent workflow chains hotspots/orphans -> context/impact). It
+// rewrites ONLY when the input isn't already a bare symbol, so plain-name queries are
+// untouched and a genuine typo is returned unchanged (still reported "no symbol named").
+func canonicalSymbol(g *graph.Store, projectID int64, input string) string {
+	if !strings.Contains(input, ".") {
+		return input
+	}
+	if defs, err := g.FindNodesBySymbol(projectID, input); err == nil && len(defs) > 0 {
+		return input // literally indexed under this dotted name
+	}
+	if bare, ok := g.ResolveQualifiedName(projectID, input); ok {
+		return bare
+	}
+	return input
+}
+
 func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64, string) ([]graph.Node, error)) (*RelationReport, error) {
 	g, err := svc.s.Graph()
 	if err != nil {
@@ -632,6 +651,8 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	if err != nil {
 		return nil, err
 	}
+	symbol = canonicalSymbol(g, p.ID, symbol) // accept the qualified form hotspots/orphans print
+	rep.Symbol = symbol
 	nodes, err := query(g, p.ID, symbol)
 	if err != nil {
 		return nil, err
@@ -748,6 +769,7 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 		return nil, nil, project, err
 	}
 
+	symbol = canonicalSymbol(g, p.ID, symbol) // accept the qualified form hotspots/orphans print
 	nodes, err := g.FindNodesBySymbol(p.ID, symbol)
 	if err != nil {
 		return nil, nil, project, err
@@ -1004,6 +1026,8 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	if err != nil {
 		return nil, err
 	}
+	symbol = canonicalSymbol(g, p.ID, symbol) // accept the qualified form hotspots/orphans print
+	rep.Symbol = symbol
 
 	locs, err := g.FindNodesBySymbol(p.ID, symbol)
 	if err != nil {
@@ -1257,6 +1281,8 @@ func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	name = canonicalSymbol(g, pid, name) // accept the qualified form hotspots/orphans print
+	rep.Symbol = name
 	nodes, err := g.FindNodesBySymbol(pid, name)
 	if err != nil {
 		return nil, err
@@ -1449,6 +1475,11 @@ func (svc *Service) Path(cwd, from, to string) (*PathReport, error) {
 		return rep, nil
 	}
 	g, _ := svc.s.Graph()
+
+	// Accept the qualified form hotspots/orphans/find print for either endpoint.
+	from = canonicalSymbol(g, pid, from)
+	to = canonicalSymbol(g, pid, to)
+	rep.From, rep.To = from, to
 
 	// Distinguish "this endpoint isn't a symbol here" from "no path between two
 	// real symbols" — otherwise a typo'd name reads as an unconnected pair.
