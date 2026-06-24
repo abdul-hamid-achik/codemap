@@ -14,12 +14,13 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 )
 
-// WatchConfig tunes the file watcher. Excluded is the dir/file base-name exclusion
-// predicate (e.g. an Indexer's excluded check) so the watcher ignores the same
-// paths the indexer does; Debounce coalesces a burst of edits into one callback.
+// WatchConfig tunes the file watcher. Excluded is the exclusion predicate (e.g. an
+// Indexer's Excluded check), called with a project-relative path so the watcher
+// ignores the same paths the indexer does; Debounce coalesces a burst of edits into
+// one callback.
 type WatchConfig struct {
 	Debounce time.Duration
-	Excluded func(name string) bool
+	Excluded func(rel string) bool
 }
 
 // Watcher reports source-file changes under a project root via fsnotify, coalescing
@@ -59,7 +60,7 @@ func NewWatcher(root string, cfg WatchConfig, onChange func(toIndex, toRemove []
 		if !d.IsDir() {
 			return nil
 		}
-		if p != root && w.skipDir(d.Name()) {
+		if p != root && w.skipDir(p) {
 			return filepath.SkipDir
 		}
 		_ = w.fsw.Add(p) // best effort; a transient add failure shouldn't abort setup
@@ -71,8 +72,17 @@ func NewWatcher(root string, cfg WatchConfig, onChange func(toIndex, toRemove []
 	return w, nil
 }
 
-func (w *Watcher) skipDir(name string) bool {
-	return w.cfg.Excluded(name) || strings.HasPrefix(name, ".")
+// rel returns path relative to the watch root (falling back to path itself), so
+// the exclude predicate sees the same project-relative paths the indexer does.
+func (w *Watcher) rel(path string) string {
+	if r, err := filepath.Rel(w.root, path); err == nil {
+		return r
+	}
+	return path
+}
+
+func (w *Watcher) skipDir(path string) bool {
+	return w.cfg.Excluded(w.rel(path)) || strings.HasPrefix(filepath.Base(path), ".")
 }
 
 // Run drives the watch loop until ctx is cancelled or the watcher is closed,
@@ -105,12 +115,11 @@ func (w *Watcher) Run(ctx context.Context) error {
 func (w *Watcher) Close() error { return w.fsw.Close() }
 
 func (w *Watcher) handle(ev fsnotify.Event) {
-	name := filepath.Base(ev.Name)
 	switch {
 	case ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename):
 		// The path is gone, so we can't stat it — treat it as a removed source file by
 		// extension (a non-source/excluded path is ignored).
-		if extract.LanguageForPath(ev.Name) != "" && !w.cfg.Excluded(name) {
+		if extract.LanguageForPath(ev.Name) != "" && !w.cfg.Excluded(w.rel(ev.Name)) {
 			w.mark(ev.Name, 'r')
 		}
 	case ev.Op.Has(fsnotify.Create) || ev.Op.Has(fsnotify.Write):
@@ -119,12 +128,12 @@ func (w *Watcher) handle(ev fsnotify.Event) {
 			return // already gone / transient
 		}
 		if fi.IsDir() {
-			if ev.Op.Has(fsnotify.Create) && !w.skipDir(name) {
+			if ev.Op.Has(fsnotify.Create) && !w.skipDir(ev.Name) {
 				w.addDir(ev.Name) // watch the new dir + index any source files it arrived with
 			}
 			return
 		}
-		if extract.LanguageForPath(ev.Name) != "" && !w.cfg.Excluded(name) {
+		if extract.LanguageForPath(ev.Name) != "" && !w.cfg.Excluded(w.rel(ev.Name)) {
 			w.mark(ev.Name, 'i')
 		}
 	}
@@ -138,15 +147,14 @@ func (w *Watcher) addDir(dir string) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
 		if d.IsDir() {
-			if p != dir && w.skipDir(name) {
+			if p != dir && w.skipDir(p) {
 				return filepath.SkipDir
 			}
 			_ = w.fsw.Add(p)
 			return nil
 		}
-		if extract.LanguageForPath(p) != "" && !w.cfg.Excluded(name) {
+		if extract.LanguageForPath(p) != "" && !w.cfg.Excluded(w.rel(p)) {
 			w.mark(p, 'i')
 		}
 		return nil

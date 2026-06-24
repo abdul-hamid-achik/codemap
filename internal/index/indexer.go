@@ -101,6 +101,7 @@ type Indexer struct {
 	vectors    *vector.Store
 	embedder   embed.Provider
 	cfg        config.IndexConfig
+	exclude    []string // effective skip globs: cfg.Exclude + cfg.ExcludeExtra
 	extractors map[string]extract.Extractor
 	closers    []io.Closer // stateful extractors (e.g. spawned language servers) to shut down
 }
@@ -212,6 +213,7 @@ func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.Index
 		vectors:    vec,
 		embedder:   emb,
 		cfg:        cfg,
+		exclude:    append(append([]string{}, cfg.Exclude...), cfg.ExcludeExtra...),
 		extractors: map[string]extract.Extractor{},
 	}
 	ix.Register(gosrc.New())
@@ -221,10 +223,11 @@ func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.Index
 // Register adds (or replaces) the extractor for a language.
 func (ix *Indexer) Register(e extract.Extractor) { ix.extractors[e.Language()] = e }
 
-// Excluded reports whether a file or directory base name matches a configured
-// exclude glob — exported so the daemon's watcher ignores the same paths the
-// indexer does.
-func (ix *Indexer) Excluded(name string) bool { return ix.excluded(name) }
+// Excluded reports whether a project-relative path (or a bare base name) matches
+// a configured exclude glob — exported so the daemon's watcher ignores the same
+// paths the indexer does. A relative path lets slash-anchored patterns
+// ("db/migrations") work; a bare name still matches segment globs ("node_modules").
+func (ix *Indexer) Excluded(relOrName string) bool { return ix.excluded(relOrName) }
 
 type fileTask struct {
 	abs  string
@@ -370,7 +373,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			}
 			continue // a non-NotExist stat error: be conservative, skip
 		}
-		if fi.IsDir() || ix.excluded(filepath.Base(rel)) {
+		if fi.IsDir() || ix.excluded(rel) {
 			continue
 		}
 		lang := extract.LanguageForPath(abs)
@@ -408,13 +411,17 @@ func (ix *Indexer) walk(root string) ([]fileTask, map[string]int, error) {
 			return nil // skip unreadable entries
 		}
 		name := d.Name()
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
 		if d.IsDir() {
-			if path != root && (ix.excluded(name) || strings.HasPrefix(name, ".")) {
+			if path != root && (ix.excluded(rel) || strings.HasPrefix(name, ".")) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if ix.excluded(name) {
+		if ix.excluded(rel) {
 			return nil
 		}
 		lang := extract.LanguageForPath(path)
@@ -425,25 +432,75 @@ func (ix *Indexer) walk(root string) ([]fileTask, map[string]int, error) {
 			}
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			rel = path
-		}
 		files = append(files, fileTask{abs: path, rel: rel, lang: lang, ext: ext})
 		return nil
 	})
 	return files, unsupported, err
 }
 
-// excluded reports whether a file or directory base name matches any configured
-// exclude glob (e.g. "node_modules", "*.min.js").
-func (ix *Indexer) excluded(name string) bool {
-	for _, pat := range ix.cfg.Exclude {
-		if ok, _ := filepath.Match(pat, name); ok {
-			return true
+// excluded reports whether a project-relative path matches any effective exclude
+// glob (cfg.Exclude + cfg.ExcludeExtra). See matchExclude for the glob semantics.
+func (ix *Indexer) excluded(rel string) bool { return matchExclude(ix.exclude, rel) }
+
+// matchExclude reports whether the (slash-normalized) relative path rel matches
+// any pattern. Semantics:
+//
+//   - A pattern WITHOUT a slash matches any single path segment, so "node_modules"
+//     or "migrations" or "*.min.js" skips that file/dir at any depth.
+//   - A pattern WITH a slash matches a segment-wise path PREFIX anchored at the
+//     project root, so "db/migrations" skips db/migrations and everything under it
+//     but not app/db/migrations.
+//   - A "**/" prefix un-anchors a slash pattern so it matches that prefix starting
+//     at any depth, so "**/db/migrations" also skips app/db/migrations.
+//
+// A bare base name (one segment, no slash) is a valid rel and matches the no-slash
+// rules — so callers may pass either a full relative path or a base name.
+func matchExclude(patterns []string, rel string) bool {
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+	if rel == "" {
+		return false
+	}
+	segs := strings.Split(rel, "/")
+	for _, pat := range patterns {
+		pat = strings.Trim(filepath.ToSlash(pat), "/")
+		if pat == "" {
+			continue
+		}
+		if !strings.ContainsRune(pat, '/') {
+			for _, s := range segs {
+				if ok, _ := filepath.Match(pat, s); ok {
+					return true
+				}
+			}
+			continue
+		}
+		anyDepth := strings.HasPrefix(pat, "**/")
+		parts := strings.Split(strings.TrimPrefix(pat, "**/"), "/")
+		last := 0 // anchored: only try matching the prefix at the root
+		if anyDepth {
+			last = len(segs) - 1 // un-anchored: try every starting segment
+		}
+		for i := 0; i <= last && i < len(segs); i++ {
+			if segPrefixMatch(parts, segs[i:]) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// segPrefixMatch reports whether each glob in parts matches the corresponding
+// leading segment of segs (parts being no longer than segs).
+func segPrefixMatch(parts, segs []string) bool {
+	if len(parts) > len(segs) {
+		return false
+	}
+	for i, p := range parts {
+		if ok, _ := filepath.Match(p, segs[i]); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result) (bool, []extract.Reference, error) {

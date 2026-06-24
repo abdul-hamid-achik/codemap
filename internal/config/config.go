@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -36,8 +37,17 @@ type EmbeddingConfig struct {
 
 // IndexConfig controls what gets indexed.
 type IndexConfig struct {
-	MaxFileBytes int      `yaml:"max_file_bytes"` // skip files larger than this
-	Exclude      []string `yaml:"exclude"`        // path globs to skip
+	MaxFileBytes int `yaml:"max_file_bytes"` // skip files larger than this
+	// Exclude fully REPLACES the built-in default skip list (.git, node_modules,
+	// vendor, …). Set it only to override those defaults wholesale. A pattern
+	// without a slash matches any path segment ("migrations" skips a migrations
+	// dir at any depth); a pattern with a slash anchors to the project root
+	// ("db/migrations"), and a "**/" prefix matches at any depth ("**/testdata").
+	Exclude []string `yaml:"exclude"`
+	// ExcludeExtra is APPENDED to Exclude (whether default or overridden), so you
+	// can skip your own folders (migrations, fixtures, generated/) without
+	// restating the defaults. Same glob semantics as Exclude.
+	ExcludeExtra []string `yaml:"exclude_extra"`
 }
 
 // DefaultConfig returns the built-in defaults (lowest precedence).
@@ -165,6 +175,13 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Daemon.EmbedMaxInFlight = n
+		}
+	}
+	if v := os.Getenv("CODEMAP_EXCLUDE_EXTRA"); v != "" {
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				cfg.Index.ExcludeExtra = append(cfg.Index.ExcludeExtra, p)
+			}
 		}
 	}
 }
