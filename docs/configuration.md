@@ -10,7 +10,9 @@ $XDG_CACHE_HOME/codemap/                  # caches
 ```
 
 If `~/.codemap/` already exists it is used (back-compat with the vecgrep/noted ecosystem).
-Use `codemap init --local` to keep repo-local state.
+`codemap init --local` drops a `.codemap` marker so a repo-local `codemap.yaml` is picked up from
+any subdirectory (the project-file step below); the index itself stays central — set `CODEMAP_DATA`
+to a path inside the repo if you want a repo-local index too.
 
 ## Precedence (highest → lowest)
 

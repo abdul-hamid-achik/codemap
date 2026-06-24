@@ -5,6 +5,18 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #173 (docs accuracy — `--local` no longer claims "repo-local state" it doesn't deliver) —
+  dogfooded `init --local`: it creates an empty `.codemap/` dir but the index STILL goes to the global
+  data dir (verified: graph.db landed in CODEMAP_DATA, `.codemap/` stayed empty), yet the help + README +
+  docs/configuration.md all said "keep repo-local state" / "keep state inside the project" — false.
+  Traced the real semantics: `.codemap` is a project-root MARKER consumed by `config.Load`'s
+  FindProjectRoot (so a repo-local `codemap.yaml` config is discovered from any subdir); the index/data
+  is always central (XDG/CODEMAP_DATA), and `resolveProject` resolves subdirs via the registry, not the
+  marker. So `--local` = repo-local *config* discovery, NOT repo-local *data*. Corrected all four spots
+  (init Long help, --local flag help, README, docs/configuration.md) to say exactly that, and to point at
+  `CODEMAP_DATA=<repo path>` as the way to actually get a repo-local index. (Repo-local data storage as a
+  first-class feature — store in `.codemap/` when marked — is a possible future addition; deferred as a
+  data-model change, not a doc fix.) Build + fmt + cmd/config tests green. COMMIT+PUSH.
 - 2026-06-24 #172 (correctness — registered-but-unindexed project no longer gives misleading empties) —
   dogfooded the init-without-index path: a project registered via `init` but never indexed (0 nodes)
   returned MISLEADING results — `callers A`→"none" (reads as "A has no callers"!), `context A`→"not

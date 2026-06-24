@@ -73,9 +73,11 @@ var (
 		Use:   "init",
 		Short: "Register the current directory as a codemap project",
 		Long: `Register the current directory as a codemap project.
-By default, project data is stored centrally under $XDG_DATA_HOME/codemap/
-(falling back to ~/.local/share or ~/.codemap if present). Use --local to keep
-state inside the project.`,
+Project data (the graph DB + vectors) is stored centrally under
+$XDG_DATA_HOME/codemap/ (falling back to ~/.local/share or ~/.codemap if
+present). --local drops a .codemap marker in the project root so a repo-local
+codemap.yaml config is picked up from any subdirectory; the index still lives
+centrally — set CODEMAP_DATA to a path inside the repo for a repo-local index.`,
 		RunE: runInit,
 	}
 	indexCmd = &cobra.Command{
@@ -219,7 +221,7 @@ func init() {
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
 	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph")
 	indexCmd.Flags().Bool("no-lsp", false, "skip language-server-backed extraction (e.g. TypeScript via typescript-language-server)")
-	initCmd.Flags().Bool("local", false, "create a .codemap directory inside the project")
+	initCmd.Flags().Bool("local", false, "drop a .codemap marker (so a repo-local codemap.yaml is found; index stays central)")
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")

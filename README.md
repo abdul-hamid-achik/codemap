@@ -316,8 +316,9 @@ $XDG_DATA_HOME/codemap/                   # graph DB, veclite, project registry
 $XDG_CACHE_HOME/codemap/                  # caches
 ```
 
-If `~/.codemap/` already exists it is used (back-compat with vecgrep/noted). Use
-`codemap init --local` to keep repo-local state. Precedence and all keys are documented in
+If `~/.codemap/` already exists it is used (back-compat with vecgrep/noted). `codemap init --local`
+drops a `.codemap` marker so a repo-local `codemap.yaml` is picked up from any subdirectory; the
+index stays central (set `CODEMAP_DATA` to a path inside the repo for a repo-local index). Precedence and all keys are documented in
 [AGENTS.md](./AGENTS.md). Override paths with `CODEMAP_CONFIG` / `CODEMAP_DATA`.
 
 ## How it fits the ecosystem
