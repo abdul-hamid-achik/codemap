@@ -10,6 +10,8 @@ package lspsrc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -45,6 +47,16 @@ func New(ctx context.Context, lang, langID, root, command string, args ...string
 		return nil, err
 	}
 	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, client: client}, nil
+}
+
+// wrapExtractErr turns the bare context-deadline error a stalled language server
+// produces (via the per-request LSP timeout) into a message a user can act on,
+// instead of a cryptic "context deadline exceeded" in the index summary.
+func wrapExtractErr(lang, relPath string, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%s language server timed out on %s — file skipped", lang, relPath)
+	}
+	return err
 }
 
 // lspLanguageID refines the extractor's default LSP languageId by file
@@ -83,7 +95,7 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 	}
 	syms, err := e.client.DocumentSymbols(e.ctx, uri)
 	if err != nil {
-		return nil, err
+		return nil, wrapExtractErr(e.lang, relPath, err)
 	}
 	res := &extract.FileResult{Path: relPath, Language: e.lang}
 	lines := strings.Split(string(src), "\n")

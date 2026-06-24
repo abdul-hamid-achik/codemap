@@ -2,9 +2,11 @@ package lspsrc
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +131,19 @@ func TestBind(t *testing.T) {
 	}
 	if err := js.Close(); err != nil {
 		t.Errorf("a shared extractor's Close should be a no-op, got %v", err)
+	}
+}
+
+// TestWrapExtractErr verifies a request timeout becomes an actionable message
+// (not a bare "context deadline exceeded"), while other errors pass through.
+func TestWrapExtractErr(t *testing.T) {
+	got := wrapExtractErr("typescript", "src/App.tsx", context.DeadlineExceeded).Error()
+	if !strings.Contains(got, "timed out") || !strings.Contains(got, "App.tsx") || !strings.Contains(got, "typescript") {
+		t.Errorf("timeout error should name the language/file and say timed out, got %q", got)
+	}
+	other := errors.New("some other failure")
+	if wrapExtractErr("go", "a.go", other) != other {
+		t.Error("a non-timeout error should pass through unchanged")
 	}
 }
 

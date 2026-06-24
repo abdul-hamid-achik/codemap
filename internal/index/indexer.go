@@ -52,7 +52,7 @@ type FileError struct {
 type Result struct {
 	FilesScanned int         `json:"files_scanned"`
 	FilesIndexed int         `json:"files_indexed"` // new or changed
-	FilesSkipped int         `json:"files_skipped"` // unchanged or too large
+	FilesSkipped int         `json:"files_skipped"` // unchanged, too large, or errored (see Errors)
 	Nodes        int         `json:"nodes"`
 	Edges        int         `json:"edges"`
 	Errors       []FileError `json:"errors,omitempty"`
@@ -226,7 +226,10 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		}
 		changed, refs, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
 		if err != nil {
+			// An errored file (e.g. a language server that timed out) wasn't indexed —
+			// count it as skipped so scanned = indexed + skipped, and record why.
 			res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
+			res.FilesSkipped++
 			continue
 		}
 		if changed {

@@ -767,6 +767,18 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #125 (polish — index surfaces skipped/timed-out files clearly) — two follow-ups #124
+  exposed (now that a file can be *skipped* on a server timeout): (1) **accounting bug** — an errored
+  file was appended to `Result.Errors` but `FilesSkipped` was never incremented, so the summary
+  "scanned X, indexed Y, skipped Z" silently didn't add up (the errored files vanished from the
+  totals). Fixed: an errored file now counts as skipped, so `scanned = indexed + skipped` always holds.
+  (2) **cryptic message** — a timed-out file printed `! file.ts: context deadline exceeded`. New
+  `lspsrc.wrapExtractErr` turns a `context.DeadlineExceeded` into `"<lang> language server timed out on
+  <file> — file skipped"` (other errors pass through). Tests: index `TestIndexErroredFileCountedAsSkipped`
+  (erroring extractor injected via `ix.Register` over the "go" slot → asserts the scanned=indexed+skipped
+  invariant), lspsrc `TestWrapExtractErr` (pure helper: timeout → actionable, other → unchanged). Full
+  suite + lint(0) + fmt green. Closes the loop on #124 — a skipped file is now both counted and
+  explained. COMMIT+PUSH.
 - 2026-06-24 #124 (robustness — per-request LSP timeout; no more index hangs) — the Vue probe
   exposed a real gap independent of Vue: `codemap index` runs on `context.Background()` (no deadline),
   and lspsrc passed that unbounded context to LSP requests — so **a hung/misbehaving language server

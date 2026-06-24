@@ -2,12 +2,14 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
+	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
@@ -234,6 +236,43 @@ func TestIndexStructureOnly(t *testing.T) {
 	}
 	if res.Nodes != 5 || res.Edges != 5 {
 		t.Errorf("structure-only nodes/edges = %d/%d, want 5/5", res.Nodes, res.Edges)
+	}
+}
+
+// erroringExtractor stands in for a backend that fails on every file (e.g. a
+// language server that timed out) so the indexer's error accounting is testable.
+type erroringExtractor struct{}
+
+func (erroringExtractor) Language() string { return "go" }
+func (erroringExtractor) ExtractFile(string, []byte) (*extract.FileResult, error) {
+	return nil, fmt.Errorf("simulated extract failure")
+}
+
+// TestIndexErroredFileCountedAsSkipped checks the accounting invariant: a file
+// that fails to extract is recorded in Errors AND counted as skipped, so the
+// summary's "scanned = indexed + skipped" always holds (it didn't before — an
+// errored file vanished from the totals).
+func TestIndexErroredFileCountedAsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.go", "package p\n\nfunc F() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("p", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix.Register(erroringExtractor{}) // replace gosrc for "go" → every file errors
+
+	res, err := ix.IndexProject(context.Background(), pid, "p", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) == 0 {
+		t.Fatal("expected the errored file recorded in res.Errors")
+	}
+	if res.FilesIndexed != 0 {
+		t.Errorf("an errored file must not count as indexed, got %d", res.FilesIndexed)
+	}
+	if res.FilesScanned != res.FilesIndexed+res.FilesSkipped {
+		t.Errorf("accounting broken: scanned %d != indexed %d + skipped %d",
+			res.FilesScanned, res.FilesIndexed, res.FilesSkipped)
 	}
 }
 
