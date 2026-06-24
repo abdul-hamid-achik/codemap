@@ -742,6 +742,21 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #112 (accuracy — MCP agent playbook didn't know TS precise) — the agent-facing surface
+  (`codemap serve`) still described `precise:true` as Go-only, so an agent indexing a **TypeScript**
+  project wouldn't know `codemap_index precise:true` is what gives it a call graph at all. Fixed two
+  spots in `internal/mcp/server.go`: (1) the Instructions/accuracy preamble — `precise:true` is now the
+  "unified exact-resolution pass: go/types for Go, typescript-language-server callHierarchy for
+  TypeScript", explicitly noting TS has NO name-based call edges so on a TS project precise:true is the
+  only way to get callers/impact/hotspots/path, and that the per-query `precise:true` on
+  codemap_callers/callees is gopls = **Go only** (on TS, reindex with codemap_index precise:true);
+  (2) the `codemap_index` `precise` jsonschema param now matches the CLI flag ("Go via go/types …;
+  TypeScript via callHierarchy … gives TypeScript a call graph"). MCP `codemap_status` was already
+  clean — it returns the raw StatusReport (precise_edges/languages as fields), no human engine-label.
+  Extended `TestInstructionsCoverKeyCapabilities` to require "TypeScript" + "callHierarchy". Full suite
+  + mcp lint(0) + fmt clean. With this, every precise/engine surface — CLI index msg, docs, studio,
+  `status`, AND the MCP agent guide — tells the truth about which engine resolved the graph. COMMIT+
+  PUSH. Next: JS row (server-dedup first).
 - 2026-06-24 #111 (accuracy — `status` precise-edge label was Go-centric, wrong for TS) — the
   human-readable `status` output hardcoded **"N precise via go/types"** for *every* project, so a
   TypeScript project showed "3 precise via go/types" — wrong engine (TS precise edges come from
