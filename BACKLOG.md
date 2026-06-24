@@ -5,6 +5,23 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #143 (polish — studio `?` help overlay is now an accurate, complete keymap) — audited the
+  studio TUI for navigation discoverability. The width-constrained per-tab footers can't list every key
+  (and `spread` drops the right-hand status when a hint overflows, so cramming keys risks wrapping the
+  fixed-height layout on 80-col terminals) — so the full-screen `?` overlay is the canonical reference,
+  and it was understating reality: the vim aliases `k/j` (wired on Graph + Metrics + Source) were
+  undocumented, `home/end` was buried, Metrics was wrongly grouped with the text-input tabs (Impact /
+  Search, which have NO `k/j` because those keys type into the query box), and the whole **Source-view
+  scroll mode** (↑/↓·k/j·pgup/pgdn·g/G·esc/q) had no entry at all. Rewrote `renderHelp` (view.go): split
+  the over-merged group into Graph / Metrics / Impact-Search / Source-view sections, documented every
+  key where it actually works, kept the columns aligned (key col 24, `padRight` measures display width
+  so the multibyte arrows/dots line up). Verified by dumping the rendered overlay — clean alignment.
+  Extended `TestHelpOverlay` to assert the new sections + `k/j`/`home/end`/Source-view. Confirmed two
+  audit claims were FALSE before acting (no churn): the README `## Commands` table already covers all 23
+  commands (a `codemap <cmd>` grep gave false "missing" hits — the table uses backtick style), and the
+  Graph tab does NOT show "loading…" forever on error (on `graphHubsMsg{err}` it sets graphLoaded=true →
+  falls through to `emptyGraphHint` + red error in footer). Full suite + lint(0) + fmt green. studio.yml
+  flow unaffected (local-only; asserts clean_exit + "codemap studio — keys", both still hold). COMMIT+PUSH.
 - 2026-06-24 #142 (polish — path annotations now surface in `path`) — fixed the half-working feature
   found while dogfooding (#141): a note pinned to a call path (`annotate <from> <to>`) was created and
   listable via `annotations` but never appeared in the `path` query — whereas symbol annotations

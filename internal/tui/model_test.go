@@ -817,7 +817,11 @@ func TestHelpOverlay(t *testing.T) {
 		t.Fatal("? should open the help overlay")
 	}
 	out := m.render()
-	for _, want := range []string{"Global", "Graph", "re-center", "precise"} {
+	// Document every key that actually works, where it works: the vim aliases
+	// (k/j) and the Source-view scroll mode were undocumented before, and
+	// Metrics was wrongly grouped with the text-input tabs (which have no k/j).
+	for _, want := range []string{"Global", "Graph", "Metrics", "Impact / Search",
+		"re-center", "precise", "k/j", "home/end", "Source view"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay should document %q:\n%s", want, out)
 		}

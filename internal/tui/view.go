@@ -48,7 +48,7 @@ func renderHelp() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("codemap studio — keys") + "\n\n")
 	row := func(k, d string) {
-		b.WriteString("  " + symStyle.Render(padRight(k, 26)) + mutedStyle.Render(d) + "\n")
+		b.WriteString("  " + symStyle.Render(padRight(k, 24)) + mutedStyle.Render(d) + "\n")
 	}
 	b.WriteString(sectionStyle.Render("Global") + "\n")
 	row("1–4 / tab / shift+tab", "switch tabs")
@@ -58,15 +58,21 @@ func renderHelp() string {
 	row("? / esc", "toggle this help")
 	row("ctrl+c", "quit (q also quits on Graph/Metrics)")
 	b.WriteString("\n" + sectionStyle.Render("Graph") + "\n")
-	row("↑/↓ · pgup/pgdn · home/end", "move the hub selection")
+	row("↑/↓ · k/j", "move the hub selection (also pgup/pgdn · home/end)")
 	row("→/l · ←/h", "focus the callers/calls pane · back to hubs")
 	row("enter", "hubs → Impact · refs → re-center (walk)")
 	row("backspace", "step back along the walk")
 	row("s · p", "view source · precise relations (gopls)")
-	b.WriteString("\n" + sectionStyle.Render("Metrics / Impact / Search") + "\n")
-	row("↑/↓ · pgup/pgdn", "move the selection")
-	row("enter", "drill the selection into Impact")
-	row("type (Impact/Search)", "edit the query; enter runs it")
+	b.WriteString("\n" + sectionStyle.Render("Metrics") + "\n")
+	row("↑/↓ · k/j", "move the selection (also pgup/pgdn · home/end)")
+	row("enter", "drill the selected symbol into Impact")
+	b.WriteString("\n" + sectionStyle.Render("Impact / Search") + "\n")
+	row("type", "edit the query; enter runs it")
+	row("↑/↓ · pgup/pgdn", "move the result selection")
+	row("enter", "run the query, or open the selected hit")
+	b.WriteString("\n" + sectionStyle.Render("Source view (s / ctrl+s)") + "\n")
+	row("↑/↓ · k/j", "scroll (also pgup/pgdn · g/G top & bottom)")
+	row("esc / q", "close the source view")
 	return b.String()
 }
 
