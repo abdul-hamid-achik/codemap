@@ -5,6 +5,15 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #137 (verify + docs — real-project edge cases hold; set expectations about deps) —
+  continued dogfooding real layouts; all **clean** (no bugs): a 4 MB file is skipped (>1 MiB
+  `MaxFileBytes`); `status`/queries from a **subdirectory** find the registered project root; **multi-
+  project isolation** holds (project A's `find` never returns project B's symbols, and vice-versa).
+  Shipped a small docs win from it: the README quick-start now states codemap "indexes your code, not
+  your dependencies" (node_modules/venv/vendor/dist/build/__pycache__/.git skipped by default,
+  configurable) — the #1 evaluation worry for a new user — and fixed a stale `--precise` line
+  (TypeScript-only → TS/JS/Python). Docs-only; no behavior change. COMMIT+PUSH. (Reliability + venv
+  fixes since v0.7.0 make a clean **v0.7.1 patch** when you want it.)
 - 2026-06-24 #136 (BUG — exclude Python virtualenvs so they don't flood the graph) — dogfooded
   real-project layouts after v0.7.0. **node_modules/vendor/dist/.git etc. are correctly skipped**
   (default `Exclude` + the dot-prefix rule — verified node_modules stays out with LSP on). But a gap

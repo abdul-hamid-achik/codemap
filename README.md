@@ -138,7 +138,9 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 codemap init                       # registers the current directory
 codemap index                      # extract graph + embed nodes (incremental)
 codemap index --no-embed           # structure only (no Ollama needed)
-codemap index --precise            # exact call edges (Go via go/types; TypeScript via callHierarchy)
+codemap index --precise            # exact call edges (Go via go/types; TS/JS/Python via callHierarchy)
+# Indexes your code, not your dependencies: node_modules, venv, vendor, dist, build,
+# __pycache__, .git (and any dotdir) are skipped by default — configurable via `exclude`.
 
 # 2. Navigate the call graph
 codemap callers authenticateUser   # who calls it (fast, name-based)
