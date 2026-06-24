@@ -7,6 +7,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -475,12 +476,18 @@ func result(v any, err error) (*sdkmcp.CallToolResult, any, error) {
 	if err != nil {
 		return errResult(err.Error()), nil, nil
 	}
-	b, mErr := json.MarshalIndent(v, "", "  ")
-	if mErr != nil {
+	// Indented JSON without HTML escaping — the inner result has no HTML context,
+	// so <, >, & stay literal (e.g. a path target "A -> B", generics Array<T>);
+	// the go-sdk re-escapes this string correctly in the JSON-RPC envelope.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if mErr := enc.Encode(v); mErr != nil {
 		return errResult(mErr.Error()), nil, nil
 	}
 	return &sdkmcp.CallToolResult{
-		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: string(b)}},
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: string(bytes.TrimRight(buf.Bytes(), "\n"))}},
 	}, v, nil
 }
 

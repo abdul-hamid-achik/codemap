@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #186 (JSON quality — stop HTML-escaping CLI/MCP output; cleaner for agents & humans) — dogfooding
+  the annotations knowledge layer (annotate node+path → surfaces inline in context/callers → list → --json,
+  all working) surfaced a real wart: a path annotation's JSON target read `"runImpact -> BlastRadius"`.
+  Both printJSON (CLI, json.NewEncoder) and the MCP result() (json.MarshalIndent) use Go's default encoding,
+  which HTML-escapes <, >, & — needless for a CLI/agent tool with no HTML context, and noisy to read/grep
+  (path separators `->`, TypeScript generics `Array<string>`, any &). Set SetEscapeHTML(false) in both
+  (MCP via a bytes.Buffer encoder; the go-sdk re-escapes the string correctly in the JSON-RPC envelope, so
+  no protocol risk). Now `annotations --json` shows `"runImpact -> BlastRadius"` on CLI AND MCP. Added
+  TestResultJSONNotHTMLEscaped guarding the MCP serialization. Nothing pinned the escaped form. `task check`
+  green. COMMIT+PUSH.
 - 2026-06-24 #185 (README accuracy — refresh the flagship `impact` example against the real binary) — audited
   the README's command examples against the current binary (the loop's "accurate README that matches the
   actual commands"). The input examples (context/callers --lsp/path/impact --depth/semantic --top/…) are all

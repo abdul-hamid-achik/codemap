@@ -26,6 +26,19 @@ func textOf(res *sdkmcp.CallToolResult) string {
 	return b.String()
 }
 
+// result() serializes tool payloads without HTML escaping, so <, >, & stay
+// literal — agents (and humans reading the JSON) see "A -> B", not "A -> B",
+// and TypeScript generics like Array<string> read cleanly.
+func TestResultJSONNotHTMLEscaped(t *testing.T) {
+	res, _, _ := result(map[string]string{"target": "A -> B & Array<string>"}, nil)
+	txt := textOf(res)
+	// With HTML escaping on, this would read "A -<esc> B ..." with the angle
+	// brackets/ampersand turned into \u00xx, and the literal check below would fail.
+	if !strings.Contains(txt, "A -> B & Array<string>") {
+		t.Errorf("result JSON should keep <, >, & literal (no HTML escaping): %s", txt)
+	}
+}
+
 func TestInstructionsCoverKeyCapabilities(t *testing.T) {
 	// The instructions are an agent's first-contact playbook; keep them in sync
 	// with the actual tools and accuracy model.

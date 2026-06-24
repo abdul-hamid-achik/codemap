@@ -1125,6 +1125,10 @@ func jsonOut(cmd *cobra.Command) bool {
 func printJSON(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
+	// CLI/agent JSON has no HTML context, so keep <, >, & literal instead of
+	// </>/& — cleaner to read and grep (e.g. a path target "A -> B",
+	// or TypeScript generics like Array<string> in a signature).
+	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
 
