@@ -767,6 +767,20 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #118 (vectors — wire the hybrid (vector + BM25) search the store already had) —
+  dogfooding semantic search (a "hotspots ranking" query returned only loosely-related hits) traced to
+  a real gap: `Service.Semantic` called pure-vector `vstore.Search`, while `vstore.HybridSearch`
+  (vector + BM25 over the symbol/fqn text index) was **built but never wired** — and the README/AGENTS
+  already *claimed* "vector + BM25 hybrid (RRF) search," so the docs were aspirational. Switched
+  `Semantic` to `HybridSearch(vec, query, topK, name)` with a defensive fallback to pure `Search` (so an
+  older index lacking a text index never hard-fails). Now a query that names a symbol gets a keyword
+  boost while conceptual queries still match by vector — verified live: "hotspots ranking by in-degree"
+  → the four Hotspots symbols up top (was loosely-related before); the conceptual `semantic.yml` flow
+  ("verify a signed login credential" → Authenticate) still passes with real Ollama. Query-side only —
+  **no reindex** (the text index already exists from `WithTextIndex(symbol, fqn)`). Improves both the
+  CLI `semantic` and the studio Search tab. Test: extended `TestServiceSemantic` (a name query ranks the
+  named symbol first via hybrid BM25); store-level `TestHybridSearch` already covered fusion. Full suite
+  + lint(0) + fmt + semantic E2E green. The docs are now accurate (hybrid is real). COMMIT+PUSH.
 - 2026-06-24 #117 (agent parity — `codemap_unannotate` MCP tool) — dogfooding the annotation layer
   surfaced a real CLI/MCP asymmetry: the CLI can create, list **and remove** annotations
   (`annotations --rm <id>`), but the MCP exposed only `codemap_annotate` (create) + `codemap_annotations`

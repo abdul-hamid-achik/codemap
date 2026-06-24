@@ -828,7 +828,14 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if err != nil {
 		return nil, err
 	}
-	hits, err := vstore.Search(vecs[0], topK, name)
+	// Hybrid (vector + BM25 over symbol/fqn) fuses meaning with keyword matches —
+	// e.g. a query that names a symbol gets a keyword boost while conceptual
+	// queries still match by vector. Fall back to pure vector if the index has no
+	// text index (older indexes) so search never hard-fails.
+	hits, err := vstore.HybridSearch(vecs[0], query, topK, name)
+	if err != nil {
+		hits, err = vstore.Search(vecs[0], topK, name)
+	}
 	if err != nil {
 		return nil, err
 	}

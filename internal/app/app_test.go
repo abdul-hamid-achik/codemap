@@ -547,6 +547,18 @@ func TestServiceSemantic(t *testing.T) {
 	if gotDoc != "Authenticate validates a jwt token." {
 		t.Errorf("semantic hit doc = %q, want %q", gotDoc, "Authenticate validates a jwt token.")
 	}
+
+	// A query that names a symbol surfaces it first via the hybrid (vector + BM25
+	// over symbol/fqn) path — the keyword match boosts it even though the fake
+	// vectors carry no real meaning. This is what makes Semantic use HybridSearch
+	// instead of pure vector search.
+	named, err := svc.Semantic(context.Background(), proj, "Render", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named.Hits) == 0 || named.Hits[0].Symbol != "Render" {
+		t.Errorf("naming a symbol should rank it first via hybrid BM25, got %+v", named.Hits)
+	}
 }
 
 func TestHotspotsFlagsSharedNames(t *testing.T) {
