@@ -73,6 +73,64 @@ func TestAppendSymbolsNesting(t *testing.T) {
 	}
 }
 
+func TestIsAnonymousCallable(t *testing.T) {
+	for _, n := range []string{"", "<function>", "<anonymous>", "<lambda>",
+		"map() callback", "defineEventHandler() callback", "xs.filter() callback"} {
+		if !isAnonymousCallable(n) {
+			t.Errorf("%q should be an anonymous callable", n)
+		}
+	}
+	for _, n := range []string{"namedFunc", "handler", "defineEventHandler",
+		"Foo.Bar", "useAuth", "callback", "myCallback", "onCallback"} {
+		if isAnonymousCallable(n) {
+			t.Errorf("%q is a real identifier and must NOT be treated as anonymous", n)
+		}
+	}
+}
+
+// TestAppendSymbolsSkipsAnonymousCallbacks verifies inline anonymous functions the
+// language server names after their call site ("map() callback") or "<function>"
+// are NOT indexed (they drown callback-heavy code in noise), while real
+// declarations are kept and a real nested symbol is reparented to the enclosing
+// scope rather than the junk callback name.
+func TestAppendSymbolsSkipsAnonymousCallbacks(t *testing.T) {
+	at := func(name string, kind, line int, kids ...lsp.DocumentSymbol) lsp.DocumentSymbol {
+		return lsp.DocumentSymbol{Name: name, Kind: kind,
+			Range:    lsp.Range{Start: lsp.Position{Line: line}, End: lsp.Position{Line: line}},
+			Children: kids}
+	}
+	res := &extract.FileResult{Path: "a.ts", Language: "typescript"}
+	roots := []lsp.DocumentSymbol{
+		at("namedFunc", lsp.SymbolFunction, 0,
+			at("map() callback", lsp.SymbolFunction, 1),
+			at("filter() callback", lsp.SymbolFunction, 1)),
+		// handler is a real module-level const; its inline arrow is anonymous, but a
+		// genuinely-named helper nested under that arrow must survive (reparented).
+		at("handler", lsp.SymbolVariable, 3,
+			at("defineEventHandler() callback", lsp.SymbolFunction, 3,
+				at("realHelper", lsp.SymbolFunction, 4))),
+		at("<function>", lsp.SymbolFunction, 6),
+	}
+	for _, s := range roots {
+		appendSymbols(res, nil, "typescript", "", false, s)
+	}
+	got := map[string]bool{}
+	for _, s := range res.Symbols {
+		got[s.FQN] = true
+		if isAnonymousCallable(s.Name) {
+			t.Errorf("anonymous callable %q was indexed but should be skipped", s.Name)
+		}
+	}
+	for _, want := range []string{"namedFunc", "handler", "handler.realHelper"} {
+		if !got[want] {
+			t.Errorf("expected real symbol %q, got %v", want, got)
+		}
+	}
+	if got["handler.defineEventHandler() callback.realHelper"] {
+		t.Error("realHelper should be reparented to handler, not the junk callback FQN")
+	}
+}
+
 // TestAppendSymbolsSkipsParams verifies a function's nested Variable children
 // (parameters/locals, as pyright reports them) are dropped, while the function
 // and a module-level variable are kept — so the graph isn't cluttered with param

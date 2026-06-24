@@ -235,9 +235,25 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 	if kind == extract.KindVariable && insideCallable {
 		kind = ""
 	}
-	fqn := s.Name
-	if parentFQN != "" {
-		fqn = parentFQN + "." + s.Name
+	// Language servers report inline anonymous functions as symbols, named after
+	// their call site ("map() callback", "defineEventHandler() callback") or
+	// "<function>"/"<anonymous>"/"<lambda>". They aren't real, queryable
+	// declarations, and on callback-heavy code (Nuxt/React/Vue, array methods, zod)
+	// they drown the graph — ~a third of a real app's symbols, and the bulk of its
+	// dead-code candidates. Don't index them; still recurse so a genuinely-named
+	// nested declaration is kept, parented to the real enclosing scope (not the
+	// synthesized junk name).
+	anon := isAnonymousCallable(s.Name)
+	if anon {
+		kind = ""
+	}
+	fqn := parentFQN
+	if !anon {
+		if parentFQN == "" {
+			fqn = s.Name
+		} else {
+			fqn = parentFQN + "." + s.Name
+		}
 	}
 	if kind != "" {
 		res.Symbols = append(res.Symbols, extract.Symbol{
@@ -251,12 +267,27 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 			Source:    lineSlice(lines, s.Range.Start.Line, s.Range.End.Line),
 		})
 	}
-	// A function/method's children are its params and locals; mark them so nested
-	// Variable symbols are dropped (above).
-	childInside := insideCallable || kind == extract.KindFunction || kind == extract.KindMethod
+	// A function/method (incl. an anonymous callback) scopes its params and locals;
+	// mark children inside-callable so nested Variable symbols are dropped (above).
+	childInside := insideCallable || anon || kind == extract.KindFunction || kind == extract.KindMethod
 	for _, child := range s.Children {
 		appendSymbols(res, lines, lang, fqn, childInside, child)
 	}
+}
+
+// isAnonymousCallable reports whether a language-server symbol name is a synthesized
+// placeholder for an inline anonymous function rather than a real declaration:
+// "<function>"/"<anonymous>"/"<lambda>"/empty, or the "<callee>() callback" form
+// servers use for arrows passed inline (e.g. "map() callback"). Such names can never
+// be a real identifier (they contain "()"/spaces/angle brackets), so this never drops
+// a genuine symbol.
+func isAnonymousCallable(name string) bool {
+	name = strings.TrimSpace(name)
+	switch name {
+	case "", "<function>", "<anonymous>", "<lambda>":
+		return true
+	}
+	return strings.HasSuffix(name, ") callback")
 }
 
 // mapKind maps an LSP DocumentSymbol to a codemap node kind, returning "" for

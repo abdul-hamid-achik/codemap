@@ -5,6 +5,26 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #196 (LSP — stop indexing anonymous inline callbacks; the biggest real-world noise source) — a
+  multi-agent dogfood sweep across 8 real sibling repos (workflow) surfaced this HIGH finding: on a real Nuxt
+  app (liftclub) ~34% of symbols (888/2573) were anonymous inline callbacks the language server names after
+  their call site — `map() callback`, `filter() callback`, `defineEventHandler() callback`,
+  `computed() callback`, `z.preprocess() callback`, `expect() callback` — plus `<function>` placeholders on
+  coder (Promise executors/IIFEs). They're not real, queryable declarations; they drowned find/symbols AND
+  dominated `orphans` (61% of liftclub's dead-code candidates were these — by construction never called).
+  Root cause: `lspsrc.appendSymbols` indexed `s.Name` from the LSP unfiltered. Fix: added `isAnonymousCallable`
+  (matches `<function>`/`<anonymous>`/`<lambda>`/empty, or the `…() callback` suffix — none of which can be a
+  real identifier) and skip those symbols, while still recursing so a genuinely-named nested decl is kept,
+  reparented to the real enclosing scope (not the junk FQN). Verified on a synthetic TS fixture (8→4 symbols,
+  callbacks gone, real ones kept). Added TestIsAnonymousCallable + TestAppendSymbolsSkipsAnonymousCallbacks.
+  `task check` + typescript/javascript/jsx/polyglot/studio_ts flows all green. COMMIT+PUSH. (Resolves the
+  liftclub garbage-symbol + orphans-noise + coder `<function>` findings — 3 of the 9 sweep findings.)
+  Remaining sweep follow-ups (tracked): (B) generated Go files indexed — add `*_gen.go` glob + detect the
+  canonical `// Code generated … DO NOT EDIT.` header (hitspec sqlc, teak rpc_gen.go); (C) hotspots/orphans
+  PRINT `pkg.Type.Method` but callers/impact/context REJECT it — accept the qualified/FQN form (teak,
+  tinyvault; breaks the documented agent workflow); (D) Go package-level `var`/`const` dropped entirely —
+  index them (glyphrun: `version.Version` missing); (E) a parse-error-skipped file is perpetually "stale: 1
+  new" — staleness must account for known-skipped files (noted).
 - 2026-06-24 #195 (exclude build-output variants — found dogfooding a real TS project) — indexed a real
   472-file TS project (linkglow) via typescript-language-server: it works (488 files in ~95s — LSP is
   slower than Go's go/parser, but tractable), but it INDEXED build artifacts — `apps/extension/dist-chrome/`
