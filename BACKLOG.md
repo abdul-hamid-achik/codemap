@@ -729,6 +729,37 @@
   setting `exclude` replaces the defaults, which is accurate — slices overlay). Full suite + lint(0) +
   fmt green. Real usability fix for Python on actual repos. COMMIT+PUSH.
 
+## 🏷️ Release — v0.9.0 (2026-06-24)
+**Built for agents and real repos.** Headline since v0.8.0 (44 commits):
+- **One-call orientation — the flagship `context`.** New `codemap context <sym>` / `codemap_context`
+  bundles a symbol's definition + callers + callees + covering tests + blast radius (with `blast_depth`) +
+  pinned annotations in ONE call, with lists bounded so a single call can't blow an agent's context window.
+  Now on every surface: CLI, MCP, and a scrollable, colorized studio overlay (`o` / `ctrl+o`).
+- **Agent trust: index freshness.** `status` (the MCP tool + studio header too) reports staleness — files
+  changed/new/deleted since indexing — so a person or agent knows to reindex before trusting results
+  instead of querying a stale graph. CI-guarded over MCP.
+- **Honesty everywhere.** `callers`/`callees` distinguish a typo from a real symbol with no callers
+  (`found`); a registered-but-unindexed project says so instead of misleading empties; `--precise`'s
+  "N unresolved" → "N to external/stdlib code" (those calls DID resolve); `hotspots` points at `--precise`
+  when counts are name-inflated; CLI/MCP JSON no longer HTML-escapes (`A -> B`, not `A -> B`). Orphans
+  cut false positives (stdlib-interface methods, package-level closures, generics) — codemap even found
+  dead code in itself.
+- **Hardened against real repos (via dogfooding).** Indexed real sibling projects and fixed what surfaced:
+  codemap was indexing browser-extension build output (`dist-chrome`/`dist-firefox`) → added
+  `dist-*`/`build-*`/`coverage` to the default excludes. Validated performance + correctness at scale
+  (666-file Go repo in <1s; real TS via the LSP backend, cross-file call graph).
+- **Onboarding that guides you.** Live progress bar for `index` (interactive TTY); consistent, actionable
+  "not indexed yet — run codemap index" across every query command; clean error output (no usage-block dump
+  on runtime errors); `--precise` documented as multi-language (TS/JS/Python need it for any call graph).
+- **studio polish.** The context overlay (above) + scroll indicators with result/hub counts, consistent
+  across all four tabs.
+- **Docs match the binary.** Full audit — README/AGENTS/CLI/quick-start/configuration accurate to the
+  20-tool surface, `context`, freshness, and all 9 env vars; the agent guide teaches the freshness + prune
+  workflow; the no-nomic-prefix embedding choice recorded with its measurement.
+- **Value demonstrated end-to-end.** New E2E flows: context, staleness, mcp_serve (stdio JSON-RPC wire),
+  annotations, polyglot (Go+TS+Python in one repo), incremental, jsx, config, onboarding. Full suite
+  (21 specs) + `task check` + CI all green.
+
 ## 🏷️ Release — v0.8.0 (2026-06-24)
 **Reliability + polish you'd actually reach for.** Headline since v0.7.0 (15 commits):
 - **Large-project symbol recovery (the big fix).** On big TypeScript repos `typescript-language-server`
