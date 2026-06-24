@@ -5,6 +5,18 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #150 (flow — demonstrate the annotations knowledge layer end-to-end) — first verified my
+  recent output changes didn't silently break the local-only flows: ran query/version/help/index_status/
+  precise/studio via `glyph run` — all PASS (the #145/#146 caps don't trip on the small fixtures; studio's
+  clean_exit holds and its help snapshot reflects #143). Then filled a real coverage gap: the annotations
+  knowledge layer — codemap's distinctive feature — was only half-shown (query.yml does a symbol-note
+  roundtrip; **path annotations (#142) had NO flow**, nor did annotation surfacing in `impact` or the
+  external-data payload). Added `specs/annotations.yml` (pure-Go, no deps): index a tiny Login→Auth
+  project, pin a note + `{"avg_ms":12}` data to `Auth` (source postgres) and see it under `impact Auth`,
+  pin a note to the Login→Auth call PATH and see it under `path Login Auth`, then list the whole layer
+  (node + path targets). 4 outcomes, all PASS; contractHash stamped via `glyph spec verify --stamp`.
+  Eyeballed the snapshot — a clean, compelling demo of "knowledge follows the graph." Updated AGENTS.md's
+  specs listing. No Go changed. COMMIT+PUSH.
 - 2026-06-24 #149 (polish — Metrics tab now renders cleanly at narrow widths, not just unbroken) —
   completed the #147 follow-up. #147's frame-level MaxWidth clamp stopped the overflow from BREAKING the
   layout, but it was masking real per-component overflow in the Metrics body: (a) `metricBlock` truncated

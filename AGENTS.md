@@ -73,7 +73,8 @@ codemap/
 │   # planned: extract/treesitter (CGO, build-tagged), extract/scip, search/* fusion
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
 ├── specs/                     # glyphrun E2E specs (*.yml): version/help/index_status/query
-│                              #   (graphs) · studio (TUI+gopls) · semantic (vectors+Ollama)
+│                              #   (graphs) · annotations (knowledge layer) · studio (TUI+gopls)
+│                              #   · semantic (vectors+Ollama) · precise/typescript/javascript/python
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md SPEC.md LICENSE

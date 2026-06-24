@@ -1,0 +1,46 @@
+version: 1
+name: annotations
+intent: |
+    codemap's annotations are a knowledge layer over the code graph: a note (and
+    optional external data, e.g. rows from a DB) pinned to a symbol or a call path
+    surfaces wherever that symbol/path shows up. After indexing a tiny project we
+    pin a note + data to a function and see it in `impact`, pin a note to the
+    Login → Auth call path and see it in `path`, then list the whole layer.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Login() { Auth() }; func Auth() {}' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== annotate a symbol with external data (e.g. a prod metric) =='; \"$CM\" annotate Auth --source postgres --note 'validates the session JWT' --data '{\"avg_ms\":12}' >/dev/null; echo '== impact surfaces the symbol annotation — knowledge follows the graph =='; \"$CM\" impact Auth; echo '== annotate the Login -> Auth call path =='; \"$CM\" annotate Login Auth --note 'login enters auth here' >/dev/null; echo '== path surfaces the path annotation =='; \"$CM\" path Login Auth; echo '== list the whole knowledge layer =='; \"$CM\" annotations"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: annotations
+outcomes:
+    - id: note_surfaces_in_impact
+      description: a symbol annotation shows up under the impact report
+      verify:
+        screen:
+            contains: "validates the session JWT"
+    - id: external_data_attached
+      description: the opaque data payload travels with the annotation
+      verify:
+        screen:
+            contains: "avg_ms"
+    - id: call_path_traced
+      description: path finds the Login -> Auth call chain
+      verify:
+        screen:
+            contains: "Login → Auth"
+    - id: path_annotation_surfaces
+      description: a note pinned to the call path shows up in `path` (not only in `annotations`)
+      verify:
+        screen:
+            contains: "login enters auth here"
+contractHash: sha256:4e910dd7eed1b1be02d84f145ef1f97b0721b16e931380755f9928ea9541abc4
