@@ -392,9 +392,10 @@ func (m Model) renderMetrics(w, h int) string {
 	if m.status.PreciseEdges > 0 { // go/types-resolved; vs name-based default
 		edges = fmt.Sprintf("%d edges (%d precise)", m.status.Edges, m.status.PreciseEdges)
 	}
-	header := title("Metrics") + "   " +
-		countStyle.Render(fmt.Sprintf("%d nodes · %s · %d files · %s",
-			m.status.Nodes, edges, m.status.Files, vec))
+	// Truncate the plain count text (with an ellipsis) before styling so the
+	// header fits a narrow terminal — `title("Metrics")` is 7 wide plus 3 spaces.
+	countTxt := fmt.Sprintf("%d nodes · %s · %d files · %s", m.status.Nodes, edges, m.status.Files, vec)
+	header := title("Metrics") + "   " + countStyle.Render(truncate(countTxt, clamp(w-10, 8, 240)))
 
 	// Two columns under the header: distributions on the left, the graph's
 	// extremes (most-referenced hubs vs unreferenced dead-code) on the right.
@@ -490,10 +491,13 @@ func metricBlock(b *strings.Builder, title string, rows []string, localSel, budg
 		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more\n", start)))
 	}
 	for i := start; i < end; i++ {
+		// Every row is clipped to the column width — not just the selected one — so
+		// a long FQN or file path can't push the column (and the whole frame) past
+		// its allotment on a narrow terminal.
 		if i == localSel {
 			b.WriteString(selectedStyle.Width(w).Render(truncate(rows[i], w)) + "\n")
 		} else {
-			b.WriteString(rows[i] + "\n")
+			b.WriteString(truncate(rows[i], w) + "\n")
 		}
 	}
 	if end < len(rows) {

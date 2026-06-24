@@ -79,6 +79,30 @@ func TestRenderFitsAllWidths(t *testing.T) {
 	}
 }
 
+// TestTabBodiesFitColumns is stricter than TestRenderFitsAllWidths: it checks
+// the body content BEFORE the render() MaxWidth clamp, so a component that
+// overflows its own column budget (e.g. an untruncated row or a fixed-width
+// header) is caught at the source instead of being silently clipped by the
+// frame clamp. Realistic widths only (≥60) — every tab fits its columns there.
+func TestTabBodiesFitColumns(t *testing.T) {
+	for _, w := range []int{120, 100, 80, 72, 60} {
+		for _, tb := range []struct {
+			name string
+			t    tab
+		}{{"Graph", tabGraph}, {"Metrics", tabMetrics}, {"Impact", tabImpact}, {"Search", tabSearch}} {
+			m := sized(t, w, 24)
+			m = seedTabs(m)
+			m.active = tb.t
+			for i, line := range strings.Split(m.body(w, 21), "\n") {
+				if lw := lipgloss.Width(line); lw > w {
+					t.Errorf("%s body at w=%d: line %d width %d exceeds column budget %d: %q",
+						tb.name, w, i, lw, w, line)
+				}
+			}
+		}
+	}
+}
+
 // TestFooterCompactsWhenNarrow pins the responsive footer: the rich hint shows
 // when it fits, and a compact form (still ending in "? help") takes over when it
 // would overflow — so key discoverability survives at 80 cols.

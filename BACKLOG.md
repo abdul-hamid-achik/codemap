@@ -5,6 +5,30 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #149 (polish — Metrics tab now renders cleanly at narrow widths, not just unbroken) —
+  completed the #147 follow-up. #147's frame-level MaxWidth clamp stopped the overflow from BREAKING the
+  layout, but it was masking real per-component overflow in the Metrics body: (a) `metricBlock` truncated
+  only the SELECTED row to the column width — every other hub/dead-code row was written raw, so a long
+  FQN or `file:line` (orphans never budgeted the path at all) overflowed the right column; (b) the Metrics
+  body header (`Metrics  N nodes · … · no embeddings — name search only`) was a fixed ~78 wide, never
+  budgeted. Both got clipped wholesale by the frame clamp (cutting the divider/columns), instead of
+  fitting. Fixed at the source: truncate EVERY row to the column width (not just the selected one), and
+  ellipsize the header's plain count text before styling (ANSI-safe — `title("Metrics")` is 7+3 wide).
+  Now the Metrics body fits exactly w at 40–120 (was a fixed 78): clean two columns + divider + ellipsized
+  content at any width. New stricter test `TestTabBodiesFitColumns` checks body content BEFORE the frame
+  clamp at widths ≥60 for all four tabs, so a source-level regression can't hide behind the clamp.
+  Known residual: the Impact body has a fixed ~55-wide element that only overflows below ~55 cols (rare;
+  the frame clamp still prevents any break) — not worth chasing now. Full suite + lint(0) + fmt green.
+  COMMIT+PUSH.
+- 2026-06-24 #148 (DECISION RESOLVED — tree-sitter deferred post-0.1, keep the LSP backend) — user was
+  asked directly (CGO breaks the pure-Go release, and the reported correctness bug is already fixed in
+  #139) and chose **"Defer — keep LSP backend."** So #141 is closed: no tree-sitter for 0.1. Rationale:
+  the symbol-drop bug is fixed (52%→96%); only large-repo SPEED + setup-friction remain, which don't
+  justify a new backend (CGO would break cross-compiled releases; the pure-Go wazero+WASM path is a real,
+  uncertain effort). Revisit post-0.1 only if large-repo speed becomes a forcing issue — and then via the
+  WASM path, never default CGO. Keep prioritizing studio/CLI/docs polish. Also confirmed this round: the
+  19 MCP tool descriptions agents read to pick tools are solid (impact framed as the flagship, orphans
+  states its blind spots, docs points at the index-first workflow + accuracy model) — no churn needed.
 - 2026-06-24 #147 (BUG — studio overflowed its frame at ≤80 cols; the flagship now fits any width) —
   finally rendered every studio tab at narrow widths (a diagnostic harness feeding realistic long-FQN
   data) instead of only the 120x40 glyphrun snapshots. Found a real layout break: at **80 cols** (a very
