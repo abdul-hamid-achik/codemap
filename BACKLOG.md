@@ -14,7 +14,7 @@
 ## Current state — what's shipped
 Released through **v0.10.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI** (23 commands, `--json`), **MCP**
-(`codemap serve`, 20 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
+(`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
 (one typescript-language-server for TS+JS, pyright for Python; `--precise` = the unified exact pass —
 go/types for Go, LSP `callHierarchy` for the rest). Semantic vectors via veclite + Ollama nomic-embed-text
@@ -255,7 +255,10 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   sha (`git.BranchSHA`), not HEAD. Robustness: `CurrentBranch`/`IsDetached` now use `symbolic-ref` (works on an
   UNBORN branch). Tests `TestInstallPostCheckoutHook` + from-defaulting in `TestBranchSwitchRestoresSnapshot`;
   task check green.
-- [ ] **BD.7** `internal/mcp/server.go` — `codemap_branch_switch` / `codemap_branch_status` tools.
+- [x] **BD.7** `internal/mcp/server.go` — `codemap_branch_status{path}` → `svc.BranchStatus` and
+  `codemap_branch_switch{path, to?, from?}` → `svc.BranchSwitch` (defaults `to` to the current branch). Registered
+  (now **22 MCP tools**), presence test extended. task check green. **🎉 Branch-index BD.1–7 COMPLETE** — git
+  checkout switches the index (graph+vectors) via snapshot→fcheap→restore, on CLI + auto-hook + MCP.
 
 ### Feature B — background daemon (incremental sync + Ollama throttle)
 > One process owns the writable handle, watches the FS, serves all CLI/MCP/studio clients over a unix

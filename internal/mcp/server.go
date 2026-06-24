@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -179,6 +180,12 @@ type unannotateInput struct {
 // doctorInput is empty: doctor inspects the environment, not a project.
 type doctorInput struct{}
 
+type branchSwitchInput struct {
+	Path string `json:"path,omitempty" jsonschema:"repository directory; defaults to cwd"`
+	To   string `json:"to,omitempty" jsonschema:"branch to switch the index to; defaults to the current git branch"`
+	From string `json:"from,omitempty" jsonschema:"branch being left; defaults to the last active branch"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -260,6 +267,14 @@ func (s *Server) register() {
 		Name:        "codemap_doctor",
 		Description: "Check the environment codemap runs in — go toolchain, gopls, the language servers (TypeScript/JavaScript, Python), and Ollama embeddings — each with a present/missing flag and an install hint. Use it to diagnose why a language isn't being indexed or why semantic search is unavailable.",
 	}, s.handleDoctor)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_branch_status",
+		Description: "Show the git branch/commit state used to key per-branch index snapshots (read-only): current branch, HEAD sha, detached, and the stable repo/branch keys.",
+	}, s.handleBranchStatus)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_branch_switch",
+		Description: "Switch the code index to a git branch: snapshots the current branch's index into fcheap and restores the target branch's snapshot (or reindexes when stale/absent), so the graph follows the working tree with no full reindex. Defaults 'to' to the current git branch; a non-git dir or detached HEAD is a no-op.",
+	}, s.handleBranchSwitch)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -284,6 +299,28 @@ func (s *Server) handleStatus(_ context.Context, _ *sdkmcp.CallToolRequest, in p
 		}
 	}
 	return result(rep, err)
+}
+
+func (s *Server) handleBranchStatus(ctx context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {
+	st, err := s.svc.BranchStatus(ctx, cwdOf(in.Path))
+	return result(st, err)
+}
+
+func (s *Server) handleBranchSwitch(ctx context.Context, _ *sdkmcp.CallToolRequest, in branchSwitchInput) (*sdkmcp.CallToolResult, any, error) {
+	root := cwdOf(in.Path)
+	to := in.To
+	if to == "" {
+		if st, serr := s.svc.BranchStatus(ctx, root); serr == nil {
+			to = st.Branch
+		}
+	}
+	if to == "" {
+		return result(nil, fmt.Errorf("no target branch (detached HEAD or not a git repository) — pass 'to'"))
+	}
+	if err := s.svc.BranchSwitch(ctx, root, in.From, to); err != nil {
+		return result(nil, err)
+	}
+	return result(map[string]string{"switched_to": to}, nil)
 }
 
 func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, in semanticInput) (*sdkmcp.CallToolResult, any, error) {
