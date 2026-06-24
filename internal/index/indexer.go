@@ -51,8 +51,9 @@ type FileError struct {
 // Result summarizes an index run.
 type Result struct {
 	FilesScanned int         `json:"files_scanned"`
-	FilesIndexed int         `json:"files_indexed"` // new or changed
-	FilesSkipped int         `json:"files_skipped"` // unchanged, too large, or errored (see Errors)
+	FilesIndexed int         `json:"files_indexed"`           // new or changed
+	FilesSkipped int         `json:"files_skipped"`           // unchanged, too large, or errored (see Errors)
+	FilesDeleted int         `json:"files_deleted,omitempty"` // pruned: indexed before, now gone from disk
 	Nodes        int         `json:"nodes"`
 	Edges        int         `json:"edges"`
 	Errors       []FileError `json:"errors,omitempty"`
@@ -131,6 +132,39 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 		registered = true
 	}
 	return registered
+}
+
+// pruneDeleted removes nodes, vectors, and index state for files that were
+// indexed previously but no longer exist on disk (deleted or renamed) — otherwise
+// incremental reindex leaves ghost symbols that show up in find/callers/search. It
+// checks each indexed file with os.Stat (not the walk result), so a file that's
+// still on disk but currently unsupported (server uninstalled, or --no-lsp) is
+// kept, never wiped; only genuinely-gone files are pruned.
+func (ix *Indexer) pruneDeleted(projectID int64, projectName, root string, res *Result) error {
+	indexed, err := ix.graph.IndexedFiles(projectID)
+	if err != nil {
+		return err
+	}
+	for _, rel := range indexed {
+		if _, statErr := os.Stat(filepath.Join(root, rel)); statErr == nil {
+			continue // still on disk — keep it (even if its extractor is unavailable now)
+		} else if !os.IsNotExist(statErr) {
+			continue // other stat error — be conservative, don't delete
+		}
+		if err := ix.graph.DeleteNodesInFile(projectID, rel); err != nil {
+			return err
+		}
+		if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
+			return err
+		}
+		if ix.vectors != nil {
+			if _, err := ix.vectors.DeleteByFile(projectName, rel); err != nil {
+				return err
+			}
+		}
+		res.FilesDeleted++
+	}
+	return nil
 }
 
 func noteMissingServer(res *Result, lang, cmd string) {
@@ -215,6 +249,15 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 			res.Languages = map[string]int{}
 		}
 		res.Languages[f.lang]++
+	}
+
+	// Incremental only: prune files that were indexed before but are gone from disk
+	// (deleted/renamed), so they don't leave ghost symbols. A full --reindex already
+	// wiped everything above.
+	if !opts.Reindex {
+		if err := ix.pruneDeleted(projectID, projectName, root, res); err != nil {
+			return nil, err
+		}
 	}
 
 	// Pass 1: extract + store nodes (and embeddings) for changed files. Collect

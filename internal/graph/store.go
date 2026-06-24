@@ -404,6 +404,32 @@ func (s *Store) FileHash(projectID int64, file string) (string, error) {
 	return h, err
 }
 
+// IndexedFiles lists every file path recorded in the index (one per previously
+// indexed file). Used to detect files deleted on disk since the last index.
+func (s *Store) IndexedFiles(projectID int64) ([]string, error) {
+	rows, err := s.db.Query("SELECT file_path FROM index_state WHERE project_id=?", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var files []string
+	for rows.Next() {
+		var f string
+		if err := rows.Scan(&f); err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, rows.Err()
+}
+
+// DeleteFileHash drops a file's index_state row (used when a file is removed from
+// disk; its nodes are deleted separately via DeleteNodesInFile).
+func (s *Store) DeleteFileHash(projectID int64, file string) error {
+	_, err := s.db.Exec("DELETE FROM index_state WHERE project_id=? AND file_path=?", projectID, file)
+	return err
+}
+
 // ---- stats ----
 
 // Stats returns counts for a project (projectID 0 = all projects).

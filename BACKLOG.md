@@ -767,6 +767,20 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #135 (BUG — incremental reindex now prunes deleted files; no more ghost symbols) —
+  dogfounded a real correctness bug: after deleting `b.go` and `codemap index` (incremental), `find
+  Gamma` STILL returned `Gamma` from the deleted file, and the graph stayed at 5 nodes — **deleted
+  files left ghost symbols in find/callers/impact/search forever** (only a full `--reindex` cleaned
+  them). The walk only sees on-disk files, so deletions were never detected; nothing even enumerated
+  the indexed-file set. Fix: new `graph.IndexedFiles`/`DeleteFileHash`; `Indexer.pruneDeleted` (run on
+  every incremental index) lists previously-indexed files and, for each that **`os.Stat` reports gone**,
+  deletes its nodes (edges cascade), vectors, and index_state row. Crucially it checks the *disk*, not
+  the walk result — so a file still on disk but currently *unsupported* (server uninstalled, or
+  `--no-lsp`) is **kept, never wiped**; only genuinely-deleted files are pruned. New `Result.FilesDeleted`
+  → CLI "N removed" + JSON. Verified live: delete b.go → "1 removed", graph 5→3 nodes, `find Gamma`
+  empty, `callers Beta` (a.go, on disk) still works. Test `TestIndexPrunesDeletedFiles` (gone → pruned;
+  on-disk → kept). Full suite + lint(0) + fmt + `-race` + query/precise E2E green. This was a genuine
+  trust bug (stale results after editing a repo) — exactly what dogfooding is for. COMMIT+PUSH.
 - 2026-06-24 #134 (honesty — recognize markup as "planned"; fix stale advisory) — the Vue dead-end
   (#133) surfaced two real gaps. (1) **Silent skips**: `.lua`/`.rb` were recognized-but-unsupported (so
   they're reported as "planned"), but `.vue`/`.html`/`.css` were unmapped → *silently* ignored, so a Vue

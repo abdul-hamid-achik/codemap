@@ -281,7 +281,11 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", rep.Warning)
 	}
 	fmt.Printf("Indexed %q (%s)\n", rep.Project, rep.Root)
-	fmt.Printf("  files: %d scanned, %d indexed, %d skipped\n", rep.FilesScanned, rep.FilesIndexed, rep.FilesSkipped)
+	filesLine := fmt.Sprintf("  files: %d scanned, %d indexed, %d skipped", rep.FilesScanned, rep.FilesIndexed, rep.FilesSkipped)
+	if rep.FilesDeleted > 0 {
+		filesLine += fmt.Sprintf(", %d removed", rep.FilesDeleted)
+	}
+	fmt.Println(filesLine)
 	fmt.Printf("  graph: %d nodes, %d edges (embeddings: %v)\n", rep.Nodes, rep.Edges, rep.Embedded)
 	if precise {
 		if rep.PreciseNote != "" {

@@ -43,6 +43,7 @@ type IndexReport struct {
 	FilesScanned int               `json:"files_scanned"`
 	FilesIndexed int               `json:"files_indexed"`
 	FilesSkipped int               `json:"files_skipped"`
+	FilesDeleted int               `json:"files_deleted,omitempty"`
 	Nodes        int               `json:"nodes"`
 	Edges        int               `json:"edges"`
 	Errors       []index.FileError `json:"errors,omitempty"`
@@ -138,6 +139,7 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.FilesScanned = res.FilesScanned
 	rep.FilesIndexed = res.FilesIndexed
 	rep.FilesSkipped = res.FilesSkipped
+	rep.FilesDeleted = res.FilesDeleted
 	rep.Nodes = res.Nodes
 	rep.Edges = res.Edges
 	rep.Errors = res.Errors

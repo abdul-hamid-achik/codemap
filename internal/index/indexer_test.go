@@ -239,6 +239,42 @@ func TestIndexStructureOnly(t *testing.T) {
 	}
 }
 
+// TestIndexPrunesDeletedFiles checks that an incremental reindex removes the
+// nodes of a file deleted from disk — otherwise ghost symbols linger in
+// find/callers/search. Files still on disk are untouched.
+func TestIndexPrunesDeletedFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.go", "package m\n\nfunc Alpha() { Beta() }\n\nfunc Beta() {}\n")
+	writeFile(t, dir, "b.go", "package m\n\nfunc Gamma() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("m", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "m", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "Gamma"); len(ns) == 0 {
+		t.Fatal("Gamma should be indexed initially")
+	}
+
+	// Delete b.go and reindex incrementally.
+	if err := os.Remove(filepath.Join(dir, "b.go")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := ix.IndexProject(context.Background(), pid, "m", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesDeleted != 1 {
+		t.Errorf("FilesDeleted = %d, want 1 (b.go gone from disk)", res.FilesDeleted)
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "Gamma"); len(ns) != 0 {
+		t.Error("Gamma (from deleted b.go) should be pruned, but it's still present")
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "Beta"); len(ns) == 0 {
+		t.Error("Beta (a.go, still on disk) must NOT be pruned")
+	}
+}
+
 // erroringExtractor stands in for a backend that fails on every file (e.g. a
 // language server that timed out) so the indexer's error accounting is testable.
 type erroringExtractor struct{}
