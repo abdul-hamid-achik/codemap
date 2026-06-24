@@ -6,14 +6,14 @@
 ```
  codemap studio                       codemap · 509 nodes · 1849 edges · 35 files
   1 Graph   2 Metrics   3 Impact   4 Search
- Hubs                                 │ lspsrc.Extractor.Close
+ Hubs (164)                           │ lspsrc.Extractor.Close
     57  lspsrc.Extractor.Close        │  Called by (57)
     56  app.Session.Close             │   ▸ main.runInit    cmd/codemap/main.go:186
     56  graph.Store.Close             │     main.runIndex   cmd/codemap/main.go:209
     26  app.NewService                │  Calls (9)
     19  app.Open                      │     app.Session.Close  internal/app/session.go:80
-                                      │  ⟩ func runInit(cmd *cobra.Command, ...) error
- ↑/↓ hub · → walk callers/calls · enter → impact · p precise · ctrl+c quit
+     ▼ 159 more                       │  ⟩ func runInit(cmd *cobra.Command, ...) error
+ ↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit · ? help
 ```
 
 ## Tabs

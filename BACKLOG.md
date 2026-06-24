@@ -5,6 +5,15 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #171 (docs — refresh the studio screenshots to match current rendering) — the README + docs/
+  studio.md studio ASCII screenshots (the front-door first impression) had drifted behind the studio's
+  rendering: the footer read `↑/↓ hub · → walk callers/calls · enter → impact · p precise · ctrl+c quit`
+  — MISSING the `s source` and `? help` keys shipped in #143 (so a reader wouldn't learn about the source
+  overlay or the `?` keymap from the front door), and the hub list title was `Hubs` not `Hubs (N)` (#160,
+  no scroll indicator either). Updated both to the real rendering: `Hubs (164)` + a `▼ 159 more` scroll
+  indicator + footer `↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit · ? help`
+  (internally consistent: 5 shown + 159 = 164; panes aligned). Compared against an actual studio.txt
+  snapshot. Docs-only. COMMIT+PUSH.
 - 2026-06-24 #170 (flow — verify + guard the JSX/TSX call graph, a distinctive claimed feature) —
   the README/CLAUDE claim "`<Component/>` usages resolve" (#122) had NO flow, and neither typescript.yml
   (plain TS) nor javascript.yml (TS+JS) exercises JSX. Dogfooded it: a `<Leaf/>` usage in a `.tsx`
