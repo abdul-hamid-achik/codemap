@@ -107,6 +107,12 @@ func LanguageForPath(path string) string {
 		return "lua"
 	case ".rb":
 		return "ruby"
+	case ".vue":
+		return "vue"
+	case ".html", ".htm":
+		return "html"
+	case ".css":
+		return "css"
 	default:
 		return ""
 	}

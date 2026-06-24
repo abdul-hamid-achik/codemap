@@ -175,7 +175,7 @@ func indexAdvisory(res *index.Result) string {
 		}
 		if len(planned) > 0 {
 			msgs = append(msgs, "skipped "+summarizeUnsupported(planned)+
-				" — codemap indexes Go (and TypeScript via typescript-language-server); more languages planned")
+				" — codemap indexes Go, TypeScript, JavaScript, and Python; more languages planned (run 'codemap doctor' to see language servers)")
 		}
 	}
 	return strings.Join(msgs, "; ")

@@ -767,6 +767,33 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #134 (honesty — recognize markup as "planned"; fix stale advisory) — the Vue dead-end
+  (#133) surfaced two real gaps. (1) **Silent skips**: `.lua`/`.rb` were recognized-but-unsupported (so
+  they're reported as "planned"), but `.vue`/`.html`/`.css` were unmapped → *silently* ignored, so a Vue
+  user got no signal at all. Mapped them in `LanguageForPath` (`.vue`→vue, `.html`/`.htm`→html,
+  `.css`→css) — no extractor/ServerSpec, so zero Volar risk; they just flow into `Result.Unsupported`
+  and get reported. (2) **Stale message**: the index advisory still said "codemap indexes Go (and
+  TypeScript via typescript-language-server)" — written before JS/Python — fixed to "Go, TypeScript,
+  JavaScript, and Python; more languages planned (run 'codemap doctor' …)". Verified live: a pure
+  Vue/CSS project now prints "skipped 1 css, 1 vue — codemap indexes Go, TypeScript, JavaScript, and
+  Python; more planned" instead of silence. Tests: new `TestLanguageForPath` (incl. markup + unknown),
+  `TestIndexAdvisory` still green. Full suite + lint(0) + fmt. So while Vue's *call graph* isn't feasible
+  (#133), a Vue user is now at least told codemap sees the files and support is planned. COMMIT+PUSH.
+- 2026-06-24 #133 (investigation — Vue via Volar is a DEAD END for the generic LSP driver) —
+  followed up the user's Vue request with two definitive raw probes (driving `vue-language-server`
+  3.2.5 directly via `lsp.Client`/`conn.Call` with custom `initialize` params). Found a real tsdk:
+  `…/nodejs/.../node_modules/typescript/lib` (has `tsserverlibrary.js`). Result: **even with
+  `initializationOptions.typescript.tsdk` set — and again with `vue.hybridMode:false` — Volar's first
+  `documentSymbol` never responds (20–25s timeout)**. So the blocker is NOT just missing init options
+  (#123's hypothesis): Volar 3.x is architecturally incompatible with codemap's generic one-server,
+  documentSymbol/callHierarchy driver. In hybrid mode it expects TS features to come from a *separate*
+  `typescript-language-server` loaded with `@vue/typescript-plugin` (a different integration entirely);
+  in full mode it still doesn't answer a plain documentSymbol here. **Conclusion: drop the
+  "vue-language-server as a ServerSpec row" approach.** The realistic path to Vue is parsing the SFC
+  ourselves — extract the `<script>` block and feed it to the existing TS pipeline, i.e. the deferred
+  **tree-sitter / structure-only markup** layer (Pass-2b), which is genuine new backend. `.vue` stays
+  unmapped (safely skipped) until then. No code shipped — `.vue` was never wired, so nothing to revert;
+  the #124 timeout already guarantees no hang regardless. This closes the Volar avenue with evidence.
 - 2026-06-24 #132 (docs — scannable languages table in the README) — the first question a visitor
   asks ("does it support my language?") was buried in a dense prose blockquote. Replaced it with a
   4-column table (Language · How · Extensions · Call graph) covering Go, TypeScript/JavaScript (one
