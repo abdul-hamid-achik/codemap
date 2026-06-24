@@ -742,6 +742,20 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #109 (studio polish — honest Graph empty-state for TS) — the multi-language work
+  exposed a misleading TUI state: `graph.Hotspots` ranks only call/reference edges, so a **TypeScript
+  project indexed without `--precise`** (nodes + `defines` edges, but zero call edges — TS calls come
+  only from the precise pass) produced an empty hub list, and the Graph tab then showed
+  `notIndexedHint` = "no index yet — press ctrl+r to index." Flat-out wrong: it IS indexed. New
+  `Model.emptyGraphHint` distinguishes three states — (1) genuinely unindexed → the index hint;
+  (2) indexed-with-nodes-but-no-hubs **and** `Languages["typescript"]>0` → "indexed — N nodes — but no
+  call graph yet … TypeScript call edges come only from the precise pass. Reindex with `codemap index
+  --precise` (needs typescript-language-server)" — NOT ctrl+r, which is structure-only and wouldn't add
+  TS call edges; (3) Go-only trivial project with no calls → the same but without the TS server line.
+  Pre-wrapped into short lines so the body width doesn't soft-wrap `typescript-language-server` across a
+  break. `TestGraphEmptyStateDistinguishesNoCallGraph` covers all three. Full suite + tui lint(0) + vet
+  + fmt clean; studio E2E (PTY) still green. Polish-first, no backend change. COMMIT+PUSH. Next: JS row
+  (needs server-dedup so a TS+JS repo doesn't spawn two tsservers); then a studio-on-TS E2E flow.
 - 2026-06-23 #108 (multi-lang — docs: TS call graph is shipped, not "in progress") — swept every
   doc surface that still said TypeScript call edges were "in progress / the next slice" and made them
   accurate now that C2 (#107) shipped. **README**: features graph bullet ("symbols + structure always,

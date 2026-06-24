@@ -640,6 +640,56 @@ func TestColdStartTabsHintToIndex(t *testing.T) {
 	}
 }
 
+// TestGraphEmptyStateDistinguishesNoCallGraph verifies the Graph tab tells the
+// truth when there are no hubs: "no index yet" only when genuinely unindexed,
+// but "indexed, no call graph — reindex with --precise" once symbols exist (the
+// normal state for a TypeScript project indexed without --precise, where the old
+// blanket "no index" message was misleading).
+func TestGraphEmptyStateDistinguishesNoCallGraph(t *testing.T) {
+	loadEmptyHubs := func(m Model) Model {
+		m, _ = applyMsg(m, graphHubsMsg{hubs: nil}) // graphLoaded=true, no hubs
+		return m
+	}
+
+	// Unindexed → the index hint.
+	m := sized(t, 120, 40) // starts on Graph
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{Project: "p", Registered: false}})
+	m = loadEmptyHubs(m)
+	if out := m.render(); !strings.Contains(out, "no index yet") {
+		t.Errorf("unindexed Graph should hint to index, got:\n%s", out)
+	}
+
+	// Indexed TypeScript, no call edges → name --precise and the TS server, NOT "no index".
+	m = sized(t, 120, 40)
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
+		Project: "ts", Registered: true, Nodes: 12, Edges: 5,
+		Languages: map[string]int{"typescript": 4},
+	}})
+	m = loadEmptyHubs(m)
+	out := m.render()
+	if strings.Contains(out, "no index yet") {
+		t.Errorf("indexed-but-no-calls Graph must not claim 'no index yet', got:\n%s", out)
+	}
+	if !strings.Contains(out, "--precise") || !strings.Contains(out, "typescript-language-server") {
+		t.Errorf("TypeScript empty-graph hint should point at --precise + the TS server, got:\n%s", out)
+	}
+
+	// Indexed Go-only, no call edges (trivial project) → still --precise, no TS server line.
+	m = sized(t, 120, 40)
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
+		Project: "g", Registered: true, Nodes: 3, Edges: 1,
+		Languages: map[string]int{"go": 3},
+	}})
+	m = loadEmptyHubs(m)
+	out = m.render()
+	if !strings.Contains(out, "--precise") {
+		t.Errorf("Go empty-graph hint should still suggest --precise, got:\n%s", out)
+	}
+	if strings.Contains(out, "typescript-language-server") {
+		t.Errorf("Go-only project should not mention the TypeScript server, got:\n%s", out)
+	}
+}
+
 func TestSearchNameModeNoEmbeddingsHint(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch

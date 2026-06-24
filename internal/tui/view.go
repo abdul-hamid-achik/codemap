@@ -173,7 +173,7 @@ func (m Model) renderGraph(w, h int) string {
 		return title("Graph") + "\n\n" + mutedStyle.Render("loading call graph…")
 	}
 	if len(m.graphHubs) == 0 {
-		return notIndexedHint("Graph")
+		return m.emptyGraphHint()
 	}
 	leftW := 38
 	if leftW > w/2 {
@@ -320,6 +320,32 @@ func (m Model) refBlock(refs []app.SymbolRef, base, budget, w int) string {
 // succeed (e.g. Impact/Search prompting for input that would only return nothing).
 func notIndexedHint(tabName string) string {
 	return title(tabName) + "\n\n" + mutedStyle.Render("no index yet — press ctrl+r to index, or run 'codemap index'")
+}
+
+// emptyGraphHint explains an empty hub list. It distinguishes "not indexed at
+// all" from "indexed but no call graph" — the latter is the normal state for a
+// TypeScript project indexed *without* --precise (TS call edges come only from
+// the precise pass), where the generic "no index yet" message would be wrong and
+// confusing (the project IS indexed; it just has no resolved calls to rank).
+func (m Model) emptyGraphHint() string {
+	if m.status == nil {
+		return title("Graph") + "\n\n" + mutedStyle.Render("loading…")
+	}
+	if !m.status.Registered || m.status.Nodes == 0 {
+		return notIndexedHint("Graph")
+	}
+	// Keep each line short so it doesn't soft-wrap inside the body (which would
+	// split the server name and read awkwardly).
+	lines := []string{fmt.Sprintf("indexed — %d nodes — but no call graph yet (no resolved calls to rank).", m.status.Nodes), ""}
+	if m.status.Languages["typescript"] > 0 {
+		// ctrl+r reindexes structure-only, which won't add TS call edges; --precise will.
+		lines = append(lines,
+			"TypeScript call edges come only from the precise pass.",
+			"Reindex with 'codemap index --precise' (needs typescript-language-server).")
+	} else {
+		lines = append(lines, "Reindex with 'codemap index --precise' to resolve calls exactly.")
+	}
+	return title("Graph") + "\n\n" + mutedStyle.Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderMetrics(w, h int) string {
