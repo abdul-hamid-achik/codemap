@@ -1223,16 +1223,35 @@ func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
 // complete picture in a single query instead of stitching together source +
 // callers + callees + impact (four round-trips for a harness).
 type ContextReport struct {
-	Symbol      string             `json:"symbol"`
-	Project     string             `json:"project"`
-	Found       bool               `json:"found"`
-	Definitions []SourceMatch      `json:"definitions"`           // signature, doc, file:line, and source body per matching def
-	Callers     []SymbolRef        `json:"callers"`               // who calls it
-	Callees     []SymbolRef        `json:"callees"`               // what it calls
-	Tests       []ImpactNode       `json:"tests"`                 // tests covering it (run these)
-	BlastRadius int                `json:"blast_radius"`          // count of transitively-affected nodes
-	Note        string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
-	Annotations []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
+	Symbol      string        `json:"symbol"`
+	Project     string        `json:"project"`
+	Found       bool          `json:"found"`
+	Definitions []SourceMatch `json:"definitions"` // signature, doc, file:line, and source body per matching def
+	Callers     []SymbolRef   `json:"callers"`     // who calls it (capped — see callers_total)
+	Callees     []SymbolRef   `json:"callees"`     // what it calls (capped — see callees_total)
+	Tests       []ImpactNode  `json:"tests"`       // tests covering it (capped — see tests_total)
+	// *Total are the true counts before capping, so an agent knows when a list was
+	// truncated and can call codemap_callers/codemap_callees/codemap_impact for the
+	// complete set. The bundle stays bounded so one orientation call can't blow an
+	// agent's context window.
+	CallersTotal int                `json:"callers_total"`
+	CalleesTotal int                `json:"callees_total"`
+	TestsTotal   int                `json:"tests_total"`
+	BlastRadius  int                `json:"blast_radius"`          // count of transitively-affected nodes
+	Note         string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
+	Annotations  []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
+}
+
+// contextListCap bounds each relationship list in a context bundle so one
+// orientation call stays small even for a hub. The full lists are a drill-down
+// away (codemap_callers / codemap_callees / codemap_impact).
+const contextListCap = 25
+
+func capSlice[T any](xs []T, n int) []T {
+	if len(xs) <= n {
+		return xs
+	}
+	return xs[:n]
 }
 
 // Context assembles the one-call bundle for a symbol by composing the existing
@@ -1260,14 +1279,17 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 		return rep, nil // unknown symbol: empty bundle, no point querying relations
 	}
 	if ca, cErr := svc.Callers(cwd, symbol); cErr == nil {
-		rep.Callers = ca.Results
+		rep.CallersTotal = len(ca.Results)
+		rep.Callers = capSlice(ca.Results, contextListCap)
 		rep.Note = ca.Note
 	}
 	if ce, cErr := svc.Callees(cwd, symbol); cErr == nil {
-		rep.Callees = ce.Results
+		rep.CalleesTotal = len(ce.Results)
+		rep.Callees = capSlice(ce.Results, contextListCap)
 	}
 	if imp, iErr := svc.Impact(cwd, symbol, depth); iErr == nil {
-		rep.Tests = imp.Tests
+		rep.TestsTotal = len(imp.Tests)
+		rep.Tests = capSlice(imp.Tests, contextListCap)
 		rep.BlastRadius = len(imp.BlastRadius)
 		if rep.Note == "" {
 			rep.Note = imp.Note

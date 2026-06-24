@@ -66,36 +66,36 @@ func runContext(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	refNames := func(refs []app.SymbolRef) ([]string, int) {
-		shown, more := capList(refs, 8)
+	refNames := func(refs []app.SymbolRef) []string {
+		shown, _ := capList(refs, 8)
 		out := make([]string, 0, len(shown))
 		for _, r := range shown {
 			out = append(out, disp(r.FQN, r.Symbol))
 		}
-		return out, more
+		return out
 	}
-	line := func(name string, items []string, total, more int) {
+	// total is the true count (the report's lists are already capped); "+N" is
+	// measured against it so a hub reads e.g. "callers (104): … (+96)".
+	line := func(name string, shown []string, total int) {
 		s := fmt.Sprintf("  %s (%d):", label(name), total)
-		if len(items) > 0 {
-			s += " " + strings.Join(items, ", ")
+		if len(shown) > 0 {
+			s += " " + strings.Join(shown, ", ")
 		}
-		if more > 0 {
+		if more := total - len(shown); more > 0 {
 			s += fmt.Sprintf(" … (+%d)", more)
 		}
 		fmt.Println(s)
 	}
 
-	cs, cm := refNames(rep.Callers)
-	line("callers", cs, len(rep.Callers), cm)
-	es, em := refNames(rep.Callees)
-	line("callees", es, len(rep.Callees), em)
+	line("callers", refNames(rep.Callers), rep.CallersTotal)
+	line("callees", refNames(rep.Callees), rep.CalleesTotal)
 
-	tShown, tMore := capList(rep.Tests, 8)
+	tShown, _ := capList(rep.Tests, 8)
 	tNames := make([]string, 0, len(tShown))
 	for _, t := range tShown {
 		tNames = append(tNames, disp(t.FQN, t.Symbol))
 	}
-	line("tests", tNames, len(rep.Tests), tMore)
+	line("tests", tNames, rep.TestsTotal)
 
 	fmt.Printf("  %s %d (depth ≤ %d)\n", label("blast radius:"), rep.BlastRadius, depth)
 	renderAnnotations(rep.Annotations)

@@ -233,7 +233,7 @@ func (s *Server) register() {
 	}, s.handleSource)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_context",
-		Description: "Everything about a symbol in ONE call: its definition(s) with source, who calls it, what it calls, the tests covering it, the blast-radius size, and any pinned annotations. Prefer this when orienting on an unfamiliar symbol — it replaces separate codemap_source + codemap_callers + codemap_callees + codemap_impact round-trips.",
+		Description: "Everything about a symbol in ONE call: its definition(s) with source, who calls it, what it calls, the tests covering it, the blast-radius size, and any pinned annotations. Prefer this when orienting on an unfamiliar symbol — it replaces separate codemap_source + codemap_callers + codemap_callees + codemap_impact round-trips. The callers/callees/tests lists are capped to keep the bundle small; callers_total/callees_total/tests_total give the true counts — call codemap_callers/codemap_callees/codemap_impact for a complete list when a total exceeds what's shown.",
 	}, s.handleContext)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_projects",

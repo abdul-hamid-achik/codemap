@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -459,12 +460,52 @@ func TestServiceContext(t *testing.T) {
 	if rep.BlastRadius < 1 {
 		t.Errorf("A should have a non-empty blast radius, got %d", rep.BlastRadius)
 	}
+	// Not truncated here, so the totals equal the (small) list lengths.
+	if rep.CallersTotal != len(rep.Callers) || rep.CalleesTotal != len(rep.Callees) || rep.TestsTotal != len(rep.Tests) {
+		t.Errorf("totals should equal list lengths when not truncated: %+v", rep)
+	}
 
 	// Unknown symbol → not found, no error.
 	if miss, err := svc.Context(proj, "NotASymbol", 3); err != nil {
 		t.Fatal(err)
 	} else if miss.Found {
 		t.Errorf("unknown symbol should report Found=false, got %+v", miss)
+	}
+}
+
+// TestContextCapsLargeLists guards the bundle's context-window safety: a hub with
+// many callers has its lists capped to contextListCap, while the *Total fields
+// still report the true count so a harness knows to drill for the rest.
+func TestContextCapsLargeLists(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	var b strings.Builder
+	b.WriteString("package app\n\nfunc Target() {}\n")
+	const callers = contextListCap + 5
+	for i := 0; i < callers; i++ {
+		fmt.Fprintf(&b, "func C%d() { Target() }\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Context(proj, "Target", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.CallersTotal != callers {
+		t.Errorf("CallersTotal = %d, want %d (true count)", rep.CallersTotal, callers)
+	}
+	if len(rep.Callers) != contextListCap {
+		t.Errorf("callers list = %d, want capped to %d", len(rep.Callers), contextListCap)
 	}
 }
 

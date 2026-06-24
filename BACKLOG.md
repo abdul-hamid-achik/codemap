@@ -5,6 +5,20 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #157 (harness — bound the `context` bundle so one call can't blow an agent's context) —
+  first verified the whole local flow suite (all 15 specs: graphs/precise/TS/JS/Python-LSP/vectors/
+  studio×2/context/staleness/index_progress/annotations) — ALL PASS, so the unreleased v0.9.0 batch is
+  solid. Then fixed a real harness hazard found by measuring: `context Close --json` (an ambiguous hub)
+  was **77 KB** (~20k tokens — 104 callers + 109 tests + 7 source bodies), enough to blow an agent's
+  window on a single orientation call. The bundle is meant to ORIENT, so its lists are now capped to
+  `contextListCap`=25 with honest `callers_total`/`callees_total`/`tests_total` fields — the agent sees
+  the true count and drills via codemap_callers/callees/impact (which stay complete, #146) for the full
+  list. `context Close --json`: **77.8 KB → 22 KB (−72%)**; a normal symbol was already small. The human
+  card shows the true total + `(+N)` (e.g. `callers (105): … (+97)`). MCP description documents the caps +
+  totals. Tests: `TestContextCapsLargeLists` (generates >cap callers; list capped, total exact) + totals
+  assertions in `TestServiceContext`. context.yml flow still green. Full suite + lint(0) + fmt green.
+  This is the last item on my agent-readiness list (token-safety, after trust #153 + round-trips #155).
+  COMMIT+PUSH.
 - 2026-06-24 #156 (docs — README front door caught up to the agent-harness story) — the README had
   drifted behind recent features: the MCP section said **"Tools (19)"** and omitted `codemap_context`
   (a real accuracy bug — now 20, list cross-checked to exactly match the server, no diffs either way),
