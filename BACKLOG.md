@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #140 (investigation — large-TS-project SPEED; useSyntaxServer is NOT the fix) — followed
+  up #139's known limitation (a full graphite index is slow because tsserver does whole-project
+  type-checking that documentSymbol doesn't need). Added `initializationOptions` plumbing to
+  `lsp.Client.Initialize` and tried `tsserver.useSyntaxServer:"always"` (the documented way to serve
+  syntactic requests from a fast syntax-only server). **Negative result:** no speedup and same ~96%
+  recovery (1374/1422 files-with-symbols in a 400s window, getTableImportColumns still not reached) —
+  the per-file documentSymbol latency under flood didn't drop. **Reverted** the experiment (back to the
+  #139 retry baseline; tree clean). So the large-project speed isn't a config knob. Likely real fixes,
+  for a dedicated future effort: (a) a **tree-sitter** structural backend (parse symbols in-process, no
+  server round-trip — the SPEC's planned 0.2 backend); or (b) pace/batch opens so tsserver isn't
+  flooded and documentSymbol is reliable first-try (no retry latency). The `initializationOptions`
+  support was reverted with the experiment but is a small, known addition to re-add when wiring (a)/(b)
+  or Vue. Net: #139's retry (52%→96% correctness) stands as the shipped improvement; speed deferred.
 - 2026-06-24 #139 (BUG — LSP symbols silently dropped on large projects; the user's graphite report)
   — user reported (CODEMAP-TS-EXTRACTION-GAP.md) that exported functions in real `.ts` modules were
   absent from find/impact/source on the `graphite` repo. **Confirmed and root-caused**: NOT an
