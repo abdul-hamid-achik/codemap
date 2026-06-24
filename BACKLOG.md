@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #146 (consistency — bound `callers`/`callees` display like `impact` did) — followed #145:
+  `callers`/`callees` were the last "complete-set" query commands with no output bound (the ranked top-N
+  family — hotspots/orphans/find/semantic — already takes `--top`). `callers Close` printed 103 lines
+  because the name merges 7 definitions. Added `renderRefsCapped` (reuses #145's tested `capList`) with
+  `relationsDisplayCap`=40: the human-facing list now caps at 40 with `… (N more — use --json for all)`,
+  while `--json`/MCP stay complete (they return before rendering — verified `callers Close --json` still
+  has all 101 results). Dogfood: `callers Close` 103→43 lines, the ambiguity ⚠ still follows; small/
+  unambiguous symbols (`callers Spawn`, 4) are unchanged. Capped in the callers/callees handlers, NOT in
+  shared `renderRefs`, so `orphans` (already `--top`-bounded at the service layer) is untouched. Left
+  `symbols` uncapped on purpose — a file outline is inherently bounded and truncating it would undermine
+  its "structured alternative to reading the file" point. Also inspected the real studio snapshots
+  (.glyphrun/runs/*studio at 120x40): Graph/Metrics fill the terminal cleanly (two columns, divider, key
+  footer) — no layout issues. Covered by `TestCapList`; full suite + lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #145 (usability + honesty — cap `impact`'s human-facing lists; make the doc examples real)
   — dogfooding `impact` on hubs surfaced a real flood: `runImpact` printed EVERY covering test and EVERY
   blast-radius node (e.g. `impact Stats --depth 2` = 26 tests + 35 nodes = 61 lines; `impact Open` = 85

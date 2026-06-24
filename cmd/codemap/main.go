@@ -457,7 +457,7 @@ func runCallers(cmd *cobra.Command, args []string) error {
 	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
 		label += " (precise, via gopls)"
 	}
-	renderRefs(label, rep.Results)
+	renderRefsCapped(label, rep.Results, relationsDisplayCap)
 	if rep.Note != "" {
 		fmt.Println("⚠ " + rep.Note)
 	}
@@ -493,7 +493,7 @@ func runCallees(cmd *cobra.Command, args []string) error {
 	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
 		label += " (precise, via gopls)"
 	}
-	renderRefs(label, rep.Results)
+	renderRefsCapped(label, rep.Results, relationsDisplayCap)
 	if rep.Note != "" {
 		fmt.Println("⚠ " + rep.Note)
 	}
@@ -965,6 +965,17 @@ func renderRefs(label string, refs []app.SymbolRef) {
 	}
 }
 
+// renderRefsCapped renders a relation list bounded to cap rows — the complete
+// set is always in --json — printing a "… (N more)" line when truncated. Used by
+// callers/callees, which (unlike the ranked top-N commands) return the full set.
+func renderRefsCapped(label string, refs []app.SymbolRef, limit int) {
+	shown, more := capList(refs, limit)
+	renderRefs(label, shown)
+	if more > 0 {
+		fmt.Printf("  … (%d more — use --json for all)\n", more)
+	}
+}
+
 // disp prefers the fully-qualified name so same-named symbols are distinguishable.
 func disp(fqn, symbol string) string {
 	if fqn != "" {
@@ -980,6 +991,11 @@ func disp(fqn, symbol string) string {
 const (
 	impactTestsCap = 10
 	impactBlastCap = 20
+	// relationsDisplayCap bounds the human-facing callers/callees lists. Most
+	// symbols have a handful, but a same-named query (e.g. `callers Close`) merges
+	// every definition and can run to 100+ rows; the ambiguity ⚠ already explains
+	// it. --json stays complete.
+	relationsDisplayCap = 40
 )
 
 // capList returns the first n items of xs (all, if fewer) and how many were
