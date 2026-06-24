@@ -30,6 +30,7 @@ type Extractor struct {
 	langID string // LSP languageId (e.g. "typescript")
 	root   string // project root, to resolve a relative path to a file:// URI
 	client *lsp.Client
+	shared bool // true for a Bind()'d extractor sharing another's server; it must not close it
 }
 
 // New spawns the language server `command args...`, initializes it at root, and
@@ -44,6 +45,15 @@ func New(ctx context.Context, lang, langID, root, command string, args ...string
 		return nil, err
 	}
 	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, client: client}, nil
+}
+
+// Bind returns an extractor for another language served by the SAME server
+// process — typescript-language-server handles both TypeScript and JavaScript, so
+// codemap spawns it once and binds each language with its own LSP languageId. The
+// returned extractor shares the client and does NOT own it: only the original
+// (from New) shuts the server down, so Close on a bound extractor is a no-op.
+func (e *Extractor) Bind(lang, langID string) *Extractor {
+	return &Extractor{ctx: e.ctx, lang: lang, langID: langID, root: e.root, client: e.client, shared: true}
 }
 
 // Language implements the extractor contract.
@@ -127,8 +137,8 @@ func (e *Extractor) relOf(uri string) (rel string, external bool) {
 
 // Close shuts the language server down.
 func (e *Extractor) Close() error {
-	if e.client == nil {
-		return nil
+	if e.client == nil || e.shared {
+		return nil // a bound extractor doesn't own the server; the original closes it
 	}
 	_ = e.client.Shutdown(e.ctx)
 	return e.client.Exit()

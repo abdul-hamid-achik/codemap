@@ -767,6 +767,23 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #119 (multi-lang — JavaScript via server-sharing; cross-language call graph) — the
+  natural completion of the LSP epic: **JavaScript is now first-class**, riding all existing machinery.
+  `typescript-language-server` handles JS natively, so the blocker was only avoiding a double-spawn for
+  a TS+JS repo. Solution — **one server serves both**: `ServerSpec` now carries `Langs []LangBinding`
+  (a server → many languages); `registerLSP` spawns the server **once** per spec (first present language
+  owns it) and `Extractor.Bind(lang, langID)` registers the rest sharing that one connection, each
+  routed with its own LSP `languageId`; only the owner closes the server (bound extractors are
+  `shared` → Close is a no-op). `LanguageForPath` already mapped `.js/.jsx/.mjs/.cjs`. De-risked with a
+  probe first (tsserver extracts JS symbols via `languageId:javascript`). Verified live on a mixed
+  project: `index --precise` indexes both, and **`callers add` (a JS function) returns `compute`
+  (app.ts) AND `run` (main.js)** — calls resolve *across* the `.ts`↔`.js` boundary via the shared
+  callHierarchy. Tests: lspsrc `TestBind` (binding shares root/client, marked shared, Close no-ops),
+  index `TestIndexJavaScriptMixed` (server-gated: both langs indexed by one server, cross-language
+  precise edge). New `specs/javascript.yml` E2E (mixed TS+JS, asserts js node + both languages +
+  cross-language caller; contractHash stamped). Docs swept Go+TS → **Go + TypeScript + JavaScript**
+  across README/AGENTS/CLAUDE/docs.go/quick-start. Full suite + lint(0) + fmt green; pure-Go /
+  CGO_ENABLED=0 (server is a subprocess). COMMIT+PUSH. Next: Python (pyright — a second ServerSpec row).
 - 2026-06-24 #118 (vectors — wire the hybrid (vector + BM25) search the store already had) —
   dogfooding semantic search (a "hotspots ranking" query returned only loosely-related hits) traced to
   a real gap: `Service.Semantic` called pure-vector `vstore.Search`, while `vstore.HybridSearch`

@@ -6,7 +6,8 @@ and the handful of things that are easy to get wrong.
 ## What codemap is
 
 Local-first code intelligence: a structural code graph (Go via stdlib `go/parser`, plus
-`--precise` go/types; TypeScript via the now-wired LSP backend / `typescript-language-server`;
+`--precise` go/types; TypeScript **and JavaScript** via the now-wired LSP backend — one
+`typescript-language-server` serves both, calls resolving across the `.ts`↔`.js` boundary;
 tree-sitter still planned) fused with semantic vectors (veclite), exposed as a unified query
 layer. Three surfaces over one store: CLI (`--json` for agents), MCP server (`codemap serve`),
 and the `studio` TUI.
@@ -63,8 +64,9 @@ Surfaces / key files:
 `task build` · `task flows` (glyphrun) when specs change. Flows are **local-only** (CI skips
 them): `studio.yml` needs `gopls`, `semantic.yml` needs a local Ollama with `nomic-embed-text`,
 `precise.yml` needs the `go` toolchain (it runs `index --precise`), and `typescript.yml` +
-`studio_ts.yml` (studio driving a TS call graph in the Graph tab) need `typescript-language-server`
-+ `node`. The toolchain-dependent flows only isolate `CODEMAP_DATA`, not `HOME`, so an asdf shim
+`javascript.yml` (one server, mixed TS+JS, cross-language call graph) + `studio_ts.yml` (studio
+driving a TS call graph in the Graph tab) need `typescript-language-server` + `node`. The
+toolchain-dependent flows only isolate `CODEMAP_DATA`, not `HOME`, so an asdf shim
 still resolves — the rest are pure-Go.
 
 ## Related projects

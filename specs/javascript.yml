@@ -1,0 +1,40 @@
+version: 1
+name: javascript
+intent: |
+    one typescript-language-server indexes BOTH JavaScript and TypeScript: a mixed
+    project's .js and .ts files become graph nodes, and `index --precise` resolves
+    call edges across the .ts<->.js boundary (a TS function calling a JS function).
+    Needs typescript-language-server + node (local-only; CI skips flows).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P\"; printf 'export function add(a, b) { return a + b; }\\n' > \"$P/math.js\"; printf 'import { add } from \"./math.js\";\\nexport function compute(x: number): number { return add(x, 1); }\\n' > \"$P/app.ts\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== index (precise) =='; \"$CM\" index --precise --no-embed 2>&1 | grep -iE 'scanned|graph|precise'; echo '== js symbols =='; \"$CM\" symbols math.js; echo '== languages =='; \"$CM\" status | grep -i languages; echo '== cross-language callers of the JS add() =='; \"$CM\" callers add"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 60000
+    - snapshot: javascript
+outcomes:
+    - id: js_indexed
+      description: a JavaScript function becomes a graph node
+      verify:
+        screen:
+            contains: "add"
+    - id: both_languages
+      description: one server indexed both JavaScript and TypeScript
+      verify:
+        screen:
+            contains: "javascript"
+    - id: cross_language_callgraph
+      description: a TS function calling a JS function resolves via --precise
+      verify:
+        screen:
+            contains: "compute"
+contractHash: sha256:60e0cf738a6570a0264a42dcda24b239fa53764d97ccb13b262c124ce6351848

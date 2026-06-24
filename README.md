@@ -18,10 +18,11 @@ instead of dozens of file reads.
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
   (name-based by default, exact via `go/types` with `--precise`) and **defines** edges (file → symbol).
   Test coverage is derived by walking the call graph to test nodes. Stored in pure-Go SQLite,
-  queryable offline. Indexes **Go** (stdlib `go/parser`, full call graph) and **TypeScript** (via
-  `typescript-language-server` when it's on `PATH` — symbols + structure always, plus a **precise
-  call graph** under `--precise`, so `callers`/`impact`/`hotspots`/`path` work for TS too);
-  JavaScript/Python and structure-only markup (Vue/HTML/CSS/Docker) are next. Semantic search is
+  queryable offline. Indexes **Go** (stdlib `go/parser`, full call graph) and **TypeScript +
+  JavaScript** (via one `typescript-language-server` when it's on `PATH` — symbols + structure always,
+  plus a **precise call graph** under `--precise`, so `callers`/`impact`/`hotspots`/`path` work for
+  TS/JS too, *across* the `.ts`↔`.js` boundary); Python and structure-only markup
+  (Vue/HTML/CSS/Docker) are next. Semantic search is
   language-agnostic.
 - **Semantic search** — every node's source is embedded (Ollama `nomic-embed-text`, 768-dim)
   into [veclite](https://github.com/abdul-hamid-achik/veclite); vector + BM25 hybrid search.
@@ -102,10 +103,11 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for `--lsp` precise Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-> **Languages:** **Go** (full graph) and **TypeScript** (structure + semantic search always, plus a
-> precise call graph under `--precise`, via `typescript-language-server` — auto-enabled when it's
-> installed; install it to index `.ts`/`.tsx`, or use `--no-lsp` to skip). Other recognized languages
-> (JS/Python/…) are reported as skipped; broader support is in progress.
+> **Languages:** **Go** (full graph) and **TypeScript + JavaScript** (structure + semantic search
+> always, plus a precise call graph under `--precise`, via one `typescript-language-server` — auto-
+> enabled when it's installed; install it to index `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`, or use
+> `--no-lsp` to skip). Other recognized languages (Python/…) are reported as skipped; broader support
+> is in progress.
 
 ### From source
 

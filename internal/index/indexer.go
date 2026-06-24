@@ -97,20 +97,37 @@ type Indexer struct {
 func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[string]int, res *Result) bool {
 	registered := false
 	for _, spec := range lspsrc.DefaultServers {
-		if present[spec.Lang] == 0 {
-			continue // no files of this language in the project
+		// Which of this server's languages does the project actually contain?
+		var want []lspsrc.LangBinding
+		for _, lb := range spec.Langs {
+			if present[lb.Lang] > 0 {
+				want = append(want, lb)
+			}
+		}
+		if len(want) == 0 {
+			continue
 		}
 		if _, err := exec.LookPath(spec.Cmd); err != nil {
-			noteMissingServer(res, spec.Lang, spec.Cmd)
+			for _, lb := range want {
+				noteMissingServer(res, lb.Lang, spec.Cmd)
+			}
 			continue
 		}
-		ext, err := lspsrc.New(ctx, spec.Lang, spec.LangID, root, spec.Cmd, spec.Args...)
+		// Spawn the server ONCE (the first present language owns it), then bind the
+		// rest to the same connection — one typescript-language-server serves both
+		// TS and JS, each routed with its own languageId.
+		owner, err := lspsrc.New(ctx, want[0].Lang, want[0].LangID, root, spec.Cmd, spec.Args...)
 		if err != nil {
-			noteMissingServer(res, spec.Lang, spec.Cmd) // spawn/init failed — treat as absent
+			for _, lb := range want {
+				noteMissingServer(res, lb.Lang, spec.Cmd) // spawn/init failed — treat as absent
+			}
 			continue
 		}
-		ix.Register(ext)
-		ix.closers = append(ix.closers, ext)
+		ix.Register(owner)
+		ix.closers = append(ix.closers, owner) // only the owner closes the server
+		for _, lb := range want[1:] {
+			ix.Register(owner.Bind(lb.Lang, lb.LangID))
+		}
 		registered = true
 	}
 	return registered

@@ -119,6 +119,50 @@ func TestIndexTypeScriptCallEdges(t *testing.T) {
 	}
 }
 
+// TestIndexJavaScriptMixed proves one typescript-language-server serves BOTH
+// TypeScript and JavaScript: a mixed project indexes .js and .ts together, and
+// --precise resolves call edges across the language boundary (a .ts function
+// calling a .js function). Server-gated.
+func TestIndexJavaScriptMixed(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "math.js", "export function add(a, b) { return a + b; }\n")
+	writeFile(t, dir, "app.ts", "import { add } from \"./math.js\";\n\nexport function compute(x: number): number { return add(x, 1); }\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("mix", dir, "javascript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := ix.IndexProject(ctx, pid, "mix", dir, Options{Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both languages were indexed by the single shared server.
+	if res.Languages["javascript"] == 0 || res.Languages["typescript"] == 0 {
+		t.Errorf("expected both JS and TS indexed, got languages %v", res.Languages)
+	}
+	// The JS function is a real node.
+	if ns, _ := g.FindNodesBySymbol(pid, "add"); len(ns) == 0 {
+		t.Fatal("JavaScript function add was not indexed")
+	}
+	// Cross-language precise call edge: compute (.ts) -> add (.js).
+	callers, err := g.Callers(pid, "add")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, c := range callers {
+		if c.Symbol == "compute" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("callers of add (JS) should include compute (TS) — cross-language precise edge, got %+v", callers)
+	}
+}
+
 // TestIndexTypeScriptDisabledByNoLSP confirms --no-lsp keeps TS unindexed
 // regardless of installed servers (deterministic, never spawns a server).
 func TestIndexTypeScriptDisabledByNoLSP(t *testing.T) {

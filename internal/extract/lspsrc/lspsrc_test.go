@@ -71,6 +71,27 @@ func TestAppendSymbolsNesting(t *testing.T) {
 	}
 }
 
+// TestBind verifies a bound extractor takes a new language/languageId while
+// sharing the original's root/client and is marked shared (so it won't close the
+// server it doesn't own) — the mechanism that lets one typescript-language-server
+// serve both TypeScript and JavaScript.
+func TestBind(t *testing.T) {
+	ts := &Extractor{lang: "typescript", langID: "typescript", root: "/proj"}
+	js := ts.Bind("javascript", "javascript")
+	if js.Language() != "javascript" || js.langID != "javascript" {
+		t.Errorf("Bind lang/langID = %q/%q, want javascript/javascript", js.Language(), js.langID)
+	}
+	if js.root != ts.root {
+		t.Errorf("bound extractor root = %q, want shared %q", js.root, ts.root)
+	}
+	if !js.shared {
+		t.Error("bound extractor must be marked shared (it doesn't own the server)")
+	}
+	if err := js.Close(); err != nil {
+		t.Errorf("a shared extractor's Close should be a no-op, got %v", err)
+	}
+}
+
 func TestCallEdgesTypeScript(t *testing.T) {
 	if _, err := exec.LookPath("typescript-language-server"); err != nil {
 		t.Skip("typescript-language-server not on PATH")
