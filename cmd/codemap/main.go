@@ -334,9 +334,18 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	rep, err := app.NewService(sess).Status(cwd)
+	svc := app.NewService(sess)
+	rep, err := svc.Status(cwd)
 	if err != nil {
 		return err
+	}
+	// Drift check (only meaningful once indexed): so you/an agent know whether the
+	// graph is behind the code before trusting a query. Best-effort — a failure
+	// here never breaks status.
+	if rep.Registered {
+		if st, sErr := svc.Staleness(cwd); sErr == nil {
+			rep.Stale = st
+		}
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
@@ -358,6 +367,10 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 	if len(rep.Kinds) > 0 {
 		fmt.Printf("  kinds:     %s\n", formatCounts(rep.Kinds))
+	}
+	if rep.Stale != nil && rep.Stale.Any() {
+		fmt.Printf("  ⚠ index is stale: %d changed, %d new, %d deleted since last index — run 'codemap index' to refresh\n",
+			rep.Stale.Changed, rep.Stale.New, rep.Stale.Deleted)
 	}
 	return nil
 }

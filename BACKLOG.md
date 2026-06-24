@@ -5,6 +5,21 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #153 (feature — index staleness signal: the #1 agent-trust gap) — an agent that edits code
+  then queries got pre-edit results SILENTLY; nothing surfaced that the index was behind the working tree.
+  Now `status` (CLI + MCP `codemap_status`) reports drift. Computed WITHOUT language servers (the whole
+  `walk` gates on registered extractors, which would spawn tsserver/pyright and falsely mark LSP-language
+  files deleted): new `index.Staleness` hashes the files already in `index_state` (the `file_hash` was
+  already stored, #135-era) to find **changed**/**deleted**, and recognizes **new** files by extension
+  (`extract.LanguageForPath`) restricted to already-indexed languages (so a recognized-but-unsupported
+  lang can't show false drift). `Service.Staleness` is separate from `Status` so studio startup stays
+  fast (it doesn't pay the walk+hash); only the agent-facing surfaces populate `StatusReport.Stale`.
+  Registered+fresh → explicit `{0,0,0}` (tells an agent "checked, fresh"); unregistered → nil/omitted.
+  CLI prints `⚠ index is stale: N changed, M new, K deleted — run 'codemap index'`. The `codemap_status`
+  MCP description now tells agents to check `stale` before trusting results. Dogfooded (edit+add+delete →
+  1/1/1, --json carries it). Tests: `TestStaleness`, `TestStalenessIgnoresUnindexedLanguages`,
+  `TestServiceStaleness`; new `specs/staleness.yml` flow. docs/cli.md updated. Full suite + lint(0) + fmt
+  green. This is the agent-harness-readiness headline I flagged after v0.8.0. COMMIT+PUSH.
 - 2026-06-24 #152 (feature — live progress bar for `codemap index`, user-requested) — researched via a
   multi-agent workflow (vecgrep reference + codemap index path + bubbles v2.1.0 API) then implemented.
   Non-breaking hook: added `Options.OnFile func(done, total int, rel string)` (nil = today's behavior;

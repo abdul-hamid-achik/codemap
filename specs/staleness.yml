@@ -1,0 +1,35 @@
+version: 1
+name: staleness
+intent: |
+    `codemap status` reports index freshness so a person or agent knows whether
+    the graph is behind the code before trusting a query: after indexing, editing
+    one file, adding another, and deleting a third, status warns that the index is
+    stale with exact changed/new/deleted counts. Pure-Go, no servers.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\nfunc A() { B() }\\nfunc B() {}\\n' > \"$P/a.go\"; printf 'package app\\nfunc C() {}\\n' > \"$P/b.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== fresh status =='; \"$CM\" status; printf 'package app\\nfunc A() { B(); B() }\\nfunc B() {}\\n' > \"$P/a.go\"; printf 'package app\\nfunc D() {}\\n' > \"$P/c.go\"; rm \"$P/b.go\"; echo '== status after editing a.go, adding c.go, deleting b.go =='; \"$CM\" status"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: staleness
+outcomes:
+    - id: drift_detected
+      description: status warns the index is stale with exact changed/new/deleted counts
+      verify:
+        screen:
+            contains: "index is stale: 1 changed, 1 new, 1 deleted"
+    - id: clean_exit
+      description: status exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:d1c9467d96888a2e7395b4684d4b7502c23bed55bea1827e1b684c6f1c8d69ef

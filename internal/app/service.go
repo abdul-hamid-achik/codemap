@@ -69,6 +69,11 @@ type StatusReport struct {
 	PreciseEdges int            `json:"precise_edges"` // go/types-resolved call edges (0 = name-based index)
 	Languages    map[string]int `json:"languages,omitempty"`
 	Kinds        map[string]int `json:"kinds,omitempty"`
+	// Stale, when set, reports how far the index has drifted from the working tree
+	// (changed/new/deleted files). Status does not compute it (keeps studio fast);
+	// the CLI `status` and MCP codemap_status populate it via Staleness so an agent
+	// knows whether to reindex before trusting query results.
+	Stale *index.Staleness `json:"stale,omitempty"`
 }
 
 // Init registers cwd as a codemap project in the global registry.
@@ -253,6 +258,43 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 		rep.PreciseEdges = n
 	}
 	return rep, nil
+}
+
+// Staleness reports how far the project's index has drifted from the working
+// tree (changed/new/deleted files) so a caller can warn that query results may
+// be behind the code. Returns nil for an unregistered/unindexed project. It runs
+// without language servers (hashes index_state files, recognizes new ones by
+// extension), so it's separate from Status and only the agent-facing surfaces
+// (CLI status, MCP codemap_status) pay for it — studio startup stays fast.
+func (svc *Service) Staleness(cwd string) (*index.Staleness, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return nil, nil // not indexed → nothing to compare
+	}
+	if err != nil {
+		return nil, err
+	}
+	stats, err := g.Stats(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	langs := make(map[string]bool, len(stats.Languages))
+	for l := range stats.Languages {
+		langs[l] = true
+	}
+	st, err := index.New(g, nil, nil, svc.s.Config.Index).Staleness(p.ID, p.Path, langs)
+	if err != nil {
+		return nil, err
+	}
+	return &st, nil
 }
 
 // hasPreciseEdges reports whether the project has any go/types-resolved call edges

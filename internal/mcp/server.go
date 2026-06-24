@@ -183,7 +183,7 @@ func (s *Server) register() {
 	}, s.handleIndex)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_status",
-		Description: "Show index statistics for a project (nodes, edges, languages, kinds).",
+		Description: "Show index statistics for a project (nodes, edges, languages, kinds) AND index freshness: a 'stale' field counts files changed/new/deleted since the last index. Check it first — if stale is non-zero, call codemap_index before trusting query results, which are computed from the indexed snapshot, not live files.",
 	}, s.handleStatus)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_semantic",
@@ -265,6 +265,13 @@ func (s *Server) handleIndex(ctx context.Context, _ *sdkmcp.CallToolRequest, in 
 
 func (s *Server) handleStatus(_ context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.Status(cwdOf(in.Path))
+	// Surface index drift (changed/new/deleted files since indexing) so the agent
+	// knows whether to call codemap_index before trusting query results.
+	if err == nil && rep != nil && rep.Registered {
+		if st, sErr := s.svc.Staleness(cwdOf(in.Path)); sErr == nil {
+			rep.Stale = st
+		}
+	}
 	return result(rep, err)
 }
 

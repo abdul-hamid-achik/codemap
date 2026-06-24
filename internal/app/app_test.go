@@ -358,6 +358,51 @@ func TestPathSurfacesAnnotations(t *testing.T) {
 	}
 }
 
+// TestServiceStaleness checks the agent-facing drift signal: a fresh index
+// reports no drift, editing a file reports it changed, and an unregistered
+// project reports nil (nothing to compare).
+func TestServiceStaleness(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B() }\n\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := svc.Staleness(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st == nil || st.Any() {
+		t.Errorf("fresh index should report no drift, got %+v", st)
+	}
+
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B(); B() }\n\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = svc.Staleness(proj); err != nil {
+		t.Fatal(err)
+	} else if st == nil || st.Changed != 1 {
+		t.Errorf("after edit: want Changed=1, got %+v", st)
+	}
+
+	if st, err = svc.Staleness(t.TempDir()); err != nil {
+		t.Fatal(err)
+	} else if st != nil {
+		t.Errorf("unregistered project should have nil staleness, got %+v", st)
+	}
+}
+
 func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
