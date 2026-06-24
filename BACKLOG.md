@@ -223,6 +223,32 @@
   setting `exclude` replaces the defaults, which is accurate — slices overlay). Full suite + lint(0) +
   fmt green. Real usability fix for Python on actual repos. COMMIT+PUSH.
 
+## 🏷️ Release — v0.8.0 (2026-06-24)
+**Reliability + polish you'd actually reach for.** Headline since v0.7.0 (15 commits):
+- **Large-project symbol recovery (the big fix).** On big TypeScript repos `typescript-language-server`
+  answered `documentSymbol` before it finished parsing a freshly-opened file and returned empty, and
+  codemap accepted it — dropping ~half the symbols. `index` now retries the empty response (bounded,
+  backoff, gated by a declarations heuristic): **52%→~96%** of files recovered (#139).
+- **Output that fits the terminal.** `impact` and `callers`/`callees` no longer flood — the human-facing
+  lists are capped (nearest blast-radius nodes / first N rows) with a `… (N more — use --json for all)`
+  line; **`--json`/MCP stay complete** so agents get everything (#145/#146). `semantic` results now show
+  the **signature**, like `find` and the studio Search tab (#151).
+- **studio uses the whole terminal at ANY width.** Fixed a real break at ≤80 cols (a long footer made the
+  whole frame overflow); added a hard `MaxWidth` guarantee + a responsive footer, and the Metrics tab now
+  renders cleanly (two columns, divider, ellipsized rows) from 40–120 cols — with regression tests
+  (#147/#149). The `?` help overlay is now a complete, accurate keymap (#143).
+- **Knowledge layer completed.** A note pinned to a call **path** now surfaces in `path` (it already did
+  for symbols in impact/callers/source) — every annotation shows up where it's relevant (#142). New
+  `annotations.yml` E2E flow demonstrates the whole layer (#150).
+- **Honesty + trust.** Oversized-skipped files are now named, not silently dropped (#138); Python
+  virtualenvs (`venv`/`env`/`site-packages`) are excluded by default so they don't flood the index (#136).
+- **Docs match the binary.** `index --no-lsp` added to the CLI reference tables; README/docs `impact`
+  examples regenerated from the real binary (the old `… (N more)` they showed didn't exist before #145);
+  studio `k/j` documented (#144). tree-sitter evaluated and **deferred** post-0.1 (CGO breaks the pure-Go
+  release; correctness bug already fixed) — keep the LSP backend (#148).
+- Full local flow suite (graphs · precise · TS/JS/Python LSP · vectors · studio · annotations) verified
+  green end-to-end this cycle.
+
 ## 🏷️ Release — v0.7.0 (2026-06-24)
 **Multi-language breadth + reliability.** Headline since v0.6.0:
 - **More languages, riding the LSP backend.** **JavaScript** (one `typescript-language-server` serves
