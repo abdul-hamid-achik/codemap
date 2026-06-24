@@ -767,6 +767,12 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #131 (studio — reindex reports skipped files, like the CLI) — closing the #125 honesty
+  loop on the #1 surface: the studio `ctrl+r` reindex status said "reindexed: N files · N nodes · N
+  edges" even when files were **skipped** (e.g. a language server timed out), silently hiding it — while
+  the CLI shows the skipped count. The `indexedMsg` handler now appends "· N skipped" when
+  `FilesSkipped > 0` (a missing-server Warning still takes precedence, as before). Test
+  `TestIndexedMsgReportsSkipped`. Full suite + tui lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #130 (agent parity — `codemap_doctor` MCP tool) — `doctor` (#121) was CLI-only, but
   "why isn't my Python/TS being indexed?" / "why is semantic search empty?" is exactly what an agent
   needs to diagnose, and the structured `DoctorReport` is ideal for it. Exposed the existing

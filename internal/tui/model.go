@@ -490,6 +490,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.rep != nil {
 			m.statusMsg = fmt.Sprintf("reindexed: %d files · %d nodes · %d edges",
 				msg.rep.FilesIndexed, msg.rep.Nodes, msg.rep.Edges)
+			if msg.rep.FilesSkipped > 0 { // e.g. a language server timed out — don't hide it
+				m.statusMsg += fmt.Sprintf(" · %d skipped", msg.rep.FilesSkipped)
+			}
 			if msg.rep.Warning != "" { // e.g. no Go files, or embeddings unavailable
 				m.statusMsg = "⚠ " + msg.rep.Warning
 			}

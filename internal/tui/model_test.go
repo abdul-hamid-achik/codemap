@@ -318,6 +318,16 @@ func TestIndexedMsgRefreshes(t *testing.T) {
 	}
 }
 
+// TestIndexedMsgReportsSkipped verifies an in-studio reindex doesn't hide skipped
+// files (e.g. a language server that timed out) behind a clean count.
+func TestIndexedMsgReportsSkipped(t *testing.T) {
+	m := sized(t, 120, 40)
+	u, _ := m.Update(indexedMsg{rep: &app.IndexReport{FilesIndexed: 8, FilesSkipped: 2, Nodes: 10, Edges: 7}})
+	if got := u.(Model).statusMsg; !strings.Contains(got, "8 files") || !strings.Contains(got, "2 skipped") {
+		t.Errorf("reindex status should report skipped files, got %q", got)
+	}
+}
+
 func TestIndexedMsgShowsWarning(t *testing.T) {
 	m := sized(t, 120, 40)
 	u, _ := m.Update(indexedMsg{rep: &app.IndexReport{Warning: "no Go files to index (codemap v0.1 indexes Go); skipped 2 typescript"}})
