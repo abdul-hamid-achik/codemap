@@ -4,7 +4,7 @@
 (Bubble Tea / Lip Gloss / Bubbles).
 
 ```
- codemap studio                       codemap · 509 nodes · 1849 edges · 35 files
+ codemap studio          ● daemon main   codemap · 509 nodes · 1849 edges · 35 files
   1 Graph   2 Metrics   3 Impact   4 Search
  Hubs (164)                           │ lspsrc.Extractor.Close
     57  lspsrc.Extractor.Close        │  Called by (57)
@@ -57,6 +57,10 @@
 | `alt+←` / `alt+→` (any tab) | **Global back / forward** — browser-style history across tabs and drills. Drilling a search hit into Impact, opening it in the Graph walker, etc. records where you came from; `alt+←` returns to the *exact* prior view **with the text you'd typed still in the bar** and the prior selection highlighted. `alt+→` re-walks forward; a new search/drill clears the forward stack. (This is a layer above the Graph's own `⌫` walk.) |
 | `esc` | Step back one global level (when no overlay/help is open); also closes the help/source/context overlay |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |
+
+When a [background daemon](/cli#background-daemon) is keeping the index fresh, the header shows a
+live green `● daemon <branch>` indicator (polled every few seconds) so you can tell at a glance
+that edits are being re-indexed automatically.
 
 Symbols are shown with their fully-qualified names so same-named methods (e.g.
 `graph.Store.Close` vs `app.Session.Close`) are easy to tell apart. In the Graph, Impact, and

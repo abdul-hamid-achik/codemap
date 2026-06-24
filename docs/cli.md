@@ -8,8 +8,8 @@ Every query command accepts `--json` for machine-readable output.
 |---|---|
 | `codemap init [--local]` | Register the current directory as a project |
 | `codemap index [--reindex] [--no-embed] [--no-lsp] [--precise]` | Index (incremental — re-indexes changed files and prunes deleted ones); `--reindex` rebuilds, `--no-embed` skips embeddings, `--no-lsp` skips the language-server backend (Go is still indexed via `go/parser`; TS/JS/Python files are skipped — no `typescript-language-server`/`pyright` spawned), `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy) |
-| `codemap status` | Show index statistics (nodes, edges, languages, kinds), plus **index freshness** — warns when files have changed/been added/removed since the last index (a `stale` field in `--json`), so you know to reindex before trusting queries |
-| `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python), Ollama embeddings — with install hints (`--json`) |
+| `codemap status` | Show index statistics (nodes, edges, languages, kinds), plus **index freshness** — warns when files have changed/been added/removed since the last index (a `stale` field in `--json`), so you know to reindex before trusting queries. Also reports a running [background daemon](#background-daemon) (a `daemon` object in `--json`) |
+| `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python), Ollama embeddings, and the [background daemon](#background-daemon) — with install hints (`--json`) |
 | `codemap projects` | List all registered projects and their index sizes |
 | `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, annotations, accuracy, ecosystem) |
 | `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`) |
@@ -71,6 +71,23 @@ embedder or creates an empty vector store in that case.
 | `codemap serve` | Run the [MCP server](/mcp) over stdio |
 | `codemap studio` | Open the interactive [TUI](/studio) |
 | `codemap version` | Print version information |
+
+## Background daemon
+
+The daemon watches the working tree and keeps the index fresh automatically —
+incrementally re-indexing on save and throttling embeddings so it never hammers
+Ollama. Tune it via the `daemon:` config block / `CODEMAP_DAEMON_*` env / the flags
+below (see [Configuration](/configuration)).
+
+| Command | Description |
+|---|---|
+| `codemap daemon start [path]` | Run the daemon in the foreground (watches the project; background it with `&`, stop with Ctrl-C). Flags: `--no-embed` (structure only, no Ollama), `--debounce`, `--idle-timeout`, `--embed-rps`, `--embed-max-in-flight`, `--embed-cache-size` |
+| `codemap daemon status` | Show whether a daemon is running and what it's watching |
+| `codemap daemon stop` | Stop the running daemon |
+
+When a daemon is running, `codemap status` and the `codemap_status` MCP tool report
+it (a `daemon` object in `--json`), `codemap doctor` lists it as a health check, and
+the [studio](/studio) header shows a live `● daemon` indicator.
 
 ## Example
 
