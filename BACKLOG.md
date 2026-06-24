@@ -12,7 +12,7 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.10.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+Released through **v0.11.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI** (23 commands, `--json`), **MCP**
 (`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
@@ -25,6 +25,14 @@ Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflati
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
 ## Release history (condensed — full detail in the vault archive)
+- **v0.11.0** — the flagship + branch-aware index switching. **P0**: TS/JS/Python `callers`/`callees` resolve
+  on demand (scoped per-symbol `callHierarchy` via `lspServerFor`, no `--precise` reindex) and `impact`
+  reports honest test coverage (heuristic test-file scan, defeating #196's filtered-callback blind spot).
+  **Branch-index (BD.1–7)**: a `git checkout` switches the code index — call graph + semantic vectors — by
+  snapshotting the old branch into **fcheap** and restoring the new one (no reindex/re-embed; incremental
+  fallback when stale), via `codemap branch-switch`/`branch-snapshot`/`branch-status`, an auto-installing
+  `post-checkout` hook (`--install-hook`), and MCP (`codemap_branch_switch`/`_status`; 22 tools). New
+  internal packages: `git`, `snapshot`, `branchstate`. Pure-Go, no new module deps.
 - **v0.10.0** — honesty + dogfood fidelity. TS/JS/Python `impact` no longer returns a confidently-empty
   `[]`+`untested` without a call graph (a `resolution` note instead, FIX.md §1); studio **global back/forward
   nav history** that restores the bar you came from (§2); studio source overlay **syntax highlighting**
