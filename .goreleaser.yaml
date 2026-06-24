@@ -56,23 +56,32 @@ changelog:
       - '^chore:'
       - '^ci:'
 
-brews:
+homebrew_casks:
   - name: codemap
+    binaries:
+      - codemap
     repository:
       owner: abdul-hamid-achik
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: "https://github.com/abdul-hamid-achik/codemap"
     description: "Local-first code intelligence: a code graph + semantic search for agents and people"
-    license: "MIT"
-    dependencies:
-      - name: ollama
-        type: optional
-    install: |
-      bin.install "codemap"
-    test: |
-      system "#{bin}/codemap", "--version"
+    # Semantic search is optional and needs a local Ollama; cask dependencies
+    # can't express "optional", so it's a caveat rather than a hard dependency.
+    # Keep this a SINGLE line: GoReleaser renders each line as a separate Ruby
+    # string literal in the `caveats do … end` block, and the block returns only
+    # its last expression — so a multi-line caveat would drop all but the last line.
+    caveats: "codemap works offline for structural queries; semantic search is optional and needs a local Ollama (https://ollama.com): run `ollama pull nomic-embed-text`."
+    # The released binaries are unsigned (pure-Go, CGO_ENABLED=0, not notarized),
+    # so strip the Gatekeeper quarantine attribute on install — otherwise macOS
+    # refuses to run a cask-installed unsigned binary ("damaged and can't be opened").
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/codemap"]
+          end
     skip_upload: "{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}"
 
 release:
