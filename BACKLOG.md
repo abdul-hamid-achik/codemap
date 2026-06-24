@@ -742,6 +742,17 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #105 (multi-lang — TS E2E flow) — **`specs/typescript.yml` demonstrates LSP-backed
+  TypeScript indexing end-to-end** — hits the directive's "demonstrate value via … LSP" channel for a
+  non-Go language and guards the new feature. Indexes a `.ts` file (class + method + function) and shows
+  `index` → `symbols` → `find` working on TS: the snapshot proves `UserService` (class), `getUser`
+  (method, class-nested FQN), `makeService` (function) all become real graph nodes, and `find getUser`
+  resolves to `svc.ts:2`. 3 positive `contains` outcomes; contractHash stamped; `glyph run` passes.
+  Server-gated/local-only like studio.yml (needs `typescript-language-server` + `node`; CI skips flows);
+  isolates only `CODEMAP_DATA` so the asdf shim resolves. CLAUDE.md flows note updated. No Go change ⇒
+  CI green. COMMIT+PUSH. **Flows now cover every value channel: graphs (query), vectors (semantic),
+  Go-precision (precise), and multi-language/LSP (typescript).** Next: slice C (TS call edges via
+  callHierarchy) — the hard slice; will probe tsserver callHierarchy reliability first.
 - 2026-06-23 #104 (multi-lang — docs) — **documented TypeScript support** so the shipped feature is
   discoverable (the #91/#98 lesson: an undocumented capability is invisible). Updated every "v0.1
   indexes Go" / "Go only" claim to the accurate Go + TypeScript reality, honest that TS is structure +

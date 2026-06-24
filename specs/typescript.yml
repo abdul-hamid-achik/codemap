@@ -1,0 +1,41 @@
+version: 1
+name: typescript
+intent: |
+    demonstrate multi-language indexing via the LSP backend: with
+    typescript-language-server on PATH, `codemap index` turns a .ts file's class,
+    method, and function into real graph nodes (correct kinds, dotted FQNs), so
+    `symbols` and `find` work on TypeScript through the same machinery Go uses.
+    Needs typescript-language-server + node (local-only; CI skips flows).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P\"; printf 'export class UserService {\\n  getUser(id: string) { return id; }\\n}\\n\\nexport function makeService() { return new UserService(); }\\n' > \"$P/svc.ts\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== index TypeScript =='; \"$CM\" index --no-embed 2>&1 | grep -iE 'scanned|graph'; echo '== symbols (structure) =='; \"$CM\" symbols svc.ts; echo '== find by name =='; \"$CM\" find getUser"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 60000
+    - snapshot: typescript
+outcomes:
+    - id: class_indexed
+      description: a TypeScript class becomes a graph node
+      verify:
+        screen:
+            contains: "UserService"
+    - id: method_indexed
+      description: a method is a node with a class-nested FQN
+      verify:
+        screen:
+            contains: "getUser"
+    - id: function_indexed
+      description: a top-level function is indexed too
+      verify:
+        screen:
+            contains: "makeService"
+contractHash: sha256:e741f2af6bfae6d120a278528d853edaf05bdf08b6c08d37974253d4b07751b2
