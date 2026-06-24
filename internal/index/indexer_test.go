@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
@@ -236,6 +237,34 @@ func TestIndexStructureOnly(t *testing.T) {
 	}
 	if res.Nodes != 5 || res.Edges != 5 {
 		t.Errorf("structure-only nodes/edges = %d/%d, want 5/5", res.Nodes, res.Edges)
+	}
+}
+
+// TestIndexSurfacesOversizedFiles verifies a recognized source file skipped for
+// exceeding max_file_bytes is named in Result.Oversized (not silently dropped),
+// while a smaller file is indexed normally.
+func TestIndexSurfacesOversizedFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "small.go", "package m\n\nfunc Small() {}\n")
+	writeFile(t, dir, "big.go", "package m\n\nfunc Big() {} //"+strings.Repeat("x", 300)+"\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("m", dir, "go")
+	cfg := config.DefaultConfig().Index
+	cfg.MaxFileBytes = 60 // small.go fits; big.go (~330 bytes) doesn't
+	ix := New(g, nil, nil, cfg)
+
+	res, err := ix.IndexProject(context.Background(), pid, "m", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Oversized) != 1 || !strings.Contains(res.Oversized[0], "big.go") {
+		t.Errorf("Oversized should name big.go, got %v", res.Oversized)
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "Small"); len(ns) == 0 {
+		t.Error("small.go (under the limit) should be indexed")
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "Big"); len(ns) != 0 {
+		t.Error("big.go (over the limit) should be skipped")
 	}
 }
 

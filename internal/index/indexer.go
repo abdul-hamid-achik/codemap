@@ -52,11 +52,15 @@ type FileError struct {
 type Result struct {
 	FilesScanned int         `json:"files_scanned"`
 	FilesIndexed int         `json:"files_indexed"`           // new or changed
-	FilesSkipped int         `json:"files_skipped"`           // unchanged, too large, or errored (see Errors)
+	FilesSkipped int         `json:"files_skipped"`           // unchanged, too large (see Oversized), or errored (see Errors)
 	FilesDeleted int         `json:"files_deleted,omitempty"` // pruned: indexed before, now gone from disk
 	Nodes        int         `json:"nodes"`
 	Edges        int         `json:"edges"`
 	Errors       []FileError `json:"errors,omitempty"`
+	// Oversized lists recognized source files skipped for exceeding
+	// index.max_file_bytes — surfaced so a silently-missing file (often generated)
+	// is explained, not just counted in FilesSkipped.
+	Oversized []string `json:"oversized,omitempty"`
 	// Unsupported maps a recognized source language (e.g. "typescript") to the
 	// number of files skipped because codemap has no extractor for it yet (v0.1
 	// indexes Go). Lets callers explain a "0 indexed" result.
@@ -364,6 +368,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	}
 	if ix.cfg.MaxFileBytes > 0 && len(content) > ix.cfg.MaxFileBytes {
 		res.FilesSkipped++
+		res.Oversized = append(res.Oversized, ft.rel)
 		return false, nil, nil
 	}
 

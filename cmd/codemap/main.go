@@ -308,6 +308,9 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	for _, e := range rep.Errors {
 		fmt.Fprintf(os.Stderr, "  ! %s: %s\n", e.File, e.Err)
 	}
+	for _, f := range rep.Oversized {
+		fmt.Fprintf(os.Stderr, "  ~ %s: skipped — exceeds index.max_file_bytes (raise it to include this file)\n", f)
+	}
 	return nil
 }
 

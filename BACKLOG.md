@@ -5,6 +5,15 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #138 (honesty — surface oversized-skipped files instead of silently dropping them) —
+  the last skip-reason that was silent: a recognized source file over `index.max_file_bytes` (1 MiB)
+  was counted in "N skipped" with no reason or filename, so a missing symbol (often from a large
+  generated/embedded file) looked unexplained. Now `Result.Oversized []string` lists them; the CLI
+  prints `~ <file>: skipped — exceeds index.max_file_bytes (raise it to include this file)` and the JSON
+  carries `oversized`. Consistent with the trust theme (#125 errored, #131/#135 deleted) — every skip
+  reason is now visible. Test `TestIndexSurfacesOversizedFiles` (tiny `MaxFileBytes` so no huge fixture;
+  big file named in Oversized, small file indexed). Verified live on the earlier 4 MB-file fixture.
+  Full suite + lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #137 (verify + docs — real-project edge cases hold; set expectations about deps) —
   continued dogfooding real layouts; all **clean** (no bugs): a 4 MB file is skipped (>1 MiB
   `MaxFileBytes`); `status`/queries from a **subdirectory** find the registered project root; **multi-
