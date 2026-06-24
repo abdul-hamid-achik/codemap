@@ -5,6 +5,23 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #147 (BUG — studio overflowed its frame at ≤80 cols; the flagship now fits any width) —
+  finally rendered every studio tab at narrow widths (a diagnostic harness feeding realistic long-FQN
+  data) instead of only the 120x40 glyphrun snapshots. Found a real layout break: at **80 cols** (a very
+  common width) the Metrics/Impact/Search footers overflow (their rich hints are 98/101/97 wide), and
+  because `lipgloss.JoinVertical` pads every line to the widest one, a single over-wide footer blew the
+  WHOLE frame past the screen — every line became >80, corrupting the display. At 60 the Graph body and
+  Metrics two-column layout overflowed too. Root cause: `spread` returns the un-truncated left when it
+  can't fit, and nothing clamped the joined frame. Fix: (1) a single ANSI-aware `MaxWidth(m.width)` clamp
+  on the final frame in `render()` — a hard guarantee nothing ever exceeds the terminal at ANY size; (2)
+  a responsive footer — the rich hint (with `ctrl+c quit · ? help`) shows when it fits, else a compact
+  per-tab fallback (terser labels, drops the universal ctrl+c, KEEPS `? help` so #143's discoverability
+  survives) that fits ~80. Verified frameOver=0 for all 4 tabs at 120/100/80/72/60/40. Permanent
+  regression tests: `TestRenderFitsAllWidths` (every tab × 6 sizes: height fills, no line exceeds width)
+  and `TestFooterCompactsWhenNarrow` (rich when wide, compact-with-?-help at 80). Full suite + lint(0) +
+  fmt green. (At <72 cols the Metrics columns still get clipped by the clamp rather than reflowing —
+  acceptable degradation at unusual widths, no longer a break; column reflow is a possible later polish.)
+  COMMIT+PUSH.
 - 2026-06-24 #146 (consistency — bound `callers`/`callees` display like `impact` did) — followed #145:
   `callers`/`callees` were the last "complete-set" query commands with no output bound (the ranked top-N
   family — hotspots/orphans/find/semantic — already takes `--top`). `callers Close` printed 103 lines

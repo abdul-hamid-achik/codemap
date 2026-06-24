@@ -40,7 +40,13 @@ func (m Model) render() string {
 	}
 	body := lipgloss.NewStyle().Width(m.width).Height(bodyH).MaxHeight(bodyH).Render(content)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
+	frame := lipgloss.JoinVertical(lipgloss.Left, header, tabs, body, footer)
+	// Hard guarantee that nothing exceeds the terminal width at any size: a single
+	// over-wide line (e.g. a long footer hint or a two-column body on a narrow
+	// terminal) would otherwise make JoinVertical pad every line to match and blow
+	// the whole frame past the screen. MaxWidth is ANSI-aware, so it clips styled
+	// content cleanly.
+	return lipgloss.NewStyle().MaxWidth(m.width).Render(frame)
 }
 
 // renderHelp is the full-screen keybinding overlay (toggled with `?`).
@@ -137,21 +143,36 @@ func (m Model) footer() string {
 		}
 		return spread(mutedStyle.Render(hint), status, m.width)
 	}
+	// Each tab has a rich hint and a compact fallback. The rich one shows on
+	// normal-width terminals; when it wouldn't fit, the compact one (terser
+	// labels, drops the universal ctrl+c — `?` documents everything) is used so
+	// the footer still fits ~80 cols with `? help` intact. Below that, the
+	// render() MaxWidth clamp is the final backstop.
+	var compact string
 	switch m.active {
 	case tabGraph:
 		if m.graphFocus == focusRefs {
 			hint = "↑/↓ ref · enter re-center · s source · ⌫ back · ← hubs · ctrl+c quit"
+			compact = "↑/↓ · enter re-center · s src · ⌫ back · ← hubs"
 		} else {
 			hint = "↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit"
+			compact = "↑/↓ · → walk · enter impact · s src · p precise"
 		}
 	case tabSearch:
 		hint = "type · enter search/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
+		compact = "type · enter · ↑/↓ · ctrl+g graph · ctrl+s src · tab"
 	case tabImpact:
 		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
+		compact = "type · enter · ↑/↓ · ctrl+g graph · ctrl+s src · tab"
 	default: // metrics
 		hint = "↑/↓ select · enter → impact · ctrl+g graph · ctrl+s source · ctrl+r reindex · ctrl+c quit"
+		compact = "↑/↓ · enter impact · ctrl+g graph · ctrl+s src · ctrl+r reindex"
 	}
 	hint += " · ? help"
+	compact += " · ? help"
+	if lipgloss.Width(hint) > m.width {
+		hint = compact
+	}
 	status := m.statusMsg
 	if m.errMsg != "" {
 		status = errorStyle.Render(m.errMsg)
