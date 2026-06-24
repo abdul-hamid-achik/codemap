@@ -280,7 +280,12 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   create/write→toIndex + remove/rename→toRemove (rel paths), and fires `onChange(toIndex, toRemove)` on the
   quiet-tick. Handles new-dir creation (watch + queue moved-in files). `Run(ctx)`/`Close`. `TestWatcher`
   (create/modify/delete + excluded-dir-ignored; 3× no flake; race-clean); task check green. (Daemon wiring = BD.11.)
-- [ ] **BD.9** `Indexer.IndexFiles(ctx, projectID, name, root, rels, opts)` — run the existing `indexFile` loop over only changed rels + `resolveEdges` (the SHA256 hash check already makes it incremental). The watcher's reindex target.
+- [x] **BD.9** `Indexer.IndexFiles(ctx, projectID, name, root, rels, opts)` — the watcher's incremental
+  reindex target: runs the existing `indexFile` over each named source file (hash-skip + re-extract + embed),
+  prunes paths gone from disk (`DeleteNodesInFile`+`DeleteFileHash`+`vectors.DeleteByFile`, `FilesDeleted++`),
+  then `resolveEdges` over the changed refs + `vectors.Sync`. `TestIndexFilesIncremental` (add file → symbol +
+  edge resolve; delete file → pruned); task check green. (Inbound name-based edges from unchanged files into a
+  changed file refresh on a full reindex — daemon can reconcile periodically.)
 - [ ] **BD.10** `internal/embed/throttle.go` — `ThrottledProvider` (embed.Provider decorator): content-hash **dedup** (codemap has none today), coalescing queue + bounded worker pool (`EmbedWorkers`, default 2), token-bucket rate (`x/time/rate`, `EmbedRPS`) + max-in-flight, **two priority lanes** (query > background), backpressure. Replaces inline `ix.embedder.Embed` under the daemon.
 - [ ] **BD.11** `internal/daemon/` — `Daemon{session, watcher, throttle, mcpHandler, listener}`: open the sole write Session, write `daemon.{sock,json,lock}` under `config.DataDir()`, accept-loop on the unix socket routing `mcp.*` frames (newline-JSON, **never Content-Length**) + `daemon.*` control RPCs; idle-timeout + SIGTERM-clean teardown.
 - [ ] **BD.12** `cmd/codemap/main.go` — `daemon start|stop|status`. Make `serve` a stdio↔socket **bridge** when a daemon is live; make query commands + `codemap_*` tools prefer the socket, else `VectorsReadOnly` fallback. Keep LSP Content-Length strictly inside `internal/lsp`.

@@ -331,6 +331,70 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	return res, nil
 }
 
+// IndexFiles incrementally (re)indexes just the given project-relative paths — the
+// daemon's watcher target. Each existing source file runs through indexFile (which
+// hash-skips unchanged files and clears + re-extracts + embeds changed ones); each
+// path that's GONE on disk is pruned (nodes + index-state + vectors), exactly like
+// pruneDeleted but scoped to the watched set. Edges for the changed files are
+// resolved once at the end. (Like the full incremental path, inbound name-based
+// edges from UNCHANGED files into a changed file are only refreshed on a full
+// reindex — the daemon can reconcile periodically.)
+func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName, root string, rels []string, opts Options) (*Result, error) {
+	res := &Result{}
+	var pending []extract.Reference
+	for _, rel := range rels {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		abs := filepath.Join(root, rel)
+		fi, statErr := os.Stat(abs)
+		if statErr != nil {
+			if os.IsNotExist(statErr) { // gone on disk → prune (mirror pruneDeleted)
+				if err := ix.graph.DeleteNodesInFile(projectID, rel); err != nil {
+					return res, err
+				}
+				if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
+					return res, err
+				}
+				if ix.vectors != nil {
+					if _, err := ix.vectors.DeleteByFile(projectName, rel); err != nil {
+						return res, err
+					}
+				}
+				res.FilesDeleted++
+			}
+			continue // a non-NotExist stat error: be conservative, skip
+		}
+		if fi.IsDir() || ix.excluded(filepath.Base(rel)) {
+			continue
+		}
+		lang := extract.LanguageForPath(abs)
+		ext, ok := ix.extractors[lang]
+		if !ok {
+			continue // a language codemap doesn't index (or no server registered) — skip
+		}
+		res.FilesScanned++
+		changed, refs, err := ix.indexFile(ctx, projectID, projectName, fileTask{abs: abs, rel: rel, lang: lang, ext: ext}, opts, res)
+		if err != nil {
+			res.Errors = append(res.Errors, FileError{File: rel, Err: err.Error()})
+			res.FilesSkipped++
+			continue
+		}
+		if changed {
+			pending = append(pending, refs...)
+		}
+	}
+	if _, err := ix.resolveEdges(projectID, pending); err != nil {
+		return res, err
+	}
+	if ix.vectors != nil {
+		if err := ix.vectors.Sync(); err != nil {
+			return res, err
+		}
+	}
+	return res, nil
+}
+
 func (ix *Indexer) walk(root string) ([]fileTask, map[string]int, error) {
 	var files []fileTask
 	unsupported := map[string]int{} // recognized language → count of files with no extractor yet

@@ -212,6 +212,54 @@ func TestIsGenerated(t *testing.T) {
 	}
 }
 
+// TestIndexFilesIncremental pins BD.9: IndexFiles (re)indexes just the named
+// files (resolving their edges) and prunes ones gone from disk — the daemon's
+// incremental-sync path.
+func TestIndexFilesIncremental(t *testing.T) {
+	g, v := newStores(t)
+	dir := setupProject(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a new file; incrementally index just it.
+	writeFile(t, dir, "c.go", "package app\nfunc New1() { Run() }\n")
+	if _, err := ix.IndexFiles(context.Background(), pid, "app", dir, []string{"c.go"}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if nodes, _ := g.FindNodesBySymbol(pid, "New1"); len(nodes) != 1 {
+		t.Errorf("New1 should be indexed after IndexFiles, got %d nodes", len(nodes))
+	}
+	// Its call edge resolved against the project-wide symbols.
+	hasNew1 := false
+	callers, _ := g.Callers(pid, "Run")
+	for _, n := range callers {
+		if n.Symbol == "New1" {
+			hasNew1 = true
+		}
+	}
+	if !hasNew1 {
+		t.Errorf("New1's call to Run should resolve, callers=%+v", callers)
+	}
+
+	// Delete a file; incrementally prune it.
+	if err := os.Remove(filepath.Join(dir, "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := ix.IndexFiles(context.Background(), pid, "app", dir, []string{"a.go"}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesDeleted != 1 {
+		t.Errorf("FilesDeleted = %d, want 1", res.FilesDeleted)
+	}
+	if nodes, _ := g.FindNodesBySymbol(pid, "Helper"); len(nodes) != 0 {
+		t.Errorf("Helper (from the deleted a.go) should be gone, got %d nodes", len(nodes))
+	}
+}
+
 // TestIndexProjectOnFileHook pins the progress hook: OnFile fires exactly once
 // per scanned file, 1-based and monotonic, with total == FilesScanned and a
 // non-empty rel path. This is what the CLI progress bar rides on.
