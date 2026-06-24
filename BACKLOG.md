@@ -742,6 +742,19 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #103 (multi-lang — slice B2: index-output accuracy) — **actionable missing-server message
+  + Go-gated `--precise` tip.** Two index-output fixes now that TS is real. (1) The "install the server"
+  advisory: `Index` now calls `indexAdvisory(res)` which surfaces `N typescript file(s) skipped —
+  install "typescript-language-server" to index them (or --no-lsp)` whenever a recognized language is
+  present but its server is missing — **decoupled from the `FilesScanned==0` gate** (the reviewer's P1:
+  a TS file dropped from a Go+TS repo is no longer silent), while genuinely-unsupported languages keep
+  the "planned" note only when nothing indexed. (2) The `--precise` tip (#97) was over-firing on
+  TS-only projects (it's a go/types pass — Go-only); now gated on `rep.Languages["go"] > 0` via a new
+  `Result.Languages` (file-count-per-language, populated from the walk). Tests: `TestIndexAdvisory`
+  (missing-server→actionable even with FilesScanned>0; unsupported→planned; clean→empty), updated
+  `TestIndexNonGoWarns`. Verified live: a TS-only index shows no `--precise` tip; a Go index still does.
+  Full suite + lint v2 (0) + query/studio/precise/index_status E2E green; fmt clean. COMMIT+PUSH. Next:
+  slice C = TS call edges (callHierarchy) to light up callers/impact/hotspots for TS.
 - 2026-06-23 #102 (multi-lang — slice B: TypeScript indexes) — **`codemap index` now indexes
   TypeScript** when `typescript-language-server` is on PATH. New `lspsrc/registry.go` (`ServerSpec` +
   `DefaultServers` = TS). `IndexProject` restructured: walk → **present-aware** `registerLSP` (spawns a

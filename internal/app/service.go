@@ -50,6 +50,8 @@ type IndexReport struct {
 	PreciseUpgraded int    `json:"precise_upgraded,omitempty"`
 	PreciseSkipped  int    `json:"precise_skipped,omitempty"`
 	PreciseNote     string `json:"precise_note,omitempty"`
+	// Languages maps each indexed language to its file count (e.g. "go", "typescript").
+	Languages map[string]int `json:"languages,omitempty"`
 }
 
 // StatusReport is returned by Status.
@@ -142,13 +144,50 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.PreciseUpgraded = res.PreciseUpgraded
 	rep.PreciseSkipped = res.PreciseSkipped
 	rep.PreciseNote = res.PreciseNote
-	// No supported (Go) files but other recognized source present → explain the
-	// empty result rather than leaving the user puzzled (v0.1 indexes Go).
-	if res.FilesScanned == 0 && len(res.Unsupported) > 0 {
-		rep.Warning = "no Go files to index (codemap v0.1 indexes Go); skipped " +
-			summarizeUnsupported(res.Unsupported) + " — support for more languages is planned"
+	rep.Languages = res.Languages
+	if adv := indexAdvisory(res); adv != "" {
+		if rep.Warning != "" {
+			rep.Warning += "; " + adv
+		} else {
+			rep.Warning = adv
+		}
 	}
 	return rep, nil
+}
+
+// indexAdvisory builds the index warning: an actionable note for a recognized
+// language that's present but whose language server isn't installed (shown
+// regardless of what else indexed, so a TS file dropped from a Go+TS repo isn't
+// silent), plus a "planned" note for genuinely-unsupported languages when nothing
+// at all was indexed.
+func indexAdvisory(res *index.Result) string {
+	var msgs []string
+	for _, lang := range sortedStrKeys(res.MissingServers) {
+		msgs = append(msgs, fmt.Sprintf("%d %s file(s) skipped — install %q to index them (or run with --no-lsp)",
+			res.Unsupported[lang], lang, res.MissingServers[lang]))
+	}
+	if res.FilesScanned == 0 {
+		planned := map[string]int{}
+		for lang, n := range res.Unsupported {
+			if _, hasServer := res.MissingServers[lang]; !hasServer {
+				planned[lang] = n
+			}
+		}
+		if len(planned) > 0 {
+			msgs = append(msgs, "skipped "+summarizeUnsupported(planned)+
+				" — codemap indexes Go (and TypeScript via typescript-language-server); more languages planned")
+		}
+	}
+	return strings.Join(msgs, "; ")
+}
+
+func sortedStrKeys(m map[string]string) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
 }
 
 // summarizeUnsupported renders a stable "12 typescript, 3 python" summary.

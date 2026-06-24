@@ -72,6 +72,9 @@ type Result struct {
 	// "typescript" -> "typescript-language-server"), so callers can advise the user
 	// (the skipped-file count is in Unsupported[lang]).
 	MissingServers map[string]string `json:"missing_servers,omitempty"`
+	// Languages maps each indexed language to its file count (e.g. "go" -> 36),
+	// so callers can tailor advice (the --precise tip applies only to Go).
+	Languages map[string]int `json:"languages,omitempty"`
 }
 
 // Indexer turns project files into a stored graph + vectors. The vector store
@@ -189,6 +192,12 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	res.FilesScanned = len(files)
 	if len(unsupported) > 0 {
 		res.Unsupported = unsupported
+	}
+	for _, f := range files {
+		if res.Languages == nil {
+			res.Languages = map[string]int{}
+		}
+		res.Languages[f.lang]++
 	}
 
 	// Pass 1: extract + store nodes (and embeddings) for changed files. Collect

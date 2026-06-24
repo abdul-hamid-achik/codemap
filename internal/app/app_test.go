@@ -213,9 +213,30 @@ func TestIndexNonGoWarns(t *testing.T) {
 	if rep.FilesScanned != 0 || rep.Nodes != 0 {
 		t.Errorf("expected nothing indexed for a non-Go project (NoLSP), got %d files / %d nodes", rep.FilesScanned, rep.Nodes)
 	}
-	if !strings.Contains(rep.Warning, "v0.1 indexes Go") ||
-		!strings.Contains(rep.Warning, "typescript") || !strings.Contains(rep.Warning, "python") {
-		t.Errorf("expected an explanatory warning naming skipped languages, got %q", rep.Warning)
+	if !strings.Contains(rep.Warning, "typescript") || !strings.Contains(rep.Warning, "python") {
+		t.Errorf("expected a warning naming the skipped languages, got %q", rep.Warning)
+	}
+}
+
+func TestIndexAdvisory(t *testing.T) {
+	// A present language whose server is missing — actionable, even though Go files
+	// indexed (FilesScanned > 0), so it is never silently dropped.
+	r := &index.Result{
+		FilesScanned:   5,
+		Unsupported:    map[string]int{"typescript": 3},
+		MissingServers: map[string]string{"typescript": "typescript-language-server"},
+	}
+	if adv := indexAdvisory(r); !strings.Contains(adv, "typescript-language-server") || !strings.Contains(adv, "3 typescript") {
+		t.Errorf("missing-server advisory = %q", adv)
+	}
+	// Genuinely unsupported language, nothing indexed — informational ("planned").
+	r2 := &index.Result{FilesScanned: 0, Unsupported: map[string]int{"ruby": 2}}
+	if adv := indexAdvisory(r2); !strings.Contains(adv, "ruby") || !strings.Contains(adv, "planned") {
+		t.Errorf("planned advisory = %q", adv)
+	}
+	// Everything indexed — nothing to say.
+	if adv := indexAdvisory(&index.Result{FilesScanned: 5}); adv != "" {
+		t.Errorf("expected no advisory, got %q", adv)
 	}
 }
 
