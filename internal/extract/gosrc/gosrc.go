@@ -264,6 +264,10 @@ func valueRefName(expr ast.Expr) string {
 		return t.Name
 	case *ast.SelectorExpr:
 		return t.Sel.Name
+	case *ast.IndexExpr: // instantiated generic used as a value/callee: Map[int]
+		return valueRefName(t.X)
+	case *ast.IndexListExpr: // multiple type params: Map[K, V]
+		return valueRefName(t.X)
 	}
 	return ""
 }

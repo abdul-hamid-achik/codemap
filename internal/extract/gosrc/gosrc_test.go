@@ -242,6 +242,35 @@ func (s *Server) wire() {
 	}
 }
 
+// TestValueRefsHandleGenerics pins that an instantiated generic function used as
+// a value (passed as an arg) or called inside a package-level closure is captured
+// as a reference — so it isn't a false orphan. (Generic calls in function bodies
+// are already RefCalls via calleeName.)
+func TestValueRefsHandleGenerics(t *testing.T) {
+	const src = `package sample
+
+func Mapper[T any](xs []T) {}
+func Filter[T any](xs []T) {}
+func register(f func([]int)) {}
+
+type Command struct{ RunE func() }
+
+func setup() { register(Mapper[int]) } // generic func as a value (arg)
+
+var cmd = &Command{RunE: func() { Filter[string](nil) }} // generic call in a package-level closure
+`
+	res, err := New().ExtractFile("cmd.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasKindRef(res.References, "sample.setup", "Mapper", extract.RefReferences) {
+		t.Errorf("generic func passed as a value should be a reference, got %+v", res.References)
+	}
+	if !hasKindRef(res.References, "cmd.go", "Filter", extract.RefReferences) {
+		t.Errorf("generic func called in a package-level closure should be a reference, got %+v", res.References)
+	}
+}
+
 // TestPackageLevelClosureCalls pins the fix for functions invoked inside a
 // package-level func-literal initializer (cobra's inline `RunE: func(){...}`):
 // callRefs never walks package-level decls, so without this they'd be false

@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #165 (accuracy — generic functions used as values aren't false orphans) — validated more of
+  the call graph by dogfooding: `path runImpact BlastRadius` → correct shortest chain (`runImpact → Impact
+  → BlastRadius`, verified hop-by-hop; reverse correctly has no path); generic CALLS (`Foo[int]()`) are
+  already captured (`calleeName` recurses through IndexExpr/IndexListExpr). But found a consistency gap:
+  `valueRefName` (function-*values* + #163's package-level-closure callees) did NOT unwrap generic
+  instantiation, so a generic func passed as a value (`register(Mapper[int])`) or called in a package-
+  level closure (`Filter[T]()`) would be a false orphan. Fixed `valueRefName` to recurse through
+  IndexExpr/IndexListExpr like `calleeName` does. Test `TestValueRefsHandleGenerics`. gosrc + full suite +
+  lint(0) + fmt green. The Go call graph now handles closures (nested + package-level), generics (calls +
+  values), and value-wired handlers consistently. COMMIT+PUSH.
 - 2026-06-24 #164 (usability — `orphans` no longer floods with stdlib-interface-method false positives) —
   dogfooded codemap on an EXTERNAL repo (~/projects/vecgrep, 65 files/889 nodes): indexed cleanly, 1170
   precise edges, sane hotspots — codemap works well on someone else's real Go code (good validation, no
