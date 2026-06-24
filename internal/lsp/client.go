@@ -6,17 +6,24 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
-// LSP symbol kinds (subset we map to codemap node kinds).
+// LSP symbol kinds (subset we map to codemap node kinds). Values are from the
+// LSP spec (SymbolKind), not gopls-specific.
 const (
-	SymbolClass     = 5
-	SymbolMethod    = 6
-	SymbolInterface = 11
-	SymbolFunction  = 12
-	SymbolVariable  = 13
-	SymbolStruct    = 23
+	SymbolModule      = 2
+	SymbolNamespace   = 3
+	SymbolClass       = 5
+	SymbolMethod      = 6
+	SymbolConstructor = 9
+	SymbolEnum        = 10
+	SymbolInterface   = 11
+	SymbolFunction    = 12
+	SymbolVariable    = 13
+	SymbolConstant    = 14
+	SymbolStruct      = 23
 )
 
 // Position is a 0-based line/character location.
@@ -131,11 +138,18 @@ func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	// Reap the subprocess on close: Kill then Wait, so a stopped language server
+	// doesn't linger as a zombie. sync.Once keeps Close idempotent (Wait must not
+	// be called twice).
+	var once sync.Once
 	closer := func() error {
-		_ = stdin.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		once.Do(func() {
+			_ = stdin.Close()
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			}
+		})
 		return nil
 	}
 	cl := newClient(stdout, stdin, closer)

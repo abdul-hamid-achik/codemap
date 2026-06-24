@@ -10,17 +10,22 @@ package lspsrc
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
 )
 
+// Extractor satisfies extract.Extractor by driving a language server.
+var _ extract.Extractor = (*Extractor)(nil)
+
 // Extractor wraps an LSP session for one language at one project root.
 type Extractor struct {
 	ctx    context.Context
 	lang   string // codemap language id (e.g. "typescript")
 	langID string // LSP languageId (e.g. "typescript")
+	root   string // project root, to resolve a relative path to a file:// URI
 	client *lsp.Client
 }
 
@@ -35,16 +40,17 @@ func New(ctx context.Context, lang, langID, root, command string, args ...string
 		_ = client.Close()
 		return nil, err
 	}
-	return &Extractor{ctx: ctx, lang: lang, langID: langID, client: client}, nil
+	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, client: client}, nil
 }
 
 // Language implements the extractor contract.
 func (e *Extractor) Language() string { return e.lang }
 
-// ExtractFile opens absPath in the server and maps its document symbols to
-// codemap symbols. relPath is stored on the result; src is the file content.
-func (e *Extractor) ExtractFile(absPath, relPath string, src []byte) (*extract.FileResult, error) {
-	uri := lsp.URI(absPath)
+// ExtractFile opens relPath (resolved against the project root) in the server and
+// maps its document symbols to codemap symbols. src is the file content. The
+// 2-arg signature matches extract.Extractor; the abs file:// URI is derived here.
+func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, error) {
+	uri := lsp.URI(filepath.Join(e.root, relPath))
 	if err := e.client.DidOpen(uri, e.langID, string(src)); err != nil {
 		return nil, err
 	}
@@ -73,7 +79,7 @@ func (e *Extractor) Close() error {
 // extract.Symbols. parentFQN builds a dotted fully-qualified name from nesting
 // (e.g. ClassName.method), which is how class-based languages scope members.
 func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN string, s lsp.DocumentSymbol) {
-	kind := mapKind(s.Kind)
+	kind := mapKind(s)
 	fqn := s.Name
 	if parentFQN != "" {
 		fqn = parentFQN + "." + s.Name
@@ -95,16 +101,27 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 	}
 }
 
-// mapKind maps LSP SymbolKind to a codemap node kind, returning "" for kinds we
-// don't track as graph nodes (variables, fields, constants, …).
-func mapKind(lspKind int) string {
-	switch lspKind {
+// mapKind maps an LSP DocumentSymbol to a codemap node kind, returning "" for
+// kinds we don't track as graph nodes. It takes the whole symbol (not just the
+// kind int) so a Variable/Constant whose Detail looks callable — e.g. a TS
+// `const f = () => {}` arrow function — is promoted to a function node.
+func mapKind(s lsp.DocumentSymbol) string {
+	switch s.Kind {
 	case lsp.SymbolFunction:
 		return extract.KindFunction
-	case lsp.SymbolMethod:
+	case lsp.SymbolMethod, lsp.SymbolConstructor:
 		return extract.KindMethod
-	case lsp.SymbolClass, lsp.SymbolStruct, lsp.SymbolInterface:
+	case lsp.SymbolClass:
+		return extract.KindClass
+	case lsp.SymbolStruct, lsp.SymbolInterface, lsp.SymbolEnum:
 		return extract.KindType
+	case lsp.SymbolModule, lsp.SymbolNamespace:
+		return extract.KindModule
+	case lsp.SymbolVariable, lsp.SymbolConstant:
+		if strings.Contains(s.Detail, "=>") || strings.Contains(s.Detail, "(") {
+			return extract.KindFunction // arrow function / callable binding
+		}
+		return extract.KindVariable
 	default:
 		return ""
 	}

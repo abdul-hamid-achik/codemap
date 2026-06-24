@@ -84,6 +84,18 @@ func setupProject(t *testing.T) string {
 	return dir
 }
 
+func TestIndexerCloseNoServers(t *testing.T) {
+	g, v := newStores(t)
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+	// With nothing spawned, Close is a no-op and idempotent.
+	if err := ix.Close(); err != nil {
+		t.Errorf("Close with no closers = %v, want nil", err)
+	}
+	if err := ix.Close(); err != nil {
+		t.Errorf("second Close = %v, want nil (idempotent)", err)
+	}
+}
+
 func TestIndexProject(t *testing.T) {
 	g, v := newStores(t)
 	dir := setupProject(t)

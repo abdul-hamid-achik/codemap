@@ -13,17 +13,30 @@ import (
 )
 
 func TestMapKind(t *testing.T) {
-	cases := map[int]string{
-		lsp.SymbolFunction:  extract.KindFunction,
-		lsp.SymbolMethod:    extract.KindMethod,
-		lsp.SymbolClass:     extract.KindType,
-		lsp.SymbolStruct:    extract.KindType,
-		lsp.SymbolInterface: extract.KindType,
-		lsp.SymbolVariable:  "",
+	ds := func(kind int, detail string) lsp.DocumentSymbol {
+		return lsp.DocumentSymbol{Kind: kind, Detail: detail}
 	}
-	for in, want := range cases {
-		if got := mapKind(in); got != want {
-			t.Errorf("mapKind(%d) = %q, want %q", in, got, want)
+	cases := []struct {
+		name string
+		sym  lsp.DocumentSymbol
+		want string
+	}{
+		{"function", ds(lsp.SymbolFunction, ""), extract.KindFunction},
+		{"method", ds(lsp.SymbolMethod, ""), extract.KindMethod},
+		{"constructor", ds(lsp.SymbolConstructor, ""), extract.KindMethod},
+		{"class", ds(lsp.SymbolClass, ""), extract.KindClass},
+		{"interface", ds(lsp.SymbolInterface, ""), extract.KindType},
+		{"enum", ds(lsp.SymbolEnum, ""), extract.KindType},
+		{"struct", ds(lsp.SymbolStruct, ""), extract.KindType},
+		{"namespace", ds(lsp.SymbolNamespace, ""), extract.KindModule},
+		{"module", ds(lsp.SymbolModule, ""), extract.KindModule},
+		{"arrow-fn const", ds(lsp.SymbolConstant, "() => void"), extract.KindFunction},
+		{"plain var", ds(lsp.SymbolVariable, "number"), extract.KindVariable},
+		{"untracked (property)", ds(7, ""), ""},
+	}
+	for _, c := range cases {
+		if got := mapKind(c.sym); got != c.want {
+			t.Errorf("mapKind(%s) = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
@@ -47,8 +60,8 @@ func TestAppendSymbolsNesting(t *testing.T) {
 	for _, s := range res.Symbols {
 		by[s.FQN] = s
 	}
-	if by["Foo"].Kind != extract.KindType {
-		t.Errorf("Foo kind = %q, want type", by["Foo"].Kind)
+	if by["Foo"].Kind != extract.KindClass {
+		t.Errorf("Foo kind = %q, want class", by["Foo"].Kind)
 	}
 	if by["Foo.bar"].Kind != extract.KindMethod {
 		t.Errorf("Foo.bar kind = %q, want method (nested FQN)", by["Foo.bar"].Kind)
@@ -94,7 +107,7 @@ func TestLSPExtractGopls(t *testing.T) {
 	}
 	defer e.Close()
 
-	res, err := e.ExtractFile(file, "a.go", []byte(src))
+	res, err := e.ExtractFile("a.go", []byte(src))
 	if err != nil {
 		t.Fatal(err)
 	}

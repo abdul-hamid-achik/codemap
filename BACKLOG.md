@@ -726,6 +726,39 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   Annotations`, tui `TestSearchPaneMarksAnnotated`. Full suite + lint v2 (0) + studio/query/semantic
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
+## 🎯 Epic — multi-language support (LSP backend) — GREENLIT 2026-06-23
+User greenlit TypeScript/JavaScript, Python, Docker, HTML, CSS, Vue. Designed via a 16-agent workflow
+(map → research → judge → synthesize → adversarial review). **Chosen approach (registry-plus-structure,
+45/50):** extend the existing language-agnostic `internal/extract/lspsrc` into a generic LSP-driven
+extractor fed by a tiny server registry (lang, langID, binary, args), LookPath-guarded, registered next
+to gosrc inside IndexProject. The Go path (gosrc+typesrc+Pass 1/2/3) is byte-for-byte untouched; queries
+are backend-blind (consume generic extract.Symbol/Reference) so callers/impact/hotspots/path/semantic
+work on the new nodes with ZERO query changes. Pure-Go / CGO_ENABLED=0 (the server is a spawned
+subprocess, like gopls; no tree-sitter, which would need CGO and stays gated). **Honest scoping:** TS/JS
++ Python are call-graph-capable (ride existing queries); Docker/HTML/CSS/Vue are STRUCTURE-ONLY
+(reference/import edges, resolve by path not name — need a new Pass-2b, sequenced LAST). Slices: **A**
+foundation (below) · **B** TS symbols-only via typescript-language-server (nodes+defines+embeddings ⇒
+structure browsing + semantic search for TS) · **C** TS call edges (callHierarchy, written direct as
+ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
+Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
+`Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #101 (multi-lang — slice A: foundation) — **lspsrc satisfies the Extractor interface +
+  Indexer lifecycle + broadened symbol mapping.** Additive, zero behavior change (lspsrc not yet
+  registered; Go path untouched). (1) Fixed the latent interface blocker: `lspsrc.ExtractFile` was 3-arg
+  (absPath, relPath, src) but `extract.Extractor` is 2-arg — now stores `root` and derives the file://
+  URI internally; added a `var _ extract.Extractor` compile assertion. (2) `Indexer` gained `closers
+  []io.Closer` + `Close()` (best-effort, idempotent) — the load-bearing lifecycle owner so a future
+  spawned language server is shut down per run, not leaked. (3) **Reaped the subprocess**: the
+  `lsp.Spawn` closer Killed but never `Wait()`'d (zombie — reviewer's catch); now Kill+Wait under a
+  sync.Once (idempotent). (4) Broadened `mapKind` to take the whole `DocumentSymbol` (for the arrow-fn
+  Detail heuristic) and the full LSP SymbolKind set (class→class, interface/enum/struct→type,
+  namespace/module→module, constructor→method, arrow-fn const→function, plain var→variable); added the
+  missing LSP enum consts + `extract.Kind{Class,Module,Variable}` (schema already accepts them). Tests:
+  rewritten `TestMapKind` (12 cases incl. arrow-fn), `TestAppendSymbolsNesting` (class), new
+  `TestIndexerCloseNoServers` (idempotent). Full suite + lint v2 (0) + CGO_ENABLED=0 build green; fmt
+  clean. COMMIT+PUSH. Next: slice B wires TS in (registry + LookPath-guarded registration + --no-lsp +
+  the decoupled missing-server message).
+
 ## Post-v0.5.0 polish
 - 2026-06-23 #100 (studio precise-awareness) — **the Graph tab knows when the index is already precise.**
   The precise feature created a redundancy: pressing `p` in the Graph tab spawns gopls to recompute the

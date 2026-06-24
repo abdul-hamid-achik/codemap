@@ -16,6 +16,9 @@ const (
 	KindFunction = "function"
 	KindMethod   = "method"
 	KindType     = "type"
+	KindClass    = "class"    // class-based languages (TS/Python); Go has none
+	KindModule   = "module"   // namespace/module (TS) or package
+	KindVariable = "variable" // top-level var/const that isn't callable
 	KindTest     = "test"
 )
 

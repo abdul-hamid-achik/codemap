@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -72,6 +73,21 @@ type Indexer struct {
 	embedder   embed.Provider
 	cfg        config.IndexConfig
 	extractors map[string]extract.Extractor
+	closers    []io.Closer // stateful extractors (e.g. spawned language servers) to shut down
+}
+
+// Close shuts down any stateful resources the indexer spawned (language-server
+// subprocesses). Best-effort: it closes every registered closer and returns the
+// first error. Safe to call when nothing was spawned.
+func (ix *Indexer) Close() error {
+	var firstErr error
+	for _, c := range ix.closers {
+		if err := c.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	ix.closers = nil
+	return firstErr
 }
 
 // New returns an indexer with the default backends registered (currently the
