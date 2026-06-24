@@ -767,6 +767,16 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #130 (agent parity — `codemap_doctor` MCP tool) — `doctor` (#121) was CLI-only, but
+  "why isn't my Python/TS being indexed?" / "why is semantic search empty?" is exactly what an agent
+  needs to diagnose, and the structured `DoctorReport` is ideal for it. Exposed the existing
+  `Service.Doctor(ctx)` as the **19th MCP tool** `codemap_doctor` (empty input — it inspects the
+  environment, not a project): `handleDoctor` → the report's data dir + toolchain/language-server/
+  embeddings checks, each with present/missing + install hint, as JSON. No new backend (parity, like
+  #117's unannotate). Test `TestMCPDoctor` (in-memory transport: report lists data_dir, go toolchain,
+  pyright-langserver, embeddings — fast, Ollama probe fails-closed in CI) + added to the tools/list
+  presence check. Swept "18 tools" → "19" + listed `codemap_doctor` in README/AGENTS/CLAUDE. Full suite
+  + mcp lint(0) + fmt green. An agent can now self-diagnose a broken setup over MCP. COMMIT+PUSH.
 - 2026-06-24 #129 (accuracy — precise framing was TS-only; now names all LSP languages) — the
   precise-engine docs (#112) predated JS/Python/JSX, so several surfaces still said "callHierarchy for
   **TypeScript**" and "TypeScript has no name-based call edges" — leaving an **agent on a JS/Python

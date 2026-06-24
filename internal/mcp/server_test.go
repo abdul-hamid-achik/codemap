@@ -89,7 +89,7 @@ func TestMCPServer(t *testing.T) {
 	for _, tool := range lt.Tools {
 		got[tool.Name] = true
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}
@@ -312,6 +312,46 @@ func TestMCPUnannotate(t *testing.T) {
 	}
 	if txt := textOf(again); !strings.Contains(txt, `"removed": false`) {
 		t.Errorf("removing a missing annotation should report removed false, not error: %s", txt)
+	}
+}
+
+// TestMCPDoctor verifies agents can diagnose the environment via codemap_doctor —
+// the structured report lists the data dir and each toolchain/language-server/
+// embeddings check, regardless of which are installed on the host.
+func TestMCPDoctor(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	sess, err := app.Open("") // no index needed — doctor checks the environment
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_doctor", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	txt := textOf(res)
+	for _, want := range []string{"data_dir", "go toolchain", "pyright-langserver", "embeddings"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("doctor report should include %q, got: %s", want, txt)
+		}
 	}
 }
 

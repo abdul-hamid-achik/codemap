@@ -169,6 +169,9 @@ type unannotateInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+// doctorInput is empty: doctor inspects the environment, not a project.
+type doctorInput struct{}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -242,6 +245,10 @@ func (s *Server) register() {
 		Name:        "codemap_unannotate",
 		Description: "Remove an annotation by 'id' (from codemap_annotate's result or codemap_annotations) — so the knowledge layer can be corrected and pruned, not only appended to.",
 	}, s.handleUnannotate)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_doctor",
+		Description: "Check the environment codemap runs in — go toolchain, gopls, the language servers (TypeScript/JavaScript, Python), and Ollama embeddings — each with a present/missing flag and an install hint. Use it to diagnose why a language isn't being indexed or why semantic search is unavailable.",
+	}, s.handleDoctor)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -399,6 +406,10 @@ func (s *Server) handleUnannotate(_ context.Context, _ *sdkmcp.CallToolRequest, 
 		out["note"] = "no annotation with that id in this project"
 	}
 	return result(out, err)
+}
+
+func (s *Server) handleDoctor(ctx context.Context, _ *sdkmcp.CallToolRequest, _ doctorInput) (*sdkmcp.CallToolResult, any, error) {
+	return result(s.svc.Doctor(ctx), nil)
 }
 
 // ---- helpers ----
