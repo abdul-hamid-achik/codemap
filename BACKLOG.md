@@ -5,6 +5,18 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #192 (release-readiness checkpoint — full E2E suite + check + CI all green) — ran the COMPLETE
+  flow suite end-to-end (toolchains + Ollama local): **21/21 specs PASS** — annotations, config, context,
+  help, incremental, index_progress, index_status, javascript, jsx, mcp_serve, onboarding, polyglot,
+  precise, python, query, semantic, staleness, studio, studio_ts, typescript, version. Together with
+  `task check` (fmt+lint(0)+test, all packages) and green CI on every push, this confirms the #152–#191
+  batch introduced no regression across any surface (CLI/MCP/studio), language (Go/TS/JS/Python), or pillar
+  (graphs/precise · vectors · LSP). **The batch is release-ready.** This session hardened it well beyond
+  v0.8.0: agent-trust freshness (#153/#154), one-call context bundle + studio overlay (#155/#178–#180),
+  honesty fixes (callers found vs typo #181, blast-radius depth #180, clean JSON #186), consistent
+  onboarding (#183/#190), multi-language validation + missing-server guard (#187), and a full docs audit
+  (README/AGENTS/cli/quick-start/configuration #185/#188–#191). **Recommended next: tag v0.9.0** (awaiting
+  the user's explicit go-ahead — releases need per-release authorization). No code changed. COMMIT+PUSH.
 - 2026-06-24 #191 (configuration.md — document all 9 env vars + the full exclude list) — first validated the
   Python LSP flagship by dogfooding (pyright: cross-file run→helper, correct orphans top/unused_helper,
   precise edges — works as well as TS; no bug). Then audited docs/configuration.md against the code: it
