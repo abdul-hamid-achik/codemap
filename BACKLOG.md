@@ -232,7 +232,12 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   `FcheapList(tags)→[]StashInfo` (`list --json` + single server-side `--tag`, extra tags AND-matched
   client-side). `FcheapBinary`/`FcheapStashDir` overridable. `TestFcheapRoundTrip` (real save→list→restore,
   gated on `fcheap` on PATH); task check green.
-- [ ] **BD.4** `internal/branchstate/state.go` — pointer file `RegistryDir()/branches/<repoHash>.json` (atomic temp+rename): branch→{stash_id, base_sha, profile, counts}. `Rebuild` from `fcheap list --tag`.
+- [x] **BD.4** `internal/branchstate/state.go` — per-project pointer file at `DataDir()/branches/<repoHash>.json`
+  (`StatePath`): `State{repo_root/hash, project, default/active_branch, branches:{<b>:{stash_id, base_sha,
+  embedding_profile, node/vector_count, last_switched_at}}}`. `Load` (missing→empty), `Save` (atomic
+  temp+rename), `Lookup`, `Record` (stamps time), `Rebuild(ctx, repoHash)` from `FcheapList([codemap-index,
+  repo:<hash>])` parsing `branch:<name>` tags (newest stash per branch). `TestStateRoundTrip` +
+  `TestRebuildFromFcheap` (real fcheap, gated); task check green.
 - [ ] **BD.5** `internal/app/branchswitch.go` — `BranchSnapshot`/`BranchSwitch`/`BranchStatus` Service methods; orchestrate snapshot-old → restore-or-reindex-new; base-sha staleness via `git merge-base --is-ancestor`; reuse `Service.Index` profile gate; detect daemon lock.
 - [ ] **BD.6** `cmd/codemap/main.go` — `branch-switch [--from --to --root --force-reindex --install-hook --json]`, `branch-snapshot`, `branch-status`. `--install-hook` writes `.git/hooks/post-checkout` (worktree/`core.hooksPath`-aware; check the hook `flag` arg so it skips `git checkout -- file`).
 - [ ] **BD.7** `internal/mcp/server.go` — `codemap_branch_switch` / `codemap_branch_status` tools.
