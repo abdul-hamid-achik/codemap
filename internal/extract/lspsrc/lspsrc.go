@@ -47,6 +47,20 @@ func New(ctx context.Context, lang, langID, root, command string, args ...string
 	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, client: client}, nil
 }
 
+// lspLanguageID refines the extractor's default LSP languageId by file
+// extension where it changes behavior — notably JSX/TSX, which
+// typescript-language-server only parses (and whose `<Component/>` usages it only
+// resolves as call edges) under the *react languageIds. Other files use fallback.
+func lspLanguageID(relPath, fallback string) string {
+	switch strings.ToLower(filepath.Ext(relPath)) {
+	case ".tsx":
+		return "typescriptreact"
+	case ".jsx":
+		return "javascriptreact"
+	}
+	return fallback
+}
+
 // Bind returns an extractor for another language served by the SAME server
 // process — typescript-language-server handles both TypeScript and JavaScript, so
 // codemap spawns it once and binds each language with its own LSP languageId. The
@@ -64,7 +78,7 @@ func (e *Extractor) Language() string { return e.lang }
 // 2-arg signature matches extract.Extractor; the abs file:// URI is derived here.
 func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, error) {
 	uri := lsp.URI(filepath.Join(e.root, relPath))
-	if err := e.client.DidOpen(uri, e.langID, string(src)); err != nil {
+	if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
 		return nil, err
 	}
 	syms, err := e.client.DocumentSymbols(e.ctx, uri)

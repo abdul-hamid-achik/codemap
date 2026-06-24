@@ -767,6 +767,18 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #122 (multi-lang — JSX/TSX call graph; per-file languageId) — user asked for JSX; a
+  probe showed it was half-broken: a `.tsx` opened with `languageId:typescript` extracts symbols but
+  **resolves no JSX call edges** (`<Button/>` usage invisible), whereas `typescriptreact` resolves them.
+  Root cause: the extractor sent one fixed languageId per language, so `.tsx`/`.jsx` never got the
+  *react ids tsserver needs to parse JSX. Fix: new `lspLanguageID(relPath, fallback)` refines the id by
+  extension — `.tsx`→`typescriptreact`, `.jsx`→`javascriptreact`, everything else keeps the language
+  default — used in `ExtractFile`'s `didOpen` (callHierarchy then rides the already-open doc). Verified
+  live: `callers Button` on `App.tsx` (App renders `<Button/>`) → `App` (was empty before). Tests:
+  lspsrc `TestLSPLanguageID`; index `TestIndexTSXCallEdges` (server-gated: JSX `<Button/>` → call edge).
+  Full suite + lint(0) + fmt green. (React `.jsx`/`.tsx` were already indexed for structure; now their
+  component-usage call graph works too.) COMMIT+PUSH. Next: Vue SFC (vue-language-server is installed —
+  probe + add).
 - 2026-06-24 #121 (polish — `codemap doctor` environment check) — now that codemap drives several
   optional language servers, users need a proactive answer to "is my TS/Python actually going to be
   indexed?" (the missing-server note only appeared mid-index). New `codemap doctor` (sibling tools all

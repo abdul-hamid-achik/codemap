@@ -132,6 +132,24 @@ func TestBind(t *testing.T) {
 	}
 }
 
+// TestLSPLanguageID pins the per-extension languageId override: .tsx/.jsx must
+// map to the *react ids (so tsserver parses JSX and resolves <Component/> calls),
+// while other files keep the language's default.
+func TestLSPLanguageID(t *testing.T) {
+	cases := []struct{ path, fallback, want string }{
+		{"src/App.tsx", "typescript", "typescriptreact"},
+		{"src/app.jsx", "javascript", "javascriptreact"},
+		{"app.ts", "typescript", "typescript"},
+		{"x.js", "javascript", "javascript"},
+		{"m.py", "python", "python"},
+	}
+	for _, c := range cases {
+		if got := lspLanguageID(c.path, c.fallback); got != c.want {
+			t.Errorf("lspLanguageID(%q, %q) = %q, want %q", c.path, c.fallback, got, c.want)
+		}
+	}
+}
+
 func TestCallEdgesTypeScript(t *testing.T) {
 	if _, err := exec.LookPath("typescript-language-server"); err != nil {
 		t.Skip("typescript-language-server not on PATH")

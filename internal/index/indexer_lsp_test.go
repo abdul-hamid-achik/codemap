@@ -119,6 +119,38 @@ func TestIndexTypeScriptCallEdges(t *testing.T) {
 	}
 }
 
+// TestIndexTSXCallEdges proves JSX is resolved: a .tsx component rendering
+// another (<Button/>) becomes a call edge under --precise — which only works
+// because the file is opened with the typescriptreact languageId. Server-gated.
+func TestIndexTSXCallEdges(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "App.tsx", "export function Button(props: { label: string }) {\n  return <button>{props.label}</button>;\n}\nexport function App() {\n  return <Button label=\"hi\" />;\n}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("tsx", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if _, err := ix.IndexProject(ctx, pid, "tsx", dir, Options{Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	callers, err := g.Callers(pid, "Button")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, c := range callers {
+		if c.Symbol == "App" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("callers of Button should include App (JSX <Button/> usage), got %+v", callers)
+	}
+}
+
 // TestIndexJavaScriptMixed proves one typescript-language-server serves BOTH
 // TypeScript and JavaScript: a mixed project indexes .js and .ts together, and
 // --precise resolves call edges across the language boundary (a .ts function
