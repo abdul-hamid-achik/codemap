@@ -742,6 +742,19 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #111 (accuracy — `status` precise-edge label was Go-centric, wrong for TS) — the
+  human-readable `status` output hardcoded **"N precise via go/types"** for *every* project, so a
+  TypeScript project showed "3 precise via go/types" — wrong engine (TS precise edges come from
+  `callHierarchy`, not go/types). And the no-precise fallback said "name-based; run --precise for exact
+  **Go** call edges", doubly wrong for TS (which has *no* name-based call edges, and they aren't Go).
+  New `preciseEdgeNote(preciseEdges, languages)` helper, engine-aware from the language mix: Go →
+  "via go/types", TS → "via callHierarchy", mixed → "go/types + callHierarchy"; and the empty case →
+  "no call graph yet; run 'codemap index --precise' to resolve TypeScript calls" for TS-only vs the
+  generic "name-based …" otherwise. Pure helper → unit-testable: new `cmd/codemap/main_test.go`
+  `TestPreciseEdgeNote` (5 cases incl. the absent-substring checks that catch the regression). Verified
+  live: Go repo still "1272 precise via go/types"; TS project now "3 precise via callHierarchy". Full
+  suite + cmd lint(0) + fmt clean. This was the last surface still saying "go/types" unconditionally
+  (index message + docs were fixed in C2/#108). COMMIT+PUSH. Next: JS row (server-dedup first).
 - 2026-06-24 #110 (E2E — studio drives a TypeScript call graph) — new `specs/studio_ts.yml`: the
   third pillar (flows that demonstrate value via LSP) now covers the studio TUI on a **TypeScript**
   project, proving the multi-language work reaches the TUI, not just the CLI. Sets up auth.ts (two

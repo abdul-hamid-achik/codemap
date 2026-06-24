@@ -313,12 +313,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", rep.Project)
 		return nil
 	}
-	edges := fmt.Sprintf("%d", rep.Edges)
-	if rep.PreciseEdges > 0 {
-		edges += fmt.Sprintf(" (%d precise via go/types)", rep.PreciseEdges)
-	} else {
-		edges += " (name-based; run 'codemap index --precise' for exact Go call edges)"
-	}
+	edges := fmt.Sprintf("%d", rep.Edges) + preciseEdgeNote(rep.PreciseEdges, rep.Languages)
 	fmt.Printf("Project: %s\n  path:  %s\n  nodes: %d\n  edges: %s\n  files: %d\n",
 		rep.Project, rep.Path, rep.Nodes, edges, rep.Files)
 	if rep.Vectors > 0 {
@@ -942,6 +937,30 @@ func printJSON(v any) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// preciseEdgeNote renders the parenthetical after the edge count in `status`,
+// engine-aware so it never lies: precise edges come from go/types for Go but
+// callHierarchy for TypeScript, and a TS project without --precise has *no* call
+// edges at all (not "name-based" — TS has no name-based call resolution).
+func preciseEdgeNote(preciseEdges int, languages map[string]int) string {
+	hasGo := languages["go"] > 0
+	hasTS := languages["typescript"] > 0
+	if preciseEdges > 0 {
+		switch {
+		case hasGo && hasTS:
+			return fmt.Sprintf(" (%d precise: go/types + callHierarchy)", preciseEdges)
+		case hasTS:
+			return fmt.Sprintf(" (%d precise via callHierarchy)", preciseEdges)
+		default:
+			return fmt.Sprintf(" (%d precise via go/types)", preciseEdges)
+		}
+	}
+	if hasTS && !hasGo {
+		// TypeScript has no name-based call edges — --precise is the only source.
+		return " (no call graph yet; run 'codemap index --precise' to resolve TypeScript calls)"
+	}
+	return " (name-based; run 'codemap index --precise' for exact call edges)"
 }
 
 func formatCounts(m map[string]int) string {
