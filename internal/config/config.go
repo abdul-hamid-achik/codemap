@@ -45,6 +45,7 @@ func DefaultConfig() *Config {
 			Exclude: []string{
 				".git", "node_modules", "vendor", "dist", "build",
 				".next", ".nuxt", "target", "__pycache__",
+				"venv", "env", "site-packages", // Python virtualenvs / installed deps
 				"*.min.js", "*.gen.go", "*.pb.go", "*_pb.go", "*.lock",
 			},
 		},

@@ -4,6 +4,20 @@
 > next unstarted task, do it, update status here. Convert relative dates to absolute.
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
+## Iteration log (post-v0.7.0)
+- 2026-06-24 #136 (BUG — exclude Python virtualenvs so they don't flood the graph) — dogfooded
+  real-project layouts after v0.7.0. **node_modules/vendor/dist/.git etc. are correctly skipped**
+  (default `Exclude` + the dot-prefix rule — verified node_modules stays out with LSP on). But a gap
+  for the just-shipped **Python** support: virtualenvs named `venv`/`env`, and `site-packages`, are
+  non-hidden and weren't excluded — so a Python project with a venv indexed **all of site-packages**
+  (verified: `requests_internal` from `venv/lib/site-packages/...` was a graph node, flooding
+  find/hotspots/search with dependency code). Fix: added `venv`, `env`, `site-packages` to the default
+  `Index.Exclude`. Verified: same project now indexes only `src/app.py`; the venv symbol is gone. Test
+  `TestIndexExcludesDependencyDirs` (src indexed; node_modules/venv/vendor symbols absent — uses `.go`
+  fixtures so it runs in CI). docs/configuration.md updated (representative example + the note that
+  setting `exclude` replaces the defaults, which is accurate — slices overlay). Full suite + lint(0) +
+  fmt green. Real usability fix for Python on actual repos. COMMIT+PUSH.
+
 ## 🏷️ Release — v0.7.0 (2026-06-24)
 **Multi-language breadth + reliability.** Headline since v0.6.0:
 - **More languages, riding the LSP backend.** **JavaScript** (one `typescript-language-server` serves

@@ -35,11 +35,17 @@ index:
   max_file_bytes: 1048576
   exclude:
     - .git
-    - node_modules
-    - vendor
+    - node_modules     # JS/TS deps
+    - venv             # Python virtualenvs (also env, site-packages)
+    - __pycache__
+    - vendor           # Go deps
     - dist
     - "*.min.js"
 ```
+
+The default exclude list also covers `build`, `.next`, `.nuxt`, `target`, `env`, `site-packages`,
+`*.gen.go`, `*.pb.go`, and `*.lock`; any dot-prefixed directory (`.git`, `.venv`, `.tox`, …) is skipped
+automatically. Setting `exclude` replaces the defaults, so include the ones you still want.
 
 ## Embedding profile guard
 

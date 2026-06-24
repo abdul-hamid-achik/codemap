@@ -239,6 +239,31 @@ func TestIndexStructureOnly(t *testing.T) {
 	}
 }
 
+// TestIndexExcludesDependencyDirs checks that the default excludes keep
+// dependency/build dirs out of the graph — critically Python virtualenvs
+// (venv/site-packages), which would otherwise flood it with library code.
+func TestIndexExcludesDependencyDirs(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/app.go", "package m\n\nfunc Mine() {}\n")
+	writeFile(t, dir, "node_modules/lib/x.go", "package lib\n\nfunc NodeDep() {}\n")
+	writeFile(t, dir, "venv/lib/site-packages/pkg/y.go", "package pkg\n\nfunc VenvDep() {}\n")
+	writeFile(t, dir, "vendor/dep/z.go", "package dep\n\nfunc VendorDep() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("m", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "m", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "Mine"); len(ns) == 0 {
+		t.Error("src/app.go should be indexed")
+	}
+	for _, dep := range []string{"NodeDep", "VenvDep", "VendorDep"} {
+		if ns, _ := g.FindNodesBySymbol(pid, dep); len(ns) != 0 {
+			t.Errorf("%s is in an excluded dependency dir — it should NOT be indexed", dep)
+		}
+	}
+}
+
 // TestIndexPrunesDeletedFiles checks that an incremental reindex removes the
 // nodes of a file deleted from disk — otherwise ghost symbols linger in
 // find/callers/search. Files still on disk are untouched.
