@@ -174,3 +174,59 @@ func (t *T) M() {}
 		t.Errorf("pointer-receiver method FQN = %v, want p.T.M", m)
 	}
 }
+
+func hasKindRef(refs []extract.Reference, from, to, kind string) bool {
+	for _, r := range refs {
+		if r.From == from && r.To == to && r.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// TestValueRefsForFunctionValues pins function-value reference extraction: a
+// function used as a VALUE (a cobra `RunE: handler` table, a callback passed to
+// register) becomes a `references` edge (not a `calls` edge), so such handlers
+// aren't flagged as dead code while the call graph stays clean. Top-level decls
+// are attributed to the file (relPath); body refs to the enclosing function.
+func TestValueRefsForFunctionValues(t *testing.T) {
+	const src = `package sample
+
+func runInit() {}
+func handler() {}
+func handleX() {}
+func register(f func()) {}
+
+type Command struct{ RunE func() }
+
+var cmd = &Command{RunE: runInit}
+
+func setup() {
+	register(handler)
+	register(handleX)
+}
+`
+	res, err := New().ExtractFile("cmd.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Top-level `RunE: runInit` → a references edge from the file to runInit.
+	if !hasKindRef(res.References, "cmd.go", "runInit", extract.RefReferences) {
+		t.Errorf("expected file->runInit references edge (top-level cobra-style handler), got %+v", res.References)
+	}
+	// Callbacks passed as args inside a body → references from the enclosing func.
+	if !hasKindRef(res.References, "sample.setup", "handler", extract.RefReferences) {
+		t.Error("expected setup->handler references edge (callback arg)")
+	}
+	if !hasKindRef(res.References, "sample.setup", "handleX", extract.RefReferences) {
+		t.Error("expected setup->handleX references edge (callback arg)")
+	}
+	// A function used only as a value is never a call target.
+	if hasKindRef(res.References, "cmd.go", "runInit", extract.RefCalls) {
+		t.Error("runInit is used as a value, not called — must not be a calls edge")
+	}
+	// Sanity: a real call (register(...)) is still a calls edge.
+	if !hasKindRef(res.References, "sample.setup", "register", extract.RefCalls) {
+		t.Error("register(...) should remain a calls edge")
+	}
+}

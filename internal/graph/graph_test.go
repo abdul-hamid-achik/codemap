@@ -428,6 +428,44 @@ func TestHotspotsOrphansPath(t *testing.T) {
 	}
 }
 
+// TestOrphansExcludesValueReferenced verifies a function reachable only as a
+// value (a `references` edge, e.g. a cobra `RunE: handler`) is NOT flagged as
+// dead code — while the node that references it, if itself uncalled, still is.
+func TestOrphansExcludesValueReferenced(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(sym, kind string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: "f.go", Symbol: sym, FQN: "p." + sym, Kind: kind, Language: "go", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	file := mk("", KindFile)
+	handler := mk("handler", KindFunction) // wired by value, never called
+	mk("lonely", KindFunction)             // truly dead
+	// The file references handler as a value (e.g. `RunE: handler`) — a
+	// references edge, distinct from a calls edge.
+	if _, err := s.AddEdge(file, handler, EdgeReferences, WeightLSP); err != nil {
+		t.Fatal(err)
+	}
+
+	orph, err := s.Orphans(pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, n := range orph {
+		got[n.Symbol] = true
+	}
+	if got["handler"] {
+		t.Error("handler is referenced as a value (references edge) — must not be an orphan")
+	}
+	if !got["lonely"] {
+		t.Errorf("lonely has no callers/references — should be an orphan, got %v", got)
+	}
+}
+
 func TestSearchSymbols(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")

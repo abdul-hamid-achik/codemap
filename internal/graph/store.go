@@ -347,11 +347,14 @@ func (s *Store) AddEdgeProv(sourceID, targetID int64, edgeType string, weight fl
 	return res.LastInsertId()
 }
 
-// DeleteCallEdgesBySource removes the calls/references edges of the given source
-// nodes that have the given provenance. The go/types pass uses it to drop the
+// DeleteCallEdgesBySource removes the `calls` edges of the given source nodes
+// that have the given provenance. The go/types pass uses it to drop the
 // name-based ('name') call edges of cleanly type-checked source nodes before
 // inserting their precise replacements — so precise supersedes name without
-// double-counting. defines edges (structural, from file nodes) are never touched.
+// double-counting. `references` edges (function values used as values, e.g.
+// `RunE: handler`) are NOT touched: go/types resolves calls, not value
+// references, so deleting them would lose data the precise pass can't restore.
+// defines edges (structural, from file nodes) are never touched either.
 func (s *Store) DeleteCallEdgesBySource(sourceIDs []int64, provenance string) error {
 	if len(sourceIDs) == 0 {
 		return nil
@@ -371,7 +374,7 @@ func (s *Store) DeleteCallEdgesBySource(sourceIDs []int64, provenance string) er
 		}
 		args = append(args, provenance)
 		q := "DELETE FROM edges WHERE source_id IN (" + strings.Join(ph, ",") +
-			") AND edge_type IN ('" + EdgeCalls + "','" + EdgeReferences + "') AND provenance = ?"
+			") AND edge_type = '" + EdgeCalls + "' AND provenance = ?"
 		if _, err := s.db.Exec(q, args...); err != nil {
 			return fmt.Errorf("delete call edges by source: %w", err)
 		}

@@ -45,6 +45,7 @@ func (e Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult,
 			sym := e.funcSymbol(fset, src, pkg, d, isTest)
 			res.Symbols = append(res.Symbols, sym)
 			res.References = append(res.References, callRefs(fset, sym.FQN, d)...)
+			res.References = append(res.References, valueRefs(fset, sym.FQN, d)...)
 		case *ast.GenDecl:
 			if d.Tok == token.TYPE {
 				for _, spec := range d.Specs {
@@ -55,6 +56,9 @@ func (e Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult,
 			}
 		}
 	}
+	// Function values wired in package-level declarations (e.g. a cobra command
+	// table) — attributed to the file so the handlers aren't flagged as dead code.
+	res.References = append(res.References, fileValueRefs(fset, relPath, f)...)
 	return res, nil
 }
 
@@ -164,6 +168,82 @@ func callRefs(fset *token.FileSet, from string, d *ast.FuncDecl) []extract.Refer
 		return true
 	})
 	return refs
+}
+
+// valueRefs collects function-value references within a function body: a bare
+// identifier naming a function used as a *value* (passed, stored, registered)
+// rather than called — e.g. `register(handler)`, `[]H{a, b}`. Attributed to the
+// enclosing function (from = its FQN).
+func valueRefs(fset *token.FileSet, from string, d *ast.FuncDecl) []extract.Reference {
+	if d.Body == nil {
+		return nil
+	}
+	var refs []extract.Reference
+	collectValueRefs(fset, from, d.Body, map[string]bool{}, &refs)
+	return refs
+}
+
+// fileValueRefs collects function-value references in package-level declarations
+// (var/const) — e.g. a cobra command table `var initCmd = &cobra.Command{RunE:
+// runInit}`. These have no enclosing function, so they're attributed to the file
+// (from = relPath; the indexer resolves a file path to its file node). Function
+// bodies are skipped here — valueRefs handles those.
+func fileValueRefs(fset *token.FileSet, relPath string, f *ast.File) []extract.Reference {
+	seen := map[string]bool{}
+	var refs []extract.Reference
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok { // *ast.FuncDecl and others — bodies handled by valueRefs
+			continue
+		}
+		collectValueRefs(fset, relPath, gd, seen, &refs)
+	}
+	return refs
+}
+
+// collectValueRefs walks node for bare identifiers naming a function used as a
+// *value* (passed, stored, registered) rather than called, appending each as a
+// RefReferences edge from `from`. Without these, framework handlers wired by
+// value (cobra commands, HTTP routers, callback tables) all look like dead code
+// in `orphans`. RefReferences is distinct from RefCalls, so the call graph
+// (callers/callees/impact/path) is unaffected. Only bare identifiers are taken —
+// they resolve within the package precisely, with no cross-package over-matching.
+func collectValueRefs(fset *token.FileSet, from string, node ast.Node, seen map[string]bool, out *[]extract.Reference) {
+	add := func(expr ast.Expr) {
+		id, ok := expr.(*ast.Ident)
+		if !ok {
+			return
+		}
+		name := id.Name
+		if name == "" || builtins[name] || seen[name] {
+			return
+		}
+		seen[name] = true
+		*out = append(*out, extract.Reference{
+			From:      from,
+			To:        name,
+			Kind:      extract.RefReferences,
+			Line:      fset.Position(id.Pos()).Line,
+			Qualified: false, // bare ident → same-package, precise resolution
+		})
+	}
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch t := n.(type) {
+		case *ast.KeyValueExpr:
+			add(t.Value) // struct/map field: `RunE: runInit`, `"x": handler`
+		case *ast.CallExpr:
+			for _, arg := range t.Args { // callbacks passed as args (not the callee)
+				add(arg)
+			}
+		case *ast.CompositeLit:
+			for _, elt := range t.Elts { // slice/array of handlers; KV elts handled above
+				if _, isKV := elt.(*ast.KeyValueExpr); !isKV {
+					add(elt)
+				}
+			}
+		}
+		return true
+	})
 }
 
 // isQualifiedCall reports whether a call uses a selector (x.Foo(), pkg.Foo()),

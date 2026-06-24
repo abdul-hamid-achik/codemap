@@ -742,6 +742,27 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #113 (real usefulness — `orphans` no longer flags function values as dead code)
+  — found by **dogfooding** `orphans` on codemap itself: the top ~20 results were all `main.runXxx`
+  cobra handlers — obvious false positives, because a handler wired by value (`RunE: runInit`) is
+  never *called*, and the call-graph extraction only saw `*ast.CallExpr`. On any cobra-based Go CLI
+  (a huge fraction of Go tools) `orphans` was useless. Fix — follow function **values**, kept entirely
+  separate from the call graph: (1) gosrc now extracts bare identifiers naming a function used as a
+  value — composite-literal field values (`RunE: runInit`), call arguments (`register(handler)`),
+  slice/map elements — as `RefReferences` (a `references` edge, NOT `calls`); body refs attributed to
+  the enclosing func, **top-level** decls (the cobra command table is a package-level `var`) attributed
+  to the file. (2) `resolveEdges` now keys file nodes by path (paths have slashes, FQNs have dots — no
+  collision) so file-scope refs resolve. (3) `DeleteCallEdgesBySource` (the `--precise` supersede) now
+  deletes only `calls`, preserving `references` — go/types resolves calls, not value uses, so nuking
+  them lost data (latent bug: it deleted references too, harmless only because nothing created them).
+  (4) `Orphans` excludes nodes with an incoming `calls` OR `references` edge. The call graph
+  (callers/callees/impact/path) is **untouched** — references aren't calls. Verified live (reindex
+  --precise): the 20 cobra handlers are gone from `orphans`; `callers runInit` → none, `impact runInit`
+  → 0 blast (no leak). 3 tests: gosrc `TestValueRefsForFunctionValues`, graph
+  `TestOrphansExcludesValueReferenced`, index `TestIndexValueReferencedHandlerNotOrphan` (end-to-end).
+  Full suite + lint(0) + fmt + precise/query E2E green. README orphans caveat updated (follows value
+  wiring; interface/reflection still blind). Bare-idents only (precise same-package resolution, no
+  over-matching); method values via selector (`s.handle`) deferred. COMMIT+PUSH.
 - 2026-06-24 #112 (accuracy — MCP agent playbook didn't know TS precise) — the agent-facing surface
   (`codemap serve`) still described `precise:true` as Go-only, so an agent indexing a **TypeScript**
   project wouldn't know `codemap_index precise:true` is what gives it a call graph at all. Fixed two

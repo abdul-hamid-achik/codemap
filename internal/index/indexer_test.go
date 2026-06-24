@@ -236,3 +236,45 @@ func TestIndexStructureOnly(t *testing.T) {
 		t.Errorf("structure-only nodes/edges = %d/%d, want 5/5", res.Nodes, res.Edges)
 	}
 }
+
+// TestIndexValueReferencedHandlerNotOrphan is the end-to-end proof for the
+// function-value reference pipeline: a handler wired only by value in a
+// top-level table (cobra-style `RunE: runInit`) must NOT be flagged as dead
+// code, yet must NOT leak into the call graph either. Exercises gosrc value-ref
+// extraction → the file-keyed resolution in resolveEdges → the Orphans query.
+func TestIndexValueReferencedHandlerNotOrphan(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "main.go", `package main
+
+func runInit() error { return nil }
+
+var cmd = &struct{ RunE func() error }{RunE: runInit}
+
+func main() { _ = cmd }
+`)
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	orph, err := g.Orphans(pid, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range orph {
+		if n.Symbol == "runInit" {
+			t.Errorf("runInit is wired by value (RunE: runInit) — must not be a dead-code candidate")
+		}
+	}
+	// The value reference is a `references` edge, not a `calls` edge: the call
+	// graph stays clean (no phantom caller).
+	callers, err := g.Callers(pid, "runInit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callers) != 0 {
+		t.Errorf("a function value must not create call-graph callers, got %+v", callers)
+	}
+}

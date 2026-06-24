@@ -422,6 +422,12 @@ func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int,
 		if n.FQN != "" {
 			fqnTo[n.FQN] = n.ID
 		}
+		// File-scope references (function values in top-level decls) are attributed
+		// to the file path; key file nodes by path so those refs resolve. Paths have
+		// slashes and FQNs have dots, so the two key spaces never collide.
+		if n.Kind == graph.KindFile {
+			fqnTo[n.FilePath] = n.ID
+		}
 		if n.Symbol != "" {
 			symTo[n.Symbol] = append(symTo[n.Symbol], n.ID)
 		}
