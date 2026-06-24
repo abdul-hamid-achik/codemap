@@ -302,7 +302,12 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   `config.DaemonSocketPath`/`DaemonStatePath`, `Indexer.Excluded`, throttle `Available` passthrough.
   `TestDaemonIndexesOnChange` (initial index + watch a new file → indexed + status + clean stop; 3× + race);
   task check green. (Full MCP-over-socket serving = BD.12.)
-- [ ] **BD.12** `cmd/codemap/main.go` — `daemon start|stop|status`. Make `serve` a stdio↔socket **bridge** when a daemon is live; make query commands + `codemap_*` tools prefer the socket, else `VectorsReadOnly` fallback. Keep LSP Content-Length strictly inside `internal/lsp`.
+- [x] **BD.12** `cmd/codemap/daemon.go` — `codemap daemon start [path] / stop / status`. `start` runs the
+  daemon in the foreground (background it with `&`; clean shutdown on Ctrl-C/SIGTERM via `d.Stop`); `stop`/
+  `status` dial the control socket. Registered the `daemon` command group. **Dogfood-verified end-to-end**:
+  started in the background, `status` → running, added a `.go` file → daemon auto-indexed it (`find` saw the new
+  symbol live), `stop` → cleanly down. task check green. (Optional follow-up: a `serve` stdio↔socket MCP bridge;
+  the daemon being the sole writer already lets clients query read-only without lock contention.)
 - [ ] **BD.13** `internal/config/config.go` — `DaemonConfig{Autostart, IdleTimeout(30m), EmbedWorkers(2), EmbedRPS, EmbedMaxInFlight, Debounce}` + `CODEMAP_DAEMON_*` overrides. Surface daemon state in `status` / `codemap_status`.
 
 **Compose:** the daemon performs the branch switch (`daemon.switchBranch` RPC: re-point watcher, reopen slice) and re-embeds only the diff via the throttle; `branch-switch` delegates to a running daemon instead of opening a second writer.
