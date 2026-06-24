@@ -60,6 +60,7 @@ func renderHelp() string {
 	row("1–4 / tab / shift+tab", "switch tabs")
 	row("ctrl+g", "open the selection in the Graph walker")
 	row("ctrl+s", "view the selected symbol's source")
+	row("ctrl+o", "orient: context card (callers/callees/tests/blast)")
 	row("ctrl+r", "reindex and refresh (keeps the project's precision)")
 	row("? / esc", "toggle this help")
 	row("ctrl+c", "quit (q also quits on Graph/Metrics)")
@@ -76,9 +77,9 @@ func renderHelp() string {
 	row("type", "edit the query; enter runs it")
 	row("↑/↓ · pgup/pgdn", "move the result selection")
 	row("enter", "run the query, or open the selected hit")
-	b.WriteString("\n" + sectionStyle.Render("Source view (s / ctrl+s)") + "\n")
+	b.WriteString("\n" + sectionStyle.Render("Source / context overlay (s · ctrl+s · ctrl+o)") + "\n")
 	row("↑/↓ · k/j", "scroll (also pgup/pgdn · g/G top & bottom)")
-	row("esc / q", "close the source view")
+	row("esc / q", "close the overlay")
 	return b.String()
 }
 
@@ -98,8 +99,12 @@ func (m Model) renderSource(w, h int) string {
 	}
 	b.WriteString(hdr + "\n\n")
 	for i := start; i < end; i++ {
-		gutter := mutedStyle.Render(fmt.Sprintf("%4d ", i+1))
-		b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
+		if m.srcGutter { // source body: line numbers; the context card has none
+			gutter := mutedStyle.Render(fmt.Sprintf("%4d ", i+1))
+			b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
+		} else {
+			b.WriteString(truncate(m.srcLines[i], w) + "\n")
+		}
 	}
 	return b.String()
 }

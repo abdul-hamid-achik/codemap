@@ -876,7 +876,7 @@ func TestHelpOverlay(t *testing.T) {
 	// (k/j) and the Source-view scroll mode were undocumented before, and
 	// Metrics was wrongly grouped with the text-input tabs (which have no k/j).
 	for _, want := range []string{"Global", "Graph", "Metrics", "Impact / Search",
-		"re-center", "precise", "k/j", "home/end", "Source view"} {
+		"re-center", "precise", "k/j", "home/end", "Source / context", "ctrl+o", "orient"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay should document %q:\n%s", want, out)
 		}
@@ -927,6 +927,51 @@ func TestSourceViewerScrollAndClose(t *testing.T) {
 	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "q", Code: 'q'}))
 	if m.srcView {
 		t.Error("q should dismiss the source viewer")
+	}
+}
+
+func TestContextCardAndOverlay(t *testing.T) {
+	rep := &app.ContextReport{
+		Symbol: "Foo", Found: true,
+		Definitions: []app.SourceMatch{{Symbol: "Foo", Kind: "func", File: "a.go",
+			StartLine: 10, EndLine: 20, Signature: "func Foo() error", Doc: "Foo does things."}},
+		Callers:      []app.SymbolRef{{Symbol: "Bar", Kind: "func", File: "b.go", StartLine: 3}},
+		CallersTotal: 5, // capped: 1 shown, "+4 more"
+		CalleesTotal: 0, // empty: "(none)"
+		Tests:        []app.ImpactNode{{Symbol: "TestFoo", File: "a_test.go", StartLine: 1}},
+		TestsTotal:   1,
+		BlastRadius:  7,
+		Annotations:  []graph.Annotation{{Source: "note", Note: "watch this"}},
+	}
+	title, lines := contextCard(rep)
+	if title != "Foo" {
+		t.Errorf("card title = %q, want Foo", title)
+	}
+	body := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"func Foo() error", "Foo does things.", "a.go:10-20",
+		"Callers (5)", "Bar", "+4 more",
+		"Callees (0)", "(none)",
+		"Tests (1)", "TestFoo",
+		"Blast radius: 7", "Annotations (1)", "watch this",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("context card missing %q:\n%s", want, body)
+		}
+	}
+
+	// The overlay shows the card (no line-number gutter) and ctrl+o is wired.
+	m := sized(t, 100, 30)
+	m, _ = applyMsg(m, sourceMsg{title: title, lines: lines, gutter: false})
+	if !m.srcView || m.srcGutter {
+		t.Fatalf("context overlay should open with gutter off (srcView=%v gutter=%v)", m.srcView, m.srcGutter)
+	}
+	out := m.render()
+	if !strings.Contains(out, "Callers (5)") {
+		t.Errorf("overlay should render the context card:\n%s", out)
+	}
+	if strings.Contains(out, "  10 ") && strings.Contains(out, "  11 ") {
+		t.Error("context overlay should not render a line-number gutter")
 	}
 }
 

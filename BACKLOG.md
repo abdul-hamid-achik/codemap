@@ -5,6 +5,24 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #178 (studio FEATURE — the context "orient" overlay: flagship parity across all three surfaces)
+  — `context` (the one-call symbol bundle: definition + callers + callees + tests + blast radius +
+  annotations) was exposed in the CLI (`codemap context`) and MCP (`codemap_context`) but had NO studio
+  surface — a real flagship-parity gap. Added an overlay opened with `o` (Graph/Metrics) or `ctrl+o` (any
+  tab, input-safe), mirroring the `s`/`ctrl+s` source-overlay pattern exactly. It composes the already-built
+  `Service.Context` (no new backend/deps) and reuses the existing scrollable-pager machinery via a new
+  `gutter bool` on the overlay (line numbers for source; off for the context card). `contextCard()` renders
+  a monochrome card (plain text so the rune-based truncation stays correct): signature+doc, def location(s),
+  Callers/Callees/Tests with `(N)` totals + `(none)`/`+N more`, `Blast radius: N transitively affected`, and
+  pinned annotations. Wired `viewContext()` off `selectedCenter()` so it works from the selected hub/ref
+  (Graph), row (Metrics), blast node/symbol (Impact), or hit (Search). Documented in the `?` help overlay
+  ("Source / context overlay (s · ctrl+s · ctrl+o)") + docs/studio.md key table. Added `TestContextCardAndOverlay`
+  (card sections/caps/empties + gutter-off render) and a `ctrl+o` step to specs/studio.yml (asserts
+  "transitively affected" + snapshots the card; re-stamped). NOTE: I first added the keys to the footer
+  hints too, but `o orient` pushed the Graph hint + the `precise via gopls…` status past 120 cols and the
+  status got clipped (the footer compacts on hint-width alone, ignoring status) — caught by the studio flow's
+  "via gopls" wait. Reverted the footer additions (the `?` overlay is the authoritative key list; footers
+  stay the per-tab teaser); keys + overlay + docs remain. `task check` + studio.yml flow green. COMMIT+PUSH.
 - 2026-06-24 #177 (studio polish — consistent scroll indicators across all four tabs) — the studio's
   scrollable lists disagreed on wording: Graph hubs/refs and Metrics rendered `▲/▼ N more`, while Impact's
   blast-radius and Search's hits rendered `▲ N more above` / `▼ N more below`. The ▲/▼ arrow already conveys

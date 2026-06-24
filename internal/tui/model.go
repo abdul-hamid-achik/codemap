@@ -85,9 +85,10 @@ type preciseDetailMsg struct {
 	err     error
 }
 type sourceMsg struct {
-	title string
-	lines []string
-	err   error
+	title  string
+	lines  []string
+	gutter bool // line-number gutter (source); false for the context card
+	err    error
 }
 
 // Model is the studio TUI state.
@@ -133,12 +134,14 @@ type Model struct {
 
 	showHelp bool // a full-screen keybinding overlay, toggled with `?`
 
-	// source viewer: a full-screen, scrollable view of a symbol's body, opened
-	// with `s` from the Graph tab and dismissed with esc/q.
+	// scrollable text overlay: a full-screen pager dismissed with esc/q. Serves
+	// two views — a symbol's source body (opened with `s`/ctrl+s, line-number
+	// gutter on) and the context "orient" card (opened with ctrl+o, gutter off).
 	srcView   bool
 	srcTitle  string
 	srcLines  []string
 	srcScroll int
+	srcGutter bool
 
 	// graph walking: the right pane can be focused to walk into callers/callees,
 	// re-centering the explorer on any node (not just hubs). graphStack records
@@ -377,8 +380,115 @@ func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
 			return sourceMsg{err: fmt.Errorf("no source for %q", sym)}
 		}
 		title := fmt.Sprintf("%s  %s:%d-%d", displayName(mch.FQN, mch.Symbol), mch.File, mch.StartLine, mch.EndLine)
-		return sourceMsg{title: title, lines: strings.Split(mch.Source, "\n")}
+		return sourceMsg{title: title, lines: strings.Split(mch.Source, "\n"), gutter: true}
 	}
+}
+
+// viewContext opens the context "orient" overlay for the current selection — the
+// same one-call bundle as `codemap context` / codemap_context (definition +
+// callers + callees + tests + blast radius + pinned annotations), so the studio
+// has the flagship orientation view the CLI and MCP already expose.
+func (m Model) viewContext() tea.Cmd {
+	if c, ok := m.selectedCenter(); ok && c.sym != "" {
+		return m.contextViewCmd(c.sym)
+	}
+	return nil
+}
+
+func (m Model) contextViewCmd(sym string) tea.Cmd {
+	svc, dir := m.service, m.startDir
+	return func() tea.Msg {
+		rep, err := svc.Context(dir, sym, 0)
+		if err != nil {
+			return sourceMsg{err: err}
+		}
+		if rep == nil || !rep.Found {
+			return sourceMsg{err: fmt.Errorf("no context for %q", sym)}
+		}
+		title, lines := contextCard(rep)
+		return sourceMsg{title: title, lines: lines, gutter: false}
+	}
+}
+
+// contextCard renders a ContextReport into a scrollable, monochrome card (plain
+// text so the overlay's rune-based truncation stays correct) matching the source
+// overlay's look: flush-left section headers, indented detail rows.
+func contextCard(rep *app.ContextReport) (string, []string) {
+	title := rep.Symbol
+	var ls []string
+	add := func(s string) { ls = append(ls, s) }
+	refRow := func(r app.SymbolRef) string {
+		return fmt.Sprintf("  %s  %s  %s:%d", displayName(r.FQN, r.Symbol), r.Kind, r.File, r.StartLine)
+	}
+	list := func(label string, total int, rows []string) {
+		add(fmt.Sprintf("%s (%d)", label, total))
+		if len(rows) == 0 {
+			add("  (none)")
+		}
+		for _, r := range rows {
+			add(r)
+		}
+		if total > len(rows) {
+			add(fmt.Sprintf("  … +%d more", total-len(rows)))
+		}
+		add("")
+	}
+
+	if len(rep.Definitions) > 0 {
+		d := rep.Definitions[0]
+		title = displayName(d.FQN, d.Symbol)
+		if d.Signature != "" {
+			add(d.Signature)
+		} else {
+			add(strings.TrimSpace(d.Kind + " " + d.Symbol))
+		}
+		if d.Doc != "" {
+			for _, dl := range strings.Split(strings.TrimRight(d.Doc, "\n"), "\n") {
+				add("  " + dl)
+			}
+		}
+		add("")
+		for _, def := range rep.Definitions {
+			add(fmt.Sprintf("  %s:%d-%d", def.File, def.StartLine, def.EndLine))
+		}
+		add("")
+	}
+	if rep.Note != "" {
+		add("⚠ " + rep.Note)
+		add("")
+	}
+
+	callers := make([]string, 0, len(rep.Callers))
+	for _, c := range rep.Callers {
+		callers = append(callers, refRow(c))
+	}
+	list("Callers", rep.CallersTotal, callers)
+
+	callees := make([]string, 0, len(rep.Callees))
+	for _, c := range rep.Callees {
+		callees = append(callees, refRow(c))
+	}
+	list("Callees", rep.CalleesTotal, callees)
+
+	tests := make([]string, 0, len(rep.Tests))
+	for _, t := range rep.Tests {
+		tests = append(tests, fmt.Sprintf("  %s  %s:%d", displayName(t.FQN, t.Symbol), t.File, t.StartLine))
+	}
+	list("Tests", rep.TestsTotal, tests)
+
+	add(fmt.Sprintf("Blast radius: %d transitively affected", rep.BlastRadius))
+	if len(rep.Annotations) > 0 {
+		add("")
+		add(fmt.Sprintf("Annotations (%d)", len(rep.Annotations)))
+		for _, a := range rep.Annotations {
+			note := a.Note
+			if note == "" {
+				note = a.Data
+			}
+			add(strings.TrimRight(fmt.Sprintf("  [%s] %s", a.Source, note), " "))
+		}
+	}
+	return title, ls
 }
 
 func (m Model) reindexCmd() tea.Cmd {
@@ -470,6 +580,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.srcView = true
 		m.srcTitle = msg.title
 		m.srcLines = msg.lines
+		m.srcGutter = msg.gutter
 		m.srcScroll = 0
 		return m, nil
 
@@ -583,6 +694,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// View the current selection's source on any tab (a modifier key so it
 		// works even where a text input would otherwise capture `s`).
 		return m, m.viewSource()
+	case "ctrl+o":
+		// Orient: the context bundle for the current selection on any tab — def +
+		// callers + callees + tests + blast + annotations in one overlay.
+		return m, m.viewContext()
 	case "ctrl+g":
 		// Open the current selection in the Graph walker (any tab) — explore a
 		// search hit / blast node / hub's call neighborhood, not just the hubs.
@@ -726,6 +841,9 @@ func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q":
 		return m, tea.Quit
+	case "o":
+		// orient: the context card for the selected row (mirrors ctrl+o globally).
+		return m, m.viewContext()
 	case "up", "k":
 		m.metricsSel = clampIdx(m.metricsSel-1, m.metricsCount())
 	case "down", "j":
@@ -808,6 +926,9 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 	case "s":
 		// view the selected node's source code in a scrollable overlay.
 		return m, m.viewSource()
+	case "o":
+		// orient: the context card for the selected node (mirrors ctrl+o globally).
+		return m, m.viewContext()
 	case "left", "h":
 		m.graphFocus = focusHubs
 		return m, nil

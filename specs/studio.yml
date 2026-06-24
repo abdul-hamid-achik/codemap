@@ -4,8 +4,10 @@ intent: |
     studio opens on the Graph tab showing call-graph hubs, fills the terminal,
     walks into a hub's callers/callees and back, recomputes relations precisely
     via gopls, switches to Metrics (bar charts) and Impact, searches by name,
-    opens a search hit in the Graph walker with ctrl+g (cross-tab navigation),
-    then quits cleanly.
+    opens the context "orient" card for a hit with ctrl+o (definition, callers,
+    callees, tests, blast radius — the codemap_context bundle, in the TUI), opens
+    a search hit in the Graph walker with ctrl+g (cross-tab navigation), then
+    quits cleanly.
 target:
     cmd:
         - "/bin/sh"
@@ -88,6 +90,20 @@ steps:
             contains: "name mode"
         timeoutMs: 8000
     - snapshot: search
+    # ctrl+o opens the context "orient" card for the selected hit (Run) — its
+    # definition, callers, callees, tests, and blast radius in one overlay (the
+    # same bundle codemap_context returns), available from any tab.
+    - press: "ctrl+o"
+    - wait:
+        screen:
+            contains: "transitively affected"
+        timeoutMs: 8000
+    - snapshot: context
+    - press: "q"
+    - wait:
+        screen:
+            contains: "name mode"
+        timeoutMs: 5000
     # ctrl+g opens the selected search hit (Run) in the Graph walker — any symbol
     # becomes a starting point for walking the call graph, not just the hubs.
     - press: "ctrl+g"
@@ -129,4 +145,4 @@ outcomes:
       verify:
         process:
             exitCode: 0
-contractHash: sha256:faffa5fdff0707d8a8b90182883bb7ee9515a5ffe564d0f50e60feebd1ef51ad
+contractHash: sha256:8c1ef20b29c08743429c1c846f75938c79b5c4cf74ac50ec8132b58652a31ad7
