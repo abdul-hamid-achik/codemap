@@ -24,6 +24,18 @@ radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
+## ⚠ NEXT-RELEASE MUST-DO — Homebrew formula→cask migration (one time)
+`.goreleaser.yaml` now publishes a **cask** (`Casks/codemap.rb`), not a formula (commit 1c165ad). The next
+tagged release will write the cask into the tap **alongside the stale `Formula/codemap.rb`** → an ambiguous
+formula+cask named `codemap`. So, **at the next release**, in `abdul-hamid-achik/homebrew-tap` (do these
+once the GoReleaser step has pushed `Casks/codemap.rb`):
+1. Add `tap_migrations.json` at the tap root: `{ "codemap": "codemap" }` (auto-migrates existing formula
+   users to the cask on `brew upgrade`).
+2. Delete the old `Formula/codemap.rb`.
+Do NOT do these before the cask is published (deleting the formula early breaks `brew install`). The
+`brew install abdul-hamid-achik/tap/codemap` command is unchanged. (Research: GoReleaser discussion #5563,
+Homebrew brew#20800 enabled in-tap formula→cask migration.)
+
 ## Release history (condensed — full detail in the vault archive)
 - **v0.13.0** — daemon observability. Live daemon state in `codemap status` + `codemap_status` (a `daemon`
   object in `--json`); `daemon start --no-embed` (structure-only); studio header `● daemon` indicator;
