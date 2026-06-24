@@ -201,20 +201,19 @@ func fileValueRefs(fset *token.FileSet, relPath string, f *ast.File) []extract.R
 	return refs
 }
 
-// collectValueRefs walks node for bare identifiers naming a function used as a
-// *value* (passed, stored, registered) rather than called, appending each as a
-// RefReferences edge from `from`. Without these, framework handlers wired by
-// value (cobra commands, HTTP routers, callback tables) all look like dead code
-// in `orphans`. RefReferences is distinct from RefCalls, so the call graph
-// (callers/callees/impact/path) is unaffected. Only bare identifiers are taken —
-// they resolve within the package precisely, with no cross-package over-matching.
+// collectValueRefs walks node for a function used as a *value* (passed, stored,
+// registered) rather than called, appending each as a RefReferences edge from
+// `from`. Without these, framework handlers wired by value (cobra commands, HTTP
+// routers like `mux.HandleFunc("/", s.handle)`, callback tables) all look like
+// dead code in `orphans`. RefReferences is distinct from RefCalls, so the call
+// graph (callers/callees/impact/path) is unaffected. Both bare identifiers
+// (`handler`) and selectors (`s.handle`, the method-value pattern) are taken, by
+// their function/method name and resolved within the package — references are
+// conservative (they only keep a node *out* of the dead-code list), so this never
+// produces a false call.
 func collectValueRefs(fset *token.FileSet, from string, node ast.Node, seen map[string]bool, out *[]extract.Reference) {
 	add := func(expr ast.Expr) {
-		id, ok := expr.(*ast.Ident)
-		if !ok {
-			return
-		}
-		name := id.Name
+		name := valueRefName(expr)
 		if name == "" || builtins[name] || seen[name] {
 			return
 		}
@@ -223,8 +222,8 @@ func collectValueRefs(fset *token.FileSet, from string, node ast.Node, seen map[
 			From:      from,
 			To:        name,
 			Kind:      extract.RefReferences,
-			Line:      fset.Position(id.Pos()).Line,
-			Qualified: false, // bare ident → same-package, precise resolution
+			Line:      fset.Position(expr.Pos()).Line,
+			Qualified: false, // resolve within the package (handlers are registered locally)
 		})
 	}
 	ast.Inspect(node, func(n ast.Node) bool {
@@ -244,6 +243,19 @@ func collectValueRefs(fset *token.FileSet, from string, node ast.Node, seen map[
 		}
 		return true
 	})
+}
+
+// valueRefName returns the function/method name an expression names when used as
+// a value: a bare identifier (`handler`) or a selector's selected name
+// (`s.handle`, `pkg.Fn` → "handle"/"Fn"). Anything else isn't a function value.
+func valueRefName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.SelectorExpr:
+		return t.Sel.Name
+	}
+	return ""
 }
 
 // isQualifiedCall reports whether a call uses a selector (x.Foo(), pkg.Foo()),

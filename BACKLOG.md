@@ -742,6 +742,25 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #114 (real usefulness — `orphans` follows method-value handlers; `hotspots` stays
+  clean) — continued dogfooding: after #113, the dominant remaining false positives were the **17
+  `mcp.Server.handleXxx`** methods, registered via `sdkmcp.AddTool(s.srv, tool, s.handleInit)` — a
+  *selector* method value, which #113's bare-ident-only capture skipped. This is also the ubiquitous web
+  pattern `mux.HandleFunc("/path", s.handleHome)`. Fix: `gosrc` value-ref extraction now also takes
+  selectors (`s.handle`, `pkg.Fn` → the selected name) via a new `valueRefName`, so method-value handler
+  registration produces a `references` edge. To keep this safe, **decoupled `Hotspots` (and the
+  `HasNameInEdges` inflation flag) from `references` — they now count only `calls`**: a hub is what many
+  *call* sites depend on, and counting value refs would let a commonly-named field/method shadow real
+  hubs. References feed **only** `orphans` (where being conservative — keeping a node *out* of dead-code
+  — is the correct direction; a false value-ref can never create a phantom call). Pre-#113 this is a
+  no-op (no references existed). Verified live (reindex --precise): the 17 MCP handlers + `Extractor.
+  Language` gone from `orphans` (remaining list is now overwhelmingly interface implementations — the
+  documented interface-dispatch blind spot); `hotspots` top-6 unchanged (Session.Close 53, NewService
+  52, …); `callers handleInit` → none (no call-graph leak). Tests: extended gosrc
+  `TestValueRefsForFunctionValues` (method-value selector case), new graph
+  `TestHotspotsCountsCallsNotReferences` (references don't inflate hotspots). Full suite + lint(0) + fmt
+  + precise/query E2E green. COMMIT+PUSH. (Still blind: calls inside FuncLits in top-level vars, e.g.
+  `isInteractiveTerminal` in rootCmd's RunE closure — a separate, smaller gap.)
 - 2026-06-24 #113 (real usefulness — `orphans` no longer flags function values as dead code)
   — found by **dogfooding** `orphans` on codemap itself: the top ~20 results were all `main.runXxx`
   cobra handlers — obvious false positives, because a handler wired by value (`RunE: runInit`) is

@@ -244,8 +244,11 @@ type Hotspot struct {
 	InDegree int
 }
 
-// Hotspots returns the most-referenced nodes (highest incoming calls/references
-// count) — the hubs of the codebase. File nodes are excluded.
+// Hotspots returns the most-called nodes (highest incoming `calls` count) — the
+// hubs of the call graph. File nodes are excluded. Counts only `calls`, not
+// `references` (function values wired as handlers): a hub is something many
+// call sites depend on, and counting value references would let a commonly-named
+// field shadow the real hubs. `references` feed only `orphans`.
 func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 	if limit <= 0 {
 		limit = 20
@@ -253,10 +256,10 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 	rows, err := s.db.Query(`
 		SELECT e.target_id, COUNT(*) AS indeg
 		FROM edges e JOIN nodes n ON e.target_id = n.id
-		WHERE n.project_id = ? AND n.kind != ? AND e.edge_type IN (?, ?)
+		WHERE n.project_id = ? AND n.kind != ? AND e.edge_type = ?
 		GROUP BY e.target_id
 		ORDER BY indeg DESC, e.target_id
-		LIMIT ?`, projectID, KindFile, EdgeCalls, EdgeReferences, limit)
+		LIMIT ?`, projectID, KindFile, EdgeCalls, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -327,9 +330,10 @@ func (s *Store) SymbolDefCounts(projectID int64) (map[string]int, error) {
 }
 
 // HasNameInEdges returns which of the given nodes still have at least one
-// name-provenance incoming call/reference edge — i.e. whose in-degree may be
-// inflated by name-based fan-out. A node whose callers were all resolved by the
-// go/types pass (provenance='precise') is absent, so its count is trustworthy.
+// name-provenance incoming `calls` edge — i.e. whose in-degree may be inflated
+// by name-based fan-out. A node whose callers were all resolved by the go/types
+// pass (provenance='precise') is absent, so its count is trustworthy. Matches
+// Hotspots in counting only `calls` (not value `references`).
 func (s *Store) HasNameInEdges(nodeIDs []int64) (map[int64]bool, error) {
 	out := make(map[int64]bool, len(nodeIDs))
 	if len(nodeIDs) == 0 {
@@ -349,7 +353,7 @@ func (s *Store) HasNameInEdges(nodeIDs []int64) (map[int64]bool, error) {
 			args[i] = id
 		}
 		q := "SELECT DISTINCT target_id FROM edges WHERE target_id IN (" + strings.Join(ph, ",") +
-			") AND edge_type IN ('" + EdgeCalls + "','" + EdgeReferences + "') AND provenance = '" + ProvName + "'"
+			") AND edge_type = '" + EdgeCalls + "' AND provenance = '" + ProvName + "'"
 		ids, err := s.scanIDs(q, args...)
 		if err != nil {
 			return nil, err

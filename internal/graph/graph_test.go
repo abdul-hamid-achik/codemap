@@ -428,6 +428,45 @@ func TestHotspotsOrphansPath(t *testing.T) {
 	}
 }
 
+// TestHotspotsCountsCallsNotReferences pins the decoupling: a function-value
+// `references` edge keeps a node out of orphans (it's wired somewhere) but must
+// NOT count toward hotspots — a hub is something many call sites depend on, and
+// counting value references would let commonly-named handlers shadow real hubs.
+func TestHotspotsCountsCallsNotReferences(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(sym string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: "f.go", Symbol: sym, FQN: "p." + sym, Kind: KindFunction, Language: "go", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a := mk("a")
+	called := mk("called")
+	referenced := mk("referenced")
+	if _, err := s.AddEdge(a, called, EdgeCalls, WeightLSP); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdge(a, referenced, EdgeReferences, WeightLSP); err != nil {
+		t.Fatal(err)
+	}
+	hs, err := s.Hotspots(pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deg := map[string]int{}
+	for _, h := range hs {
+		deg[h.Node.Symbol] = h.InDegree
+	}
+	if deg["called"] != 1 {
+		t.Errorf("called should be a hotspot with in-degree 1, got %d", deg["called"])
+	}
+	if _, ok := deg["referenced"]; ok {
+		t.Error("a value-referenced node must NOT count toward hotspots (calls only)")
+	}
+}
+
 // TestOrphansExcludesValueReferenced verifies a function reachable only as a
 // value (a `references` edge, e.g. a cobra `RunE: handler`) is NOT flagged as
 // dead code — while the node that references it, if itself uncalled, still is.

@@ -198,12 +198,19 @@ func handleX() {}
 func register(f func()) {}
 
 type Command struct{ RunE func() }
+type Server struct{}
+
+func (s *Server) handleReq() {}
 
 var cmd = &Command{RunE: runInit}
 
 func setup() {
 	register(handler)
 	register(handleX)
+}
+
+func (s *Server) wire() {
+	register(s.handleReq) // method value (selector), e.g. mux.HandleFunc("/", s.handleReq)
 }
 `
 	res, err := New().ExtractFile("cmd.go", []byte(src))
@@ -220,6 +227,10 @@ func setup() {
 	}
 	if !hasKindRef(res.References, "sample.setup", "handleX", extract.RefReferences) {
 		t.Error("expected setup->handleX references edge (callback arg)")
+	}
+	// A method value passed as an arg (s.handleReq) → references edge by method name.
+	if !hasKindRef(res.References, "sample.Server.wire", "handleReq", extract.RefReferences) {
+		t.Errorf("expected Server.wire->handleReq references edge (method value), got %+v", res.References)
 	}
 	// A function used only as a value is never a call target.
 	if hasKindRef(res.References, "cmd.go", "runInit", extract.RefCalls) {
