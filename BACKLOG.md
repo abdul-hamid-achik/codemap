@@ -5,6 +5,20 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #182 (validate the flagship pillars end-to-end + protect vectors from a plausible regression) —
+  dogfood pass over the two flagships. GRAPHS/precise: reindexed codemap with `--precise` (go/types) — 1704
+  call edges resolved exactly (10 unresolved), name-collision hotspot inflation gone (name-based showed
+  `Close ⚠ name shared by 7`; precise is clean), and real dead code surfaced (Init/View interface impls show
+  as candidates — confirmed BY DESIGN per the #164 "candidates" comment + interface-dispatch docs, not a bug).
+  VECTORS: indexed with Ollama embeddings; semantic queries ("open the graph db lazily" → graph.Open/DBPath/
+  Session.Graph; "compute blast radius" → Service.Impact; "render the studio footer" → footer()) all ranked
+  spot-on. The ~0.03 scores users see are the HybridSearch (vector+BM25) fusion scale, not cosine — raw cosine
+  is healthy (0.708 for a relevant pair). Investigated the missing nomic task prefixes (looks like a bug —
+  Nomic docs recommend `search_document:`/`search_query:`): MEASURED them and they REDUCE separation on
+  nomic-embed-text (relevant/unrelated 0.708/0.350 sep .358 unprefixed → 0.729/0.418 sep .311 prefixed), i.e.
+  adding them would DEGRADE retrieval. Recorded the measurement as a comment on OllamaProvider.Embed so the
+  deliberate no-prefix choice survives the next "fix" attempt. No functional change; both pillars validated.
+  `task check` (embed) green. COMMIT+PUSH.
 - 2026-06-24 #181 (honesty — callers/callees distinguish a typo from a real symbol with no callers; actionable
   not-found) — dogfooding found `callers NoSuchXYZ` → "Callers of NoSuchXYZ: none", identical to a real symbol
   that genuinely has no callers — so a typo looked like a valid empty result (the #172 misleading-empty class).

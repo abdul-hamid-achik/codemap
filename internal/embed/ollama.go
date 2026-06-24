@@ -50,6 +50,15 @@ type embedResponse struct {
 }
 
 // Embed implements Provider, sending all texts in one batched request.
+// Embed sends the texts to Ollama verbatim — deliberately WITHOUT nomic-embed-text's
+// "search_document:" / "search_query:" task prefixes. The omission looks like a bug
+// (Nomic's docs recommend the prefixes), but measured on nomic-embed-text the prefixes
+// raise the similarity of UNRELATED pairs more than relevant ones, shrinking the gap
+// that ranking depends on: relevant/unrelated cosine went 0.708/0.350 (sep 0.358)
+// unprefixed → 0.729/0.418 (sep 0.311) prefixed. Less separation = worse retrieval, so
+// we don't prefix. (codemap also fuses BM25 over symbol/fqn in HybridSearch, which a
+// query-side prefix can't help.) If you switch default models, re-measure before adding
+// prefixes.
 func (o *OllamaProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
