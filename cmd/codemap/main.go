@@ -595,7 +595,10 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	for _, h := range rep.Hits {
-		fmt.Printf("%s%.3f  %-36s %s:%d\n", annMark(h.Annotations), h.Score, disp(h.FQN, h.Symbol), h.File, h.StartLine)
+		// Mirror `find`'s outline (file:line + signature) but lead with the relevance
+		// score — so a meaning-based hit shows WHAT it is, not just a bare name.
+		fmt.Printf("%s%.3f  %-26s %s\n", annMark(h.Annotations), h.Score,
+			fmt.Sprintf("%s:%d", h.File, h.StartLine), sigOrName(h.Signature, h.FQN, h.Symbol))
 	}
 	return nil
 }

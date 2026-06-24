@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #151 (polish — `semantic` results now show signatures, like `find`/studio do) — ran the
+  FULL local flow suite for the first time this session (all toolchains present: typescript-language-
+  server, pyright, Ollama+nomic-embed-text, gopls): typescript/javascript/python/semantic/studio_ts ALL
+  PASS — so the multi-language-LSP + vector + TUI value props work end-to-end, not just in theory.
+  While eyeballing the semantic snapshot, found a real inconsistency: `semantic` printed only
+  `score · FQN · file:line` — no signature — while `find` (and the studio Search tab) show the signature.
+  For MEANING-based search, where you may surface a symbol you don't recognize, the signature matters
+  MORE, not less. Fixed `runSemantic` to mirror `find`'s outline (`file:line · signature` via `sigOrName`)
+  led by the relevance score: now a hit reads `0.033  internal/app/service.go:898  func (svc *Service)
+  Impact(cwd, symbol string, depth int) (*ImpactReport, error)`. `--json` unchanged (already carried the
+  signature). Dogfooded on codemap itself ("compute blast radius of a symbol" → Service.Impact, with its
+  signature). semantic.yml still green (asserts "Authenticate", which the signature contains; contractHash
+  untouched — output-only change). Full suite + lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #150 (flow — demonstrate the annotations knowledge layer end-to-end) — first verified my
   recent output changes didn't silently break the local-only flows: ran query/version/help/index_status/
   precise/studio via `glyph run` — all PASS (the #145/#146 caps don't trip on the small fixtures; studio's
