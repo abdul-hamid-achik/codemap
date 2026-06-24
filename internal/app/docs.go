@@ -17,8 +17,9 @@ calls instead of many file reads — for both people (CLI + the studio TUI) and
 agents (a stdio MCP server).
 
 Indexes Go (stdlib go/parser, full call graph) and TypeScript (via
-typescript-language-server when installed: symbols + structure today, call edges
-in progress). Other languages are recognized and reported as skipped (more in
+typescript-language-server when installed: symbols + structure always, plus a
+precise call graph under 'index --precise' so callers/impact/hotspots/path work
+for TS). Other languages are recognized and reported as skipped (more in
 progress); --no-lsp disables the LSP backend. Semantic search is language-agnostic.
 
 Data lives under XDG paths (or ~/.codemap): the graph DB, the veclite vector
@@ -85,15 +86,17 @@ type-checker). codemap flags this rather than hiding it:
   - callers/callees/impact note when a name resolves to multiple definitions.
   - hotspots marks name-collision inflation; orphans can't see interface/reflection callers (candidates).
 THE GRAPH-WIDE FIX: re-index with 'codemap index --precise' (CLI) or codemap_index
-precise:true (MCP) — a pure-Go go/types pass that resolves every call to the one
-method it invokes and replaces the name-based call edges, so EVERY query (callers,
-callees, impact, hotspots, path) becomes exact at once. Needs the go toolchain + a
-buildable module; packages that don't type-check keep name-based edges (per-package
-degrade), and no go/go.mod falls back wholesale with a "note" — never worse than
-name-based, never a hard error. Opt-in: without --precise the index is the fast
-name-based path. For a one-off exact answer without reindexing, callers/callees also
-accept precise:true / --lsp (gopls). Interface dispatch is statically undecidable, so
-a precise edge points at the interface method, not concrete implementors.`},
+precise:true (MCP) — the unified exact-resolution pass. For Go it's a pure-Go go/types
+pass; for TypeScript it drives typescript-language-server callHierarchy. It resolves
+every call to the one it invokes and replaces the name-based call edges, so EVERY query
+(callers, callees, impact, hotspots, path) becomes exact at once. (TypeScript has NO
+name-based call edges, so --precise is what gives TS a call graph at all.) The Go pass
+needs the go toolchain + a buildable module; packages that don't type-check keep
+name-based edges (per-package degrade), and no go/go.mod falls back wholesale with a
+"note" — never worse than name-based, never a hard error. Opt-in: without --precise the
+index is the fast name-based path. For a one-off exact Go answer without reindexing,
+callers/callees also accept precise:true / --lsp (gopls). Interface dispatch is statically
+undecidable, so a precise edge points at the interface method, not concrete implementors.`},
 
 	{"ecosystem", `codemap is one tool in a local, XDG-stored toolchain for analyzing and fixing
 code. A harness can chain them:

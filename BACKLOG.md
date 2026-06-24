@@ -742,6 +742,23 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #108 (multi-lang — docs: TS call graph is shipped, not "in progress") — swept every
+  doc surface that still said TypeScript call edges were "in progress / the next slice" and made them
+  accurate now that C2 (#107) shipped. **README**: features graph bullet ("symbols + structure always,
+  plus a precise call graph under `--precise`"), the "Precise call resolution" bullet (now framed as the
+  unified cross-language pass: go/types for Go + callHierarchy for TS, noting TS has no name-based call
+  edges so `--precise` is its *only* call-graph source), the Languages note, the `index --precise`
+  command comment, and a new paragraph in the Accuracy section spelling out the TS-specific story.
+  Renamed the Accuracy heading `name-based vs precise (go/types)` → `name-based vs precise` (no longer
+  Go-only) and fixed the now-stale `#accuracy-…-gotypes` anchor link in `docs/cli.md`. **`internal/app/
+  docs.go`** (the in-CLI `codemap docs` the harness reads): overview + accuracy topics updated — verified
+  they render (`docs accuracy` mentions callHierarchy, `docs overview` mentions the TS precise graph).
+  **`docs/cli.md`** table row + analysis-commands prose. **`cmd/codemap/main.go`** `--precise` flag help.
+  **AGENTS.md** three spots (high-level edge summary, Extraction section pointing at
+  `Indexer.resolveLSPCallEdges`, Accuracy model). No behavior change — `go build ./...` clean, gofmt
+  clean. Docs now match the actual commands (the directive's accuracy pillar). COMMIT+PUSH. Next: JS row
+  (one `DefaultServers` entry, but needs server-dedup so a TS+JS repo doesn't spawn two tsservers — not
+  literally one line); then Python (pyright); then markup structure-only layer.
 - 2026-06-23 #107 (multi-lang — slice C2: TS call graph) — **`index --precise` now gives TypeScript a
   call graph** — callers/impact/hotspots/path work for TS. New `indexer.resolveLSPCallEdges` (Pass 3,
   under `--precise`): collects `extract.CallResolver` extractors, builds `fqnTo` (caller) + `posTo`

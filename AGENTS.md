@@ -20,7 +20,8 @@ Three surfaces over one store (the ecosystem pattern, see vecgrep/noted):
 
 Key features:
 - **Structural graph** — nodes (files, functions, types, methods, tests) + `calls`/`defines` edges
-  in pure-Go SQLite (call edges are name-based by default, exact via `go/types` with `--precise`;
+  in pure-Go SQLite (Go call edges are name-based by default, exact via `go/types` with `--precise`;
+  TypeScript call edges come only from `--precise` via `callHierarchy`;
   `imports`/`implements`/`references`/`overrides` edge types are reserved for the planned LSP/tree-sitter
   backends).
 - **Semantic search** — node source text embedded via Ollama (`nomic-embed-text`, 768-dim)
@@ -130,8 +131,9 @@ task install         # go install ./cmd/codemap
   via `go/types`). **`lspsrc` (the LSP backend) is now wired in**: `IndexProject` runs a present-aware
   `registerLSP` that, for each `lspsrc.DefaultServers` spec whose language is actually in the repo and
   whose server is on PATH, spawns it and registers a generic LSP-driven extractor — TypeScript via
-  `typescript-language-server` today (symbols + `defines` edges; call edges via `callHierarchy` are
-  the next slice). A Go-only repo never spawns a server; `defer ix.Close()` reaps any that were.
+  `typescript-language-server` today (symbols + `defines` edges always; call edges via `callHierarchy`
+  under `--precise`, resolved in `Indexer.resolveLSPCallEdges`). A Go-only repo never spawns a server;
+  `defer ix.Close()` reaps any that were.
 - Languages present but missing their server are recorded in `Result.MissingServers` and surfaced
   as an actionable "install X" message; genuinely-unsupported languages are still `Result.Unsupported`
   ("skipped, planned"). `--no-lsp` disables the LSP backend.
@@ -192,13 +194,16 @@ task install         # go install ./cmd/codemap
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`
   marks inflation; `orphans` results are interface/reflection-blind *candidates*). **The graph-wide
-  fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) runs an
-  in-process pure-Go `go/types` pass (`internal/extract/typesrc`) that resolves each call to the one
-  method it invokes and *replaces* the name-based call edges via the `edges.provenance` column — so
-  every query (callers/callees/impact/hotspots/path) becomes exact at once, no query change. Opt-in
-  and additive (name-based stays the default); degrades per-package on type errors and wholesale
-  (with a note) when the `go` toolchain/module is unavailable. `callers`/`callees --lsp`
-  (`precise:true`) remains the per-query gopls path for a one-off without reindexing.
+  fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) is the unified
+  exact-resolution pass. For Go it runs an in-process pure-Go `go/types` pass (`internal/extract/typesrc`);
+  for TypeScript it drives `typescript-language-server` `callHierarchy` (`Indexer.resolveLSPCallEdges`).
+  It resolves each call to the one it invokes and writes precise call edges via the `edges.provenance`
+  column — so every query (callers/callees/impact/hotspots/path) becomes exact at once, no query change.
+  TypeScript has **no** name-based call edges, so `--precise` is what gives TS a call graph at all (for
+  Go it *replaces* the name-based edges; name-based stays the Go default). The Go pass degrades
+  per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable.
+  `callers`/`callees --lsp` (`precise:true`) remains the per-query gopls path for a one-off without
+  reindexing.
 
 ### Config precedence (highest → lowest)
 1. Env vars `CODEMAP_*` (e.g. `CODEMAP_CONFIG`, `CODEMAP_DATA`, `CODEMAP_EMBEDDING_MODEL`,

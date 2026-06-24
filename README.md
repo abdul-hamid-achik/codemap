@@ -19,9 +19,10 @@ instead of dozens of file reads.
   (name-based by default, exact via `go/types` with `--precise`) and **defines** edges (file → symbol).
   Test coverage is derived by walking the call graph to test nodes. Stored in pure-Go SQLite,
   queryable offline. Indexes **Go** (stdlib `go/parser`, full call graph) and **TypeScript** (via
-  `typescript-language-server` when it's on `PATH` — symbols + structure today, call edges in
-  progress); JavaScript/Python and structure-only markup (Vue/HTML/CSS/Docker) are next. Semantic
-  search is language-agnostic.
+  `typescript-language-server` when it's on `PATH` — symbols + structure always, plus a **precise
+  call graph** under `--precise`, so `callers`/`impact`/`hotspots`/`path` work for TS too);
+  JavaScript/Python and structure-only markup (Vue/HTML/CSS/Docker) are next. Semantic search is
+  language-agnostic.
 - **Semantic search** — every node's source is embedded (Ollama `nomic-embed-text`, 768-dim)
   into [veclite](https://github.com/abdul-hamid-achik/veclite); vector + BM25 hybrid search.
 - **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
@@ -32,14 +33,16 @@ instead of dozens of file reads.
 - **Annotations** — pin notes and external data (DB rows from mongosh/postgres, vidtrace/vecgrep
   findings, …) to a symbol or a call path; they persist across reindex. A knowledge layer over the
   graph for agent harnesses (`annotate` / `annotations`, also on MCP).
-- **Precise call resolution (go/types)** — the fast name-based graph over-matches same-named methods
-  (`x.Close()` links to *every* `Close`). One `codemap index --precise` runs an in-process, pure-Go
-  `go/types` pass that resolves each call to the method it actually invokes and makes **every** query
-  — callers, callees, impact, hotspots, path — exact at once, no per-query flag (e.g. a `Close` method
-  that name-matching credited with 71 callers shows only its real ones). Opt-in and additive
-  (name-based stays the default); degrades to name-based **with a note** when the `go` toolchain or
-  module isn't available. For a one-off exact answer without reindexing, `callers`/`callees` also take
-  `--lsp` (gopls `callHierarchy`). CLI + MCP.
+- **Precise call resolution** — the fast name-based graph over-matches same-named methods
+  (`x.Close()` links to *every* `Close`). One `codemap index --precise` resolves each call to the one
+  it actually invokes and makes **every** query — callers, callees, impact, hotspots, path — exact at
+  once, no per-query flag (e.g. a `Close` method that name-matching credited with 71 callers shows only
+  its real ones). It's the unified exact-resolution pass across languages: an in-process, pure-Go
+  `go/types` pass for **Go**, and `typescript-language-server` `callHierarchy` for **TypeScript** (which
+  has no name-based call edges, so `--precise` is what gives TS a call graph at all). Opt-in and
+  additive (name-based stays the default for Go); the Go pass degrades to name-based **with a note**
+  when the `go` toolchain or module isn't available. For a one-off exact answer without reindexing,
+  `callers`/`callees` also take `--lsp` (gopls `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider/model/dimension changes instead of corrupting the vector space.
 - **Three surfaces, one store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
@@ -99,10 +102,10 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for `--lsp` precise Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-> **Languages:** **Go** (full graph) and **TypeScript** (structure + semantic search, via
-> `typescript-language-server` — auto-enabled when it's installed; install it to index `.ts`/`.tsx`,
-> or use `--no-lsp` to skip). Other recognized languages (JS/Python/…) are reported as skipped;
-> broader support is in progress.
+> **Languages:** **Go** (full graph) and **TypeScript** (structure + semantic search always, plus a
+> precise call graph under `--precise`, via `typescript-language-server` — auto-enabled when it's
+> installed; install it to index `.ts`/`.tsx`, or use `--no-lsp` to skip). Other recognized languages
+> (JS/Python/…) are reported as skipped; broader support is in progress.
 
 ### From source
 
@@ -125,7 +128,7 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 codemap init                       # registers the current directory
 codemap index                      # extract graph + embed nodes (incremental)
 codemap index --no-embed           # structure only (no Ollama needed)
-codemap index --precise            # exact call edges via go/types (Go; needs the go toolchain)
+codemap index --precise            # exact call edges (Go via go/types; TypeScript via callHierarchy)
 
 # 2. Navigate the call graph
 codemap callers authenticateUser   # who calls it (fast, name-based)
@@ -190,7 +193,7 @@ Impact of Stats (codemap)
 
 All query commands accept `--json`.
 
-## Accuracy: name-based vs precise (go/types)
+## Accuracy: name-based vs precise
 
 codemap's graph is **name-based by default** — instant, offline, and tolerant of broken code. It
 resolves calls *within* a package precisely (Go), but a cross-package method call like `x.Close()`
@@ -211,6 +214,12 @@ and turns `hotspots` from name-collision noise into genuine hubs. Requirements a
 - Purely additive and opt-in: without `--precise`, indexing is byte-for-byte the fast name-based path.
 - Interface dispatch is statically undecidable, so a precise edge points at the interface method, not
   the concrete implementors.
+
+**For TypeScript, `--precise` is the *only* source of call edges.** The name-based pass extracts TS
+structure (classes, methods, functions) but not calls, so a plain `index` gives TS no call graph;
+`index --precise` drives `typescript-language-server` `callHierarchy` to resolve them exactly, and the
+same `callers`/`callees`/`impact`/`hotspots`/`path` queries then work for TS with no flag of their own.
+Needs `typescript-language-server` on `PATH`.
 
 For a one-off exact answer *without* reindexing, `callers`/`callees` also accept `--lsp` (gopls
 `callHierarchy`), which likewise degrades to name-based with a note when gopls can't resolve.

@@ -7,7 +7,7 @@ Every query command accepts `--json` for machine-readable output.
 | Command | Description |
 |---|---|
 | `codemap init [--local]` | Register the current directory as a project |
-| `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly via go/types (Go) |
+| `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly (Go via go/types, TypeScript via callHierarchy) |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
 | `codemap projects` | List all registered projects and their index sizes |
 | `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, annotations, accuracy, ecosystem) |
@@ -28,8 +28,10 @@ Every query command accepts `--json` for machine-readable output.
 
 The fast default uses the indexed graph (name-based resolution; same-named methods can over-match,
 e.g. `callers Close` lists callers of every `Close`). **The best fix is to reindex once with
-`codemap index --precise`** (a pure-Go go/types pass), which makes *every* query — callers, callees,
-impact, hotspots, path — exact, with no per-query flag. For a one-off exact answer without
+`codemap index --precise`** — the unified exact-resolution pass (a pure-Go go/types pass for Go,
+`typescript-language-server` callHierarchy for TypeScript), which makes *every* query — callers,
+callees, impact, hotspots, path — exact, with no per-query flag. (TypeScript has no name-based call
+edges, so `--precise` is what gives TS a call graph at all.) For a one-off exact Go answer without
 reindexing, `callers`/`callees` also accept `--lsp` (gopls); both `--precise` and `--lsp` degrade to
 name-based with a note when the toolchain/module isn't available — never a hard error.
 
@@ -37,7 +39,7 @@ On a name-based index the analysis commands flag their limits honestly: `callers
 a name resolves to multiple definitions, `hotspots` marks name-collision inflation, and `orphans`
 can't see callers reached via interface dispatch or reflection — treat its output as dead-code
 *candidates*. `index --precise` removes the call-edge inflation outright. See
-[Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-vs-precise-gotypes).
+[Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-vs-precise).
 
 ## Analysis
 
