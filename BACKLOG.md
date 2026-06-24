@@ -50,7 +50,7 @@ codebases. codemap's role: **structural understanding + the annotation layer**, 
 intelligence hub that both *feeds* ground-truth to and *fetches* meaning/runtime/secrets from its siblings.
 Ecosystem flow: **vidtrace** (repro) → **vecgrep** (semantic) → **codemap** (structure/impact) → **fcheap**
 (persist artifacts), with findings pinned back onto the graph as durable annotations. See the Ecosystem
-integration epic below; per-sibling design plans live in each sibling repo's `docs/`.
+integration epic below; per-sibling design plans live at each sibling repo's ROOT (CODEMAP-INTEGRATION.md).
 
 ---
 
@@ -104,7 +104,7 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 > Shared rails: veclite (Ollama nomic-embed-text 768-dim cosine), the XDG project registry,
 > newline-delimited MCP stdio, and the reindex-durable annotation layer (kind:node|path, opaque
 > data). Each task degrades gracefully when the sibling is off `$PATH`. Supersedes the old E7 stub.
-> Per-sibling design plans live in each repo's `docs/` (vecgrep, veclite, tinyvault, file.cheap,
+> Per-sibling design plans live at each repo's ROOT — CODEMAP-INTEGRATION.md (vecgrep, veclite, tinyvault, file.cheap,
 > glyphrun, cairntrace).
 
 ### Foundation (unblocks everything; build first)
@@ -170,6 +170,43 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 **Sequencing:** EI.1+EI.2+EI.4 (foundation) → EI.3+EI.6 (registry + first feed) → EI.7→EI.5 (behavioral loop)
 → EI.8+EI.9 (evidence pinning + re-rank) → EI.12→EI.11→EI.13 (secrets) → EI.10+EI.16+EI.14 (memory/substrate)
 → EI.15+EI.17 (deep substrate + discovery). EI.18 is cross-cutting, anytime.
+
+---
+
+## 🎯 Epic — branch-aware index + background daemon (codemap + vecgrep) — GREENLIT 2026-06-24
+
+> Build in **codemap first**, then the user spawns agents for the vecgrep + fcheap halves (plans live in
+> those repos' ROOT; full cross-project spec in the vault). **gpeek dropped** (Swift macOS GUI git client).
+> Trigger = a plain git **`post-checkout` hook**. See [[branch-index-and-daemon-direction]] memory + the
+> vault spec `~/notes/projects/codemap/branch-index-and-daemon-spec.md`.
+
+### Feature A — per-branch index switching (via fcheap)
+> On checkout, snapshot the leaving branch's index to fcheap (keyed by repo+branch+base-sha) and restore
+> the entering branch's snapshot — else incremental reindex. codemap CANNOT copy a file (single shared
+> graph.db + codemap.veclite sliced by project), so it **serializes its project slice** and restores via
+> WipeProject + bulk-insert; vecgrep just file-copies its per-branch veclite.
+- [ ] **BD.1** `internal/git/branch.go` — `CurrentBranch`/`HeadSHA`/`RepoRoot`/`IsDetached`/`SanitizeBranch`/`RepoHash` via `git` shell-out (no CGO git lib). Ship read-only `branch-status` first to validate detection (detached HEAD + worktrees) before any writes.
+- [ ] **BD.2** `internal/snapshot/snapshot.go` — `Export(graph, vectors, projectID, project, dir, profile, baseSHA)` → `nodes/edges/index_state/annotations/vectors.jsonl` + `snapshot.json` (**deterministic ordering** so fcheap dedups identical slices). `Import` = WipeProject + DeleteByProject then bulk re-insert, **gated on embeddingProfile match**. New graph helpers `ProjectEdges`/`ProjectIndexState`; new `vector.Store.IterByProject` (mirror DeleteByProject). ⚠ **Merge (don't blow away) annotations** on import.
+- [ ] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper: `Save(dir,tool,name,tags,sourceSHA)->stashID` (parse `--json`), `Restore(id,toDir)` (check `Verified`), `List(tags)`. fcheap binary path from config/PATH.
+- [ ] **BD.4** `internal/branchstate/state.go` — pointer file `RegistryDir()/branches/<repoHash>.json` (atomic temp+rename): branch→{stash_id, base_sha, profile, counts}. `Rebuild` from `fcheap list --tag`.
+- [ ] **BD.5** `internal/app/branchswitch.go` — `BranchSnapshot`/`BranchSwitch`/`BranchStatus` Service methods; orchestrate snapshot-old → restore-or-reindex-new; base-sha staleness via `git merge-base --is-ancestor`; reuse `Service.Index` profile gate; detect daemon lock.
+- [ ] **BD.6** `cmd/codemap/main.go` — `branch-switch [--from --to --root --force-reindex --install-hook --json]`, `branch-snapshot`, `branch-status`. `--install-hook` writes `.git/hooks/post-checkout` (worktree/`core.hooksPath`-aware; check the hook `flag` arg so it skips `git checkout -- file`).
+- [ ] **BD.7** `internal/mcp/server.go` — `codemap_branch_switch` / `codemap_branch_status` tools.
+
+### Feature B — background daemon (incremental sync + Ollama throttle)
+> One process owns the writable handle, watches the FS, serves all CLI/MCP/studio clients over a unix
+> socket (fixes the multi-process veclite lock), and throttles Ollama so background re-embeds don't
+> saturate it or starve interactive search. (codemap has NO watcher today and embeds inline per-file with
+> no dedup; vecgrep already has a dormant `internal/index/watcher.go`.)
+- [ ] **BD.8** Port a watcher into `internal/index/watcher.go` (fsnotify + debounce/coalesce; filter via `IndexConfig.Exclude` + `extract.LanguageForPath`; codemap doesn't yet import fsnotify). Wire the delete path: removed/renamed → `graph.DeleteNodesInFile` + `DeleteFileHash` + `vectors.DeleteByFile` (reuse `pruneDeleted`).
+- [ ] **BD.9** `Indexer.IndexFiles(ctx, projectID, name, root, rels, opts)` — run the existing `indexFile` loop over only changed rels + `resolveEdges` (the SHA256 hash check already makes it incremental). The watcher's reindex target.
+- [ ] **BD.10** `internal/embed/throttle.go` — `ThrottledProvider` (embed.Provider decorator): content-hash **dedup** (codemap has none today), coalescing queue + bounded worker pool (`EmbedWorkers`, default 2), token-bucket rate (`x/time/rate`, `EmbedRPS`) + max-in-flight, **two priority lanes** (query > background), backpressure. Replaces inline `ix.embedder.Embed` under the daemon.
+- [ ] **BD.11** `internal/daemon/` — `Daemon{session, watcher, throttle, mcpHandler, listener}`: open the sole write Session, write `daemon.{sock,json,lock}` under `config.DataDir()`, accept-loop on the unix socket routing `mcp.*` frames (newline-JSON, **never Content-Length**) + `daemon.*` control RPCs; idle-timeout + SIGTERM-clean teardown.
+- [ ] **BD.12** `cmd/codemap/main.go` — `daemon start|stop|status`. Make `serve` a stdio↔socket **bridge** when a daemon is live; make query commands + `codemap_*` tools prefer the socket, else `VectorsReadOnly` fallback. Keep LSP Content-Length strictly inside `internal/lsp`.
+- [ ] **BD.13** `internal/config/config.go` — `DaemonConfig{Autostart, IdleTimeout(30m), EmbedWorkers(2), EmbedRPS, EmbedMaxInFlight, Debounce}` + `CODEMAP_DAEMON_*` overrides. Surface daemon state in `status` / `codemap_status`.
+
+**Compose:** the daemon performs the branch switch (`daemon.switchBranch` RPC: re-point watcher, reopen slice) and re-embeds only the diff via the throttle; `branch-switch` delegates to a running daemon instead of opening a second writer.
+**Sequencing:** BD.1 (detection, read-only status) → BD.8+BD.9+BD.10 (watcher + IndexFiles + throttle — the daemon's guts) → BD.11+BD.12+BD.13 (daemon process + serve + config) → BD.2–BD.7 (branch snapshot/switch, the heavier serialize/restore) → `--install-hook`. Do vecgrep's simpler file-copy version in parallel (its agent) to de-risk the model.
 
 ---
 
