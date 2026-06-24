@@ -1676,6 +1676,53 @@ func TestCallersAutoUpgradesTypeScript(t *testing.T) {
 	}
 }
 
+// TestImpactHeuristicTestCoverage pins P0 slice 3: a symbol with NO call-graph
+// test coverage but REFERENCED in a test file is reported tested (heuristically),
+// not untested — the fix for #196's filtered-callback blind spot (and TS without
+// --precise). Pure-Go, no language server: the test file references Foo as a value
+// (no call edge), so the call graph sees no coverage but the file scan does.
+func TestImpactHeuristicTestCoverage(t *testing.T) {
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/m\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "foo.go"), []byte("package m\n\nfunc Foo() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// References Foo as a value (no call edge) → invisible to the call graph.
+	if err := os.WriteFile(filepath.Join(proj, "foo_test.go"),
+		[]byte("package m\n\nimport \"testing\"\n\nfunc TestThing(t *testing.T) { _ = Foo }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Impact(proj, "Foo", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Untested {
+		t.Errorf("Foo is referenced by a test file — must not be reported untested")
+	}
+	hasHeuristic := false
+	for _, te := range rep.Tests {
+		if te.Heuristic && strings.Contains(te.File, "foo_test.go") {
+			hasHeuristic = true
+		}
+	}
+	if !hasHeuristic {
+		t.Errorf("expected a heuristic covering test naming foo_test.go, got tests=%+v", rep.Tests)
+	}
+}
+
 func TestPreciseCalleesGopls(t *testing.T) {
 	if _, err := exec.LookPath("gopls"); err != nil {
 		t.Skip("gopls not installed")

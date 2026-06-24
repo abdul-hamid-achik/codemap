@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -1090,6 +1091,9 @@ type ImpactNode struct {
 	Depth     int    `json:"depth"`
 	Signature string `json:"signature,omitempty"`
 	Doc       string `json:"doc,omitempty"`
+	// Heuristic marks a covering test found by scanning test files for a reference
+	// to the symbol's name (not via the call graph) — see heuristicTestCoverage.
+	Heuristic bool `json:"heuristic,omitempty"`
 }
 
 // ImpactReport is the flagship impact analysis: who is affected by changing a
@@ -1186,6 +1190,18 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		}
 	}
 	rep.Untested = len(rep.Tests) == 0
+	// Heuristic coverage: when the call graph found NO tests — genuinely untested, OR
+	// the test's call edge was lost (a TS test whose call lives in an anonymous
+	// it(() => …) callback filtered at index time, #196), OR there's no call graph at
+	// all (TS/JS/Python without --precise) — scan test files for a reference to the
+	// symbol so a covered symbol isn't reported untested. Conservative + bounded.
+	if len(rep.Tests) == 0 {
+		if ht := heuristicTestCoverage(g, p.ID, p.Path, symbol); len(ht) > 0 {
+			rep.Tests = append(rep.Tests, ht...)
+			rep.Untested = false
+			rep.Note = joinNote(rep.Note, fmt.Sprintf("%d covering test(s) found heuristically (test files referencing %q) — not confirmed via the call graph; run 'codemap index --precise' to confirm", len(ht), symbol))
+		}
+	}
 	// If the symbol's language has no name-based call graph and the index isn't
 	// precise, the empty callers/blast/tests are UNRESOLVED, not absent — say so and
 	// don't claim "untested" (that fired for a function with 106 real tests).
@@ -1203,6 +1219,78 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	}
 	rep.Annotations = nodeAnnotationsFor(g, p.ID, targets...)
 	return rep, nil
+}
+
+// joinNote appends an additional note to an existing one (which may be empty).
+func joinNote(existing, add string) string {
+	if existing == "" {
+		return add
+	}
+	return existing + "; " + add
+}
+
+// isTestFilePath reports whether a project-relative path looks like a test file by
+// the common conventions across codemap's languages (Go _test.go; JS/TS
+// .test/.spec; Python test_*.py / *_test.py).
+func isTestFilePath(p string) bool {
+	base := strings.ToLower(filepath.Base(p))
+	if strings.HasSuffix(base, "_test.go") || strings.HasSuffix(base, "_test.py") {
+		return true
+	}
+	if strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py") {
+		return true
+	}
+	for _, ext := range []string{"ts", "tsx", "js", "jsx", "mjs", "cjs"} {
+		if strings.HasSuffix(base, ".test."+ext) || strings.HasSuffix(base, ".spec."+ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// heuristicTestCoverage finds test files that REFERENCE the symbol's bare name (a
+// word-boundary match), as a conservative fallback for coverage the call graph
+// can't see — a TS test whose call lives in a filtered anonymous it(() => …)
+// callback (#196), or any LSP-language symbol on a non-precise index. Returns one
+// heuristic ImpactNode per matching test file (bounded). Marked Heuristic so it's
+// distinguishable from call-graph-confirmed coverage.
+func heuristicTestCoverage(g *graph.Store, projectID int64, root, symbol string) []ImpactNode {
+	name := symbol
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:] // bare name; a method is referenced as obj.method, not Type.method
+	}
+	if name == "" {
+		return nil
+	}
+	re, err := regexp.Compile(`\b` + regexp.QuoteMeta(name) + `\b`)
+	if err != nil {
+		return nil
+	}
+	files, err := g.IndexedFiles(projectID)
+	if err != nil {
+		return nil
+	}
+	var out []ImpactNode
+	for _, rel := range files {
+		if !isTestFilePath(rel) {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		if !re.Match(content) {
+			continue
+		}
+		out = append(out, ImpactNode{
+			Symbol: filepath.Base(rel), FQN: rel, Kind: graph.KindTest,
+			File: rel, StartLine: 1, Heuristic: true,
+		})
+		if len(out) >= 50 {
+			break // bound output; the point is "is it tested", not an exhaustive list
+		}
+	}
+	return out
 }
 
 // nodeAnnotationsFor returns the deduped node-annotations whose target matches

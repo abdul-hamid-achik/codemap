@@ -74,8 +74,14 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     server is absent. `TestCallersAutoUpgradesTypeScript`; task check green. (Deferred: **`Impact`** auto-upgrade
     — its blast radius is transitive, so on-demand needs recursive callHierarchy; left note-only for now, a
     follow-up could at least fill `direct_callers`. An agent can use `callers` now, which resolves.)
-  - [ ] **Slice 3** — heuristic `describe/it`→`covers` test edges (scan test-file bodies for symbol refs) to
-    defeat #196's filtered-callback blind spot (a covered TS symbol currently reads untested).
+  - [x] **Slice 3** — heuristic test coverage: when the call graph finds NO tests for a symbol, `Impact` scans
+    test files (`isTestFilePath`: `_test.go`/`.test|.spec.{ts,tsx,js,…}`/`test_*.py`) for a word-boundary
+    reference to the symbol name (`heuristicTestCoverage`), adds them as `Heuristic:true` `ImpactNode`s, and
+    sets `Untested=false` + a note. Defeats #196's filtered-callback blind spot (a covered TS symbol read
+    untested because its call lived in a filtered anonymous `it(()=>…)` callback) and works with no call graph.
+    `TestImpactHeuristicTestCoverage` (pure-Go); task check green. **P0 core complete** (callers/callees resolve
+    on demand; untested is honest). Remaining optional: `Impact` direct_callers/blast on-demand (transitive,
+    deferred).
 - [ ] **P1 — cost envelope.** Measure index time, `--precise` wall-clock, DB size, query latency on ≥1 real
   medium repo (1k+ symbols) per language. The whole pitch is "cheaper than file reads," and `--precise`
   (mandatory for TS/JS/Py graphs) is the unmeasured expensive path; also de-risks the 0.2 tree-sitter call.
