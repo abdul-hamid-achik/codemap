@@ -72,6 +72,53 @@ export function makeService() { return new UserService(); }
 	}
 }
 
+// TestIndexTypeScriptCallEdges proves --precise adds exact TS call edges via
+// callHierarchy, so callers/impact work for TypeScript. Server-gated.
+func TestIndexTypeScriptCallEdges(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "callee.ts", "export function callee() { return 1; }\n")
+	writeFile(t, dir, "caller.ts", "import { callee } from \"./callee\";\n\nexport function caller() { return callee(); }\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("ts", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := ix.IndexProject(ctx, pid, "ts", dir, Options{Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.PreciseUpgraded == 0 {
+		t.Fatal("expected precise TS call edges, got 0 (callHierarchy join failed?)")
+	}
+	callers, err := g.Callers(pid, "callee")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, c := range callers {
+		if c.Symbol == "caller" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("callers of callee should include caller (precise TS edge), got %+v", callers)
+	}
+	// Without --precise, TS has no call edges (callHierarchy is the only source).
+	g2, _ := newStores(t)
+	pid2, _ := g2.UpsertProject("ts", dir, "typescript")
+	ix2 := New(g2, nil, nil, config.DefaultConfig().Index)
+	defer ix2.Close()
+	if _, err := ix2.IndexProject(context.Background(), pid2, "ts", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := g2.Callers(pid2, "callee"); len(c) != 0 {
+		t.Errorf("name-based TS index should have no call edges, got %+v", c)
+	}
+}
+
 // TestIndexTypeScriptDisabledByNoLSP confirms --no-lsp keeps TS unindexed
 // regardless of installed servers (deterministic, never spawns a server).
 func TestIndexTypeScriptDisabledByNoLSP(t *testing.T) {

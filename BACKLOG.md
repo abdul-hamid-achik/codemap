@@ -742,6 +742,22 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #107 (multi-lang — slice C2: TS call graph) — **`index --precise` now gives TypeScript a
+  call graph** — callers/impact/hotspots/path work for TS. New `indexer.resolveLSPCallEdges` (Pass 3,
+  under `--precise`): collects `extract.CallResolver` extractors, builds `fqnTo` (caller) + `posTo`
+  ((file,line)→nodeID) from the LSP-language nodes, drives `CallEdges` per file, and writes each
+  resolved call as a `ProvPrecise`/`WeightLSP` `calls` edge — so the SAME callers/impact/hotspots/path
+  queries return TS results, no query change. The Go `go/types` pass is now gated on `Languages["go"]>0`
+  (so a TS-only `--precise` doesn't emit a spurious "not a buildable Go module" note). **Caught a real
+  bug while wiring:** the `callee.ts` *file node* shares line 1 with the first symbol, so the collision
+  guard was deleting the callee's `posTo` entry → 0 edges; fix = exclude file nodes from the position
+  map (never call targets). Index message made engine-neutral ("N call edges resolved exactly" — it now
+  spans go/types + callHierarchy; precise.yml re-stamped). Verified live: `callers callee` → `caller`,
+  `impact callee` → 1 caller. Test `TestIndexTypeScriptCallEdges` (server-gated: callers work with
+  `--precise`, none without). Full suite + lint v2 (0) + precise/typescript/query/studio E2E green; fmt
+  clean. CGO_ENABLED=0. COMMIT+PUSH. **`--precise` is now the unified exact-call-resolution pass: go/types
+  for Go, callHierarchy for TypeScript.** Next: doc the TS call-graph (#104 said "in progress"); then
+  JS/Python rows; perf for large TS repos (callHierarchy is 2 RPCs/symbol — fine for now, budget later).
 - 2026-06-23 #106 (multi-lang — slice C1: TS call extraction) — **`lspsrc.CallEdges` resolves
   TypeScript calls via LSP callHierarchy.** First de-risked with a probe: confirmed `tsserver`
   `prepareCallHierarchy` + `outgoingCalls` resolve a cross-file call (`caller → callee`) correctly after

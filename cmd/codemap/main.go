@@ -276,7 +276,7 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 		if rep.PreciseNote != "" {
 			fmt.Printf("  precise: %s\n", rep.PreciseNote)
 		} else {
-			fmt.Printf("  precise: %d call edges resolved exactly via go/types (%d unresolved)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
+			fmt.Printf("  precise: %d call edges resolved exactly (%d unresolved)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
 		}
 	} else if rep.Languages["go"] > 0 {
 		// Surface --precise at the moment a user would most benefit — only when the

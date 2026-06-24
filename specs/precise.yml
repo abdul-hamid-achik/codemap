@@ -42,5 +42,5 @@ outcomes:
       description: index --precise resolves calls exactly via go/types
       verify:
         screen:
-            contains: "resolved exactly via go/types"
-contractHash: sha256:a017ebff1c91f98768304d7179d0f7e7c5f6ab5fec22b9364aa5bf32ced5ff28
+            contains: "resolved exactly"
+contractHash: sha256:74044fe8183677f0b745cb2515ff8fd29c9118fc78706812e769462db0257c05

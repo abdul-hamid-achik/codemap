@@ -222,12 +222,14 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		return res, err
 	}
 
-	// Pass 3 (opt-in): replace name-based call edges with go/types-precise ones for
-	// cleanly type-checked packages. Best-effort and project-wide — degrades to the
-	// name baseline (with a note) when the toolchain/module isn't available, and
-	// never makes the graph worse than name-based.
+	// Pass 3 (opt-in): exact call edges. For Go, the go/types pass replaces
+	// name-based edges (only run when the project has Go). For LSP-backed languages
+	// (TypeScript), callHierarchy adds precise call edges where there were none.
 	if opts.Precise {
-		ix.resolvePreciseEdges(ctx, projectID, root, res)
+		if res.Languages["go"] > 0 {
+			ix.resolvePreciseEdges(ctx, projectID, root, res)
+		}
+		ix.resolveLSPCallEdges(ctx, projectID, root, res)
 	}
 
 	if ix.vectors != nil {
@@ -463,6 +465,84 @@ func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int,
 type precisePos struct {
 	file string
 	line int
+}
+
+// resolveLSPCallEdges adds exact call edges for LSP-backed languages (TypeScript)
+// by driving each registered CallResolver's callHierarchy over its files, joining
+// callees to nodes by declaration position. Edges are written ProvPrecise (there's
+// no name-based call extraction for these languages to supersede). Best-effort:
+// errors skip a file, never abort. The servers are still alive (closed by the
+// deferred ix.Close() after this runs).
+func (ix *Indexer) resolveLSPCallEdges(ctx context.Context, projectID int64, root string, res *Result) {
+	resolvers := map[string]extract.CallResolver{} // language -> resolver
+	for lang, e := range ix.extractors {
+		if cr, ok := e.(extract.CallResolver); ok {
+			resolvers[lang] = cr
+		}
+	}
+	if len(resolvers) == 0 {
+		return
+	}
+	nodes, err := ix.graph.ProjectNodes(projectID)
+	if err != nil {
+		return
+	}
+	fqnTo := make(map[string]int64, len(nodes))
+	posTo := make(map[precisePos]int64, len(nodes))
+	posCollide := map[precisePos]bool{}
+	filesByLang := map[string]map[string]bool{}
+	for _, n := range nodes {
+		if _, isLSP := resolvers[n.Language]; !isLSP {
+			continue
+		}
+		if filesByLang[n.Language] == nil {
+			filesByLang[n.Language] = map[string]bool{}
+		}
+		filesByLang[n.Language][n.FilePath] = true
+		if n.Kind == graph.KindFile {
+			continue // a file node shares line 1 with the first symbol; never a call target
+		}
+		if n.FQN != "" {
+			fqnTo[n.FQN] = n.ID
+		}
+		key := precisePos{n.FilePath, n.StartLine}
+		if _, dup := posTo[key]; dup {
+			posCollide[key] = true
+		} else {
+			posTo[key] = n.ID
+		}
+	}
+	for k := range posCollide {
+		delete(posTo, k) // ambiguous (same-line decls) — drop, don't mis-route
+	}
+
+	upgraded := 0
+	for lang, cr := range resolvers {
+		for file := range filesByLang[lang] {
+			edges, cErr := cr.CallEdges(ctx, file)
+			if cErr != nil {
+				continue
+			}
+			for _, e := range edges {
+				if e.External {
+					continue // callee outside the project — no node
+				}
+				from, ok := fqnTo[e.FromFQN]
+				if !ok {
+					continue
+				}
+				to, ok := posTo[precisePos{e.ToFile, e.ToLine}]
+				if !ok || to == from {
+					continue
+				}
+				if _, aErr := ix.graph.AddEdgeProv(from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); aErr != nil {
+					return
+				}
+				upgraded++
+			}
+		}
+	}
+	res.PreciseUpgraded += upgraded
 }
 
 // resolvePreciseEdges runs the go/types pass and supersedes name-based call edges
