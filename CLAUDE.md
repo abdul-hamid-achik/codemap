@@ -62,9 +62,10 @@ Surfaces / key files:
 `task check` (fmt + lint + test) before every commit · `task race` for TUI/indexer ·
 `task build` · `task flows` (glyphrun) when specs change. Flows are **local-only** (CI skips
 them): `studio.yml` needs `gopls`, `semantic.yml` needs a local Ollama with `nomic-embed-text`,
-`precise.yml` needs the `go` toolchain (it runs `index --precise`), and `typescript.yml` needs
-`typescript-language-server` + `node`. The toolchain-dependent flows only isolate `CODEMAP_DATA`,
-not `HOME`, so an asdf shim still resolves — the rest are pure-Go.
+`precise.yml` needs the `go` toolchain (it runs `index --precise`), and `typescript.yml` +
+`studio_ts.yml` (studio driving a TS call graph in the Graph tab) need `typescript-language-server`
++ `node`. The toolchain-dependent flows only isolate `CODEMAP_DATA`, not `HOME`, so an asdf shim
+still resolves — the rest are pure-Go.
 
 ## Related projects
 

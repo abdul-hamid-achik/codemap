@@ -742,6 +742,20 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #110 (E2E — studio drives a TypeScript call graph) — new `specs/studio_ts.yml`: the
+  third pillar (flows that demonstrate value via LSP) now covers the studio TUI on a **TypeScript**
+  project, proving the multi-language work reaches the TUI, not just the CLI. Sets up auth.ts (two
+  exported functions) + server.ts (handleRequest + middleware, both calling across files), runs
+  `index --precise` (TS call graph via callHierarchy), launches `studio`. Asserts inline (glyphrun
+  `wait: screen: contains`, like studio.yml): the Graph tab opens on the top TS hub **validateToken**
+  with **"Called by (2)"** → handleRequest/middleware (the cross-file precise call graph, badged
+  `precise · index`), walks into a caller (`depth 1`), and the Metrics tab shows **typescript** in the
+  language distribution. 3 snapshots (graph_ts, graph_ts_walk, metrics_ts). Isolates only
+  `CODEMAP_DATA` (not `HOME`) so the typescript-language-server asdf shim resolves; local-only (CI
+  skips flows). Verified: `glyph run` passes (1/1, clean exit), snapshot shows validateToken ←
+  handleRequest(server.ts:2)/middleware(server.ts:6) and the typescript language bar. contractHash
+  stamped; CLAUDE.md flow inventory updated. No Go change. COMMIT+PUSH. Next: JS row (server-dedup
+  first); then JS/Python E2E once those land.
 - 2026-06-24 #109 (studio polish — honest Graph empty-state for TS) — the multi-language work
   exposed a misleading TUI state: `graph.Hotspots` ranks only call/reference edges, so a **TypeScript
   project indexed without `--precise`** (nodes + `defines` edges, but zero call edges — TS calls come

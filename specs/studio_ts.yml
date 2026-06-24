@@ -1,0 +1,77 @@
+version: 1
+name: studio_ts
+intent: |
+    studio works end-to-end on a TypeScript project: after `index --precise`
+    (which gives TS a call graph via typescript-language-server callHierarchy),
+    the Graph tab opens on the real TS hubs — validateToken, called by two
+    functions across files — walks into a caller, and the Metrics tab shows the
+    language distribution as typescript. Proves the multi-language work reaches
+    the TUI, not just the CLI. Needs typescript-language-server + node + gopls is
+    NOT required (local-only; CI skips flows).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$P\"; printf 'export function validateToken(tok: string): boolean { return tok.length > 0; }\\nexport function loadUser(id: string): string { return id; }\\n' > \"$P/auth.ts\"; printf 'import { validateToken, loadUser } from \"./auth\";\\nexport function handleRequest(tok: string, id: string): string {\\n  if (!validateToken(tok)) return \"denied\";\\n  return loadUser(id);\\n}\\nexport function middleware(tok: string): boolean { return validateToken(tok); }\\n' > \"$P/server.ts\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --precise --no-embed >/dev/null 2>&1; \"$ROOT/bin/codemap\" studio"
+    cwd: "."
+terminal:
+    cols: 120
+    rows: 40
+    profile: xterm-256color
+    alternateScreen: require
+steps:
+    - wait:
+        screen:
+            contains: "codemap studio"
+        timeoutMs: 60000
+    - wait:
+        screen:
+            contains: "Hubs"
+        timeoutMs: 8000
+    # The Graph tab opens centered on the top TS hub. validateToken is called by
+    # two functions across files (handleRequest, middleware) — the precise TS call
+    # graph, rendered in the TUI.
+    - wait:
+        screen:
+            contains: "validateToken"
+        timeoutMs: 8000
+    - wait:
+        screen:
+            contains: "Called by (2)"
+        timeoutMs: 8000
+    - wait:
+        screen:
+            contains: "handleRequest"
+        timeoutMs: 8000
+    - snapshot: graph_ts
+    # Walk the graph: focus the callers pane and re-center on the first caller.
+    - press: "l"
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "depth 1"
+        timeoutMs: 8000
+    - snapshot: graph_ts_walk
+    # Metrics shows the language distribution — typescript, the whole project.
+    - press: "2"
+    - wait:
+        screen:
+            contains: "By language"
+        timeoutMs: 8000
+    - wait:
+        screen:
+            contains: "typescript"
+        timeoutMs: 8000
+    - snapshot: metrics_ts
+    - press: "ctrl+c"
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 5000
+outcomes:
+    - id: clean_exit
+      description: studio quits cleanly with status 0
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:30a582a79d91cb0e3a23d3f8b0f1a3c95680ee69ba0ea5fdffda412760342445
