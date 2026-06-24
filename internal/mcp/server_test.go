@@ -108,9 +108,13 @@ func TestMCPServer(t *testing.T) {
 	}
 	if txt := textOf(res); !strings.Contains(txt, `"registered": true`) || !strings.Contains(txt, `"nodes":`) {
 		t.Errorf("unexpected status payload: %s", txt)
+	} else if !strings.Contains(txt, `"stale"`) {
+		// Agents are told (codemap_docs) to check freshness before trusting results,
+		// so the staleness object must reach them over MCP, not just the CLI.
+		t.Errorf("status should carry the staleness object for agents: %s", txt)
 	}
 
-	// codemap_callers
+	// codemap_callers — a real symbol with callers reports found:true.
 	res2, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
 		Name:      "codemap_callers",
 		Arguments: map[string]any{"path": proj, "symbol": "Helper"},
@@ -118,8 +122,21 @@ func TestMCPServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(res2); !strings.Contains(txt, "Run") {
-		t.Errorf("callers of Helper should include Run: %s", txt)
+	if txt := textOf(res2); !strings.Contains(txt, "Run") || !strings.Contains(txt, `"found": true`) {
+		t.Errorf("callers of Helper should include Run and found:true: %s", txt)
+	}
+
+	// A nonexistent symbol must report found:false so an agent can tell a typo
+	// from a real symbol with no callers (both have empty results).
+	res3, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_callers",
+		Arguments: map[string]any{"path": proj, "symbol": "NoSuchSymbolXYZ"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(res3); !strings.Contains(txt, `"found": false`) {
+		t.Errorf("callers of a nonexistent symbol should report found:false: %s", txt)
 	}
 }
 

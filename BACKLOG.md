@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #184 (validate the MCP/agent surface end-to-end + CI-guard the agent-trust path) — dogfooded
+  the MCP server (the user's primary "use with a harness" goal) by driving real JSON-RPC tool calls over the
+  newline-delimited stdio protocol: 20 tools, clean handshake/exit; codemap_context → full bundle with
+  found:true + signature/doc; codemap_callers on a typo → found:false (#181 reaches agents); codemap_status →
+  the `stale` object, fresh = {0,0,0} and after adding a file = {changed:0,new:1,deleted:0} (the #153/#176
+  agent-trust freshness works end-to-end over MCP); codemap_index works via MCP. No bug — all solid. Gap
+  found: the MCP unit test asserted status has registered/nodes and callers includes Run, but NOT the `stale`
+  object or the `found` field — the two agent-critical signals — and flows (which DO cover them) are
+  local-only, so CI had no guard. Added assertions to TestMCPServer: status payload carries `"stale"`,
+  callers(Helper)→`"found": true`, and a new callers(NoSuchSymbolXYZ)→`"found": false` call. Now the primary
+  agent surface's trust signals are protected in CI. `task check` green. COMMIT+PUSH.
 - 2026-06-24 #183 (onboarding — consistent, actionable cold-start across ALL query commands + a flow to pin it)
   — dogfooded the first-run experience (fresh dir, query before indexing). status/context/semantic/impact/
   path/orphans all gave the clear "Project X is not indexed yet. Run 'codemap index'." (they gate on
