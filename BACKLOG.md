@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #160 (studio — Graph hub list shows a count + ▲/▼ scroll indicators) — first confirmed the
+  whole unreleased batch passes the project's canonical gates: **`task check` (fmt+lint+test) AND
+  `task race` both green** across all packages (validates the concurrency added in #152/#154) — v0.9.0 is
+  release-ready by the maintainer's own bar. Then a real studio nav gap: the Graph hub list (up to 200
+  hubs) windowed silently — no total count, no cue that more hubs exist above/below (the Metrics lists
+  already show "▲/▼ N more"). Now the title reads `Hubs (N)` and the list shows `▲ N more`/`▼ N more`
+  when it overflows (reserving 2 lines for them only when scrolling; full height otherwise). Rendering-
+  only — no change to graphSel/selection space, so the Metrics tab (which shares graphHubs) and all
+  existing Graph behavior are untouched; mirrors the proven metricBlock pattern + reuses `windowStart`.
+  Considered a full type-to-filter mode but it's invasive (graphSel re-indexing over the shared list)
+  and partly redundant with Search+ctrl+g — deferred. Test `TestGraphHubListScrollIndicators` (30 hubs:
+  count + ▼ at top, no ▲); studio.yml shows `Hubs (2)`, still green. Full suite + lint(0) + fmt green.
+  COMMIT+PUSH.
 - 2026-06-24 #159 (docs — VitePress MCP + quick-start pages caught up to 20 tools / context / freshness) —
   the deployed docs site had drifted: **docs/mcp.md listed only 17 of 20 tools** (missing codemap_context,
   codemap_doctor, codemap_unannotate), `codemap_status` didn't mention freshness, and it still called

@@ -224,18 +224,25 @@ func (m Model) renderGraph(w, h int) string {
 
 func (m Model) hubList(w, h int) string {
 	var b strings.Builder
-	b.WriteString(title("Hubs") + "\n")
-	rows := h - 1
-	if rows < 1 {
-		rows = 1
+	n := len(m.graphHubs)
+	b.WriteString(title(fmt.Sprintf("Hubs (%d)", n)) + "\n")
+	avail := h - 1 // minus the title line
+	if avail < 1 {
+		avail = 1
 	}
-	start := 0
-	if m.graphSel >= rows {
-		start = m.graphSel - rows + 1
+	// When the list overflows the window, reserve two lines for the ▲/▼ "N more"
+	// scroll indicators so you can tell there are hubs above/below — otherwise use
+	// the full height. Mirrors the Metrics tab's lists.
+	budget := avail
+	if n > avail {
+		if budget = avail - 2; budget < 1 {
+			budget = 1
+		}
 	}
-	end := start + rows
-	if end > len(m.graphHubs) {
-		end = len(m.graphHubs)
+	start := windowStart(m.graphSel, budget, n)
+	end := clamp(start+budget, 0, n)
+	if start > 0 {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more", start)) + "\n")
 	}
 	for i := start; i < end; i++ {
 		hub := m.graphHubs[i]
@@ -249,6 +256,9 @@ func (m Model) hubList(w, h int) string {
 			b.WriteString(line)
 		}
 		b.WriteByte('\n')
+	}
+	if end < n {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more", n-end)) + "\n")
 	}
 	return b.String()
 }

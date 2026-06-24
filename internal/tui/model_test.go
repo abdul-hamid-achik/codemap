@@ -100,6 +100,26 @@ func TestGraphNavigation(t *testing.T) {
 	}
 }
 
+func TestGraphHubListScrollIndicators(t *testing.T) {
+	m := sized(t, 80, 12) // small height so the 30-hub list overflows the window
+	hubs := make([]app.HotspotRef, 30)
+	for i := range hubs {
+		hubs[i] = app.HotspotRef{Symbol: fmt.Sprintf("H%d", i), InDegree: 30 - i}
+	}
+	m, _ = applyMsg(m, graphHubsMsg{hubs: hubs})
+	out := m.render()
+	if !strings.Contains(out, "Hubs (30)") {
+		t.Errorf("hub list title should show the total count:\n%s", out)
+	}
+	// graphSel starts at 0 (top): a ▼ more-below indicator, no ▲ more-above.
+	if !strings.Contains(out, "▼") || !strings.Contains(out, "more") {
+		t.Errorf("an overflowing hub list should show a ▼ 'N more' indicator at the top:\n%s", out)
+	}
+	if strings.Contains(out, "▲") {
+		t.Errorf("at the top there should be no ▲ more-above indicator:\n%s", out)
+	}
+}
+
 func TestRenderFillsScreen(t *testing.T) {
 	m := sized(t, 120, 40)
 	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
