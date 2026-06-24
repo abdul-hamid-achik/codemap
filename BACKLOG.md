@@ -4,6 +4,31 @@
 > next unstarted task, do it, update status here. Convert relative dates to absolute.
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
+## 🏷️ Release — v0.6.0 (2026-06-24)
+**TypeScript becomes a first-class language**, plus trustworthy dead-code analysis and richer studio
+navigation. Headline since v0.5.0:
+- **Multi-language / TypeScript (LSP backend).** `internal/lsp` drives `typescript-language-server`;
+  `index` extracts TS classes/methods/functions (structure + semantic search always), and
+  **`index --precise` gives TypeScript a real call graph** via `callHierarchy` — so
+  `callers`/`callees`/`impact`/`hotspots`/`path` work for TS through the same backend-blind queries Go
+  uses. `--precise` is now the unified exact-resolution pass: go/types for Go, callHierarchy for TS.
+  Pure-Go / CGO_ENABLED=0 (the server is a spawned subprocess). Present-aware: a Go-only repo never
+  spawns a server.
+- **`orphans` you can trust.** Now follows functions wired by *value* (cobra `RunE: handler`,
+  `mux.HandleFunc("/", s.handle)`) via a new `references` edge type that never enters the call graph —
+  so framework handlers are no longer false dead-code. `hotspots` stays a clean call-only hub metric.
+- **studio `ctrl+g`** opens any Search/Impact/Metrics selection in the Graph walker; honest empty-state
+  for a TS project indexed without `--precise`.
+- **`codemap_unannotate`** MCP tool — agents can prune the knowledge layer, not just append (CLI/MCP
+  parity). Every precise/engine surface (CLI/docs/studio/status/MCP) made honest about which engine
+  resolved the graph.
+- New E2E flows: `typescript.yml`, `studio_ts.yml` (studio driving a TS call graph). Ships: CLI ·
+  **MCP (18 tools)** · studio TUI · graph+vectors+LSP (Go + TypeScript).
+
+Pre-release: CGO_ENABLED=0 full suite green · golangci-lint v2 0 issues · gofmt/vet clean ·
+`goreleaser check` + snapshot cross-compiled all 5 pure-Go targets · tree clean. Tagging `v0.6.0`
+triggers `.github/workflows/release.yml` → goreleaser → binaries + `abdul-hamid-achik/homebrew-tap`.
+
 ## 🏷️ Release — v0.1.0 (2026-06-23)
 First public release, tagged on user go-ahead. Pre-release audit (7-agent workflow) returned
 **GO, zero blockers**: CGO_ENABLED=0 build + full test suite + race clean; golangci-lint v2 0
