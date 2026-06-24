@@ -190,7 +190,7 @@ Impact of Stats (codemap)
 | `annotate` / `annotations` | pin / list notes + external data on a symbol or call path |
 | `impact` | blast radius + test coverage for a symbol (`--depth`) |
 | `hotspots` / `orphans` | hubs / dead-code candidates (`--top`) |
-| `semantic` | meaning-based search (`--top`) |
+| `semantic` (alias `search`) | meaning-based search (`--top`) |
 | `serve` | run the MCP server (stdio) |
 | `studio` | open the interactive TUI |
 

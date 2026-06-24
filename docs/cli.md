@@ -55,7 +55,7 @@ callers reached via interface dispatch or reflection — treat its output as dea
 
 | Command | Description |
 |---|---|
-| `codemap semantic <query> [--top N]` | Meaning-based search across the indexed graph |
+| `codemap semantic <query> [--top N]` | Meaning-based search across the indexed graph (alias: `codemap search`) |
 | `codemap find <query> [--top N]` | Find symbols by name, with signatures (offline; no embeddings needed) |
 
 On a structure-only project (indexed with `--no-embed`, or before Ollama was available), `codemap semantic`

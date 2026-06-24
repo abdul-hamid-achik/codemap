@@ -767,6 +767,12 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #127 (discoverability — `codemap search` alias for `semantic`) — small CLI/studio
+  consistency fix: the studio's 4th tab is "Search" (and the universal mental model is "search"), but
+  the CLI command is `semantic`, so `codemap search "…"` returned "unknown command". Added `search` as
+  a cobra alias on `semanticCmd`. Verified live (`codemap search "hotspots ranking"` works); docs
+  (README + cli.md) note the alias; `TestSemanticSearchAlias` guards it. Full suite + fmt green.
+  COMMIT+PUSH.
 - 2026-06-24 #126 (studio — ctrl+r preserves precision instead of dropping the call graph) — a real
   in-session regression the multi-language work exposed: the studio reindex (`ctrl+r`) was hardcoded
   structure-only, so pressing it on a **`--precise` project** (any TS/JS/Python — they have *no* call

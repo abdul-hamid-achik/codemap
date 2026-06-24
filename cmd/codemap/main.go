@@ -135,10 +135,11 @@ var (
 		RunE:  runImpact,
 	}
 	semanticCmd = &cobra.Command{
-		Use:   "semantic <query>",
-		Short: "Semantic search across the code graph by meaning",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  runSemantic,
+		Use:     "semantic <query>",
+		Aliases: []string{"search"}, // matches the studio "Search" tab and the common mental model
+		Short:   "Semantic search across the code graph by meaning",
+		Args:    cobra.MinimumNArgs(1),
+		RunE:    runSemantic,
 	}
 	hotspotsCmd = &cobra.Command{
 		Use:   "hotspots",

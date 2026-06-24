@@ -34,3 +34,17 @@ func TestPreciseEdgeNote(t *testing.T) {
 		})
 	}
 }
+
+// TestSemanticSearchAlias guards the `search` alias for `semantic` — it matches
+// the studio "Search" tab so users moving between the TUI and CLI aren't tripped.
+func TestSemanticSearchAlias(t *testing.T) {
+	var found bool
+	for _, a := range semanticCmd.Aliases {
+		if a == "search" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("semantic command should alias \"search\", got aliases %v", semanticCmd.Aliases)
+	}
+}
