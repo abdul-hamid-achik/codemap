@@ -40,6 +40,12 @@ type Options struct {
 	// NoLSP disables auto-registration of language-server-backed extractors
 	// (TypeScript, …). Indexing then covers only the built-in Go backend.
 	NoLSP bool
+	// OnFile, if non-nil, is called once per scanned file just before it is
+	// indexed: done is the 1-based position, total is the number of scanned files
+	// (== Result.FilesScanned), rel is the project-relative path. Used only by the
+	// interactive CLI progress bar; studio and MCP leave it nil. It runs inline on
+	// the single indexing goroutine, so it must be cheap and non-blocking.
+	OnFile func(done, total int, rel string)
 }
 
 // FileError records a per-file failure that didn't abort the whole run.
@@ -267,9 +273,13 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// Pass 1: extract + store nodes (and embeddings) for changed files. Collect
 	// the references emitted by changed files for edge resolution.
 	var pending []extract.Reference
-	for _, ft := range files {
+	total := len(files) // == res.FilesScanned; the bar's denominator
+	for i, ft := range files {
 		if err := ctx.Err(); err != nil {
 			return res, err
+		}
+		if opts.OnFile != nil {
+			opts.OnFile(i+1, total, ft.rel)
 		}
 		changed, refs, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
 		if err != nil {

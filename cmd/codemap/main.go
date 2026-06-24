@@ -270,7 +270,17 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
 	precise, _ := cmd.Flags().GetBool("precise")
 	noLSP, _ := cmd.Flags().GetBool("no-lsp")
-	rep, err := app.NewService(sess).Index(cmd.Context(), cwd, index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP}, !noEmbed)
+	opts := index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP}
+	svc := app.NewService(sess)
+	// Live progress bar only for an interactive `codemap index` (TTY, no --json).
+	// Under --json, MCP, studio reindex, or a pipe, opts.OnFile stays nil and
+	// indexing runs exactly as before — no bar, no stdout noise.
+	var rep *app.IndexReport
+	if !jsonOut(cmd) && isInteractiveTTY() {
+		rep, err = runIndexWithBar(cmd.Context(), svc, cwd, opts, !noEmbed)
+	} else {
+		rep, err = svc.Index(cmd.Context(), cwd, opts, !noEmbed)
+	}
 	if err != nil {
 		return err
 	}

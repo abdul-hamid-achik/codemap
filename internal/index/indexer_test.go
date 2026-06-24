@@ -132,6 +132,64 @@ func TestIndexProject(t *testing.T) {
 	}
 }
 
+// TestIndexProjectOnFileHook pins the progress hook: OnFile fires exactly once
+// per scanned file, 1-based and monotonic, with total == FilesScanned and a
+// non-empty rel path. This is what the CLI progress bar rides on.
+func TestIndexProjectOnFileHook(t *testing.T) {
+	g, v := newStores(t)
+	dir := setupProject(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+
+	type call struct {
+		done, total int
+		rel         string
+	}
+	var calls []call
+	res, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{
+		OnFile: func(done, total int, rel string) { calls = append(calls, call{done, total, rel}) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != res.FilesScanned {
+		t.Fatalf("OnFile fired %d times, want FilesScanned=%d", len(calls), res.FilesScanned)
+	}
+	for i, c := range calls {
+		if c.done != i+1 {
+			t.Errorf("call %d: done=%d, want %d (1-based monotonic)", i, c.done, i+1)
+		}
+		if c.total != res.FilesScanned {
+			t.Errorf("call %d: total=%d, want FilesScanned=%d", i, c.total, res.FilesScanned)
+		}
+		if c.rel == "" {
+			t.Errorf("call %d: empty rel path", i)
+		}
+	}
+}
+
+// TestIndexProjectOnFileIsObservational confirms the hook is side-effect-free:
+// a nil OnFile (studio/MCP/default path) yields the same Result as a non-nil one.
+func TestIndexProjectOnFileIsObservational(t *testing.T) {
+	run := func(opts Options) *Result {
+		g, v := newStores(t)
+		dir := setupProject(t)
+		pid, _ := g.UpsertProject("app", dir, "go")
+		res, err := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index).
+			IndexProject(context.Background(), pid, "app", dir, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	a := run(Options{})
+	b := run(Options{OnFile: func(int, int, string) {}})
+	if a.FilesScanned != b.FilesScanned || a.FilesIndexed != b.FilesIndexed ||
+		a.FilesSkipped != b.FilesSkipped || a.Nodes != b.Nodes || a.Edges != b.Edges {
+		t.Errorf("OnFile altered the Result: nil=%+v cb=%+v", a, b)
+	}
+}
+
 func TestIndexIncremental(t *testing.T) {
 	g, v := newStores(t)
 	dir := setupProject(t)

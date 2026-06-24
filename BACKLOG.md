@@ -5,6 +5,24 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #152 (feature — live progress bar for `codemap index`, user-requested) — researched via a
+  multi-agent workflow (vecgrep reference + codemap index path + bubbles v2.1.0 API) then implemented.
+  Non-breaking hook: added `Options.OnFile func(done, total int, rel string)` (nil = today's behavior;
+  `Service.Index` forwards Options verbatim, so no exported signatures changed), invoked once per scanned
+  file at the top of the Pass-1 loop (`indexer.go`). CLI-only Bubble Tea bar (`cmd/codemap/index_progress.go`,
+  charm.land/bubbles/v2/progress — `WithDefaultBlend`, the gradient API was renamed in v2.1.0): the
+  indexer runs on a goroutine feeding the bar via `prog.Send`, the real Result returns on a buffered
+  channel. Gated to render ONLY when `!--json` AND **both stdin+stdout are TTYs** (`x/term`, like vecgrep)
+  — studio reindex and MCP `handleIndex` leave OnFile nil, so they're untouched (no second bubbletea
+  program, no stdio pollution). Robustness: indexing runs on the parent ctx, so a TUI failure (no usable
+  terminal) NEVER fails the index — it falls through to the real result; only a genuine ctrl+c cancels.
+  Tests: `TestProgressModel*` (fileMsg/doneMsg→Quit/ctrl+c→Quit/zero-total/empty-View-when-finished) +
+  `TestIndexProjectOnFileHook` (exact count, 1-based monotonic, total==FilesScanned) +
+  `TestIndexProjectOnFileIsObservational` (nil vs cb yield identical Result). New `specs/index_progress.yml`
+  flow runs `index` under glyph's real terminal emulator (both TTYs → bar path) and verifies it completes
+  cleanly (exit 0 + summary) — the verification a sandboxed `script`/PTY couldn't give. Non-TTY plain path
+  confirmed unchanged (piped summary identical). go.mod: x/term promoted to a direct require (pure-Go).
+  Full suite + lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #151 (polish — `semantic` results now show signatures, like `find`/studio do) — ran the
   FULL local flow suite for the first time this session (all toolchains present: typescript-language-
   server, pyright, Ollama+nomic-embed-text, gopls): typescript/javascript/python/semantic/studio_ts ALL

@@ -1,0 +1,41 @@
+version: 1
+name: index_progress
+intent: |
+    In an interactive terminal `codemap index` shows a live progress bar (Bubble
+    Tea + bubbles/progress) while it scans files, then clears it and prints the
+    normal summary. This pins the interactive bar path end-to-end: it must run
+    cleanly under a real terminal and never break indexing (a TUI failure falls
+    back to plain output; piped/--json output stays plain — covered elsewhere).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; i=1; while [ $i -le 12 ]; do printf 'package app\\n\\nfunc F%s() { G%s() }\\nfunc G%s() {}\\n' \"$i\" \"$i\" \"$i\" > \"$P/f$i.go\"; i=$((i+1)); done; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - snapshot: indexing
+    - wait:
+        screen:
+            contains: "Indexed"
+        timeoutMs: 15000
+    - snapshot: index_done
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 5000
+outcomes:
+    - id: summary_printed
+      description: the index summary prints after the bar clears (bar path completes cleanly)
+      verify:
+        screen:
+            contains: "12 scanned"
+    - id: clean_exit
+      description: index with the progress bar exits 0
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:d5b88084b99de3798cc80f509afeff3162f86ad6c7937e605f0265f0c9db0b07
