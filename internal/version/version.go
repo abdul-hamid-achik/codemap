@@ -9,6 +9,3 @@ var (
 
 // Full returns "Version (Commit) Date".
 func Full() string { return Version + " (" + Commit + ") " + Date }
-
-// Short returns just the version string.
-func Short() string { return Version }

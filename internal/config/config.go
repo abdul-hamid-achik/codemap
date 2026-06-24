@@ -142,12 +142,3 @@ func Save(cfg *Config, path string) error {
 	}
 	return os.WriteFile(path, data, 0o644)
 }
-
-// WriteDefault writes the default config to the global config file if absent.
-func WriteDefault() (string, error) {
-	path := ConfigFile()
-	if _, err := os.Stat(path); err == nil {
-		return path, nil // already exists
-	}
-	return path, Save(DefaultConfig(), path)
-}

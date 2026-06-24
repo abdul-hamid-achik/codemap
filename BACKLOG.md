@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #162 (dogfood — `orphans` found real dead code in codemap; removed it) — stress-tested the
+  accuracy value props on codemap itself (real scale). `index --precise` over the whole module: ~7s,
+  1653 edges resolved exactly (10 unresolved), and it correctly collapsed `Close` from a name-inflated
+  105 (shared by 7) to the real `app.Session.Close`=62 with NO inflation warnings — precise works at
+  scale. Then ran `orphans` on the precise index: most hits are expected interface-dispatch false
+  positives (Init/View/String/Error — the output already says "candidates"), but two PLAIN functions had
+  zero callers repo-wide and were genuinely dead: **`config.WriteDefault`** and **`version.Short`** —
+  removed both. (`config.Save` stays — still used by a test; `isInteractiveTerminal`/`version.Full` are
+  false positives: called from cobra closures / a package-level var initializer, which the call-graph
+  doesn't attribute to a named caller — a known limitation, covered by "candidates".) Confirmed: build +
+  full suite + lint(0) + fmt green; re-ran orphans — the two are gone, nothing newly orphaned. Also
+  dogfooded `doctor` (#161) — accurate. Nice self-consistent story: codemap's dead-code finder found and
+  we removed codemap's own dead code. COMMIT+PUSH.
 - 2026-06-24 #161 (studio — Search header shows the result count) — audited the rest of the studio's
   scrollable lists after #160: the Graph refs pane (`refBlock`), Metrics (`metricBlock`), and the Impact
   blast-radius + Search lists ALL already have ▲/▼ "N more" indicators — list nav is consistent. One real
