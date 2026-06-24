@@ -5,6 +5,20 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #167 (honesty — `index` summary no longer says "0 skipped" while warning about skipped files)
+  — dogfooded the first-run-WITHOUT-a-toolchain path (a Python/TS dev with no pyright/tsserver): the
+  install-hint warning is excellent ("1 python file(s) skipped — install pyright-langserver … or run with
+  --no-lsp"), but the summary said `files: 0 scanned, 0 indexed, 0 skipped` — flatly contradicting the
+  warning's "2 skipped" (violates codemap's own "every skip reason visible" honesty principle, #137/#138).
+  Root: recognized-but-unsupported files (no extractor available) are tracked in the Unsupported map (→
+  warning) but excluded from FilesScanned/FilesSkipped, whose "extractable-only" semantic the advisory's
+  `FilesScanned==0` signal + 2 tests rely on (so don't change it). Fix: exposed `IndexReport.Unsupported`
+  (also gives agents structured unsupported-language counts via `index --json`, previously only the
+  warning string) and a tested CLI helper `indexFilesSummary` that folds the unsupported count into the
+  displayed scanned+skipped — so the line reads `2 scanned, 0 indexed, 2 skipped`, matching the warning,
+  invariant intact. Happy path unchanged (Unsupported empty → identical). Test `TestIndexFilesSummary`
+  (plain / unsupported / mixed+removed). Full suite + lint(0) + fmt + index_status/typescript/polyglot
+  flows green. COMMIT+PUSH.
 - 2026-06-24 #166 (flow — polyglot Go+TS+Python in one repo, the headline multi-language value prop) —
   dogfooded the realistic mixed-repo case (no existing flow covered it — they're per-language). One
   `index --precise` run indexed all three (go/parser + typescript-language-server + pyright into one

@@ -36,18 +36,22 @@ type InitReport struct {
 
 // IndexReport is returned by Index.
 type IndexReport struct {
-	Project      string            `json:"project"`
-	Root         string            `json:"root"`
-	Embedded     bool              `json:"embedded"`
-	Warning      string            `json:"warning,omitempty"`
-	FilesScanned int               `json:"files_scanned"`
-	FilesIndexed int               `json:"files_indexed"`
-	FilesSkipped int               `json:"files_skipped"`
-	FilesDeleted int               `json:"files_deleted,omitempty"`
-	Oversized    []string          `json:"oversized,omitempty"`
-	Nodes        int               `json:"nodes"`
-	Edges        int               `json:"edges"`
-	Errors       []index.FileError `json:"errors,omitempty"`
+	Project      string   `json:"project"`
+	Root         string   `json:"root"`
+	Embedded     bool     `json:"embedded"`
+	Warning      string   `json:"warning,omitempty"`
+	FilesScanned int      `json:"files_scanned"`
+	FilesIndexed int      `json:"files_indexed"`
+	FilesSkipped int      `json:"files_skipped"`
+	FilesDeleted int      `json:"files_deleted,omitempty"`
+	Oversized    []string `json:"oversized,omitempty"`
+	// Unsupported maps a recognized source language with no available extractor
+	// (e.g. its language server isn't installed) to the count of such files. They
+	// were scanned but couldn't be indexed — the Warning explains how to enable them.
+	Unsupported map[string]int    `json:"unsupported,omitempty"`
+	Nodes       int               `json:"nodes"`
+	Edges       int               `json:"edges"`
+	Errors      []index.FileError `json:"errors,omitempty"`
 	// Precise* surface the opt-in go/types pass (index --precise).
 	PreciseUpgraded int    `json:"precise_upgraded,omitempty"`
 	PreciseSkipped  int    `json:"precise_skipped,omitempty"`
@@ -147,6 +151,7 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.FilesSkipped = res.FilesSkipped
 	rep.FilesDeleted = res.FilesDeleted
 	rep.Oversized = res.Oversized
+	rep.Unsupported = res.Unsupported
 	rep.Nodes = res.Nodes
 	rep.Edges = res.Edges
 	rep.Errors = res.Errors

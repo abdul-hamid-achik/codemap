@@ -263,6 +263,25 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// indexFilesSummary renders the "files:" line of `codemap index`. Recognized
+// files of a language with no available extractor (e.g. its language server isn't
+// installed) were genuinely scanned and skipped, so they're folded into the
+// scanned+skipped counts here — otherwise the summary would claim "0 skipped"
+// while the warning above reports skipped files. (IndexReport keeps FilesScanned
+// as extractable-only for the advisory; this reconciles the human view with it.)
+func indexFilesSummary(rep *app.IndexReport) string {
+	unsupported := 0
+	for _, n := range rep.Unsupported {
+		unsupported += n
+	}
+	line := fmt.Sprintf("  files: %d scanned, %d indexed, %d skipped",
+		rep.FilesScanned+unsupported, rep.FilesIndexed, rep.FilesSkipped+unsupported)
+	if rep.FilesDeleted > 0 {
+		line += fmt.Sprintf(", %d removed", rep.FilesDeleted)
+	}
+	return line
+}
+
 func runIndex(cmd *cobra.Command, _ []string) error {
 	sess, err := openSession(cmd)
 	if err != nil {
@@ -298,11 +317,7 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", rep.Warning)
 	}
 	fmt.Printf("Indexed %q (%s)\n", rep.Project, rep.Root)
-	filesLine := fmt.Sprintf("  files: %d scanned, %d indexed, %d skipped", rep.FilesScanned, rep.FilesIndexed, rep.FilesSkipped)
-	if rep.FilesDeleted > 0 {
-		filesLine += fmt.Sprintf(", %d removed", rep.FilesDeleted)
-	}
-	fmt.Println(filesLine)
+	fmt.Println(indexFilesSummary(rep))
 	fmt.Printf("  graph: %d nodes, %d edges (embeddings: %v)\n", rep.Nodes, rep.Edges, rep.Embedded)
 	if precise {
 		if rep.PreciseNote != "" {

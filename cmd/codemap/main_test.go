@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/abdul-hamid-achik/codemap/internal/app"
 )
 
 // TestPreciseEdgeNote pins the engine-aware status phrasing: precise edges are
@@ -32,6 +34,34 @@ func TestPreciseEdgeNote(t *testing.T) {
 				t.Errorf("preciseEdgeNote(%d, %v) = %q, should not contain %q", c.precise, c.languages, got, c.absent)
 			}
 		})
+	}
+}
+
+// TestIndexFilesSummary pins that the `index` summary counts recognized-but-
+// unsupported files (no language server) as scanned+skipped, so it can't claim
+// "0 skipped" while the warning reports skipped files.
+func TestIndexFilesSummary(t *testing.T) {
+	// No unsupported files: plain counts, invariant scanned = indexed + skipped.
+	plain := indexFilesSummary(&app.IndexReport{FilesScanned: 10, FilesIndexed: 10, FilesSkipped: 0})
+	if !strings.Contains(plain, "10 scanned, 10 indexed, 0 skipped") {
+		t.Errorf("plain summary = %q", plain)
+	}
+	// Unsupported (e.g. TS+Python with no servers) fold into scanned + skipped, so
+	// the line agrees with the warning instead of saying "0 skipped".
+	unsup := indexFilesSummary(&app.IndexReport{
+		FilesScanned: 0, FilesIndexed: 0, FilesSkipped: 0,
+		Unsupported: map[string]int{"typescript": 1, "python": 1},
+	})
+	if !strings.Contains(unsup, "2 scanned, 0 indexed, 2 skipped") {
+		t.Errorf("unsupported files should be counted as scanned+skipped, got %q", unsup)
+	}
+	// Mixed: Go indexed + a TS file with no server.
+	mixed := indexFilesSummary(&app.IndexReport{
+		FilesScanned: 10, FilesIndexed: 10, FilesSkipped: 0, FilesDeleted: 1,
+		Unsupported: map[string]int{"typescript": 2},
+	})
+	if !strings.Contains(mixed, "12 scanned, 10 indexed, 2 skipped, 1 removed") {
+		t.Errorf("mixed summary = %q", mixed)
 	}
 }
 
