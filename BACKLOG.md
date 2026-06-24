@@ -286,7 +286,13 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   then `resolveEdges` over the changed refs + `vectors.Sync`. `TestIndexFilesIncremental` (add file → symbol +
   edge resolve; delete file → pruned); task check green. (Inbound name-based edges from unchanged files into a
   changed file refresh on a full reindex — daemon can reconcile periodically.)
-- [ ] **BD.10** `internal/embed/throttle.go` — `ThrottledProvider` (embed.Provider decorator): content-hash **dedup** (codemap has none today), coalescing queue + bounded worker pool (`EmbedWorkers`, default 2), token-bucket rate (`x/time/rate`, `EmbedRPS`) + max-in-flight, **two priority lanes** (query > background), backpressure. Replaces inline `ix.embedder.Embed` under the daemon.
+- [x] **BD.10** `internal/embed/throttle.go` — `ThrottledProvider` (embed.Provider decorator, the
+  Ollama-sparing core): content-hash **dedup** (cache + `singleflight` for concurrent identical texts → a text
+  embeds once across files/branches), token-bucket **rate limit** (`x/time/rate`) + **max-in-flight** semaphore
+  on inner calls, and **two lanes** — `QueryEmbed` (interactive) skips the background rate limit so a reindex
+  storm never stalls a search, while `Embed` (index) is throttled. `NewThrottled(inner, ThrottleConfig{RPS,
+  Burst, MaxInFlight, CacheSize})`. New deps `x/time/rate`, `x/sync`. `TestThrottledDedup` +
+  `TestThrottledMaxInFlight` (race-clean). (Daemon wraps Ollama in this; wiring = BD.11/13.)
 - [ ] **BD.11** `internal/daemon/` — `Daemon{session, watcher, throttle, mcpHandler, listener}`: open the sole write Session, write `daemon.{sock,json,lock}` under `config.DataDir()`, accept-loop on the unix socket routing `mcp.*` frames (newline-JSON, **never Content-Length**) + `daemon.*` control RPCs; idle-timeout + SIGTERM-clean teardown.
 - [ ] **BD.12** `cmd/codemap/main.go` — `daemon start|stop|status`. Make `serve` a stdio↔socket **bridge** when a daemon is live; make query commands + `codemap_*` tools prefer the socket, else `VectorsReadOnly` fallback. Keep LSP Content-Length strictly inside `internal/lsp`.
 - [ ] **BD.13** `internal/config/config.go` — `DaemonConfig{Autostart, IdleTimeout(30m), EmbedWorkers(2), EmbedRPS, EmbedMaxInFlight, Debounce}` + `CODEMAP_DAEMON_*` overrides. Surface daemon state in `status` / `codemap_status`.
