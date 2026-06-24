@@ -504,6 +504,10 @@ func runCallers(cmd *cobra.Command, args []string) error {
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
+	if !rep.Found {
+		printNoSymbol(rep.Symbol, rep.Project)
+		return nil
+	}
 	label := fmt.Sprintf("Callers of %s", rep.Symbol)
 	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
 		label += " (precise, via gopls)"
@@ -514,6 +518,15 @@ func runCallers(cmd *cobra.Command, args []string) error {
 	}
 	renderAnnotations(rep.Annotations)
 	return nil
+}
+
+// printNoSymbol reports a symbol that isn't in the index, with a recovery hint:
+// `find` does name/substring search — the right next step when a name was
+// guessed, partial, or misspelled. Shared by the symbol-query commands so the
+// "no such symbol" message (and its fix) reads the same everywhere.
+func printNoSymbol(symbol, project string) {
+	fmt.Printf("no symbol named %q in project %s\n", symbol, project)
+	fmt.Printf("  try: codemap find %s   (search symbols by name/substring)\n", symbol)
 }
 
 func runCallees(cmd *cobra.Command, args []string) error {
@@ -539,6 +552,10 @@ func runCallees(cmd *cobra.Command, args []string) error {
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
+	}
+	if !rep.Found {
+		printNoSymbol(rep.Symbol, rep.Project)
+		return nil
 	}
 	label := fmt.Sprintf("Callees of %s", rep.Symbol)
 	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
@@ -572,7 +589,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	if !rep.Found {
-		fmt.Printf("symbol %q not found in project %s\n", rep.Symbol, rep.Project)
+		printNoSymbol(rep.Symbol, rep.Project)
 		return nil
 	}
 	fmt.Printf("Impact of %s (%s)\n", rep.Symbol, rep.Project)

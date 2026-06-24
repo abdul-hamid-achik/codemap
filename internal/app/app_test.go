@@ -129,6 +129,49 @@ func TestServiceCallers(t *testing.T) {
 	}
 }
 
+// A nonexistent symbol and a real symbol-with-no-callers both yield empty
+// Results; Found is what tells them apart (so the CLI can say "no such symbol"
+// vs "no callers" instead of a misleading "none" for both).
+func TestCallersFoundDistinguishesTypoFromNoCallers(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	// Run calls Helper; nothing calls Run; Helper calls nothing.
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Real symbol, no callers → Found, empty Results.
+	run, err := svc.Callers(proj, "Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !run.Found || len(run.Results) != 0 {
+		t.Errorf("Run: want Found=true with no callers, got Found=%v results=%+v", run.Found, run.Results)
+	}
+	// Nonexistent symbol → not Found.
+	if miss, err := svc.Callers(proj, "NoSuchSymbol"); err != nil {
+		t.Fatal(err)
+	} else if miss.Found {
+		t.Error("a nonexistent symbol should report Found=false")
+	}
+	// Callees of a real leaf symbol → Found even with no callees.
+	if leaf, err := svc.Callees(proj, "Helper"); err != nil {
+		t.Fatal(err)
+	} else if !leaf.Found {
+		t.Error("Helper exists, so Callees should report Found=true")
+	}
+}
+
 func TestQueryResultsCarrySignature(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

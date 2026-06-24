@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #181 (honesty — callers/callees distinguish a typo from a real symbol with no callers; actionable
+  not-found) — dogfooding found `callers NoSuchXYZ` → "Callers of NoSuchXYZ: none", identical to a real symbol
+  that genuinely has no callers — so a typo looked like a valid empty result (the #172 misleading-empty class).
+  Root cause: `relation()` returned empty Results with no existence signal. Fix: added `Found bool`
+  (`json:"found"`) to RelationReport, set from the FindNodesBySymbol lookup it ALREADY does for the ambiguity
+  note (`Found = len(Results)>0 || len(defs)>0`); the precise gopls paths set Found=true on successful
+  resolution (fallback delegates to the name-based path). CLI now prints "no symbol named X in project P"
+  for a real miss vs the accurate "Callers of X: none" when X exists with no callers; the JSON carries
+  `found` so agents can tell a typo from a true empty. Added a shared `printNoSymbol` helper with a recovery
+  hint ("try: codemap find X") and unified context + impact + callers + callees onto it (consistent,
+  actionable not-found everywhere). Also switched the CLI context card's "(depth ≤ N)" to read rep.BlastDepth
+  (#180) so it reflects the actual traversal. Verified: typo→hint, real-no-callers→"none", `--json`→found:false.
+  Added TestCallersFoundDistinguishesTypoFromNoCallers; `task check` + query.yml flow green. COMMIT+PUSH.
 - 2026-06-24 #180 (honesty/parity — blast-radius depth scope in context, surfaced everywhere) — dogfooding
   codemap on itself (index + context/impact/path/find/symbols/status — all healthy), the one real gap: the
   CLI context card qualifies blast radius as `(depth ≤ 3)` but the studio card said just "N transitively

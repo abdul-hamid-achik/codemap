@@ -545,6 +545,7 @@ func nodeToRef(n graph.Node) SymbolRef {
 type RelationReport struct {
 	Symbol      string             `json:"symbol"`
 	Project     string             `json:"project"`
+	Found       bool               `json:"found"` // whether the symbol exists in the index — distinguishes a typo from a real symbol with no callers/callees (both yield empty Results)
 	Results     []SymbolRef        `json:"results"`
 	Note        string             `json:"note,omitempty"`        // set when precise resolution fell back to name-based
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to the queried symbol
@@ -641,7 +642,11 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	// Name-keyed lookup unions same-named definitions, so flag it (mirrors impact)
 	// and point at the right fix for the current index — precise reindex on a
 	// name-based graph, or a more specific name when edges are already exact.
-	if defs, derr := g.FindNodesBySymbol(p.ID, symbol); derr == nil && len(defs) > 1 {
+	// The same lookup tells us whether the symbol exists at all, so an empty
+	// Results set can be reported as "no such symbol" rather than "no callers".
+	defs, derr := g.FindNodesBySymbol(p.ID, symbol)
+	rep.Found = len(rep.Results) > 0 || (derr == nil && len(defs) > 0)
+	if derr == nil && len(defs) > 1 {
 		if svc.hasPreciseEdges(g, p.ID) {
 			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but these results still merge all of them; query a more specific name to separate them", symbol, len(defs))
 		} else {
@@ -685,7 +690,8 @@ func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*Re
 	if err != nil {
 		return svc.preciseFallback(cwd, symbol, err, svc.Callers)
 	}
-	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(c),
+	// preciseRelations succeeding means gopls resolved the symbol, so it exists.
+	return &RelationReport{Symbol: symbol, Project: project, Found: true, Results: nonNil(c),
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
 }
 
@@ -710,7 +716,8 @@ func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*Re
 	if err != nil {
 		return svc.preciseFallback(cwd, symbol, err, svc.Callees)
 	}
-	return &RelationReport{Symbol: symbol, Project: project, Results: nonNil(ce),
+	// preciseRelations succeeding means gopls resolved the symbol, so it exists.
+	return &RelationReport{Symbol: symbol, Project: project, Found: true, Results: nonNil(ce),
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
 }
 

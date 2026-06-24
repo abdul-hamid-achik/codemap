@@ -40,7 +40,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	if !rep.Found {
-		fmt.Printf("symbol %q not found in project %s\n", rep.Symbol, rep.Project)
+		printNoSymbol(rep.Symbol, rep.Project)
 		return nil
 	}
 
@@ -97,7 +97,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 	}
 	line("tests", tNames, rep.TestsTotal)
 
-	fmt.Printf("  %s %d (depth ≤ %d)\n", label("blast radius:"), rep.BlastRadius, depth)
+	fmt.Printf("  %s %d (depth ≤ %d)\n", label("blast radius:"), rep.BlastRadius, rep.BlastDepth)
 	renderAnnotations(rep.Annotations)
 	return nil
 }
