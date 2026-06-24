@@ -40,6 +40,7 @@ var (
 )
 
 func init() {
+	daemonStartCmd.Flags().Bool("no-embed", false, "watch + index structure only (skip Ollama embeddings)")
 	daemonCmd.AddCommand(daemonStartCmd, daemonStopCmd, daemonStatusCmd)
 }
 
@@ -57,6 +58,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	applyConfigFlags(cmd, cfg) // flags win over config file + env
+	noEmbed, _ := cmd.Flags().GetBool("no-embed")
 	dc := cfg.Daemon
 	d, err := daemon.Start(cmd.Context(), root, daemon.Config{
 		Debounce:    time.Duration(dc.DebounceMS) * time.Millisecond,
@@ -66,6 +68,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 			MaxInFlight: dc.EmbedMaxInFlight,
 			CacheSize:   dc.EmbedCacheSize,
 		},
+		NoEmbed:   noEmbed,
 		Overrides: func(c *config.Config) { applyConfigFlags(cmd, c) },
 	})
 	if err != nil {

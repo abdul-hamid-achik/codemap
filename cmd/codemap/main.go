@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/daemon"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	mcpserver "github.com/abdul-hamid-achik/codemap/internal/mcp"
@@ -522,11 +523,15 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 			rep.Stale = st
 		}
 	}
+	// Attach live background-daemon state (nil if none is running) so a human or
+	// agent can tell whether the index is being kept fresh automatically.
+	out := daemon.AttachStatus(rep)
 	if jsonOut(cmd) {
-		return printJSON(rep)
+		return printJSON(out)
 	}
 	if !rep.Registered {
 		fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", rep.Project)
+		printDaemonLine(out.Daemon)
 		return nil
 	}
 	edges := fmt.Sprintf("%d", rep.Edges) + preciseEdgeNote(rep.PreciseEdges, rep.Languages)
@@ -547,7 +552,26 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("  ⚠ index is stale: %d changed, %d new, %d deleted since last index — run 'codemap index' to refresh\n",
 			rep.Stale.Changed, rep.Stale.New, rep.Stale.Deleted)
 	}
+	printDaemonLine(out.Daemon)
 	return nil
+}
+
+// printDaemonLine reports whether a background daemon is keeping the index fresh.
+// A nil info means no daemon answered the control socket.
+func printDaemonLine(info *daemon.Info) {
+	if info == nil {
+		fmt.Println("  daemon: not running")
+		return
+	}
+	line := fmt.Sprintf("  daemon: running — %s (pid %d", info.ProjectName, info.PID)
+	if info.Watching {
+		line += ", watching"
+	}
+	line += ")"
+	if info.LastReindexAt != "" {
+		line += "  last reindex " + info.LastReindexAt
+	}
+	fmt.Println(line)
 }
 
 func runDoctor(cmd *cobra.Command, _ []string) error {

@@ -95,6 +95,41 @@ func TestDaemonIndexesOnChange(t *testing.T) {
 	}
 }
 
+// TestQueryStatus pins the daemon-state client used by `codemap status` /
+// codemap_status: nil when no daemon runs, live Info while one runs, nil again
+// after it stops.
+func TestQueryStatus(t *testing.T) {
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+
+	if got := QueryStatus(); got != nil {
+		t.Fatalf("QueryStatus with no daemon should be nil, got %+v", got)
+	}
+
+	root := t.TempDir()
+	mustWrite(t, root, "go.mod", "module example.com/m\n\ngo 1.25\n")
+	mustWrite(t, root, "a.go", "package m\n\nfunc Alpha() {}\n")
+	d, err := Start(context.Background(), root, Config{NoEmbed: true, Debounce: 80 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	info := QueryStatus()
+	if info == nil {
+		t.Fatal("QueryStatus should return Info while the daemon runs")
+	}
+	if info.PID == 0 || !info.Watching || info.ProjectRoot == "" {
+		t.Errorf("unexpected daemon Info: %+v", info)
+	}
+
+	d.Stop()
+	d.Wait()
+	if got := QueryStatus(); got != nil {
+		t.Errorf("QueryStatus after stop should be nil, got %+v", got)
+	}
+}
+
 func mustWrite(t *testing.T, dir, rel, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, rel), []byte(content), 0o644); err != nil {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/daemon"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/abdul-hamid-achik/codemap/internal/version"
 )
@@ -298,7 +299,12 @@ func (s *Server) handleStatus(_ context.Context, _ *sdkmcp.CallToolRequest, in p
 			rep.Stale = st
 		}
 	}
-	return result(rep, err)
+	if err != nil || rep == nil {
+		return result(rep, err)
+	}
+	// Attach live background-daemon state (nil if none is running) so the agent
+	// knows whether the index is being kept fresh automatically.
+	return result(daemon.AttachStatus(rep), nil)
 }
 
 func (s *Server) handleBranchStatus(ctx context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {
