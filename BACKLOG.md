@@ -5,6 +5,24 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #141 (decision — tree-sitter for large-TS speed: CGO conflicts with pure-Go releases;
+  needs a product call) — user greenlit a tree-sitter backend *"if good compatibility with go and our
+  product."* Did that compatibility check; the honest finding: **tree-sitter requires CGO** (official
+  `tree-sitter/go-tree-sitter` and smacker's both wrap libtree-sitter C; no production pure-Go binding),
+  and codemap's releases are **CGO_ENABLED=0** (`.goreleaser.yaml`, 5 cross-compiled targets) — CLAUDE.md
+  already states tree-sitter "stays behind the `treesitter` build tag and out of release binaries until
+  0.2." So tree-sitter as the DEFAULT fast backend would break the pure-Go cross-platform release model
+  → fails the user's own condition. Options laid out: (A) CGO tree-sitter default — breaks releases ❌;
+  (B) CGO behind a build tag — fast only when built from source, NOT in release binaries, so doesn't fix
+  the released-binary speed ⚠️; (C) **pure-Go WASM tree-sitter** (wazero + tree-sitter.wasm + grammar
+  wasms) — fast AND fits the pure-Go release, but a substantial, uncertain DIY effort 🔶; (D) keep the
+  LSP backend (#139) — correct (the reported BUG is fixed), pure-Go, slow only on huge repos ✅-for-now.
+  **Recommendation:** the reported correctness bug is already fixed (#139, 52%→96%); the remaining issue
+  is only large-repo SPEED. Don't take CGO (A/B) — it breaks the product's core constraint. The pure-Go
+  path (C) is viable but a dedicated multi-increment effort — awaiting the user's go-ahead. Deleted the
+  user's `CODEMAP-TS-EXTRACTION-GAP.md` (findings now in #139–#141). Also noted while dogfooding: **path
+  (from→to) annotations don't surface in the `path` query** (symbol annotations do surface in `impact`)
+  — minor consistency gap, fix later.
 - 2026-06-24 #140 (investigation — large-TS-project SPEED; useSyntaxServer is NOT the fix) — followed
   up #139's known limitation (a full graphite index is slow because tsserver does whole-project
   type-checking that documentSymbol doesn't need). Added `initializationOptions` plumbing to
