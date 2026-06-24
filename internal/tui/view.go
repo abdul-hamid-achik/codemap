@@ -583,7 +583,7 @@ func (m Model) renderImpact(w, h int) string {
 		start := windowStart(m.impactSel, budget, len(br))
 		end := clamp(start+budget, 0, len(br))
 		if start > 0 {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more above\n", start)))
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more\n", start)))
 		}
 		for i := start; i < end; i++ {
 			n := br[i]
@@ -605,7 +605,7 @@ func (m Model) renderImpact(w, h int) string {
 			}
 		}
 		if end < len(br) {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(br)-end)) + "\n")
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more", len(br)-end)) + "\n")
 		}
 		if m.impactSel < len(br) {
 			if p := detailPreview(br[m.impactSel].Signature, br[m.impactSel].Doc, w); p != "" {
@@ -650,7 +650,7 @@ func (m Model) renderSearch(w, h int) string {
 		start := windowStart(m.searchSel, budget, len(hits))
 		end := clamp(start+budget, 0, len(hits))
 		if start > 0 {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more above\n", start)))
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more\n", start)))
 		}
 		for i := start; i < end; i++ {
 			hit := hits[i]
@@ -669,7 +669,7 @@ func (m Model) renderSearch(w, h int) string {
 			}
 		}
 		if end < len(hits) {
-			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more below", len(hits)-end)) + "\n")
+			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more", len(hits)-end)) + "\n")
 		}
 		if m.searchSel < len(hits) {
 			sel := hits[m.searchSel]

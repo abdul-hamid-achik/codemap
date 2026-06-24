@@ -5,6 +5,13 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #177 (studio polish — consistent scroll indicators across all four tabs) — the studio's
+  scrollable lists disagreed on wording: Graph hubs/refs and Metrics rendered `▲/▼ N more`, while Impact's
+  blast-radius and Search's hits rendered `▲ N more above` / `▼ N more below`. The ▲/▼ arrow already conveys
+  direction, so the suffix was redundant and the only effect was inconsistent navigation cues between tabs.
+  Normalized Impact + Search to the compact `▲/▼ N more` form used everywhere else (view.go, 4 strings).
+  Nothing pins the verbose wording (grep'd internal/ + specs/); `task check` (fmt+lint+test, all pkgs) green.
+  COMMIT+PUSH.
 - 2026-06-24 #176 (agent guide — teach freshness-check + the prune/dangling tools so agents USE them) —
   audited `codemap_docs` (the agent's instruction manual) against shipped features and found the guide
   hadn't kept pace: the **workflow** topic never told agents to check `status` freshness before trusting
