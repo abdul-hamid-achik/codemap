@@ -760,6 +760,11 @@
   annotations, polyglot (Go+TS+Python in one repo), incremental, jsx, config, onboarding. Full suite
   (21 specs) + `task check` + CI all green.
 
+✅ **Shipped + verified 2026-06-24** (tag `v0.9.0` @ `374d550`): release.yml green (checks + GoReleaser);
+GitHub release published with 6 assets (darwin/linux amd64+arm64 + windows amd64 + checksums.txt);
+`abdul-hamid-achik/homebrew-tap` formula bumped to `0.9.0` with the v0.9.0 asset URLs; the downloaded
+darwin/arm64 binary reports `codemap version 0.9.0 (374d550)` and runs.
+
 ## 🏷️ Release — v0.8.0 (2026-06-24)
 **Reliability + polish you'd actually reach for.** Headline since v0.7.0 (15 commits):
 - **Large-project symbol recovery (the big fix).** On big TypeScript repos `typescript-language-server`
