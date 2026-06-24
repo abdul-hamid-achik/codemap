@@ -147,6 +147,36 @@ func TestWrapExtractErr(t *testing.T) {
 	}
 }
 
+// TestHasDeclarations pins the heuristic that decides whether an empty
+// documentSymbol is worth retrying (a parse race on a file that should yield
+// symbols) versus accepting immediately (a re-export / import-only file).
+func TestHasDeclarations(t *testing.T) {
+	yes := []string{
+		"export function getTableImportColumns() {}",
+		"export const sort = () => {}",
+		"class Foo {}",
+		"interface Bar {}",
+		"type T = number",
+		"def add(a, b):\n    return a + b", // Python
+	}
+	no := []string{
+		"export { x } from './y'",
+		"import x from 'y'\nexport default x",
+		"// just a comment\n",
+		"",
+	}
+	for _, s := range yes {
+		if !hasDeclarations([]byte(s)) {
+			t.Errorf("hasDeclarations should be true for %q", s)
+		}
+	}
+	for _, s := range no {
+		if hasDeclarations([]byte(s)) {
+			t.Errorf("hasDeclarations should be false for %q", s)
+		}
+	}
+}
+
 // TestLSPLanguageID pins the per-extension languageId override: .tsx/.jsx must
 // map to the *react ids (so tsserver parses JSX and resolves <Component/> calls),
 // while other files keep the language's default.

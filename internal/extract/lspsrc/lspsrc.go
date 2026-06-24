@@ -14,10 +14,18 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
 )
+
+// parseWait caps a per-file retry of an empty documentSymbol. The server answers
+// documentSymbol BEFORE it finishes parsing a freshly-opened file (instant when
+// idle, but it races ahead under load) and returns EMPTY — which silently dropped
+// ~half the files on a large repo. Retrying recovers them and paces codemap to the
+// server. Bounded, and gated by hasDeclarations so symbol-less files aren't retried.
+const parseWait = 8 * time.Second
 
 // Extractor satisfies extract.Extractor (and CallResolver) by driving a language server.
 var (
@@ -85,6 +93,52 @@ func (e *Extractor) Bind(lang, langID string) *Extractor {
 // Language implements the extractor contract.
 func (e *Extractor) Language() string { return e.lang }
 
+// documentSymbolsParsed queries a file's symbols, retrying an EMPTY result while
+// the file plausibly has declarations. The server answers documentSymbol before
+// it finishes parsing a freshly-opened file under load and returns empty — which
+// silently dropped ~half the files on a big repo. A file with no declaration
+// keyword (a barrel / import-only file) is accepted empty immediately, so the
+// retry cost falls only on files that should yield symbols; retrying also paces
+// codemap to the server's parse rate instead of flooding it.
+func (e *Extractor) documentSymbolsParsed(uri string, src []byte) ([]lsp.DocumentSymbol, error) {
+	syms, err := e.client.DocumentSymbols(e.ctx, uri)
+	if err != nil || len(syms) > 0 || !hasDeclarations(src) {
+		return syms, err
+	}
+	deadline := time.Now().Add(parseWait)
+	for backoff := 40 * time.Millisecond; time.Now().Before(deadline); {
+		select {
+		case <-e.ctx.Done():
+			return nil, e.ctx.Err()
+		case <-time.After(backoff):
+		}
+		if syms, err = e.client.DocumentSymbols(e.ctx, uri); err != nil || len(syms) > 0 {
+			return syms, err
+		}
+		if backoff < 2*time.Second {
+			backoff *= 2
+		}
+	}
+	return syms, nil // still empty after waiting — accept it
+}
+
+// hasDeclarations is a cheap heuristic: does the source contain a declaration
+// construct that should produce a documentSymbol? Used to decide whether an empty
+// result is worth retrying (a parse race) or genuine (a re-export/import-only
+// file). Covers TS/JS and Python keywords.
+func hasDeclarations(src []byte) bool {
+	s := string(src)
+	for _, kw := range []string{
+		"function", "class ", "interface ", "enum ", "=>",
+		"const ", "let ", "var ", "type ", "namespace ", "module ", "def ",
+	} {
+		if strings.Contains(s, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // ExtractFile opens relPath (resolved against the project root) in the server and
 // maps its document symbols to codemap symbols. src is the file content. The
 // 2-arg signature matches extract.Extractor; the abs file:// URI is derived here.
@@ -93,7 +147,7 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 	if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
 		return nil, err
 	}
-	syms, err := e.client.DocumentSymbols(e.ctx, uri)
+	syms, err := e.documentSymbolsParsed(uri, src)
 	if err != nil {
 		return nil, wrapExtractErr(e.lang, relPath, err)
 	}

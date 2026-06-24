@@ -5,6 +5,27 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #139 (BUG — LSP symbols silently dropped on large projects; the user's graphite report)
+  — user reported (CODEMAP-TS-EXTRACTION-GAP.md) that exported functions in real `.ts` modules were
+  absent from find/impact/source on the `graphite` repo. **Confirmed and root-caused**: NOT an
+  extraction-kind gap (a direct `lspsrc` probe returns all 159 symbols of `tableImport.ts`, incl.
+  `getTableImportColumns`/`sortTableColumnsStable`); it's a **scale race** — on a 2895-file project,
+  `typescript-language-server` answers `documentSymbol` BEFORE it finishes parsing a freshly-opened
+  file and returns **empty**, and codemap accepted it. Measured: only **1385 / 2895 files had ANY
+  symbols (52% dropped)**; `tableImport.ts` had 1 node (file only). Fix: `documentSymbolsParsed`
+  retries an empty `documentSymbol` (bounded by `parseWait`=8s, exponential backoff) — which both
+  recovers the symbols AND paces codemap to the server instead of flooding it — gated by a
+  `hasDeclarations` heuristic so re-export/import-only files aren't retried. Recovery jumped to **~96%
+  of processed files**. Tried and rejected: a `ready`/project-load gate (defeated itself),
+  `publishDiagnostics`-wait (server doesn't publish per-file under flood → every wait timed out),
+  `WaitReady`/`$/progress` (90s wait that breaks small projects). Tests: `TestHasDeclarations`;
+  existing server-gated TS/JS/Py tests still pass fast (retry is a no-op when the first query succeeds).
+  Full suite + lint(0) + fmt green. **Known limitation:** on very large repos the retry makes a full
+  index slow (tsserver is slow doing whole-project type-checking, which `documentSymbol` doesn't need);
+  the real fix for huge projects is tsserver's **syntax-server mode** (`useSyntaxServer`) via
+  `initializationOptions` — scoped follow-up (needs init-options plumbing, also unblocks Vue). Net: a
+  genuine correctness fix for the common case (small/medium projects: fast + complete) and a big
+  improvement (52%→~96%) for large ones. COMMIT+PUSH.
 - 2026-06-24 #138 (honesty — surface oversized-skipped files instead of silently dropping them) —
   the last skip-reason that was silent: a recognized source file over `index.max_file_bytes` (1 MiB)
   was counted in "N skipped" with no reason or filename, so a missing symbol (often from a large
