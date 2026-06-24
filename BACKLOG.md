@@ -12,7 +12,7 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.9.1** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+Released through **v0.10.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI** (23 commands, `--json`), **MCP**
 (`codemap serve`, 20 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
@@ -24,11 +24,14 @@ radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
-**On `main`, unreleased** (FIX.md §1/§2/§3): honest TS impact `resolution` note; studio global back/forward
-nav history; studio source overlay syntax highlighting (chroma/v2) + real file-line gutter. → a **0.10.0**
-is queued, **pending explicit per-release authorization** (loop paused per user).
-
 ## Release history (condensed — full detail in the vault archive)
+- **v0.10.0** — honesty + dogfood fidelity. TS/JS/Python `impact` no longer returns a confidently-empty
+  `[]`+`untested` without a call graph (a `resolution` note instead, FIX.md §1); studio **global back/forward
+  nav history** that restores the bar you came from (§2); studio source overlay **syntax highlighting**
+  (chroma/v2, pure-Go) + real file-line gutter (§3). Indexing fidelity: Go package-level **var/const** now
+  indexed (finding D); **scanned-but-skipped files** (parse-error/oversized) no longer show false staleness
+  (finding E); **generated code** skipped by `*_gen.go` + the `// Code generated … DO NOT EDIT.` header
+  (finding B). New dep: `chroma/v2`.
 - **v0.9.1** — real-repo dogfood fixes: drop anonymous-callback symbol noise (#196), accept qualified
   `pkg.Type.Method` names in callers/impact/etc. (#197).
 - **v0.9.0** — flagship one-call `context`; index-freshness/staleness for agent trust; honesty pass
