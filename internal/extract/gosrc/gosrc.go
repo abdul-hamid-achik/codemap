@@ -179,7 +179,9 @@ func valueRefs(fset *token.FileSet, from string, d *ast.FuncDecl) []extract.Refe
 		return nil
 	}
 	var refs []extract.Reference
-	collectValueRefs(fset, from, d.Body, map[string]bool{}, &refs)
+	// Function bodies: only function-*values*. Calls are already RefCalls edges
+	// (callRefs), so don't double-count them as references.
+	collectValueRefs(fset, from, d.Body, false, map[string]bool{}, &refs)
 	return refs
 }
 
@@ -196,7 +198,12 @@ func fileValueRefs(fset *token.FileSet, relPath string, f *ast.File) []extract.R
 		if !ok { // *ast.FuncDecl and others — bodies handled by valueRefs
 			continue
 		}
-		collectValueRefs(fset, relPath, gd, seen, &refs)
+		// Package-level decls have no enclosing function, so callRefs never walks
+		// them — yet a func-literal initializer (e.g. cobra's inline `RunE:
+		// func(...){ runStudio(...) }`) really does invoke its callees. Collect
+		// those callees too (as references, attributed to the file), so a function
+		// reachable only from a package-level closure isn't a false orphan.
+		collectValueRefs(fset, relPath, gd, true, seen, &refs)
 	}
 	return refs
 }
@@ -211,7 +218,7 @@ func fileValueRefs(fset *token.FileSet, relPath string, f *ast.File) []extract.R
 // their function/method name and resolved within the package — references are
 // conservative (they only keep a node *out* of the dead-code list), so this never
 // produces a false call.
-func collectValueRefs(fset *token.FileSet, from string, node ast.Node, seen map[string]bool, out *[]extract.Reference) {
+func collectValueRefs(fset *token.FileSet, from string, node ast.Node, collectCalls bool, seen map[string]bool, out *[]extract.Reference) {
 	add := func(expr ast.Expr) {
 		name := valueRefName(expr)
 		if name == "" || builtins[name] || seen[name] {
@@ -233,6 +240,9 @@ func collectValueRefs(fset *token.FileSet, from string, node ast.Node, seen map[
 		case *ast.CallExpr:
 			for _, arg := range t.Args { // callbacks passed as args (not the callee)
 				add(arg)
+			}
+			if collectCalls { // package-level: the callee is genuinely invoked (e.g. inside a RunE closure)
+				add(t.Fun)
 			}
 		case *ast.CompositeLit:
 			for _, elt := range t.Elts { // slice/array of handlers; KV elts handled above

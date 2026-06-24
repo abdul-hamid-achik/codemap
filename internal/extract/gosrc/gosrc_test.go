@@ -241,3 +241,48 @@ func (s *Server) wire() {
 		t.Error("register(...) should remain a calls edge")
 	}
 }
+
+// TestPackageLevelClosureCalls pins the fix for functions invoked inside a
+// package-level func-literal initializer (cobra's inline `RunE: func(){...}`):
+// callRefs never walks package-level decls, so without this they'd be false
+// orphans. They become references from the file (no named caller exists), not
+// calls — and a normal function-body call must NOT be double-counted as a ref.
+func TestPackageLevelClosureCalls(t *testing.T) {
+	const src = `package sample
+
+func runStudio() {}
+func helper() bool { return true }
+func calledFromBody() {}
+
+type Command struct{ RunE func() }
+
+var root = &Command{RunE: func() {
+	if helper() {
+		return
+	}
+	runStudio()
+}}
+
+func setup() { calledFromBody() }
+`
+	res, err := New().ExtractFile("cmd.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fn := range []string{"runStudio", "helper"} {
+		if !hasKindRef(res.References, "cmd.go", fn, extract.RefReferences) {
+			t.Errorf("expected file->%s references edge (called in a package-level closure), got %+v", fn, res.References)
+		}
+		if hasKindRef(res.References, "cmd.go", fn, extract.RefCalls) {
+			t.Errorf("%s: a package-level closure call must be a reference, not a calls edge", fn)
+		}
+	}
+	// Regression guard: a normal function-body call stays a calls edge and is NOT
+	// also duplicated as a reference (collectCalls is off for function bodies).
+	if !hasKindRef(res.References, "sample.setup", "calledFromBody", extract.RefCalls) {
+		t.Error("setup->calledFromBody should be a calls edge")
+	}
+	if hasKindRef(res.References, "sample.setup", "calledFromBody", extract.RefReferences) {
+		t.Error("a function-body call must NOT also be a reference (no double-count)")
+	}
+}

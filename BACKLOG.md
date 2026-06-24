@@ -5,6 +5,22 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #163 (accuracy — capture calls inside package-level closures; fewer false orphans) — the
+  #162 dogfooding flagged `runStudio`/`isInteractiveTerminal` as orphans, but they ARE used — called
+  inside `rootCmd`'s inline `RunE: func(){...}`. Root-caused: `callRefs` only walks `*ast.FuncDecl`
+  bodies, so a func-literal in a PACKAGE-LEVEL var initializer (the cobra inline-handler pattern) is never
+  walked → its callees vanish from the graph (verified `callers isInteractiveTerminal` = none).
+  IMPORTANT scope check: closures NESTED in a named function ARE captured (ast.Inspect recurses — e.g.
+  `stalenessCmd`'s `return func(){ svc.Staleness() }` is correctly a callee), so goroutines/callbacks
+  inside functions were never affected; the gap was only package-level func-literals. Fix: `fileValueRefs`
+  → `collectValueRefs(..., collectCalls=true, ...)` now also collects each CallExpr's callee (not just
+  args) as a RefReferences edge from the file — so a function reachable only from a package-level closure
+  isn't a false orphan. Gated by `collectCalls` so function BODIES (valueRefs) don't double-count calls
+  that are already RefCalls edges. References-not-calls keeps callers/callees/impact clean (consistent
+  with the #113/#114 value-ref model: `callers runStudio` stays "none", but orphans no longer flags it).
+  Codemap's own false orphans 14→12. Test `TestPackageLevelClosureCalls` (closure callees → refs not
+  calls; body calls stay calls, not double-counted). gosrc + full suite + lint(0) + fmt + query/precise
+  flows green. COMMIT+PUSH.
 - 2026-06-24 #162 (dogfood — `orphans` found real dead code in codemap; removed it) — stress-tested the
   accuracy value props on codemap itself (real scale). `index --precise` over the whole module: ~7s,
   1653 edges resolved exactly (10 unresolved), and it correctly collapsed `Close` from a name-inflated
