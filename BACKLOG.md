@@ -5,6 +5,14 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #188 (docs accuracy — AGENTS.md MCP tool list was missing the flagship `context` tool) — audited
+  AGENTS.md's claims against the binary (docs accuracy is a loop priority; hadn't checked it this session).
+  Line 196 said "Current set (19)" and listed 19 tools — but `codemap_context` (the one-call orientation
+  bundle, added #155) was OMITTED, and the server actually registers 20 (verified by counting Name:"codemap_*"
+  in server.go and via MCP tools/list). Added `context` to the list (now 20, matching), bumped (19)→(20), and
+  added a one-line description (def+callers+callees+tests+blast radius with blast_depth). Cross-checked the
+  other count claims: README ("Tools (20)") and CLAUDE.md ("20 tools") were already correct and include
+  context — AGENTS.md was the lone drift. No Go changed. COMMIT+PUSH.
 - 2026-06-24 #187 (validate the multi-language LSP flagship + CI-guard the missing-server onboarding warning)
   — dogfooded a real TypeScript project (cross-file: main.ts run() → util.ts helper()) indexed `--precise`
   (callHierarchy via typescript-language-server): 6 nodes/6 edges, 2 precise edges, callers/callees resolve
