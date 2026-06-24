@@ -88,6 +88,16 @@ state inside the project.`,
 		Short: "Show index status and statistics (nodes, edges, coverage, languages)",
 		RunE:  runStatus,
 	}
+	doctorCmd = &cobra.Command{
+		Use:   "doctor",
+		Short: "Check the environment: toolchains, language servers, and embeddings",
+		Long: `Check which codemap capabilities are ready in this environment, before
+indexing: the go toolchain and gopls (Go precise paths), each language server
+(TypeScript/JavaScript via typescript-language-server, Python via pyright), and
+Ollama embeddings (semantic search). Nothing here is required for the core graph
+— each missing piece just disables one capability, with a hint to enable it.`,
+		RunE: runDoctor,
+	}
 	serveCmd = &cobra.Command{
 		Use:   "serve",
 		Short: "Start the MCP stdio server for AI agents",
@@ -215,7 +225,7 @@ func init() {
 	annotateCmd.Flags().String("data", "", "opaque data payload (e.g. JSON from a DB query)")
 	annotationsCmd.Flags().Int64("rm", 0, "remove the annotation with this id")
 
-	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, serveCmd, studioCmd,
+	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
 		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd)
 }
@@ -326,6 +336,34 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 	if len(rep.Kinds) > 0 {
 		fmt.Printf("  kinds:     %s\n", formatCounts(rep.Kinds))
+	}
+	return nil
+}
+
+func runDoctor(cmd *cobra.Command, _ []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	rep := app.NewService(sess).Doctor(context.Background())
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	fmt.Printf("codemap doctor\n  data: %s\n\n", rep.DataDir)
+	for _, c := range rep.Checks {
+		mark := "✓"
+		if !c.OK {
+			mark = "⚠"
+		}
+		line := fmt.Sprintf("  %s %s", mark, c.Name)
+		if c.Detail != "" {
+			line += "  " + c.Detail
+		}
+		fmt.Println(line)
+		if !c.OK && c.Hint != "" {
+			fmt.Printf("      → %s\n", c.Hint)
+		}
 	}
 	return nil
 }

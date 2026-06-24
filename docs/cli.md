@@ -9,6 +9,7 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap init [--local]` | Register the current directory as a project |
 | `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy) |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
+| `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python), Ollama embeddings — with install hints (`--json`) |
 | `codemap projects` | List all registered projects and their index sizes |
 | `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, annotations, accuracy, ecosystem) |
 | `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`) |

@@ -767,6 +767,18 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #121 (polish — `codemap doctor` environment check) — now that codemap drives several
+  optional language servers, users need a proactive answer to "is my TS/Python actually going to be
+  indexed?" (the missing-server note only appeared mid-index). New `codemap doctor` (sibling tools all
+  have one): `Service.Doctor(ctx)` → a `DoctorReport` of environment checks — data dir, go toolchain
+  (`--precise` Go), gopls (`--lsp`), each `lspsrc.DefaultServers` server (typescript-language-server
+  for TS/JS, pyright-langserver for Python, via `exec.LookPath`), and Ollama embeddings (type-asserted
+  `Available` probe with a 3s timeout; structure works without it). Each check carries an actionable
+  **install hint** when missing (⚠) and `--json` for agents. Verified live: all ✓ locally; with a
+  restricted PATH, ⚠ + hints ("install typescript-language-server to index typescript/javascript",
+  "go install …/gopls@latest"). Test `TestServiceDoctor` (fake embedder → no network; asserts every
+  check present + the hint/OK invariant). Docs: README/cli.md/docs.go command tables. Full suite +
+  lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #120 (multi-lang — Python via pyright) — **Python is now first-class**, riding the
   LSP plumbing as a second `ServerSpec` row (`pyright-langserver --stdio`, its own process). De-risked
   with a probe first: pyright extracts symbols AND `callHierarchy` resolves (`compute → add`). One real

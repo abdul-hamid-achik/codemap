@@ -42,6 +42,7 @@ files; use codemap_source when you need the implementation.`},
 
 	{"commands", `CLI commands (all query commands accept --json):
   init / index / status / projects   register, index (--reindex, --no-embed, --precise), stats, projects
+  doctor                             check toolchains, language servers, embeddings (with install hints)
   callers / callees [--lsp]          who calls X / what X calls (--lsp = exact gopls resolution, Go)
   impact <sym> [--depth N]           definition, callers, transitive blast radius, covering tests
   path <from> <to>                   shortest call path between two symbols

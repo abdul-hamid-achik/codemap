@@ -561,6 +561,46 @@ func TestServiceSemantic(t *testing.T) {
 	}
 }
 
+// TestServiceDoctor checks the environment report's shape regardless of which
+// tools the host has installed: every expected check is present, and the
+// hint/OK invariant holds (a failing check carries remediation, a passing one
+// doesn't). The fake embedder skips the network probe.
+func TestServiceDoctor(t *testing.T) {
+	isolate(t)
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.SetEmbedder(fakeEmbedder{dims: 8}) // not an Ollama probe → no network call
+
+	rep := NewService(sess).Doctor(context.Background())
+	if rep.DataDir == "" {
+		t.Error("doctor should report the data dir")
+	}
+	names := map[string]bool{}
+	for _, c := range rep.Checks {
+		names[c.Name] = true
+	}
+	for _, want := range []string{
+		"data directory", "go toolchain", "gopls",
+		"typescript-language-server (typescript/javascript)",
+		"pyright-langserver (python)", "embeddings (Ollama)",
+	} {
+		if !names[want] {
+			t.Errorf("doctor missing check %q (have %v)", want, names)
+		}
+	}
+	for _, c := range rep.Checks {
+		if !c.OK && c.Hint == "" {
+			t.Errorf("failing check %q should carry a remediation hint", c.Name)
+		}
+		if c.OK && c.Hint != "" {
+			t.Errorf("passing check %q should not carry a hint", c.Name)
+		}
+	}
+}
+
 func TestHotspotsFlagsSharedNames(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
