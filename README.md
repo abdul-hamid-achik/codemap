@@ -39,9 +39,10 @@ instead of dozens of file reads.
   it actually invokes and makes **every** query — callers, callees, impact, hotspots, path — exact at
   once, no per-query flag (e.g. a `Close` method that name-matching credited with 71 callers shows only
   its real ones). It's the unified exact-resolution pass across languages: an in-process, pure-Go
-  `go/types` pass for **Go**, and `typescript-language-server` `callHierarchy` for **TypeScript** (which
-  has no name-based call edges, so `--precise` is what gives TS a call graph at all). Opt-in and
-  additive (name-based stays the default for Go); the Go pass degrades to name-based **with a note**
+  `go/types` pass for **Go**, and the language server's `callHierarchy` for the **LSP languages**
+  (TypeScript, JavaScript, Python — which have no name-based call edges, so `--precise` is what gives
+  them a call graph at all). Opt-in and additive (name-based stays the default for Go); the Go pass
+  degrades to name-based **with a note**
   when the `go` toolchain or module isn't available. For a one-off exact answer without reindexing,
   `callers`/`callees` also take `--lsp` (gopls `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the

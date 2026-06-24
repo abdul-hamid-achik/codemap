@@ -206,11 +206,12 @@ task install         # go install ./cmd/codemap
   interface/reflection-blind, so its results are *candidates*). **The graph-wide
   fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) is the unified
   exact-resolution pass. For Go it runs an in-process pure-Go `go/types` pass (`internal/extract/typesrc`);
-  for TypeScript it drives `typescript-language-server` `callHierarchy` (`Indexer.resolveLSPCallEdges`).
-  It resolves each call to the one it invokes and writes precise call edges via the `edges.provenance`
-  column — so every query (callers/callees/impact/hotspots/path) becomes exact at once, no query change.
-  TypeScript has **no** name-based call edges, so `--precise` is what gives TS a call graph at all (for
-  Go it *replaces* the name-based edges; name-based stays the Go default). The Go pass degrades
+  for the LSP languages (TypeScript, JavaScript, Python) it drives the language server's `callHierarchy`
+  (`Indexer.resolveLSPCallEdges`). It resolves each call to the one it invokes and writes precise call
+  edges via the `edges.provenance` column — so every query (callers/callees/impact/hotspots/path) becomes
+  exact at once, no query change. The LSP languages have **no** name-based call edges, so `--precise` is
+  what gives them a call graph at all (for Go it *replaces* the name-based edges; name-based stays the Go
+  default). The Go pass degrades
   per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable.
   `callers`/`callees --lsp` (`precise:true`) remains the per-query gopls path for a one-off without
   reindexing.

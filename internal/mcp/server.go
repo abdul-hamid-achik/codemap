@@ -41,13 +41,14 @@ codemap_status (index size), codemap_projects (what's indexed).
 Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matches every method
 named Foo — codemap_callers/codemap_impact note when a name is ambiguous and codemap_hotspots flags
 the inflation. The graph-wide fix is to re-run codemap_index with precise:true — the unified
-exact-resolution pass: go/types for Go, typescript-language-server callHierarchy for TypeScript. It
-makes EVERY query exact (callers, callees, impact, hotspots, path) with no per-call flag. TypeScript
-has NO name-based call edges, so for a TS project precise:true is what gives codemap_callers/impact/
-hotspots/path a call graph at all. For a one-off exact answer on Go without reindexing, pass
-precise:true to codemap_callers/codemap_callees (gopls; Go only — on TypeScript, reindex with
-codemap_index precise:true instead). Precise resolution degrades to name-based (with a "note" in the
-result) when the toolchain or module is unavailable, so precise:true is never a hard failure. Likewise
+exact-resolution pass: go/types for Go, language-server callHierarchy for the LSP languages
+(TypeScript, JavaScript, Python). It makes EVERY query exact (callers, callees, impact, hotspots,
+path) with no per-call flag. The LSP languages have NO name-based call edges, so for a TS/JS/Python
+project precise:true is what gives codemap_callers/impact/hotspots/path a call graph at all. For a
+one-off exact answer on Go without reindexing, pass precise:true to codemap_callers/codemap_callees
+(gopls; Go only — on the LSP languages, reindex with codemap_index precise:true instead). Precise
+resolution degrades to name-based (with a "note" in the result) when the toolchain or module is
+unavailable, so precise:true is never a hard failure. Likewise
 codemap_semantic returns a "note" (not an error) when the project has no embeddings — fall back to
 codemap_find.
 
@@ -91,7 +92,7 @@ type indexInput struct {
 	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Reindex bool   `json:"reindex,omitempty" jsonschema:"wipe and rebuild the whole index"`
 	NoEmbed bool   `json:"no_embed,omitempty" jsonschema:"skip semantic embeddings (structure only)"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript via callHierarchy) — eliminates same-named over-matching and gives TypeScript a call graph"`
+	Precise bool   `json:"precise,omitempty" jsonschema:"resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via language-server callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph"`
 }
 
 type semanticInput struct {

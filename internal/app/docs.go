@@ -90,10 +90,11 @@ type-checker). codemap flags this rather than hiding it:
     (handlers like cobra RunE / mux.HandleFunc) but can't see interface/reflection callers (candidates).
 THE GRAPH-WIDE FIX: re-index with 'codemap index --precise' (CLI) or codemap_index
 precise:true (MCP) — the unified exact-resolution pass. For Go it's a pure-Go go/types
-pass; for TypeScript it drives typescript-language-server callHierarchy. It resolves
-every call to the one it invokes and replaces the name-based call edges, so EVERY query
-(callers, callees, impact, hotspots, path) becomes exact at once. (TypeScript has NO
-name-based call edges, so --precise is what gives TS a call graph at all.) The Go pass
+pass; for the LSP languages (TypeScript, JavaScript, Python) it drives the language
+server's callHierarchy. It resolves every call to the one it invokes and replaces the
+name-based call edges, so EVERY query (callers, callees, impact, hotspots, path) becomes
+exact at once. (The LSP languages have NO name-based call edges, so --precise is what gives
+TS/JS/Python a call graph at all.) The Go pass
 needs the go toolchain + a buildable module; packages that don't type-check keep
 name-based edges (per-package degrade), and no go/go.mod falls back wholesale with a
 "note" — never worse than name-based, never a hard error. Opt-in: without --precise the

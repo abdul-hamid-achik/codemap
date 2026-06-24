@@ -32,9 +32,9 @@ func TestInstructionsCoverKeyCapabilities(t *testing.T) {
 	for _, want := range []string{"codemap_index", "codemap_impact", "codemap_semantic",
 		"codemap_source", "codemap_projects", "precise:true", "name-based",
 		`"indexed": false`, "degrades to name-based",
-		// precise:true spans both engines — agents on a TS project must know it's
-		// the only way to get a TS call graph (callHierarchy), not just a Go fix.
-		"TypeScript", "callHierarchy"} {
+		// precise:true spans engines — agents on an LSP-language project must know
+		// it's the only way to get a call graph (callHierarchy), not just a Go fix.
+		"TypeScript", "JavaScript", "Python", "callHierarchy"} {
 		if !strings.Contains(instructions, want) {
 			t.Errorf("MCP instructions should mention %q", want)
 		}

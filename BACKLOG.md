@@ -767,6 +767,16 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #129 (accuracy — precise framing was TS-only; now names all LSP languages) — the
+  precise-engine docs (#112) predated JS/Python/JSX, so several surfaces still said "callHierarchy for
+  **TypeScript**" and "TypeScript has no name-based call edges" — leaving an **agent on a JS/Python
+  project unaware that `precise:true` gives it a call graph** (the agent-facing twin of #128). Swept to
+  "the LSP languages (TypeScript, JavaScript, Python)": MCP Instructions/accuracy preamble + the
+  `codemap_index` precise jsonschema param (the two an agent reads), the in-CLI `codemap docs accuracy`
+  (verified it renders), AGENTS.md accuracy model, and the README "Precise call resolution" bullet.
+  Strengthened `TestInstructionsCoverKeyCapabilities` to require "JavaScript" + "Python" (not just
+  "TypeScript") so the playbook can't regress to one language. No behavior change; full suite + lint(0)
+  + fmt green. Every precise/engine surface now tells the truth for all four languages. COMMIT+PUSH.
 - 2026-06-24 #128 (onboarding — `index` tips TS/JS/Python users toward `--precise`) — dogfooding the
   new-user path for the LSP languages exposed a real dead-end: a TS/JS/Python project indexed with a
   plain `codemap index` gets structure but **no call graph** (those need `--precise`), and the
