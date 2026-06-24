@@ -5,6 +5,15 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #175 (polish — clean error output: stop dumping the usage block on runtime errors) — while
+  dogfooding the malformed-config error path (found the error itself is GOOD: `Error: parse config
+  <path>: yaml: line 1: …`, and confirmed no TODOs/FIXMEs in the code), noticed cobra dumps the full
+  Usage block after EVERY runtime error (bad config, not-indexed, etc.) — noise for a human and pollution
+  in stderr for an agent parsing the error. Set `rootCmd.SilenceUsage = true` (standard cobra practice):
+  now a runtime failure prints just the `Error: …` line + exit 1; arg-count errors stay clear
+  (`accepts 2 arg(s), received 1`); `--help` is unaffected (SilenceUsage only gates error-triggered
+  usage). Benefits humans AND the agent-harness (clean stderr). Verified malformed-config + arg-error +
+  --help; full suite + lint(0) + fmt + help/version/query flows green. COMMIT+PUSH.
 - 2026-06-24 #174 (flow — repo-local codemap.yaml config is honored, the "configure it XDG style" pillar)
   — followed #173 by verifying config actually WORKS end-to-end (it was a core pillar with NO flow). A
   repo-local `codemap.yaml` with `index.exclude: ["gen", …]` correctly skips `gen/` (find Skip → none)

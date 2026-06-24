@@ -35,6 +35,10 @@ var rootCmd = &cobra.Command{
 	Use:     "codemap",
 	Short:   "Local-first code intelligence: graph + vectors for agents and people",
 	Version: version.Full(),
+	// A runtime failure (bad config, not-indexed, …) shouldn't dump the full usage
+	// block — that's noise for a human and pollutes stderr for an agent parsing the
+	// error. cobra still prints the "Error: …" line; `--help` is there when wanted.
+	SilenceUsage: true,
 	Long: `codemap combines a structural code graph (LSP + parsers) with semantic
 vector search (veclite) and exposes both as a unified query layer.
 
