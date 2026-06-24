@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #159 (docs — VitePress MCP + quick-start pages caught up to 20 tools / context / freshness) —
+  the deployed docs site had drifted: **docs/mcp.md listed only 17 of 20 tools** (missing codemap_context,
+  codemap_doctor, codemap_unannotate), `codemap_status` didn't mention freshness, and it still called
+  impact "the flagship". docs/quick-start.md had no `context` step. Fixed: added the 3 missing tool rows;
+  `codemap_status` row now notes the `stale` freshness signal; a "the two an agent reaches for first"
+  paragraph leads with `codemap_context` (one call vs four) + `codemap_status` (freshness), with impact
+  reframed as the deep change-analysis query; quick-start now opens with `codemap context` and adds a
+  `codemap status` (freshness) line. Verified docs/mcp.md tool rows == the 20 server tools (no diffs),
+  markdown tables balanced. README/cli/studio were already current (#144/#154/#156); docs/ now consistent
+  end-to-end. Docs-only. COMMIT+PUSH.
 - 2026-06-24 #158 (harness — verified + flow-guarded the MCP stdio wire) — the unit tests use the
   go-sdk's in-process transport; the actual `codemap serve` stdio path (CLAUDE.md's #1 gotcha: must be
   newline-delimited JSON-RPC, NOT Content-Length) was never exercised end-to-end this cycle. Drove a real

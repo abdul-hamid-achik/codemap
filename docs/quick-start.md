@@ -34,11 +34,13 @@ Re-running `index` is incremental — unchanged files are skipped. Use `--reinde
 ## Ask questions
 
 ```bash
+codemap context  authenticateUser     # everything about it in ONE call (def, callers, callees, tests)
 codemap callers  authenticateUser     # who calls it
 codemap impact   authenticateUser     # callers + blast radius + covering tests
 codemap path     Handler Login        # shortest call path
 codemap hotspots                      # the most-referenced symbols
 codemap semantic "jwt validation"     # find code by meaning
+codemap status                        # stats + warns if the index is stale vs your files
 ```
 
 Add `--json` to any query for machine-readable output (handy for agents and scripts).
