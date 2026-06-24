@@ -637,12 +637,48 @@ type SemanticReport struct {
 
 // Callers returns the functions/methods that call symbol.
 func (svc *Service) Callers(cwd, symbol string) (*RelationReport, error) {
-	return svc.relation(cwd, symbol, (*graph.Store).Callers)
+	rep, err := svc.relation(cwd, symbol, (*graph.Store).Callers)
+	if err != nil {
+		return nil, err
+	}
+	return svc.autoUpgradeRelation(rep, cwd, symbol, true), nil
 }
 
 // Callees returns the functions/methods that symbol calls.
 func (svc *Service) Callees(cwd, symbol string) (*RelationReport, error) {
-	return svc.relation(cwd, symbol, (*graph.Store).Callees)
+	rep, err := svc.relation(cwd, symbol, (*graph.Store).Callees)
+	if err != nil {
+		return nil, err
+	}
+	return svc.autoUpgradeRelation(rep, cwd, symbol, false), nil
+}
+
+// autoUpgradeRelation fills in a callers/callees result for an LSP-language symbol
+// whose call graph isn't indexed (base.Resolution set by callGraphUnavailable) by
+// driving a scoped, on-demand callHierarchy for just that symbol — so TS/JS/Python
+// callers/callees resolve without a full `index --precise`. It's a no-op when the
+// call graph is already available (Go, or a precise index), so those queries pay no
+// latency. If the language server is absent or fails, the honest "run --precise"
+// note is kept unchanged. wantCallers selects the direction.
+func (svc *Service) autoUpgradeRelation(base *RelationReport, cwd, symbol string, wantCallers bool) *RelationReport {
+	if base.Resolution == "" {
+		return base // call graph available — nothing to upgrade, no server spawn
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	callers, callees, _, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
+	if err != nil {
+		return base // server missing/failed — keep the honest "unresolved" note
+	}
+	results := callees
+	if wantCallers {
+		results = callers
+	}
+	base.Results = nonNil(results)
+	base.Found = true
+	base.Resolution = "" // resolved on demand; the "run --precise" note no longer applies
+	base.Note = "resolved on demand via the language server's callHierarchy (no --precise needed)"
+	return base
 }
 
 // canonicalSymbol resolves a user query that may be qualified ("pkg.Sym",

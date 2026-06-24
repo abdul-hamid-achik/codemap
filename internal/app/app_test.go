@@ -1629,6 +1629,53 @@ func TestPreciseCallersTypeScript(t *testing.T) {
 	}
 }
 
+// TestCallersAutoUpgradesTypeScript pins P0 slice 2: a plain Callers query on a TS
+// symbol (project indexed WITHOUT --precise) auto-upgrades to an on-demand
+// callHierarchy and returns the real caller — clearing the "unresolved" note.
+func TestCallersAutoUpgradesTypeScript(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not installed")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "tsconfig.json"), []byte(`{"compilerOptions":{"strict":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.ts"),
+		[]byte("export function helper(): void {}\n\nexport function run(): void { helper(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Callers(proj, "helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Resolution != "" {
+		t.Errorf("Callers should have auto-upgraded (no resolution note), got %q", rep.Resolution)
+	}
+	found := false
+	for _, r := range rep.Results {
+		if r.Symbol == "run" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("auto-upgraded TS callers of helper = %+v, want to include run", rep.Results)
+	}
+}
+
 func TestPreciseCalleesGopls(t *testing.T) {
 	if _, err := exec.LookPath("gopls"); err != nil {
 		t.Skip("gopls not installed")

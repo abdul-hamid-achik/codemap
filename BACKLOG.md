@@ -68,8 +68,12 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     gopls-only to any LSP language via `lspServerFor` (reuses `lspsrc.DefaultServers`: gopls/tsserver/pyright,
     `.tsx`→typescriptreact). Per-symbol `callHierarchy` now resolves on demand with NO `--precise` reindex.
     `TestPreciseCallersTypeScript` (passes locally, structure-only index); task check green.
-  - [ ] **Slice 2** — auto-upgrade `Impact`/`Callers`/`Callees` for an LSP-language symbol with no call graph
-    to run scoped `preciseRelations` on demand (return real results) instead of the empty `[]` + resolution note.
+  - [x] **Slice 2** — `Callers`/`Callees` auto-upgrade: when `callGraphUnavailable` set the "unresolved" note
+    for an LSP-language symbol, `autoUpgradeRelation` drives a scoped on-demand `callHierarchy` and returns
+    real results (clearing the note); no-op for Go/precise indexes (no latency); keeps the honest note if the
+    server is absent. `TestCallersAutoUpgradesTypeScript`; task check green. (Deferred: **`Impact`** auto-upgrade
+    — its blast radius is transitive, so on-demand needs recursive callHierarchy; left note-only for now, a
+    follow-up could at least fill `direct_callers`. An agent can use `callers` now, which resolves.)
   - [ ] **Slice 3** — heuristic `describe/it`→`covers` test edges (scan test-file bodies for symbol refs) to
     defeat #196's filtered-callback blind spot (a covered TS symbol currently reads untested).
 - [ ] **P1 — cost envelope.** Measure index time, `--precise` wall-clock, DB size, query latency on ≥1 real
