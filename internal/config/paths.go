@@ -92,6 +92,12 @@ func VeclitePath() string { return filepath.Join(DataDir(), appName+".veclite") 
 // RegistryDir holds per-project registry entries and local index state.
 func RegistryDir() string { return filepath.Join(DataDir(), "projects") }
 
+// DaemonSocketPath is the unix socket the background daemon listens on.
+func DaemonSocketPath() string { return filepath.Join(DataDir(), "daemon.sock") }
+
+// DaemonStatePath is the daemon's status file (pid, project, last reindex).
+func DaemonStatePath() string { return filepath.Join(DataDir(), "daemon.json") }
+
 // ExpandPath expands a leading "~" or "~/" to the user's home directory.
 func ExpandPath(p string) string {
 	switch {

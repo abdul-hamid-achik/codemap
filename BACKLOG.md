@@ -293,7 +293,15 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   storm never stalls a search, while `Embed` (index) is throttled. `NewThrottled(inner, ThrottleConfig{RPS,
   Burst, MaxInFlight, CacheSize})`. New deps `x/time/rate`, `x/sync`. `TestThrottledDedup` +
   `TestThrottledMaxInFlight` (race-clean). (Daemon wraps Ollama in this; wiring = BD.11/13.)
-- [ ] **BD.11** `internal/daemon/` — `Daemon{session, watcher, throttle, mcpHandler, listener}`: open the sole write Session, write `daemon.{sock,json,lock}` under `config.DataDir()`, accept-loop on the unix socket routing `mcp.*` frames (newline-JSON, **never Content-Length**) + `daemon.*` control RPCs; idle-timeout + SIGTERM-clean teardown.
+- [x] **BD.11** `internal/daemon/daemon.go` — `Daemon.Start(ctx, root, cfg)`: opens the sole write Session
+  (wrapping the embedder in `embed.NewThrottled` unless structure-only), one-time index, builds the Indexer +
+  `index.NewWatcher` whose `onChange` calls `IndexFiles` (watch→debounce→incremental sync), binds
+  `config.DaemonSocketPath()` (socket-dial liveness check refuses a 2nd daemon + clears a stale socket — no
+  flock, so it cross-compiles for Windows), writes `daemon.json`, serves newline-JSON **control** RPCs
+  (`daemon.status`/`reindex`/`shutdown`) + idle-timeout. `Stop`/`Wait`; teardown removes sock+json. New
+  `config.DaemonSocketPath`/`DaemonStatePath`, `Indexer.Excluded`, throttle `Available` passthrough.
+  `TestDaemonIndexesOnChange` (initial index + watch a new file → indexed + status + clean stop; 3× + race);
+  task check green. (Full MCP-over-socket serving = BD.12.)
 - [ ] **BD.12** `cmd/codemap/main.go` — `daemon start|stop|status`. Make `serve` a stdio↔socket **bridge** when a daemon is live; make query commands + `codemap_*` tools prefer the socket, else `VectorsReadOnly` fallback. Keep LSP Content-Length strictly inside `internal/lsp`.
 - [ ] **BD.13** `internal/config/config.go` — `DaemonConfig{Autostart, IdleTimeout(30m), EmbedWorkers(2), EmbedRPS, EmbedMaxInFlight, Debounce}` + `CODEMAP_DAEMON_*` overrides. Surface daemon state in `status` / `codemap_status`.
 

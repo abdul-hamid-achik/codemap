@@ -221,6 +221,11 @@ func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.Index
 // Register adds (or replaces) the extractor for a language.
 func (ix *Indexer) Register(e extract.Extractor) { ix.extractors[e.Language()] = e }
 
+// Excluded reports whether a file or directory base name matches a configured
+// exclude glob — exported so the daemon's watcher ignores the same paths the
+// indexer does.
+func (ix *Indexer) Excluded(name string) bool { return ix.excluded(name) }
+
 type fileTask struct {
 	abs  string
 	rel  string

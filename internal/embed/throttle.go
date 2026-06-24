@@ -78,6 +78,18 @@ func (t *ThrottledProvider) QueryEmbed(ctx context.Context, texts []string) ([][
 // Profile delegates to the wrapped provider (the throttle doesn't change the space).
 func (t *ThrottledProvider) Profile() EmbeddingProfile { return t.inner.Profile() }
 
+// Available forwards the inner provider's reachability probe (if it has one), so a
+// caller can still detect an unreachable backend (e.g. Ollama down) and fall back
+// to structure-only — the throttle wrapping must not hide that signal.
+func (t *ThrottledProvider) Available(ctx context.Context) error {
+	if a, ok := t.inner.(interface {
+		Available(context.Context) error
+	}); ok {
+		return a.Available(ctx)
+	}
+	return nil
+}
+
 func (t *ThrottledProvider) embed(ctx context.Context, texts []string, lim *rate.Limiter) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	// Serve from cache; collect the unique misses (dedup within the batch too).
