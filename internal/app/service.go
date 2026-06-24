@@ -1028,12 +1028,13 @@ type OrphansReport struct {
 
 // PathReport is returned by Path.
 type PathReport struct {
-	From    string      `json:"from"`
-	To      string      `json:"to"`
-	Project string      `json:"project"`
-	Found   bool        `json:"found"`
-	Note    string      `json:"note,omitempty"` // set when an endpoint isn't a symbol in the project
-	Path    []SymbolRef `json:"path"`
+	From        string             `json:"from"`
+	To          string             `json:"to"`
+	Project     string             `json:"project"`
+	Found       bool               `json:"found"`
+	Note        string             `json:"note,omitempty"` // set when an endpoint isn't a symbol in the project
+	Path        []SymbolRef        `json:"path"`
+	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes pinned to this from→to path
 }
 
 // project resolves cwd to a registered project id. found is false (no error)
@@ -1289,6 +1290,11 @@ func (svc *Service) Path(cwd, from, to string) (*PathReport, error) {
 		rep.Path = append(rep.Path, nodeToRef(n))
 	}
 	rep.Found = len(nodes) > 0
+	// Surface notes pinned to this from→to path (annotate <from> <to>), so a path
+	// annotation shows up where it's relevant — not only in `annotations`.
+	if anns, _ := g.AnnotationsByTarget(pid, graph.AnnotationPath, pathTarget(from, to)); len(anns) > 0 {
+		rep.Annotations = anns
+	}
 	return rep, nil
 }
 

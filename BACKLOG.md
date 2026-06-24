@@ -5,6 +5,15 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #142 (polish — path annotations now surface in `path`) — fixed the half-working feature
+  found while dogfooding (#141): a note pinned to a call path (`annotate <from> <to>`) was created and
+  listable via `annotations` but never appeared in the `path` query — whereas symbol annotations
+  surface in `impact`/`callers`/`source`/`find`. Now `Service.Path` populates `PathReport.Annotations`
+  from `AnnotationsByTarget(AnnotationPath, from→to)`, the CLI `runPath` renders them (in both the
+  found and no-path branches, since a pinned note is worth showing either way), and MCP `codemap_path`
+  carries them for free (returns the report JSON). Verified live: `path runIndex Index` now shows the
+  pinned note. Test `TestPathSurfacesAnnotations`. Full suite + lint(0) + fmt green. Completes the
+  annotations knowledge layer — every annotation now surfaces where it's relevant. COMMIT+PUSH.
 - 2026-06-24 #141 (decision — tree-sitter for large-TS speed: CGO conflicts with pure-Go releases;
   needs a product call) — user greenlit a tree-sitter backend *"if good compatibility with go and our
   product."* Did that compatibility check; the honest finding: **tree-sitter requires CGO** (official

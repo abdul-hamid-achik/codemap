@@ -669,6 +669,7 @@ func runPath(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("no call path from %s to %s\n", rep.From, rep.To)
 		}
+		renderAnnotations(rep.Annotations) // a pinned path note is worth showing even with no current path
 		return nil
 	}
 	names := make([]string, 0, len(rep.Path))
@@ -679,6 +680,7 @@ func runPath(cmd *cobra.Command, args []string) error {
 	for _, p := range rep.Path {
 		fmt.Printf("  %-30s %s:%d\n", p.Symbol, p.File, p.StartLine)
 	}
+	renderAnnotations(rep.Annotations)
 	return nil
 }
 

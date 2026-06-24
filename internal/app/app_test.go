@@ -325,6 +325,39 @@ func TestImpactSurfacesAnnotations(t *testing.T) {
 	}
 }
 
+// TestPathSurfacesAnnotations verifies a note pinned to a call path (annotate
+// <from> <to>) shows up in the `path` query — not only in `annotations`.
+func TestPathSurfacesAnnotations(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc A() { B() }\n\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := svc.AnnotatePath(proj, "A", "B", "note", "the A->B flow", ""); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Path(proj, "A", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatal("path A->B should be found (A calls B)")
+	}
+	if len(rep.Annotations) != 1 || rep.Annotations[0].Note != "the A->B flow" {
+		t.Errorf("path should surface the pinned path annotation, got %+v", rep.Annotations)
+	}
+}
+
 func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
