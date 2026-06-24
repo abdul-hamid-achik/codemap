@@ -1579,6 +1579,56 @@ func TestPreciseCallersGopls(t *testing.T) {
 	}
 }
 
+// TestPreciseCallersTypeScript pins P0: precise callers resolve for TypeScript ON
+// DEMAND — the project is indexed WITHOUT --precise (so the TS call graph is empty
+// by default), yet PreciseCallers drives typescript-language-server's callHierarchy
+// for the one queried symbol and finds its caller. Local-only (skips without the
+// server / node), like the gopls tests.
+func TestPreciseCallersTypeScript(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not installed")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "tsconfig.json"), []byte(`{"compilerOptions":{"strict":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.ts"),
+		[]byte("export function helper(): void {}\n\nexport function run(): void { helper(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	// Structure-only index (no --precise) → the TS call graph is empty by default.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	rep, err := svc.PreciseCallers(ctx, proj, "helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range rep.Results {
+		if r.Symbol == "run" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("precise callers of helper (TS, on demand, no --precise) = %+v, want to include run", rep.Results)
+	}
+}
+
 func TestPreciseCalleesGopls(t *testing.T) {
 	if _, err := exec.LookPath("gopls"); err != nil {
 		t.Skip("gopls not installed")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
@@ -738,8 +739,11 @@ func (svc *Service) symbolAnnotationsByName(name, symbol string) []graph.Annotat
 	return symbolAnnotations(g, p.ID, symbol)
 }
 
-// PreciseCallers computes exact callers of a Go symbol using gopls callHierarchy
-// (no by-name inflation). Go-only for now; errors if gopls is unavailable.
+// PreciseCallers computes exact callers of a symbol using the language server's
+// callHierarchy (gopls for Go; typescript-language-server / pyright for the LSP
+// languages) — no by-name inflation, and scoped to the one symbol so it needs no
+// `index --precise` reindex. Falls back to name-based results if the server is
+// unavailable.
 func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
 	c, _, project, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
 	if err != nil {
@@ -761,11 +765,13 @@ func (svc *Service) preciseFallback(cwd, symbol string, cause error, nameBased f
 	if err != nil {
 		return nil, err
 	}
-	rep.Note = fmt.Sprintf("precise (gopls) resolution unavailable (%v) — showing name-based results", cause)
+	rep.Note = fmt.Sprintf("precise resolution unavailable (%v) — showing name-based results", cause)
 	return rep, nil
 }
 
-// PreciseCallees computes exact callees of a Go symbol using gopls callHierarchy.
+// PreciseCallees computes exact callees of a symbol using the language server's
+// callHierarchy (gopls for Go; typescript-language-server / pyright for the LSP
+// languages), scoped to the one symbol.
 func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*RelationReport, error) {
 	_, ce, project, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
 	if err != nil {
@@ -784,9 +790,40 @@ func (svc *Service) PreciseRelationsAt(ctx context.Context, cwd, symbol, file st
 	return c, ce, err
 }
 
+// lspServerFor returns the language server that resolves precise call edges for a
+// codemap language, drawn from the same registry the indexer uses (gopls for Go;
+// the DefaultServers entry for TypeScript/JavaScript/Python). filePath refines the
+// LSP languageId for JSX/TSX, which typescript-language-server only parses (and
+// whose <Component/> usages it resolves as calls) under the *react ids. ok is
+// false for a language codemap can't resolve precisely.
+func lspServerFor(lang, filePath string) (cmd string, args []string, langID string, ok bool) {
+	if lang == "go" {
+		return "gopls", nil, "go", true
+	}
+	for _, spec := range lspsrc.DefaultServers {
+		for _, b := range spec.Langs {
+			if b.Lang != lang {
+				continue
+			}
+			id := b.LangID
+			switch strings.ToLower(filepath.Ext(filePath)) {
+			case ".tsx":
+				id = "typescriptreact"
+			case ".jsx":
+				id = "javascriptreact"
+			}
+			return spec.Cmd, spec.Args, id, true
+		}
+	}
+	return "", nil, "", false
+}
+
 // preciseRelations resolves the symbol's node via the graph (preferring the one
-// at hintFile:hintLine), then drives gopls (documentSymbol → prepareCallHierarchy
-// → incoming + outgoing) in a single session.
+// at hintFile:hintLine), then drives the matching language server (gopls for Go;
+// typescript-language-server / pyright for the LSP languages) through
+// documentSymbol → prepareCallHierarchy → incoming + outgoing in a single session.
+// Scoped to the one queried symbol, so it works on demand without a full
+// `index --precise` reindex.
 func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile string, hintLine int) (callers, callees []SymbolRef, project string, err error) {
 	g, err := svc.s.Graph()
 	if err != nil {
@@ -810,22 +847,23 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 	}
 	var node *graph.Node
 	for i := range nodes {
-		if nodes[i].Language != "go" {
-			continue
+		if _, _, _, ok := lspServerFor(nodes[i].Language, nodes[i].FilePath); !ok {
+			continue // a language codemap can't resolve precisely
 		}
 		if hintFile != "" && nodes[i].FilePath == hintFile && (hintLine == 0 || nodes[i].StartLine == hintLine) {
 			node = &nodes[i] // exact match for the requested declaration
 			break
 		}
 		if node == nil {
-			node = &nodes[i] // first Go node as fallback
+			node = &nodes[i] // first precise-capable node as fallback
 		}
 	}
 	if node == nil {
-		return nil, nil, project, fmt.Errorf("precise queries currently support Go only (no Go symbol named %q)", symbol)
+		return nil, nil, project, fmt.Errorf("no precise-resolvable symbol named %q (precise resolution supports Go, TypeScript, JavaScript, Python)", symbol)
 	}
-	if _, err := exec.LookPath("gopls"); err != nil {
-		return nil, nil, project, fmt.Errorf("gopls not found on PATH (required for --lsp)")
+	cmd, args, langID, _ := lspServerFor(node.Language, node.FilePath)
+	if _, err := exec.LookPath(cmd); err != nil {
+		return nil, nil, project, fmt.Errorf("%s not found on PATH (required for precise %s resolution)", cmd, node.Language)
 	}
 
 	root := p.Path
@@ -835,7 +873,7 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 		return nil, nil, project, err
 	}
 
-	cl, err := lsp.Spawn(ctx, "gopls")
+	cl, err := lsp.Spawn(ctx, cmd, args...)
 	if err != nil {
 		return nil, nil, project, err
 	}
@@ -844,7 +882,7 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 		return nil, nil, project, err
 	}
 	uri := lsp.URI(absFile)
-	if err := cl.DidOpen(uri, "go", string(src)); err != nil {
+	if err := cl.DidOpen(uri, langID, string(src)); err != nil {
 		return nil, nil, project, err
 	}
 	// callHierarchy needs the whole workspace analyzed; wait for gopls to load.

@@ -60,13 +60,18 @@ integration epic below; per-sibling design plans live at each sibling repo's ROO
 ## Open priorities (forward-looking)
 Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-24).
 
-- [ ] **P0 — §1 ask-2: real TS/JS/Python call graph on demand.** `impact`/`callers`/tests are EMPTY by
+- [~] **P0 — §1 ask-2: real TS/JS/Python call graph on demand.** `impact`/`callers`/tests are EMPTY by
   default for the LSP languages (no call graph without a whole-project `index --precise`). §1 made this
-  *honest* (a `resolution` note instead of false `[]`), not *resolved*. Fix = **scoped per-symbol
-  `callHierarchy` on demand** (reuse the Go preciseRelations machinery to drive
-  typescript-language-server/pyright per queried symbol) **+ heuristic `describe/it`→`covers` test edges**
-  (also defeats #196's filtered-callback blind spot, which makes a covered TS symbol read as untested).
-  This is the flagship for the PRIMARY (agent) audience — it dominates the stack.
+  *honest* (a `resolution` note instead of false `[]`), not *resolved*. The flagship for the PRIMARY (agent)
+  audience. Slices:
+  - [x] **Slice 1** — generalized `preciseRelations`/`PreciseCallers`/`PreciseCallees` (service.go) from
+    gopls-only to any LSP language via `lspServerFor` (reuses `lspsrc.DefaultServers`: gopls/tsserver/pyright,
+    `.tsx`→typescriptreact). Per-symbol `callHierarchy` now resolves on demand with NO `--precise` reindex.
+    `TestPreciseCallersTypeScript` (passes locally, structure-only index); task check green.
+  - [ ] **Slice 2** — auto-upgrade `Impact`/`Callers`/`Callees` for an LSP-language symbol with no call graph
+    to run scoped `preciseRelations` on demand (return real results) instead of the empty `[]` + resolution note.
+  - [ ] **Slice 3** — heuristic `describe/it`→`covers` test edges (scan test-file bodies for symbol refs) to
+    defeat #196's filtered-callback blind spot (a covered TS symbol currently reads untested).
 - [ ] **P1 — cost envelope.** Measure index time, `--precise` wall-clock, DB size, query latency on ≥1 real
   medium repo (1k+ symbols) per language. The whole pitch is "cheaper than file reads," and `--precise`
   (mandatory for TS/JS/Py graphs) is the unmeasured expensive path; also de-risks the 0.2 tree-sitter call.
