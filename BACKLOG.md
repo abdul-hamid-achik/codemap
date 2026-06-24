@@ -5,6 +5,15 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #190 (quick-start — `--precise` was described as Go-only, misleading polyglot onboarding) —
+  audited docs/quick-start.md (commands/examples otherwise accurate, no drift — uses generic symbols, not
+  codemap-on-itself). One real onboarding trap: the copy-paste Index block said `index --precise # exact
+  call edges via go/types (Go; needs the go toolchain)` — Go-only. A TS/JS/Python user acting on that block
+  would conclude --precise doesn't apply to them and never run it — but it's the ONLY way to get a call
+  graph for those languages (no name-based call edges), so their callers/callees/impact would silently come
+  back empty. Fixed the comment to the README's accurate wording ("Go via go/types; TS/JS/Python via
+  callHierarchy") and added a line spelling out that TS/JS/Python need `--precise` for a call graph at all.
+  No Go changed. COMMIT+PUSH.
 - 2026-06-24 #189 (docs/cli.md — make the impact example drift-PROOF, not just re-fix the drift) — audited
   docs/cli.md: command coverage + flags all accurate, the `codemap search` alias verified working. But the
   Example block (`impact windowStart --depth 2`, "real output from codemap") had drifted hard (defined

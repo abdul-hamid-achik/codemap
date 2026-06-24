@@ -26,10 +26,12 @@ cd ~/projects/myapp
 codemap init                 # register the project
 codemap index                # extract the graph + embed nodes (incremental)
 codemap index --no-embed     # structure only (no Ollama needed)
-codemap index --precise      # exact call edges via go/types (Go; needs the go toolchain)
+codemap index --precise      # exact call edges (Go via go/types; TS/JS/Python via callHierarchy)
 ```
 
 Re-running `index` is incremental — unchanged files are skipped. Use `--reindex` to rebuild.
+For **TypeScript/JavaScript/Python**, `--precise` is what builds the call graph at all (there are no
+name-based call edges for them), so `callers`/`callees`/`impact` need it — run it once after indexing.
 
 ## Ask questions
 
