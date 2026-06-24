@@ -49,6 +49,45 @@ func TestStaleness(t *testing.T) {
 	}
 }
 
+// TestStalenessTracksParseErrorFile pins finding E: a scanned-but-unparseable
+// file is recorded in index_state so staleness doesn't report it as perpetually
+// "new" (before, a parse-error file never entered index_state → "1 new" forever,
+// and a re-index never cleared it). The error is still surfaced once.
+func TestStalenessTracksParseErrorFile(t *testing.T) {
+	g, v := newStores(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "good.go", "package app\nfunc Good() {}\n")
+	writeFile(t, dir, "broken.go", "package app\nfunc (") // invalid Go → parse error
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+
+	res, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The parse error is still surfaced (the file genuinely isn't indexed)...
+	if len(res.Errors) == 0 {
+		t.Fatal("broken.go should be recorded in res.Errors")
+	}
+	// ...but it is tracked in index_state, so staleness reports NO drift.
+	st, err := ix.Staleness(pid, dir, map[string]bool{"go": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Any() {
+		t.Errorf("a tracked parse-error file must not show as drift, got %+v", st)
+	}
+	// A second incremental index re-indexes nothing (no pointless retry of the
+	// unchanged broken file) — i.e. the re-index actually clears the false "new".
+	res2, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.FilesIndexed != 0 {
+		t.Errorf("second index should re-index nothing, got FilesIndexed=%d", res2.FilesIndexed)
+	}
+}
+
 // TestStalenessIgnoresUnindexedLanguages guards the "new" restriction: a new file
 // of a language not present in the index must not register as drift (otherwise a
 // recognized-but-unsupported language would show perpetual false staleness).

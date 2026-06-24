@@ -376,13 +376,15 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	if err != nil {
 		return false, nil, err
 	}
+	hash := sha256hex(content)
 	if ix.cfg.MaxFileBytes > 0 && len(content) > ix.cfg.MaxFileBytes {
 		res.FilesSkipped++
 		res.Oversized = append(res.Oversized, ft.rel)
-		return false, nil, nil
+		// Track the hash of this scanned-but-skipped file so staleness doesn't
+		// report it as perpetually "new"; a content change re-picks it up.
+		return false, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
 	}
 
-	hash := sha256hex(content)
 	if !opts.Reindex {
 		prev, err := ix.graph.FileHash(projectID, ft.rel)
 		if err != nil {
@@ -406,6 +408,14 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 
 	fr, err := ft.ext.ExtractFile(ft.rel, content)
 	if err != nil {
+		// The file was scanned but can't be parsed/extracted. Record its hash so
+		// staleness doesn't report it as perpetually "new" (the bug: a parse-error
+		// file never entered index_state, so every status showed "1 new" forever).
+		// A later edit that fixes the error changes the hash and re-indexes it; its
+		// old nodes were already cleared above, which is correct for a broken file.
+		if herr := ix.graph.SetFileHash(projectID, ft.rel, hash); herr != nil {
+			return false, nil, herr
+		}
 		return false, nil, err
 	}
 

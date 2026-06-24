@@ -76,8 +76,10 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     only; blank `_` and function-local var/const stay out). `version.Version`, sentinel errors, const blocks
     are findable. Test `TestExtractVarConst`; `task check` green; dogfood-verified via `find`. (No fixture
     shift — fileA/fileB and flow snapshots had no top-level var/const.)
-  - [ ] **E** — staleness counts a parse-error-skipped file as perpetually "stale: 1 new" forever
-    (`internal/index/staleness.go`); account for scanned-but-skipped files.
+  - [x] **E** — scanned-but-skipped files (parse error AND oversized) now record their hash in
+    `index_state` (in `indexFile`), so staleness no longer reports them as perpetually "new" and a
+    re-index clears the false drift. The parse error is still surfaced once. Test
+    `TestStalenessTracksParseErrorFile`; `task check` green.
   - [ ] **B** — generated Go still indexed; add `*_gen.go` glob to default excludes AND detect the
     `// Code generated … DO NOT EDIT.` first-line header (robust across sqlc/protobuf/stringer).
 - [ ] **P4 — studio for humans** (capped — human surface on an agent-first project; do the cheap wins,
