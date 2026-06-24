@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #161 (studio — Search header shows the result count) — audited the rest of the studio's
+  scrollable lists after #160: the Graph refs pane (`refBlock`), Metrics (`metricBlock`), and the Impact
+  blast-radius + Search lists ALL already have ▲/▼ "N more" indicators — list nav is consistent. One real
+  inconsistency remained: Impact shows explicit counts ("N direct callers · N in blast radius · N
+  covering tests") but Search showed no total, so you couldn't tell how many matches you got without
+  scrolling. Added it to the Search header badge: `name mode · 12 results` (correctly singular for 1).
+  Rendering-only, low risk. Also dogfooded `codemap doctor` (CLI + --json) — accurate and helpful (data
+  dir, go, gopls, TS/JS + Python servers, Ollama, each ✓ with path), no gap. Test
+  `TestSearchHeaderShowsResultCount`; studio.yml still green (its "name mode" assertion still matches).
+  Full suite + lint(0) + fmt green. COMMIT+PUSH.
 - 2026-06-24 #160 (studio — Graph hub list shows a count + ▲/▼ scroll indicators) — first confirmed the
   whole unreleased batch passes the project's canonical gates: **`task check` (fmt+lint+test) AND
   `task race` both green** across all packages (validates the concurrency added in #152/#154) — v0.9.0 is

@@ -629,6 +629,13 @@ func (m Model) renderSearch(w, h int) string {
 		if m.searchMode == "name" && m.status != nil && m.status.Vectors == 0 {
 			badge += " (no embeddings)" // why it isn't semantic; see Metrics for how to enable
 		}
+		if n := len(m.searchHits); n > 0 { // how many matches, so you needn't scroll to find out
+			unit := "results"
+			if n == 1 {
+				unit = "result"
+			}
+			badge += fmt.Sprintf(" · %d %s", n, unit)
+		}
 		hdr += "  " + countStyle.Render(badge)
 	}
 	b.WriteString(hdr + "   " + m.search.View() + "\n\n")

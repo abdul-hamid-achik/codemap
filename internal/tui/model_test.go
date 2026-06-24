@@ -199,6 +199,18 @@ func TestSearchSelect(t *testing.T) {
 	}
 }
 
+func TestSearchHeaderShowsResultCount(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m, _ = applyMsg(m, semanticMsg{query: "x", mode: "name", hits: []app.SemanticHit{
+		{Symbol: "A"}, {Symbol: "B"}, {Symbol: "C"},
+	}})
+	out := m.render()
+	if !strings.Contains(out, "name mode") || !strings.Contains(out, "3 results") {
+		t.Errorf("search header should show the mode and result count:\n%s", out)
+	}
+}
+
 func TestSearchDrillToImpact(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch
