@@ -16,8 +16,10 @@ offline. It precomputes structure once, then answers narrow questions in a few
 calls instead of many file reads — for both people (CLI + the studio TUI) and
 agents (a stdio MCP server).
 
-v0.1 indexes Go (stdlib go/parser). Other languages are recognized and reported
-as skipped (broader support is planned). Semantic search is language-agnostic.
+Indexes Go (stdlib go/parser, full call graph) and TypeScript (via
+typescript-language-server when installed: symbols + structure today, call edges
+in progress). Other languages are recognized and reported as skipped (more in
+progress); --no-lsp disables the LSP backend. Semantic search is language-agnostic.
 
 Data lives under XDG paths (or ~/.codemap): the graph DB, the veclite vector
 store, and the project registry — so other tools can inspect the same store.`},

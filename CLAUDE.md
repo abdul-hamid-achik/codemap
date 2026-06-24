@@ -5,10 +5,11 @@ and the handful of things that are easy to get wrong.
 
 ## What codemap is
 
-Local-first code intelligence: a structural code graph (stdlib `go/parser` today; a headless
-LSP client is built and being wired in; tree-sitter planned) fused with semantic vectors
-(veclite), exposed as a unified query layer. Three surfaces over one store: CLI (`--json` for
-agents), MCP server (`codemap serve`), and the `studio` TUI.
+Local-first code intelligence: a structural code graph (Go via stdlib `go/parser`, plus
+`--precise` go/types; TypeScript via the now-wired LSP backend / `typescript-language-server`;
+tree-sitter still planned) fused with semantic vectors (veclite), exposed as a unified query
+layer. Three surfaces over one store: CLI (`--json` for agents), MCP server (`codemap serve`),
+and the `studio` TUI.
 
 Surfaces / key files:
 - CLI + all commands: `cmd/codemap/main.go`

@@ -742,6 +742,16 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #104 (multi-lang — docs) — **documented TypeScript support** so the shipped feature is
+  discoverable (the #91/#98 lesson: an undocumented capability is invisible). Updated every "v0.1
+  indexes Go" / "Go only" claim to the accurate Go + TypeScript reality, honest that TS is structure +
+  semantic search today with call edges in progress: README (graph bullet + Languages note), AGENTS.md
+  (rewrote the "Extraction (v0.1 = Go only)" section → "Go + TypeScript", and corrected the stale
+  "lspsrc built but NOT yet wired" claim — it IS wired via present-aware registerLSP), docs/quick-start,
+  the in-tool `codemap docs overview`, and CLAUDE.md's one-liner. MCP instructions needed no change
+  (they never claimed Go-only; codemap_docs now mentions TS). Docs-only ⇒ full suite + lint v2 (0) +
+  MCP playbook test green; fmt clean. COMMIT+PUSH. Next: slice C (TS call edges via callHierarchy — the
+  hard slice per the design reviews: needs warm-up + retry-on-empty), then a TS E2E flow.
 - 2026-06-23 #103 (multi-lang — slice B2: index-output accuracy) — **actionable missing-server message
   + Go-gated `--precise` tip.** Two index-output fixes now that TS is real. (1) The "install the server"
   advisory: `Index` now calls `indexAdvisory(res)` which surfaces `N typescript file(s) skipped —

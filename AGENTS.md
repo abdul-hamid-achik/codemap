@@ -125,14 +125,19 @@ task install         # go install ./cmd/codemap
 
 ## Architecture Notes
 
-### Extraction (v0.1 = Go only)
-- **The default indexer registers ONLY the `gosrc` (`go/parser`) extractor** — so v0.1 indexes
-  **Go**. Files in other recognized languages (TS/JS/Python/Lua/Ruby) are counted and surfaced as
-  a "skipped, support planned" warning (`Result.Unsupported`), not silently ignored. The
-  **headless LSP client** (`internal/lsp` + `internal/extract/lspsrc`) is built but NOT yet wired
-  into the default indexer; wiring it (per-language sessions) is what unlocks TS/Python/etc.
+### Extraction (Go + TypeScript)
+- **`gosrc` (`go/parser`) is always registered** (Go: full call graph; `--precise` adds exact edges
+  via `go/types`). **`lspsrc` (the LSP backend) is now wired in**: `IndexProject` runs a present-aware
+  `registerLSP` that, for each `lspsrc.DefaultServers` spec whose language is actually in the repo and
+  whose server is on PATH, spawns it and registers a generic LSP-driven extractor — TypeScript via
+  `typescript-language-server` today (symbols + `defines` edges; call edges via `callHierarchy` are
+  the next slice). A Go-only repo never spawns a server; `defer ix.Close()` reaps any that were.
+- Languages present but missing their server are recorded in `Result.MissingServers` and surfaced
+  as an actionable "install X" message; genuinely-unsupported languages are still `Result.Unsupported`
+  ("skipped, planned"). `--no-lsp` disables the LSP backend.
 - **Default backends are pure-Go** so release binaries stay `CGO_ENABLED=0` and cross-compile
-  cleanly. LSP edges carry weight `1.0`; heuristic/parser edges `0.7`.
+  cleanly (the language server is a spawned subprocess, like gopls — never linked in). LSP edges
+  carry weight `1.0`; heuristic/parser edges `0.7`.
 - **tree-sitter is OPTIONAL**, gated behind the `treesitter` build tag (it needs CGO via
   `github.com/tree-sitter/go-tree-sitter`). Release builds do not include it; it rounds out
   long-tail language coverage in 0.2 (built with a `zig cc` matrix or the purego path).
