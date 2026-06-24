@@ -1314,6 +1314,39 @@ func TestIndexedReportsRegistration(t *testing.T) {
 	}
 }
 
+// TestIndexedFalseWhenRegisteredButEmpty pins that a project registered with init
+// but never indexed (0 nodes) reports NOT indexed — so query commands say "run
+// codemap index" instead of misleading empties like "callers: none".
+func TestIndexedFalseWhenRegisteredButEmpty(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Foo() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	// Registered (init) but not indexed → not indexed.
+	if _, err := svc.Init(proj, false); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _, err := svc.Indexed(proj); err != nil || ok {
+		t.Fatalf("Indexed after init-only = (%v, %v), want (false, nil) — registered but 0 nodes", ok, err)
+	}
+	// After indexing → indexed.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _, err := svc.Indexed(proj); err != nil || !ok {
+		t.Fatalf("Indexed after index = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
 func TestSemanticNoEmbeddings(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

@@ -1139,9 +1139,25 @@ func (svc *Service) project(cwd string) (id int64, name string, found bool, err 
 // graph) along with the resolved project name. It's a cheap registration check so
 // query commands can give a clear "run codemap index" message instead of
 // misleading empty results (e.g. "Callers of X: none") on a cold repo.
+// Indexed reports whether the project has indexable content to query — i.e. it's
+// registered AND has at least one node. A registered-but-never-indexed project
+// (init without index) returns false so query commands print "run codemap index"
+// instead of a misleading empty result (e.g. "callers: none" reads as "no callers"
+// when nothing is indexed at all).
 func (svc *Service) Indexed(cwd string) (indexed bool, name string, err error) {
-	_, name, found, err := svc.project(cwd)
-	return found, name, err
+	pid, name, found, err := svc.project(cwd)
+	if err != nil || !found {
+		return false, name, err
+	}
+	g, err := svc.s.Graph()
+	if err != nil {
+		return false, name, err
+	}
+	st, err := g.Stats(pid)
+	if err != nil {
+		return false, name, err
+	}
+	return st.Nodes > 0, name, nil
 }
 
 // SymbolsReport is returned by Symbols.

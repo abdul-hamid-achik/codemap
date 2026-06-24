@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #172 (correctness — registered-but-unindexed project no longer gives misleading empties) —
+  dogfooded the init-without-index path: a project registered via `init` but never indexed (0 nodes)
+  returned MISLEADING results — `callers A`→"none" (reads as "A has no callers"!), `context A`→"not
+  found" — when the truth is "you haven't indexed." An agent/person would draw wrong conclusions. Root:
+  `Service.Indexed` returned `found` (registered) instead of whether the project has indexable content;
+  so the query guards (requireIndexed/notIndexed) passed for an empty project. Fix: `Indexed` now also
+  requires `Stats.Nodes > 0`, so query commands print the actionable "Project X is not indexed yet. Run
+  'codemap index'." (CLI) / `"indexed": false` (MCP) instead of empties. Verified: init-only callers/
+  context → the run-index message; after index → real results. Existing `TestIndexedReportsRegistration`
+  still passes (its "cold" repo is unregistered); new `TestIndexedFalseWhenRegisteredButEmpty` covers the
+  init-only state. Full suite + lint(0) + fmt + query/index_status/context flows green. COMMIT+PUSH.
 - 2026-06-24 #171 (docs — refresh the studio screenshots to match current rendering) — the README + docs/
   studio.md studio ASCII screenshots (the front-door first impression) had drifted behind the studio's
   rendering: the footer read `↑/↓ hub · → walk callers/calls · enter → impact · p precise · ctrl+c quit`
