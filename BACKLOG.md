@@ -12,7 +12,7 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.12.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+Released through **v0.13.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI** (24 commands incl. `daemon`, `--json`), **MCP**
 (`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
@@ -25,6 +25,10 @@ Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflati
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
 ## Release history (condensed — full detail in the vault archive)
+- **v0.13.0** — daemon observability. Live daemon state in `codemap status` + `codemap_status` (a `daemon`
+  object in `--json`); `daemon start --no-embed` (structure-only); studio header `● daemon` indicator;
+  `codemap doctor` daemon-health check; full daemon docs; glyphrun flows (`daemon.yml`, `exclude_extra.yml`).
+  Released 2026-06-24 (run 28135984585, brew tap bumped).
 - **v0.12.0** — background daemon + config ergonomics. **Daemon (BD.8–13)**: `codemap daemon start/stop/status`
   watches the tree (fsnotify, debounce/coalesce), incrementally reindexes, throttles Ollama embeddings (token
   bucket + dedup + max-in-flight), and serves control RPCs over a unix socket; tuned via `DaemonConfig` +
@@ -320,7 +324,7 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 - [x] **Configurable exclude paths** — `index.exclude_extra` (config, APPENDED to defaults so adding a folder doesn't clobber `node_modules`/`vendor`; the yaml slice-merge replaces, which was the footgun) + `CODEMAP_EXCLUDE_EXTRA` env. Exclude globs are now **path-aware**: bare name = any segment/depth (`migrations`), slash = root-anchored prefix (`db/migrations`), `**/` = any depth (`**/testdata`). `matchExclude` threaded through the full walk, incremental reindex, and the watcher (now passes project-relative paths). Tests: `exclude_test.go`. (commit 390883e)
 - [x] **Per-setting override flags** — every config-file/env knob now also has a CLI flag (precedence: file < env < **flag**). Embedding flags persistent (`--embed-provider/-model/--ollama-url/--embed-dimensions/-distance`); index flags on `index` (`--exclude`, `--exclude-extra`, `--max-file-bytes`); daemon flags on `daemon start` (`--debounce`, `--idle-timeout`, `--embed-rps`, `--embed-max-in-flight`, `--embed-cache-size`). `applyConfigFlags` overlays only `.Changed` flags; daemon gets an `Overrides` hook so flags reach its own indexer/embedder. (commit 6d6a054)
 
-**Post-0.12.0 (unreleased on main — coherent daemon-observability increment, release-worthy as 0.12.1/0.13.0 when authorized):**
+**Daemon observability (shipped in v0.13.0):**
 - [x] **Daemon state in `status` / `codemap_status`** (deferred BD.13 tail) — `daemon.QueryStatus` dials the control socket; `StatusWithDaemon` (in the daemon pkg to avoid an app→daemon cycle) flattens into `--json` under `"daemon"`; human surface prints a `daemon: running — <project> (pid N, watching)` / `not running` line. Added `daemon start --no-embed` (structure-only daemon; fixes the initial-embed delaying socket bind + makes it testable). Test: `TestQueryStatus`. (commit 3a7fe8a)
 - [x] **Studio daemon indicator** — green `● daemon <branch>` chip in the studio header while a daemon is watching (cheap periodic poll, re-armed each tick; live as it starts/stops). Test: `TestHeaderShowsDaemon`. (commit aa68875)
 - [x] **`doctor` daemon-health check** — `codemap doctor` lists the daemon (running / hint to start). Socket-connect probe (no app→daemon cycle, doesn't reset idle). (commit 6ecfaef)
