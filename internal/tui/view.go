@@ -230,6 +230,9 @@ func (m Model) hubDetail(w, h int) string {
 	if m.graphPrecise {
 		hdr += "  " + countStyle.Render("precise · gopls")
 		mark = " · gopls"
+	} else if m.status != nil && m.status.PreciseEdges > 0 {
+		// Relations come from the --precise (go/types) index, so they're already exact.
+		hdr += "  " + countStyle.Render("precise · index")
 	}
 	if len(m.graphStack) > 0 {
 		hdr += "  " + mutedStyle.Render(fmt.Sprintf("· depth %d (⌫ back)", len(m.graphStack)))

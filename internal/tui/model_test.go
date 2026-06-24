@@ -233,6 +233,26 @@ func TestImpactDrillIntoBlastNode(t *testing.T) {
 	}
 }
 
+func TestGraphPreciseIndexAware(t *testing.T) {
+	m := sized(t, 120, 40) // default tab is Graph
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{Registered: true, PreciseEdges: 50}})
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", FQN: "graph.Store.Close", File: "x.go", StartLine: 95, InDegree: 45}}})
+	m, _ = applyMsg(m, graphDetailMsg{symbol: "Close", callers: []app.SymbolRef{{Symbol: "X"}}})
+
+	// The detail signals the relations are already exact (from the --precise index).
+	if !strings.Contains(m.render(), "precise · index") {
+		t.Errorf("graph detail should show 'precise · index' on a --precise index:\n%s", m.render())
+	}
+	// Pressing p must NOT spawn the redundant gopls recompute; it informs instead.
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "p", Code: 'p'}))
+	if cmd != nil {
+		t.Error("p should not spawn gopls when the index is already precise")
+	}
+	if !strings.Contains(u.(Model).statusMsg, "already precise") {
+		t.Errorf("p status = %q, want an 'already precise' note", u.(Model).statusMsg)
+	}
+}
+
 func TestGraphPreciseToggle(t *testing.T) {
 	m := sized(t, 120, 40)
 	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", FQN: "graph.Store.Close", File: "internal/graph/store.go", StartLine: 95, InDegree: 45}}})

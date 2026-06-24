@@ -726,6 +726,18 @@ harness that analyzes & fixes codebases. Concrete asks, in priority order:
   Annotations`, tui `TestSearchPaneMarksAnnotated`. Full suite + lint v2 (0) + studio/query/semantic
   E2E green; fmt clean. COMMIT+PUSH. **Annotation layer now complete on ALL surfaces + all studio tabs.**
 
+## Post-v0.5.0 polish
+- 2026-06-23 #100 (studio precise-awareness) — **the Graph tab knows when the index is already precise.**
+  The precise feature created a redundancy: pressing `p` in the Graph tab spawns gopls to recompute the
+  centered node's callers/callees, but on a `--precise` index the stored edges are *already* exact — so
+  the gopls round-trip is wasted (and can be slow or hit "no views"). Now, when `status.PreciseEdges > 0`:
+  the hub-detail header shows a `precise · index` badge (the relations are exact, from go/types), and
+  `p` short-circuits with "already precise — these relations are from the --precise index" instead of
+  spawning gopls. On a name-based index `p` still does its gopls recompute (studio.yml's name-based
+  fixture proves this). Test `TestGraphPreciseIndexAware` (badge shown + `p` fires no command + informs);
+  `TestGraphPreciseToggle` (name-based path) stays green. Full suite + lint v2 (0) + studio E2E green;
+  fmt clean. COMMIT+PUSH.
+
 ## 🏷️ Release — v0.5.0 (2026-06-23) — RELEASED
 The precise-call-resolution epic (#87–#99, the 13 commits since v0.4.0). Tagged `v0.5.0`, release.yml
 green: GitHub release with 5 pure-Go targets + checksums, homebrew-tap formula bumped to 0.5.0

@@ -728,8 +728,14 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "p":
-		// recompute the centered node's relations precisely via gopls
+		// recompute the centered node's relations precisely via gopls — but on a
+		// project indexed with --precise the stored edges are already exact, so the
+		// gopls round-trip is redundant; say so instead of spawning it.
 		if m.graphCenter.sym != "" {
+			if m.status != nil && m.status.PreciseEdges > 0 {
+				m.statusMsg = "already precise — these relations are from the --precise index"
+				return m, nil
+			}
 			m.statusMsg = "resolving precise (gopls)…"
 			return m, m.preciseDetailCmd(m.graphCenter)
 		}
