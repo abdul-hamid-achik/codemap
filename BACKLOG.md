@@ -780,6 +780,14 @@ Remaining sweep findings (deferred — see #196 iteration entry): (B) generated 
 (e.g. `version.Version` unfindable); (E) a parse-error-skipped file shows a stuck "stale: 1 new". All
 low-severity polish; the tool is fully usable without them.
 
+✅ **Shipped + verified 2026-06-24** (tag `v0.9.1` @ `0598c1d`): release.yml green; 6 assets;
+homebrew-tap formula → `0.9.1`; downloaded darwin/arm64 binary reports `codemap version 0.9.1 (0598c1d)`.
+**Loop paused after this release** (per user). Next session: user's one extra fix, then sweep findings
+D (Go var/const indexing — gosrc handles GenDecl TYPE only at gosrc.go:49; add VAR/CONST → KindVariable),
+B (generated-code: `*_gen.go` glob + `// Code generated … DO NOT EDIT.` header detection), E (staleness
+miscounts a parse-error-skipped file as perpetually "new"). See the dogfood-sweep task output for full
+evidence + reproduce commands.
+
 ## 🏷️ Release — v0.9.0 (2026-06-24)
 **Built for agents and real repos.** Headline since v0.8.0 (44 commits):
 - **One-call orientation — the flagship `context`.** New `codemap context <sym>` / `codemap_context`
