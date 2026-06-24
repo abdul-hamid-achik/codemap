@@ -1,0 +1,41 @@
+version: 1
+name: config
+intent: |
+    A repo-local codemap.yaml customizes indexing. codemap discovers it as a
+    project marker and merges it (precedence: defaults < global < project file <
+    --config < env), so a custom `index.exclude` is honored: a directory named in
+    it is skipped even though it isn't a built-in default exclude. Demonstrates the
+    "configure it XDG style" config system. Pure-Go.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$HOME\" \"$P/gen\"; printf 'index:\\n  exclude: [\"gen\", \".git\", \"node_modules\"]\\n' > \"$P/codemap.yaml\"; printf 'package app\\nfunc Keep() {}\\n' > \"$P/a.go\"; printf 'package gen\\nfunc Skip() {}\\n' > \"$P/gen/g.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed 2>&1 | grep -iE 'files:|graph'; echo '== gen/ is excluded by the repo-local codemap.yaml =='; \"$CM\" find Skip; echo '== a.go is still indexed =='; \"$CM\" find Keep"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: config
+outcomes:
+    - id: custom_exclude_applied
+      description: a directory named in codemap.yaml's index.exclude is skipped (config is loaded)
+      verify:
+        screen:
+            contains: 'no symbols matching "Skip"'
+    - id: other_files_indexed
+      description: files outside the exclude are still indexed
+      verify:
+        screen:
+            contains: "func Keep()"
+    - id: clean_exit
+      description: index with a repo-local config exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:cc41b8909a7fe6c902a5344223046193e9a6066360b3d07f5629691b45c94cbb

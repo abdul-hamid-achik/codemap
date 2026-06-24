@@ -75,7 +75,7 @@ codemap/
 ├── specs/                     # glyphrun E2E specs (*.yml): version/help/index_status/query
 │                              #   (graphs) · context (one-call bundle) · annotations (knowledge
 │                              #   layer) · staleness (drift) · incremental (reindex updates) ·
-│                              #   index_progress (TTY bar) · mcp_serve
+│                              #   config (repo-local codemap.yaml) · index_progress (TTY bar) · mcp_serve
 │                              #   (stdio JSON-RPC) · studio (gopls) · semantic (vectors+Ollama)
 │                              #   · precise/typescript/javascript/python · jsx (<Component/> call edges)
 │                              #   · polyglot (Go+TS+Py one repo)

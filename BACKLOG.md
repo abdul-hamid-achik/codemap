@@ -5,6 +5,14 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #174 (flow — repo-local codemap.yaml config is honored, the "configure it XDG style" pillar)
+  — followed #173 by verifying config actually WORKS end-to-end (it was a core pillar with NO flow). A
+  repo-local `codemap.yaml` with `index.exclude: ["gen", …]` correctly skips `gen/` (find Skip → none)
+  while a.go indexes (find Keep → found); control without the config indexes gen/ (it's not a default
+  exclude) — proving the project-file config is loaded + merged (precedence defaults<global<project<
+  --config<env, via FindProjectRoot on the codemap.yaml marker). Captured `specs/config.yml` (3 outcomes:
+  custom exclude applied, other files indexed, clean exit). contractHash stamped; AGENTS.md listing
+  updated. No Go changed. The config system is now demonstrated + guarded. COMMIT+PUSH.
 - 2026-06-24 #173 (docs accuracy — `--local` no longer claims "repo-local state" it doesn't deliver) —
   dogfooded `init --local`: it creates an empty `.codemap/` dir but the index STILL goes to the global
   data dir (verified: graph.db landed in CODEMAP_DATA, `.codemap/` stayed empty), yet the help + README +
