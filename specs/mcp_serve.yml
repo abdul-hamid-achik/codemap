@@ -1,0 +1,47 @@
+version: 1
+name: mcp_serve
+intent: |
+    `codemap serve` is the agent-harness surface: an MCP server speaking
+    newline-delimited JSON-RPC over stdio (NOT Content-Length framing — that
+    breaks Claude Code). This drives a real client lifecycle over a pipe —
+    initialize, tools/list, tools/call codemap_docs — and confirms the server
+    answers with the right tools (incl. codemap_context) and shuts down cleanly
+    when the client disconnects. Guards CLAUDE.md's #1 gotcha (the stdio framing).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/h\"; export CODEMAP_DATA=\"$TMP/d\"; mkdir -p \"$HOME\"; CM=\"$ROOT/bin/codemap\"; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"flow\",\"version\":\"0\"}}}' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' '{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"codemap_docs\",\"arguments\":{}}}' > \"$TMP/reqs\"; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/out\" 2>/dev/null; echo \"serve exit: $?\"; grep -q serverInfo \"$TMP/out\" && echo INIT_OK; grep -q '\"name\":\"codemap_context\"' \"$TMP/out\" && echo TOOLS_OK; grep -q 'trace flow' \"$TMP/out\" && echo DOCS_OK; grep -c Content-Length \"$TMP/out\" | sed 's/^/content_length_lines: /'"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: mcp_serve
+outcomes:
+    - id: initialize_ok
+      description: the server completes the MCP initialize handshake over stdio
+      verify:
+        screen:
+            contains: "INIT_OK"
+    - id: tools_listed
+      description: tools/list returns the full toolset including codemap_context
+      verify:
+        screen:
+            contains: "TOOLS_OK"
+    - id: tool_call_ok
+      description: tools/call codemap_docs returns the agent guide
+      verify:
+        screen:
+            contains: "DOCS_OK"
+    - id: clean_disconnect
+      description: serve exits 0 when the client disconnects (no error noise)
+      verify:
+        screen:
+            contains: "serve exit: 0"
+contractHash: sha256:8403191e461350864f2126cd61a5fdfdcfe0cfe0b3fafb0adcb54b390cfa7d68

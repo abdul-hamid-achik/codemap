@@ -74,8 +74,9 @@ codemap/
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
 ├── specs/                     # glyphrun E2E specs (*.yml): version/help/index_status/query
 │                              #   (graphs) · context (one-call bundle) · annotations (knowledge
-│                              #   layer) · staleness (drift) · index_progress (TTY bar) · studio (gopls)
-│                              #   · semantic (vectors+Ollama) · precise/typescript/javascript/python
+│                              #   layer) · staleness (drift) · index_progress (TTY bar) · mcp_serve
+│                              #   (stdio JSON-RPC) · studio (gopls) · semantic (vectors+Ollama)
+│                              #   · precise/typescript/javascript/python
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md SPEC.md LICENSE

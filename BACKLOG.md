@@ -5,6 +5,18 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #158 (harness — verified + flow-guarded the MCP stdio wire) — the unit tests use the
+  go-sdk's in-process transport; the actual `codemap serve` stdio path (CLAUDE.md's #1 gotcha: must be
+  newline-delimited JSON-RPC, NOT Content-Length) was never exercised end-to-end this cycle. Drove a real
+  client lifecycle (python: initialize → tools/list → tools/call codemap_docs → disconnect): serverInfo
+  OK, **20 tools incl. codemap_context**, codemap_docs returned the 7.3 KB guide, **clean disconnect =
+  exit 0**, and **zero Content-Length lines** (framing correct). Found NO bug — an earlier exit-1 was my
+  naive test closing stdin mid-request (→ sdk `ErrServerClosing`); the sdk's `wait()` treats a clean
+  `io.EOF` as success, so a real client disconnect exits 0. Captured it as a permanent regression guard:
+  new `specs/mcp_serve.yml` pipes the JSON-RPC handshake to `codemap serve` (keep-alive so responses
+  flush before EOF), asserts INIT_OK / TOOLS_OK / DOCS_OK / `serve exit: 0` via short markers (immune to
+  PTY JSON wrapping) + `content_length_lines: 0`. 4 outcomes pass; contractHash stamped. AGENTS.md specs
+  listing updated. No Go changed — the harness wire is solid, now demonstrated and guarded. COMMIT+PUSH.
 - 2026-06-24 #157 (harness — bound the `context` bundle so one call can't blow an agent's context) —
   first verified the whole local flow suite (all 15 specs: graphs/precise/TS/JS/Python-LSP/vectors/
   studio×2/context/staleness/index_progress/annotations) — ALL PASS, so the unreleased v0.9.0 batch is
