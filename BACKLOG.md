@@ -742,6 +742,21 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #115 (studio TUI — cross-tab `ctrl+g` opens any symbol in the Graph walker) — the
+  Graph walker (browse hubs → walk callers/callees → re-center → backspace) is the nicest exploration
+  UI, but it was only reachable via its own hub list: a symbol found by **Search**, **Impact**, or
+  **Metrics** could be drilled to Impact (blast radius) but not *walked*. New global **`ctrl+g`** (any
+  tab, like ctrl+s/ctrl+r) re-centers the Graph on the active selection and switches to it, focused on
+  the callers/calls pane — so a search hit / blast node / metrics row becomes a starting point for
+  walking the call graph. Implementation: refactored the per-tab selection logic into one
+  `selectedCenter()` (sym/fqn/file/line) that now backs **both** ctrl+s (source) and ctrl+g, so they
+  always act on the same target; `openInGraph()` sets the center, clears the walk stack, focuses refs.
+  Footer hints + help overlay updated (`ctrl+g  open the selection in the Graph walker`). Test
+  `TestOpenInGraphFromSearch` (search hit → ctrl+g → Graph centered on it, focusRefs, fresh stack,
+  detail load fired). Extended `specs/studio.yml`: after the name search, ctrl+g → walker centered on
+  `app.Run` showing "Called by (2)" → Top/Other, snapshot `graph_from_search`, back to Search to finish
+  (contractHash re-stamped). Full suite + tui lint(0) + fmt + studio E2E green. Polish-first, no backend
+  change. COMMIT+PUSH.
 - 2026-06-24 #114 (real usefulness — `orphans` follows method-value handlers; `hotspots` stays
   clean) — continued dogfooding: after #113, the dominant remaining false positives were the **17
   `mcp.Server.handleXxx`** methods, registered via `sdkmcp.AddTool(s.srv, tool, s.handleInit)` — a

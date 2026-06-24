@@ -4,6 +4,7 @@ intent: |
     studio opens on the Graph tab showing call-graph hubs, fills the terminal,
     walks into a hub's callers/callees and back, recomputes relations precisely
     via gopls, switches to Metrics (bar charts) and Impact, searches by name,
+    opens a search hit in the Graph walker with ctrl+g (cross-tab navigation),
     then quits cleanly.
 target:
     cmd:
@@ -87,6 +88,19 @@ steps:
             contains: "name mode"
         timeoutMs: 8000
     - snapshot: search
+    # ctrl+g opens the selected search hit (Run) in the Graph walker — any symbol
+    # becomes a starting point for walking the call graph, not just the hubs.
+    - press: "ctrl+g"
+    - wait:
+        screen:
+            contains: "Called by"
+        timeoutMs: 8000
+    - snapshot: graph_from_search
+    - press: "4" # back to Search to continue the flow
+    - wait:
+        screen:
+            contains: "name mode"
+        timeoutMs: 5000
     # ctrl+s views the selected hit's source from the Search tab (where the text
     # input would otherwise capture a plain `s`), then close it.
     - press: "ctrl+s"
@@ -115,4 +129,4 @@ outcomes:
       verify:
         process:
             exitCode: 0
-contractHash: sha256:430b9622f34e9ddae11c493172764162f908c17c624c3eb2d253c4805bbb6c04
+contractHash: sha256:faffa5fdff0707d8a8b90182883bb7ee9515a5ffe564d0f50e60feebd1ef51ad

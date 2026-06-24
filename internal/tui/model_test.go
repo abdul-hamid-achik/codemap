@@ -752,6 +752,35 @@ func TestSourceTargetAcrossTabs(t *testing.T) {
 	}
 }
 
+// TestOpenInGraphFromSearch verifies ctrl+g re-centers the Graph walker on the
+// active tab's selection and switches to it — making any search hit (or impact
+// node, or metrics row) a starting point for walking the call graph, not just
+// the hubs.
+func TestOpenInGraphFromSearch(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.active = tabSearch
+	m, _ = applyMsg(m, semanticMsg{query: "auth", mode: "name", hits: []app.SemanticHit{
+		{Symbol: "validateToken", FQN: "auth.validateToken", File: "auth.go", StartLine: 4},
+	}})
+
+	m2, cmd := applyMsg(m, tea.KeyPressMsg(tea.Key{Code: 'g', Mod: tea.ModCtrl}))
+	if m2.active != tabGraph {
+		t.Fatalf("ctrl+g should switch to the Graph tab, got %v", m2.active)
+	}
+	if m2.graphCenter.sym != "validateToken" || m2.graphCenter.fqn != "auth.validateToken" {
+		t.Errorf("graph should be centered on the search hit, got %+v", m2.graphCenter)
+	}
+	if m2.graphFocus != focusRefs {
+		t.Error("ctrl+g should focus the callers/calls pane, ready to walk")
+	}
+	if len(m2.graphStack) != 0 {
+		t.Error("opening from another tab should start a fresh walk (empty stack)")
+	}
+	if cmd == nil {
+		t.Error("ctrl+g should fire a detail load for the centered symbol")
+	}
+}
+
 func TestHelpOverlay(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabSearch // a tab with a focused text input

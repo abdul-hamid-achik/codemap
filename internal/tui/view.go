@@ -52,6 +52,7 @@ func renderHelp() string {
 	}
 	b.WriteString(sectionStyle.Render("Global") + "\n")
 	row("1–4 / tab / shift+tab", "switch tabs")
+	row("ctrl+g", "open the selection in the Graph walker")
 	row("ctrl+s", "view the selected symbol's source")
 	row("ctrl+r", "reindex (structure-only) and refresh")
 	row("? / esc", "toggle this help")
@@ -138,11 +139,11 @@ func (m Model) footer() string {
 			hint = "↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit"
 		}
 	case tabSearch:
-		hint = "type · enter search/open · ↑/↓ select · ctrl+s source · tab · ctrl+c quit"
+		hint = "type · enter search/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
 	case tabImpact:
-		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+s source · tab · ctrl+c quit"
+		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
 	default: // metrics
-		hint = "↑/↓ select · enter → impact · ctrl+s source · ctrl+r reindex · ctrl+c quit"
+		hint = "↑/↓ select · enter → impact · ctrl+g graph · ctrl+s source · ctrl+r reindex · ctrl+c quit"
 	}
 	hint += " · ? help"
 	status := m.statusMsg

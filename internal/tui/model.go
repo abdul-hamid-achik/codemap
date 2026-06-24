@@ -266,52 +266,78 @@ func (m Model) preciseDetailCmd(c graphCenter) tea.Cmd {
 	}
 }
 
-// sourceTarget is the symbol whose source `s`/ctrl+s should show, based on the
-// active tab and selection: the selected ref/hub on Graph, the selected blast
-// node (or analyzed symbol) on Impact, the selected hit on Search.
-func (m Model) sourceTarget() (sym, file string, line int, ok bool) {
+// selectedCenter is the symbol currently selected on the active tab, as a
+// graphCenter (sym/fqn/file/line): the selected ref/hub on Graph, the selected
+// blast node (or analyzed symbol) on Impact, the selected hit on Search, the
+// selected row on Metrics. It's the basis for both ctrl+s (view source) and
+// ctrl+g (open in the Graph walker), so the two always act on the same target.
+func (m Model) selectedCenter() (graphCenter, bool) {
 	switch m.active {
 	case tabGraph:
 		if m.graphFocus == focusRefs {
 			if refs := m.graphRefs(); m.graphRefSel < len(refs) {
-				r := refs[m.graphRefSel]
-				return r.Symbol, r.File, r.StartLine, true
+				return centerOfRef(refs[m.graphRefSel]), true
 			}
-			return "", "", 0, false
+			return graphCenter{}, false
 		}
-		if m.graphCenter.sym != "" {
-			return m.graphCenter.sym, m.graphCenter.file, m.graphCenter.line, true
-		}
+		return m.graphCenter, m.graphCenter.sym != ""
 	case tabImpact:
 		if m.impactRep != nil {
 			if m.impactSel < len(m.impactRep.BlastRadius) {
 				n := m.impactRep.BlastRadius[m.impactSel]
-				return n.Symbol, n.File, n.StartLine, true
+				return graphCenter{sym: n.Symbol, fqn: n.FQN, file: n.File, line: n.StartLine}, true
 			}
 			if len(m.impactRep.Locations) > 0 {
 				l := m.impactRep.Locations[0]
-				return l.Symbol, l.File, l.StartLine, true
+				return graphCenter{sym: l.Symbol, fqn: l.FQN, file: l.File, line: l.StartLine}, true
 			}
 		}
 	case tabSearch:
 		if m.searchSel < len(m.searchHits) {
 			h := m.searchHits[m.searchSel]
-			return h.Symbol, h.File, h.StartLine, true
+			return graphCenter{sym: h.Symbol, fqn: h.FQN, file: h.File, line: h.StartLine}, true
 		}
 	case tabMetrics:
-		if sym, _, file, line, ok := m.metricsItem(m.metricsSel); ok {
-			return sym, file, line, true
+		if sym, fqn, file, line, ok := m.metricsItem(m.metricsSel); ok {
+			return graphCenter{sym: sym, fqn: fqn, file: file, line: line}, true
 		}
 	}
-	return "", "", 0, false
+	return graphCenter{}, false
+}
+
+// sourceTarget is the selected symbol's source location (sym/file/line) — the
+// subset of selectedCenter the source overlay needs.
+func (m Model) sourceTarget() (sym, file string, line int, ok bool) {
+	c, ok := m.selectedCenter()
+	return c.sym, c.file, c.line, ok
 }
 
 // viewSource opens the source overlay for the current selection, if any.
 func (m Model) viewSource() tea.Cmd {
-	if sym, file, line, ok := m.sourceTarget(); ok {
-		return m.sourceViewCmd(sym, file, line)
+	if c, ok := m.selectedCenter(); ok {
+		return m.sourceViewCmd(c.sym, c.file, c.line)
 	}
 	return nil
+}
+
+// openInGraph re-centers the Graph walker on the active tab's selected symbol
+// and switches to it, focused on the callers/calls pane — so any symbol found by
+// Search/Impact/Metrics becomes a place to start walking the call graph, not just
+// the hubs. Returns the model unchanged if nothing is selected.
+func (m Model) openInGraph() (tea.Model, tea.Cmd) {
+	c, ok := m.selectedCenter()
+	if !ok || c.sym == "" {
+		return m, nil
+	}
+	m.active = tabGraph
+	m.graphCenter = c
+	m.graphStack = nil
+	m.graphPrecise = false
+	m.graphFocus = focusRefs
+	m.graphRefSel = 0
+	m.syncFocus()
+	m.statusMsg = "graph: " + displayName(c.fqn, c.sym)
+	return m, m.detailCmd(c.sym)
 }
 
 func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
@@ -522,6 +548,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// View the current selection's source on any tab (a modifier key so it
 		// works even where a text input would otherwise capture `s`).
 		return m, m.viewSource()
+	case "ctrl+g":
+		// Open the current selection in the Graph walker (any tab) — explore a
+		// search hit / blast node / hub's call neighborhood, not just the hubs.
+		return m.openInGraph()
 	case "ctrl+r":
 		// Reindex in place (structure-only) and refresh — works on any tab.
 		m.statusMsg = "indexing…"
