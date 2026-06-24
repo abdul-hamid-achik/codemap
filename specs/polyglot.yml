@@ -1,0 +1,58 @@
+version: 1
+name: polyglot
+intent: |
+    codemap indexes a POLYGLOT repo — Go + TypeScript + Python in one project —
+    in a single pass: Go via go/parser, TS via typescript-language-server, Python
+    via pyright, all into one graph. `index --precise` then resolves call edges
+    exactly across all three (go/types for Go, callHierarchy for the LSP
+    languages), so callers/callees work per language. This is the headline
+    multi-language value prop in the realistic mixed-repo case. Needs gopls + the
+    go toolchain + typescript-language-server + node + pyright; not run in CI.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P\"; printf 'module poly\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf 'package poly\\n\\nfunc GoEntry() { goHelper() }\\nfunc goHelper() {}\\n' > \"$P/main.go\"; printf 'export function tsEntry() { tsHelper(); }\\nfunction tsHelper() {}\\n' > \"$P/app.ts\"; printf 'def py_entry():\\n    py_helper()\\n\\ndef py_helper():\\n    pass\\n' > \"$P/script.py\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== index Go+TS+Python (precise) =='; \"$CM\" index --precise --no-embed 2>&1 | grep -iE 'graph|precise'; echo '== status =='; \"$CM\" status | grep -iE 'languages|edges'; echo '== Go callers =='; \"$CM\" callers goHelper; echo '== TS callers =='; \"$CM\" callers tsHelper; echo '== Python callers =='; \"$CM\" callers py_helper"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 45000
+    - snapshot: polyglot
+outcomes:
+    - id: all_three_languages
+      description: status reports Go, TypeScript and Python indexed in one repo
+      verify:
+        screen:
+            contains: "typescript"
+    - id: python_indexed
+      description: Python is indexed alongside the others
+      verify:
+        screen:
+            contains: "python"
+    - id: unified_precise
+      description: the precise pass resolves both Go (go/types) and the LSP languages (callHierarchy)
+      verify:
+        screen:
+            contains: "go/types + callHierarchy"
+    - id: go_call_graph
+      description: Go call edges resolve (goHelper's caller is GoEntry)
+      verify:
+        screen:
+            contains: "GoEntry"
+    - id: ts_call_graph
+      description: TypeScript call edges resolve (tsHelper's caller is tsEntry)
+      verify:
+        screen:
+            contains: "tsEntry"
+    - id: python_call_graph
+      description: Python call edges resolve (py_helper's caller is py_entry)
+      verify:
+        screen:
+            contains: "py_entry"
+contractHash: sha256:23b6c7cf5b8a0f6107d82ae83bded5e08d3e6c927f392a3bf181d3ba766fd5fd

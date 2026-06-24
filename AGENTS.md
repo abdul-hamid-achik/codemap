@@ -76,7 +76,7 @@ codemap/
 │                              #   (graphs) · context (one-call bundle) · annotations (knowledge
 │                              #   layer) · staleness (drift) · index_progress (TTY bar) · mcp_serve
 │                              #   (stdio JSON-RPC) · studio (gopls) · semantic (vectors+Ollama)
-│                              #   · precise/typescript/javascript/python
+│                              #   · precise/typescript/javascript/python · polyglot (Go+TS+Py one repo)
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md SPEC.md LICENSE

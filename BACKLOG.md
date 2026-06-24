@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #166 (flow — polyglot Go+TS+Python in one repo, the headline multi-language value prop) —
+  dogfooded the realistic mixed-repo case (no existing flow covered it — they're per-language). One
+  `index --precise` run indexed all three (go/parser + typescript-language-server + pyright into one
+  graph): `languages: go=3 python=3 typescript=3`, and the UNIFIED precise pass resolved edges across all
+  three ("3 precise: go/types + callHierarchy"), with `callers` working per language (goHelper←GoEntry,
+  tsHelper←tsEntry, py_helper←py_entry). Works — no bug (an initial "only Go indexed" scare was my own
+  harness setting HOME=tmp, which breaks asdf shim resolution; per CLAUDE.md the toolchain flows isolate
+  CODEMAP_DATA only). Captured as `specs/polyglot.yml` (6 outcomes: all-three-languages, unified-precise,
+  per-language call graphs) — needs gopls+go+tsserver+node+pyright, local-only. contractHash stamped.
+  Updated CLAUDE.md flows note + AGENTS.md specs listing. No Go changed. COMMIT+PUSH.
 - 2026-06-24 #165 (accuracy — generic functions used as values aren't false orphans) — validated more of
   the call graph by dogfooding: `path runImpact BlastRadius` → correct shortest chain (`runImpact → Impact
   → BlastRadius`, verified hop-by-hop; reverse correctly has no path); generic CALLS (`Foo[int]()`) are
