@@ -193,7 +193,9 @@ task install         # go install ./cmd/codemap
 - **Accuracy model** (be honest with users): the graph is name-based by default — intra-package
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`
-  marks inflation; `orphans` results are interface/reflection-blind *candidates*). **The graph-wide
+  marks inflation; `orphans` follows functions wired by value — handlers like cobra `RunE` /
+  `mux.HandleFunc(s.h)`, via `references` edges that never enter the call graph — but stays
+  interface/reflection-blind, so its results are *candidates*). **The graph-wide
   fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) is the unified
   exact-resolution pass. For Go it runs an in-process pure-Go `go/types` pass (`internal/extract/typesrc`);
   for TypeScript it drives `typescript-language-server` `callHierarchy` (`Indexer.resolveLSPCallEdges`).

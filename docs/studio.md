@@ -29,12 +29,14 @@
   language on the left; on the right, the two ends of the call graph — the **top hubs**
   (most-referenced, load-bearing symbols) and the **dead-code candidates** (symbols with no
   callers). Both lists are navigable with `↑`/`↓`: `enter` drills the selected symbol into
-  Impact, `ctrl+s` reads its source — so the overview is also a launchpad.
+  Impact, `ctrl+s` reads its source, `ctrl+g` opens it in the Graph walker — so the overview is
+  also a launchpad.
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it. `ctrl+s`
-  reads the selected blast node's source.
+  reads the selected blast node's source; `ctrl+g` opens it in the Graph walker.
 - **Search** — search by meaning (semantic, when an embedded index exists), automatically
   falling back to fast name search otherwise; the header shows which mode is active. `ctrl+s`
-  reads the selected hit's source.
+  reads the selected hit's source; `ctrl+g` opens it in the Graph walker to explore its call
+  neighborhood.
 
 ## Keys
 
@@ -48,6 +50,7 @@
 | `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection · or run the query after editing the text |
 | `backspace` | (Graph) step back to the previous centered node while walking |
 | `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
+| `ctrl+g` (any tab) | **open the selection in the Graph walker** — re-centers the Graph on the selected hit/blast node/row and switches to it, focused on the callers/calls pane, so any symbol becomes a place to start walking the call graph (not just the hubs) |
 | `p` | (Graph) recompute the centered node's callers/callees precisely via gopls (Go) |
 | `ctrl+r` | Reindex the project (structure-only) and refresh, without leaving studio |
 | `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |

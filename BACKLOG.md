@@ -742,6 +742,16 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #116 (docs accuracy — `ctrl+g` + `orphans` value-following, swept consistent) — paid
+  down the doc debt from the last three increments. **studio `ctrl+g`** (#115): `docs/studio.md` Keys
+  table gained a `ctrl+g` row and the Metrics/Impact/Search tab blurbs now mention "open in the Graph
+  walker." **`orphans` value-following** (#113/#114): four surfaces still framed orphans as only
+  "interface/reflection-blind candidates" — now consistent with the README that it *follows functions
+  wired by value* (cobra `RunE` / `mux.HandleFunc`, via `references` edges that never enter the call
+  graph) while staying interface/reflection-blind: updated the in-CLI `codemap docs accuracy`
+  (`internal/app/docs.go`, verified it renders), `AGENTS.md`, `docs/cli.md`, and the MCP
+  `codemap_orphans` tool description (so agents know value-wired handlers aren't falsely flagged). No
+  behavior change; build + full suite + fmt clean. COMMIT+PUSH.
 - 2026-06-24 #115 (studio TUI — cross-tab `ctrl+g` opens any symbol in the Graph walker) — the
   Graph walker (browse hubs → walk callers/callees → re-center → backspace) is the nicest exploration
   UI, but it was only reachable via its own hub list: a symbol found by **Search**, **Impact**, or

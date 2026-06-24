@@ -37,8 +37,9 @@ name-based with a note when the toolchain/module isn't available — never a har
 
 On a name-based index the analysis commands flag their limits honestly: `callers`/`impact` note when
 a name resolves to multiple definitions, `hotspots` marks name-collision inflation, and `orphans`
-can't see callers reached via interface dispatch or reflection — treat its output as dead-code
-*candidates*. `index --precise` removes the call-edge inflation outright. See
+follows functions wired by value (handlers like cobra `RunE` / `mux.HandleFunc`) but can't see
+callers reached via interface dispatch or reflection — treat its output as dead-code *candidates*.
+`index --precise` removes the call-edge inflation outright. See
 [Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-vs-precise).
 
 ## Analysis

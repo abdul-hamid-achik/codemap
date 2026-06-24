@@ -84,7 +84,8 @@ package calls resolve precisely (Go), but a cross-package method call like
 x.Foo() links to EVERY method named Foo (resolving the receiver's type needs a
 type-checker). codemap flags this rather than hiding it:
   - callers/callees/impact note when a name resolves to multiple definitions.
-  - hotspots marks name-collision inflation; orphans can't see interface/reflection callers (candidates).
+  - hotspots marks name-collision inflation; orphans follows functions wired by value
+    (handlers like cobra RunE / mux.HandleFunc) but can't see interface/reflection callers (candidates).
 THE GRAPH-WIDE FIX: re-index with 'codemap index --precise' (CLI) or codemap_index
 precise:true (MCP) — the unified exact-resolution pass. For Go it's a pure-Go go/types
 pass; for TypeScript it drives typescript-language-server callHierarchy. It resolves
