@@ -943,8 +943,16 @@ func runAnnotations(cmd *cobra.Command, args []string) error {
 		fmt.Println("no annotations")
 		return nil
 	}
+	dangling := make(map[int64]bool, len(rep.Dangling))
+	for _, id := range rep.Dangling {
+		dangling[id] = true
+	}
 	for _, a := range rep.Annotations {
-		fmt.Printf("#%-4d %-5s %-8s %s\n", a.ID, a.Kind, a.Source, a.Target)
+		line := fmt.Sprintf("#%-4d %-5s %-8s %s", a.ID, a.Kind, a.Source, a.Target)
+		if dangling[a.ID] {
+			line += "  ⚠ no current symbol (renamed/removed — prune with --rm, or re-add)"
+		}
+		fmt.Println(line)
 		if a.Note != "" {
 			fmt.Printf("        note: %s\n", a.Note)
 		}

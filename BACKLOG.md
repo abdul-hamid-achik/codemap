@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #169 (usability — `annotations` flags dangling notes after a refactor) — knowledge-layer
+  hygiene gap: `annotate` warns at creation if the target is unknown, but an EXISTING annotation silently
+  dangles after the symbol is renamed/removed — `annotations` listed it normally with no hint it no longer
+  matches, so an agent/person maintaining the layer couldn't tell what to prune. Now the shared
+  `annotations()` cross-checks each target against the index (`NodeExistsByName`; both endpoints for a
+  path) and sets `AnnotationsReport.Dangling []int64` (additive/non-breaking). CLI marks them `⚠ no
+  current symbol (renamed/removed — prune with --rm, or re-add)`; MCP `codemap_annotations` carries the
+  `dangling` list (description updated) so an agent can prune via codemap_unannotate. Annotations still
+  persist (durable by design); this just surfaces the stale ones. Dogfooded: annotate Auth + Auth→check,
+  rename Auth→Login, reindex → both flagged, `--json dangling:[1,2]`. Test `TestAnnotationsFlagDangling`
+  (node+path, resolving vs dangling). Full suite + lint(0) + fmt + annotations.yml flow green. COMMIT+PUSH.
 - 2026-06-24 #168 (flow — incremental reindex correctness, a headline value prop) — dogfood-verified the
   most common operation: editing a file (drop a symbol, add another) + adding a new file, then re-running
   `index` (no --reindex), correctly drops the removed symbol (no ghost), indexes the added one, and picks

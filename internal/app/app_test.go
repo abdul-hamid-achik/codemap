@@ -509,6 +509,52 @@ func TestContextCapsLargeLists(t *testing.T) {
 	}
 }
 
+// TestAnnotationsFlagDangling pins that the annotations list flags entries whose
+// target no longer resolves to an indexed symbol (so stale notes after a refactor
+// can be pruned), while resolving ones aren't flagged.
+func TestAnnotationsFlagDangling(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Auth() {}\n\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	realID, _, _ := svc.AnnotateNode(proj, "Auth", "note", "ok", "")
+	ghostID, _, _ := svc.AnnotateNode(proj, "Ghost", "note", "stale", "")
+	pathOK, _, _, _ := svc.AnnotatePath(proj, "Auth", "B", "note", "ok", "")
+	pathBad, _, _, _ := svc.AnnotatePath(proj, "Auth", "Ghost", "note", "stale", "")
+
+	rep, err := svc.AllAnnotations(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := make(map[int64]bool, len(rep.Dangling))
+	for _, id := range rep.Dangling {
+		d[id] = true
+	}
+	if !d[ghostID] {
+		t.Error("a note on a missing symbol should be flagged dangling")
+	}
+	if !d[pathBad] {
+		t.Error("a path note with a missing endpoint should be flagged dangling")
+	}
+	if d[realID] {
+		t.Error("a note on an indexed symbol must not be flagged dangling")
+	}
+	if d[pathOK] {
+		t.Error("a path note whose endpoints both resolve must not be flagged dangling")
+	}
+}
+
 func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

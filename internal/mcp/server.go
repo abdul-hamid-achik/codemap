@@ -249,7 +249,7 @@ func (s *Server) register() {
 	}, s.handleAnnotate)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_annotations",
-		Description: "List annotations: all in the project (no args), on a 'symbol', or on a 'from'→'to' call path.",
+		Description: "List annotations: all in the project (no args), on a 'symbol', or on a 'from'→'to' call path. A 'dangling' list flags annotation ids whose target no longer matches an indexed symbol (renamed/removed) — prune them with codemap_unannotate or re-add.",
 	}, s.handleAnnotations)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_unannotate",

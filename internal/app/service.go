@@ -375,6 +375,10 @@ func (svc *Service) Projects() (*ProjectsReport, error) {
 type AnnotationsReport struct {
 	Project     string             `json:"project"`
 	Annotations []graph.Annotation `json:"annotations"`
+	// Dangling lists annotation ids whose target no longer matches an indexed
+	// symbol (e.g. it was renamed or removed since). They persist but won't surface
+	// in queries — so they can be pruned or re-targeted (codemap_unannotate).
+	Dangling []int64 `json:"dangling,omitempty"`
 }
 
 // pathTarget is the canonical key for a path annotation.
@@ -479,7 +483,34 @@ func (svc *Service) annotations(cwd, kind, target string) (*AnnotationsReport, e
 	if anns != nil {
 		rep.Annotations = anns
 	}
+	// Flag annotations whose target no longer resolves to an indexed symbol, so a
+	// refactor's stale notes can be pruned/re-targeted rather than silently kept.
+	for _, a := range rep.Annotations {
+		if !annotationResolves(g, pid, a) {
+			rep.Dangling = append(rep.Dangling, a.ID)
+		}
+	}
 	return rep, nil
+}
+
+// annotationResolves reports whether an annotation's target currently matches an
+// indexed symbol: the symbol itself for a node annotation, BOTH endpoints for a
+// path annotation. Unknown formats are treated as resolved (never falsely flagged).
+func annotationResolves(g *graph.Store, pid int64, a graph.Annotation) bool {
+	switch a.Kind {
+	case graph.AnnotationNode:
+		ok, _ := g.NodeExistsByName(pid, a.Target)
+		return ok
+	case graph.AnnotationPath:
+		from, to, found := strings.Cut(a.Target, " -> ")
+		if !found {
+			return true
+		}
+		f, _ := g.NodeExistsByName(pid, from)
+		t, _ := g.NodeExistsByName(pid, to)
+		return f && t
+	}
+	return true
 }
 
 // RemoveAnnotation deletes one annotation by id; reports whether it existed.
