@@ -1,0 +1,46 @@
+version: 1
+name: incremental
+intent: |
+    codemap's index is incremental: re-running it after edits updates only what
+    changed and keeps the graph consistent. Editing a file (removing a symbol,
+    adding another) and adding a new file, then re-running `index` (no --reindex),
+    drops the removed symbol, indexes the added one, and picks up the new file —
+    no stale ghosts. Pairs with staleness.yml (which *detects* the drift). Pure-Go.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\nfunc Alpha() {}\\nfunc Bravo() {}\\n' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== edit a.go: drop Bravo, add Charlie; add b.go with Delta =='; printf 'package app\\nfunc Alpha() {}\\nfunc Charlie() {}\\n' > \"$P/a.go\"; printf 'package app\\nfunc Delta() {}\\n' > \"$P/b.go\"; \"$CM\" index --no-embed 2>&1 | grep -iE 'files:|graph'; echo '== removed symbol is gone =='; \"$CM\" find Bravo; echo '== changed file: Charlie indexed =='; \"$CM\" find Charlie; echo '== new file: Delta indexed =='; \"$CM\" find Delta"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: incremental
+outcomes:
+    - id: removed_symbol_pruned
+      description: a symbol deleted from a changed file is removed from the index (no ghost)
+      verify:
+        screen:
+            contains: 'no symbols matching "Bravo"'
+    - id: changed_file_reindexed
+      description: a symbol added to a changed file is indexed
+      verify:
+        screen:
+            contains: "func Charlie()"
+    - id: new_file_indexed
+      description: a newly added file is picked up incrementally
+      verify:
+        screen:
+            contains: "func Delta()"
+    - id: clean_exit
+      description: incremental reindex exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:5a6dd6b027b8c4d1b64632fa69c888847e2f66e1ae2ce006373f99b26e715f4a

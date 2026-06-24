@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #168 (flow — incremental reindex correctness, a headline value prop) — dogfood-verified the
+  most common operation: editing a file (drop a symbol, add another) + adding a new file, then re-running
+  `index` (no --reindex), correctly drops the removed symbol (no ghost), indexes the added one, and picks
+  up the new file — confirmed `find Bravo`→none after removal, `symbols a.go`→A,C. Also confirmed
+  annotations persist across a FULL `--reindex` (node + path; still surface in impact/path) — and that's
+  already locked by a test (app_test.go:282). The changed-file incremental path was only unit-tested
+  (TestIndexIncremental); no flow demonstrated it (staleness.yml only *detects* drift). Added
+  `specs/incremental.yml` (pure-Go): edit→reindex→removed symbol pruned + changed/new symbols indexed.
+  4 outcomes pass; contractHash stamped; AGENTS.md listing updated. No Go changed. Pairs with staleness.yml
+  to demonstrate the full incremental story (detect drift → reindex resolves it correctly). COMMIT+PUSH.
 - 2026-06-24 #167 (honesty — `index` summary no longer says "0 skipped" while warning about skipped files)
   — dogfooded the first-run-WITHOUT-a-toolchain path (a Python/TS dev with no pyright/tsserver): the
   install-hint warning is excellent ("1 python file(s) skipped — install pyright-langserver … or run with
