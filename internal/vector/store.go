@@ -191,6 +191,30 @@ func (s *Store) DeleteByProject(project string) (int, error) {
 	return len(recs), nil
 }
 
+// VecRecord is one stored embedding with everything needed to re-insert it
+// elsewhere without re-embedding: the raw vector, its searchable content, and the
+// graph metadata (incl. the node id it belongs to).
+type VecRecord struct {
+	Vector  []float32
+	Content string
+	Meta    NodeMeta
+}
+
+// IterByProject returns every embedding stored for a project — its raw vector,
+// content, and metadata — so a snapshot can carry the vectors and restore them
+// without a second embedding pass. Order is unspecified.
+func (s *Store) IterByProject(project string) ([]VecRecord, error) {
+	recs, err := s.coll.Find(veclite.Equal(keyProject, project))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]VecRecord, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, VecRecord{Vector: r.Vector, Content: r.Content, Meta: metaFromPayload(r.Payload)})
+	}
+	return out, nil
+}
+
 // CountByProject returns how many embeddings a project has (0 = no semantic
 // index, so semantic search won't return results until `index` runs with an
 // embedding provider).

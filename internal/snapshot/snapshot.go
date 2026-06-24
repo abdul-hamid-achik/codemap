@@ -19,6 +19,7 @@ import (
 	"sort"
 
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
+	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
 
 // SchemaVersion is bumped when the on-disk snapshot format changes incompatibly.
@@ -30,6 +31,7 @@ const (
 	fileEdges       = "edges.jsonl"
 	fileIndexState  = "index_state.jsonl"
 	fileAnnotations = "annotations.jsonl"
+	fileVectors     = "vectors.jsonl"
 )
 
 // Manifest is snapshot.json — the header describing a snapshot directory.
@@ -42,6 +44,7 @@ type Manifest struct {
 	Edges            int    `json:"edges"`
 	IndexState       int    `json:"index_state"`
 	Annotations      int    `json:"annotations"`
+	Vectors          int    `json:"vectors"`
 }
 
 // snapNode is a node's content without its volatile identity (DB id, project id,
@@ -78,15 +81,27 @@ type snapAnnotation struct {
 	Data   string `json:"data,omitempty"`
 }
 
+// snapVector carries an embedding by node POSITION (index into the sorted node
+// list) so its node id is remapped on import the same way edges are — the raw
+// vector + content + metadata travel along, so restore needs no re-embedding.
+type snapVector struct {
+	Pos     int             `json:"pos"`
+	Vector  []float32       `json:"vector"`
+	Content string          `json:"content,omitempty"`
+	Meta    vector.NodeMeta `json:"meta"`
+}
+
 func nodeKey(n graph.Node) string {
 	return n.FilePath + "\x00" + itoa(n.StartLine) + "\x00" + n.Symbol + "\x00" + n.FQN + "\x00" + n.Kind + "\x00" + n.Signature
 }
 
 func itoa(i int) string { return fmt.Sprintf("%d", i) }
 
-// Export writes the project's graph slice into dir (created if needed). Rows are
-// emitted in deterministic order so identical slices hash-identically.
-func Export(g *graph.Store, projectID int64, project, dir, profile, baseSHA string) (*Manifest, error) {
+// Export writes the project's slice into dir (created if needed): the graph
+// (nodes/edges/index_state/annotations) and, when vec != nil, its embedding
+// vectors. Rows are emitted in deterministic order so identical slices
+// hash-identically (fcheap dedups them).
+func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, profile, baseSHA string) (*Manifest, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -174,9 +189,34 @@ func Export(g *graph.Store, projectID int64, project, dir, profile, baseSHA stri
 		return nil, err
 	}
 
+	nVectors := 0
+	if vec != nil {
+		vrecs, verr := vec.IterByProject(project)
+		if verr != nil {
+			return nil, verr
+		}
+		svecs := make([]snapVector, 0, len(vrecs))
+		for _, vr := range vrecs {
+			pos, ok := idxOf[vr.Meta.NodeID]
+			if !ok {
+				continue // an embedding for a node not in this slice — skip
+			}
+			svecs = append(svecs, snapVector{Pos: pos, Vector: vr.Vector, Content: vr.Content, Meta: vr.Meta})
+		}
+		sort.SliceStable(svecs, func(i, j int) bool { return svecs[i].Pos < svecs[j].Pos })
+		vAny := make([]any, len(svecs))
+		for i, v := range svecs {
+			vAny[i] = v
+		}
+		if err := writeJSONL(filepath.Join(dir, fileVectors), vAny); err != nil {
+			return nil, err
+		}
+		nVectors = len(svecs)
+	}
+
 	m := &Manifest{
 		SchemaVersion: SchemaVersion, Project: project, EmbeddingProfile: profile, BaseSHA: baseSHA,
-		Nodes: len(nodes), Edges: len(sedges), IndexState: len(idx), Annotations: len(anns),
+		Nodes: len(nodes), Edges: len(sedges), IndexState: len(idx), Annotations: len(anns), Vectors: nVectors,
 	}
 	if err := writeJSON(filepath.Join(dir, fileManifest), m); err != nil {
 		return nil, err
@@ -189,8 +229,10 @@ func Export(g *graph.Store, projectID int64, project, dir, profile, baseSHA stri
 // snapshot's nodes/edges/index-state, and MERGES annotations (adds those not
 // already present — never deletes existing ones). It refuses if the snapshot's
 // embedding_profile disagrees with wantProfile (never mix models). Both empty
-// profiles are treated as compatible.
-func Import(g *graph.Store, projectID int64, project, dir, wantProfile string) (*Manifest, error) {
+// profiles are treated as compatible. When vec != nil, the project's embeddings
+// are replaced with the snapshot's (re-inserted with remapped node ids — no
+// re-embedding).
+func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wantProfile string) (*Manifest, error) {
 	var m Manifest
 	if err := readJSON(filepath.Join(dir, fileManifest), &m); err != nil {
 		return nil, fmt.Errorf("read snapshot manifest: %w", err)
@@ -265,6 +307,30 @@ func Import(g *graph.Store, projectID int64, project, dir, wantProfile string) (
 			return nil, err
 		}
 	}
+
+	if vec != nil {
+		var svecs []snapVector
+		if err := readJSONL(filepath.Join(dir, fileVectors), &svecs); err != nil {
+			return nil, err
+		}
+		if _, err := vec.DeleteByProject(project); err != nil { // clear stale vectors before restore
+			return nil, err
+		}
+		for _, sv := range svecs {
+			if sv.Pos < 0 || sv.Pos >= len(newID) {
+				return nil, fmt.Errorf("snapshot vector references node index out of range")
+			}
+			meta := sv.Meta
+			meta.NodeID = newID[sv.Pos] // remap to the new node id
+			meta.Project = project
+			if _, err := vec.Insert(sv.Vector, sv.Content, meta); err != nil {
+				return nil, err
+			}
+		}
+		if err := vec.Sync(); err != nil {
+			return nil, err
+		}
+	}
 	return &m, nil
 }
 
@@ -332,6 +398,15 @@ func readJSONL(path string, out any) error {
 	case *[]snapAnnotation:
 		return decodeLines(f, func(b []byte) error {
 			var x snapAnnotation
+			if err := json.Unmarshal(b, &x); err != nil {
+				return err
+			}
+			*v = append(*v, x)
+			return nil
+		})
+	case *[]snapVector:
+		return decodeLines(f, func(b []byte) error {
+			var x snapVector
 			if err := json.Unmarshal(b, &x); err != nil {
 				return err
 			}

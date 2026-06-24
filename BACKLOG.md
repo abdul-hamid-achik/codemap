@@ -220,8 +220,12 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     and **MERGES** annotations (adds missing, never deletes/duplicates). New graph helpers `ProjectEdges` +
     `ProjectIndexState` (+ `IndexEntry`). `TestRoundTrip` + `TestExportDeterministic` (swapped insertion
     order → identical bytes); task check green.
-  - [ ] **BD.2b (vectors)** — add `vectors.jsonl` (veclite Record exposes `.Vector`/`.Content`/`.Payload`, so
-    no re-embed) via a new `vector.Store.IterByProject`; Import re-inserts with the remapped node ids.
+  - [x] **BD.2b (vectors)** — `vectors.jsonl` carries each embedding by node POSITION (remapped on import like
+    edges) + raw vector/content/meta, so restore needs NO re-embed. New `vector.Store.IterByProject` →
+    `[]VecRecord{Vector,Content,Meta}` (reads `veclite.Record.Vector/.Content/.Payload`). `Export`/`Import` gained
+    a `vec *vector.Store` param (nil = graph-only); Import clears + re-inserts vectors with the new node ids.
+    `TestVectorRoundTrip` (restored vector points at the new node id + is searchable); task check green.
+    **BD.2 complete.**
 - [ ] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper: `Save(dir,tool,name,tags,sourceSHA)->stashID` (parse `--json`), `Restore(id,toDir)` (check `Verified`), `List(tags)`. fcheap binary path from config/PATH.
 - [ ] **BD.4** `internal/branchstate/state.go` — pointer file `RegistryDir()/branches/<repoHash>.json` (atomic temp+rename): branch→{stash_id, base_sha, profile, counts}. `Rebuild` from `fcheap list --tag`.
 - [ ] **BD.5** `internal/app/branchswitch.go` — `BranchSnapshot`/`BranchSwitch`/`BranchStatus` Service methods; orchestrate snapshot-old → restore-or-reindex-new; base-sha staleness via `git merge-base --is-ancestor`; reuse `Service.Index` profile gate; detect daemon lock.
