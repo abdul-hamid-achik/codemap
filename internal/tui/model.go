@@ -85,10 +85,12 @@ type preciseDetailMsg struct {
 	err     error
 }
 type sourceMsg struct {
-	title  string
-	lines  []string
-	gutter bool // line-number gutter (source); false for the context card
-	err    error
+	title       string
+	lines       []string
+	gutter      bool // line-number gutter (source); false for the context card
+	highlighted bool // lines carry chroma ANSI styling → clip ANSI-aware, don't rune-truncate
+	firstLine   int  // file line number of lines[0], so the gutter shows real file lines (0 = fall back to 1-based)
+	err         error
 }
 
 // Model is the studio TUI state.
@@ -137,11 +139,13 @@ type Model struct {
 	// scrollable text overlay: a full-screen pager dismissed with esc/q. Serves
 	// two views — a symbol's source body (opened with `s`/ctrl+s, line-number
 	// gutter on) and the context "orient" card (opened with ctrl+o, gutter off).
-	srcView   bool
-	srcTitle  string
-	srcLines  []string
-	srcScroll int
-	srcGutter bool
+	srcView      bool
+	srcTitle     string
+	srcLines     []string
+	srcScroll    int
+	srcGutter    bool
+	srcHighlight bool // srcLines carry chroma ANSI styling (source overlay only)
+	srcFirstLine int  // file line of srcLines[0], for the gutter (0 = 1-based fallback)
 
 	// graph walking: the right pane can be focused to walk into callers/callees,
 	// re-centering the explorer on any node (not just hubs). graphStack records
@@ -479,7 +483,14 @@ func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
 			return sourceMsg{err: fmt.Errorf("no source for %q", sym)}
 		}
 		title := fmt.Sprintf("%s  %s:%d-%d", displayName(mch.FQN, mch.Symbol), mch.File, mch.StartLine, mch.EndLine)
-		return sourceMsg{title: title, lines: strings.Split(mch.Source, "\n"), gutter: true}
+		// Syntax-highlight by the file's language; fall back to plain on an
+		// unknown/unsupported language so the overlay never errors, just isn't colored.
+		// (Runs here, off the UI goroutine; highlighted once, then scrolled cheaply.)
+		lines, hl := highlightSource(mch.File, mch.Source)
+		if !hl {
+			lines = strings.Split(mch.Source, "\n")
+		}
+		return sourceMsg{title: title, lines: lines, gutter: true, highlighted: hl, firstLine: mch.StartLine}
 	}
 }
 
@@ -688,6 +699,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.srcTitle = msg.title
 		m.srcLines = msg.lines
 		m.srcGutter = msg.gutter
+		m.srcHighlight = msg.highlighted
+		m.srcFirstLine = msg.firstLine
 		m.srcScroll = 0
 		return m, nil
 

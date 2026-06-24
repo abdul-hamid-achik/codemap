@@ -982,6 +982,37 @@ func TestSourceViewerScrollAndClose(t *testing.T) {
 	}
 }
 
+func TestHighlightSource(t *testing.T) {
+	// A known language highlights: per-line ANSI, line count preserved.
+	lines, ok := highlightSource("svc.go", "package main\n\nfunc Run() int { return 42 }\n")
+	if !ok {
+		t.Fatal("Go source should be highlightable")
+	}
+	if len(lines) < 3 {
+		t.Errorf("want >=3 lines for 3 source lines, got %d", len(lines))
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "\x1b[") {
+		t.Error("highlighted output should carry ANSI color escapes")
+	}
+}
+
+// TestSourceOverlayFileLineGutter pins FIX.md §3: the source overlay's gutter shows
+// real file line numbers (from firstLine), not 1-based within-def numbers.
+func TestSourceOverlayFileLineGutter(t *testing.T) {
+	m := sized(t, 100, 20)
+	m, _ = applyMsg(m, sourceMsg{title: "x.F  x.go:10-12",
+		lines: []string{"func F() {", "  return", "}"}, gutter: true, firstLine: 10})
+	out := m.render()
+	for _, want := range []string{"  10 ", "  12 "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("gutter should show file line %q (firstLine=10):\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "   1 func F") {
+		t.Error("gutter should NOT show 1-based within-def numbers when firstLine is set")
+	}
+}
+
 func TestContextCardAndOverlay(t *testing.T) {
 	rep := &app.ContextReport{
 		Symbol: "Foo", Found: true,

@@ -5,6 +5,18 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #200 (FIX.md §3 — studio source overlay: syntax highlighting + real file-line gutter) — the
+  source overlay (`s`/`ctrl+s`) rendered plain monochrome text. Added `internal/tui/highlight.go`
+  (`highlightSource` via github.com/alecthomas/chroma/v2 — terminal256 formatter, monokai, per-line ANSI;
+  pure-Go, CGO_ENABLED=0 build verified) wired into sourceViewCmd: source bodies are now syntax-colored, with
+  graceful fallback to plain on an unknown/unsupported language (never errors). renderSource clips the ANSI
+  lines via lipgloss MaxWidth (ANSI-aware, like the context card) instead of rune-truncate, and the gutter now
+  shows REAL file line numbers (from a new sourceMsg.firstLine) instead of 1-based within-def numbers — so you
+  can reference them. NOTE: FIX.md's "mark + center the target" is moot here — the overlay shows ONLY the def
+  body (mch.Source = StartLine..EndLine), so the whole view IS the target; nothing to center/mark within.
+  Highlighting done in the cmd with NO shared cache → race-clean (`go test -race` green). Added
+  TestHighlightSource + TestSourceOverlayFileLineGutter. `task check` + race + studio/studio_ts flows green.
+  COMMIT+PUSH. **FIX.md §1+§2+§3 all shipped on main** (ready for a 0.10.0 when authorized).
 - 2026-06-24 #199 (FIX.md §2 — studio global back/forward nav history; restores the bar across drills) — the
   reported daily-use pain: drilling a search hit → Impact → Graph clobbered the search/impact bar with no way
   back to what you'd typed (graphStack was Graph-walk-local + reset on openInGraph). Added a browser-style

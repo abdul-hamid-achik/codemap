@@ -102,8 +102,16 @@ func (m Model) renderSource(w, h int) string {
 	b.WriteString(hdr + "\n\n")
 	for i := start; i < end; i++ {
 		if m.srcGutter { // source body: line numbers; the context card has none
-			gutter := mutedStyle.Render(fmt.Sprintf("%4d ", i+1))
-			b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
+			ln := i + 1
+			if m.srcFirstLine > 0 { // show real file line numbers, not 1-based within the def
+				ln = i + m.srcFirstLine
+			}
+			gutter := mutedStyle.Render(fmt.Sprintf("%4d ", ln))
+			if m.srcHighlight { // chroma ANSI — clip ANSI-aware (rune truncate would mangle escapes)
+				b.WriteString(gutter + lipgloss.NewStyle().MaxWidth(w-5).Render(m.srcLines[i]) + "\n")
+			} else {
+				b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
+			}
 		} else {
 			// the context card carries lipgloss styling, so clip ANSI-aware
 			// (rune-based truncate would miscount the escape codes).
