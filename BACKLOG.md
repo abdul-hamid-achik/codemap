@@ -762,6 +762,24 @@
   setting `exclude` replaces the defaults, which is accurate — slices overlay). Full suite + lint(0) +
   fmt green. Real usability fix for Python on actual repos. COMMIT+PUSH.
 
+## 🏷️ Release — v0.9.1 (2026-06-24)
+**Real-repo fixes from a parallel dogfood sweep.** A multi-agent sweep indexed 8 real sibling repos
+(Go + TS/JS) and surfaced 9 genuine rough edges; the two highest-value are fixed here:
+- **No more anonymous-callback noise (#196).** Language servers report inline arrows/callbacks as symbols
+  named after their call site (`map() callback`, `defineEventHandler() callback`) or `<function>`. On a real
+  Nuxt app that was **~34% of all symbols** and **61% of dead-code candidates** — pure noise drowning
+  find/symbols/orphans. `lspsrc` now skips these anonymous placeholders (real declarations and named nested
+  decls are kept, reparented to the real scope).
+- **Qualified names resolve (#197).** hotspots/orphans/find PRINT `pkg.Type.Method`, but
+  callers/callees/impact/context/source/path REJECTED that exact string ("no symbol named") — breaking the
+  documented agent workflow (copy a name from hotspots → impact). They now accept the qualified form
+  (exact fqn → fqn-suffix → bare), additive so plain names and honest typos are unchanged.
+
+Remaining sweep findings (deferred — see #196 iteration entry): (B) generated Go files (`*_gen.go` + the
+`// Code generated … DO NOT EDIT.` header) still indexed; (D) Go package-level `var`/`const` not indexed
+(e.g. `version.Version` unfindable); (E) a parse-error-skipped file shows a stuck "stale: 1 new". All
+low-severity polish; the tool is fully usable without them.
+
 ## 🏷️ Release — v0.9.0 (2026-06-24)
 **Built for agents and real repos.** Headline since v0.8.0 (44 commits):
 - **One-call orientation — the flagship `context`.** New `codemap context <sym>` / `codemap_context`
