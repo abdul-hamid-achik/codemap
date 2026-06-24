@@ -12,8 +12,8 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.11.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
-5 cross-compiled targets. Three surfaces over one store: **CLI** (23 commands, `--json`), **MCP**
+Released through **v0.12.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+5 cross-compiled targets. Three surfaces over one store: **CLI** (24 commands incl. `daemon`, `--json`), **MCP**
 (`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
 (one typescript-language-server for TS+JS, pyright for Python; `--precise` = the unified exact pass —
@@ -25,6 +25,12 @@ Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflati
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
 ## Release history (condensed — full detail in the vault archive)
+- **v0.12.0** — background daemon + config ergonomics. **Daemon (BD.8–13)**: `codemap daemon start/stop/status`
+  watches the tree (fsnotify, debounce/coalesce), incrementally reindexes, throttles Ollama embeddings (token
+  bucket + dedup + max-in-flight), and serves control RPCs over a unix socket; tuned via `DaemonConfig` +
+  `CODEMAP_DAEMON_*`. **Configurable excludes**: `index.exclude_extra` (appended, no longer clobbers defaults)
+  + path-aware globs (bare=any-depth, slash=root-anchored, `**/`=any-depth). **3-way config**: every knob
+  reachable via config file < env < CLI flag. Released 2026-06-24 (run 28132071238, brew tap bumped).
 - **v0.11.0** — the flagship + branch-aware index switching. **P0**: TS/JS/Python `callers`/`callees` resolve
   on demand (scoped per-symbol `callHierarchy` via `lspServerFor`, no `--precise` reindex) and `impact`
   reports honest test coverage (heuristic test-file scan, defeating #196's filtered-callback blind spot).
