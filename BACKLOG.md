@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #194 (honesty — index --precise said "N unresolved" for calls it actually RESOLVED) — dogfooded
+  `--precise` on the real 83-file blueprint module: works great (120 files in 5.4s; 3226 edges resolved
+  exactly; hotspots transformed from name-inflated `String()` noise into the real parser hubs ParseFile/
+  expect/check/advance — a compelling demo of precise's value). But the index summary read "(70 unresolved)"
+  — and PreciseSkipped actually counts calls go/types DID resolve whose target just isn't an indexed node
+  (stdlib/external functions). "Unresolved" wrongly implies the pass fell short / the graph is incomplete,
+  when precise resolved everything reachable in the project. Reworded the CLI to "(N to external/stdlib
+  code)" (kept the `precise_skipped` JSON field for compat; kept "resolved exactly" which precise.yml
+  asserts). Same honesty-of-language class as #180/#181/#186. precise.yml + query.yml + `task check` green.
+  COMMIT+PUSH.
 - 2026-06-24 #193 (hotspots — point at the fix when counts are name-inflated; found dogfooding a real repo) —
   first real-world test beyond codemap-on-itself: indexed a sibling 666-`.go`-file project (`blueprint`).
   Performance is great (name-based index in 0.86s, hotspots query in 0.019s) and exclusion is correct — 583

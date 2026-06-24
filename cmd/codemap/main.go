@@ -329,7 +329,10 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 		if rep.PreciseNote != "" {
 			fmt.Printf("  precise: %s\n", rep.PreciseNote)
 		} else {
-			fmt.Printf("  precise: %d call edges resolved exactly (%d unresolved)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
+			// "skipped" are calls go/types DID resolve but whose target isn't an
+			// indexed node (stdlib/external functions) — not precision failures, so
+			// don't call them "unresolved" (that wrongly implies the pass fell short).
+			fmt.Printf("  precise: %d call edges resolved exactly (%d to external/stdlib code)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
 		}
 	} else {
 		// Surface --precise at the moment a user would most benefit: it refines Go's
