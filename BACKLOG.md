@@ -742,6 +742,23 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #102 (multi-lang — slice B: TypeScript indexes) — **`codemap index` now indexes
+  TypeScript** when `typescript-language-server` is on PATH. New `lspsrc/registry.go` (`ServerSpec` +
+  `DefaultServers` = TS). `IndexProject` restructured: walk → **present-aware** `registerLSP` (spawns a
+  server ONLY for a recognized language actually in the repo, so a Go-only project pays zero cost and
+  never spawns) → re-walk to route those files → `defer ix.Close()` shuts the server down. `Options.NoLSP`
+  + `--no-lsp` flag to opt out. `Result.MissingServers` records present-but-uninstalled servers (for the
+  message slice). **Verified live: a `.ts` file with a class + method + function indexes into class/
+  method/function nodes with dotted FQNs (UserService.getUser) + defines edges + works with
+  `symbols`** — so structure browsing and (with embeddings) semantic search work on TS end-to-end; the
+  Go path is byte-for-byte unchanged (queries are backend-blind). Arrow-fn consts fall to `variable`
+  when tsserver's Detail is empty (known lossy heuristic). Tests: `TestIndexTypeScriptSymbols`
+  (server-gated, asserts kinds/FQNs/defines), `TestIndexTypeScriptDisabledByNoLSP`; updated
+  `TestIndexNonGoWarns` → `NoLSP:true` (deterministic now that a TS server would index .ts). Full suite
+  + lint v2 (0) + query/studio/precise E2E green; CGO_ENABLED=0 clean. COMMIT+PUSH. **Follow-ups:** (B2)
+  surface `MissingServers` as an actionable "install typescript-language-server" message decoupled from
+  the FilesScanned==0 gate; the `--precise` tip (#97) now over-fires on TS-only projects (gate on Go
+  presence); then slice C = TS call edges (callHierarchy).
 - 2026-06-23 #101 (multi-lang — slice A: foundation) — **lspsrc satisfies the Extractor interface +
   Indexer lifecycle + broadened symbol mapping.** Additive, zero behavior change (lspsrc not yet
   registered; Go path untouched). (1) Fixed the latent interface blocker: `lspsrc.ExtractFile` was 3-arg

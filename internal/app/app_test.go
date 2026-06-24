@@ -204,12 +204,14 @@ func TestIndexNonGoWarns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sess.Close()
-	rep, err := NewService(sess).Index(context.Background(), proj, index.Options{}, false)
+	// NoLSP so the result is deterministic regardless of which language servers are
+	// installed: with typescript-language-server on PATH the .ts file would index.
+	rep, err := NewService(sess).Index(context.Background(), proj, index.Options{NoLSP: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rep.FilesScanned != 0 || rep.Nodes != 0 {
-		t.Errorf("expected nothing indexed for a non-Go project, got %d files / %d nodes", rep.FilesScanned, rep.Nodes)
+		t.Errorf("expected nothing indexed for a non-Go project (NoLSP), got %d files / %d nodes", rep.FilesScanned, rep.Nodes)
 	}
 	if !strings.Contains(rep.Warning, "v0.1 indexes Go") ||
 		!strings.Contains(rep.Warning, "typescript") || !strings.Contains(rep.Warning, "python") {

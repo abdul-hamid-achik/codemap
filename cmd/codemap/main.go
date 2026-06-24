@@ -201,6 +201,7 @@ func init() {
 	indexCmd.Flags().Bool("reindex", false, "wipe and rebuild the whole project index")
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
 	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly with go/types (Go; needs the go toolchain) — eliminates same-named over-matching")
+	indexCmd.Flags().Bool("no-lsp", false, "skip language-server-backed extraction (e.g. TypeScript via typescript-language-server)")
 	initCmd.Flags().Bool("local", false, "create a .codemap directory inside the project")
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
@@ -257,7 +258,8 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	reindex, _ := cmd.Flags().GetBool("reindex")
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
 	precise, _ := cmd.Flags().GetBool("precise")
-	rep, err := app.NewService(sess).Index(cmd.Context(), cwd, index.Options{Reindex: reindex, Precise: precise}, !noEmbed)
+	noLSP, _ := cmd.Flags().GetBool("no-lsp")
+	rep, err := app.NewService(sess).Index(cmd.Context(), cwd, index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP}, !noEmbed)
 	if err != nil {
 		return err
 	}

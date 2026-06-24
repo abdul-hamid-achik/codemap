@@ -22,6 +22,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/gosrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/typesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
@@ -36,6 +37,9 @@ type Options struct {
 	// with exact ones for cleanly type-checked packages. Requires the `go`
 	// toolchain and a buildable module; degrades to name-based otherwise.
 	Precise bool
+	// NoLSP disables auto-registration of language-server-backed extractors
+	// (TypeScript, …). Indexing then covers only the built-in Go backend.
+	NoLSP bool
 }
 
 // FileError records a per-file failure that didn't abort the whole run.
@@ -63,6 +67,11 @@ type Result struct {
 	PreciseUpgraded int    `json:"precise_upgraded,omitempty"`
 	PreciseSkipped  int    `json:"precise_skipped,omitempty"`
 	PreciseNote     string `json:"precise_note,omitempty"`
+	// MissingServers maps a recognized language present in the project to the
+	// language-server binary that would index it but isn't on PATH (e.g.
+	// "typescript" -> "typescript-language-server"), so callers can advise the user
+	// (the skipped-file count is in Unsupported[lang]).
+	MissingServers map[string]string `json:"missing_servers,omitempty"`
 }
 
 // Indexer turns project files into a stored graph + vectors. The vector store
@@ -74,6 +83,41 @@ type Indexer struct {
 	cfg        config.IndexConfig
 	extractors map[string]extract.Extractor
 	closers    []io.Closer // stateful extractors (e.g. spawned language servers) to shut down
+}
+
+// registerLSP spawns and registers a language-server-backed extractor for each
+// DefaultServers spec whose language is actually present in the project (present
+// is the post-walk unsupported map: recognized languages with no extractor yet).
+// A language whose server isn't on PATH, or fails to spawn, is recorded in
+// res.MissingServers and skipped — never fatal. Returns true if it registered at
+// least one extractor (so the caller re-walks to route those files).
+func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[string]int, res *Result) bool {
+	registered := false
+	for _, spec := range lspsrc.DefaultServers {
+		if present[spec.Lang] == 0 {
+			continue // no files of this language in the project
+		}
+		if _, err := exec.LookPath(spec.Cmd); err != nil {
+			noteMissingServer(res, spec.Lang, spec.Cmd)
+			continue
+		}
+		ext, err := lspsrc.New(ctx, spec.Lang, spec.LangID, root, spec.Cmd, spec.Args...)
+		if err != nil {
+			noteMissingServer(res, spec.Lang, spec.Cmd) // spawn/init failed — treat as absent
+			continue
+		}
+		ix.Register(ext)
+		ix.closers = append(ix.closers, ext)
+		registered = true
+	}
+	return registered
+}
+
+func noteMissingServer(res *Result, lang, cmd string) {
+	if res.MissingServers == nil {
+		res.MissingServers = map[string]string{}
+	}
+	res.MissingServers[lang] = cmd
 }
 
 // Close shuts down any stateful resources the indexer spawned (language-server
@@ -117,6 +161,7 @@ type fileTask struct {
 // IndexProject indexes root for the given registered project.
 func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectName, root string, opts Options) (*Result, error) {
 	res := &Result{}
+	defer func() { _ = ix.Close() }() // shut down any language servers spawned below
 
 	if opts.Reindex {
 		if err := ix.graph.WipeProject(projectID); err != nil {
@@ -132,6 +177,14 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	files, unsupported, err := ix.walk(root)
 	if err != nil {
 		return nil, err
+	}
+	// Auto-register language-server-backed extractors for recognized languages that
+	// are actually present (so a Go-only repo never spawns a server), then re-walk
+	// to route their files to the new extractor. Skipped entirely under --no-lsp.
+	if !opts.NoLSP && ix.registerLSP(ctx, root, unsupported, res) {
+		if files, unsupported, err = ix.walk(root); err != nil {
+			return nil, err
+		}
 	}
 	res.FilesScanned = len(files)
 	if len(unsupported) > 0 {
