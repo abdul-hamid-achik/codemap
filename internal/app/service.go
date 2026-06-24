@@ -1290,6 +1290,7 @@ type ContextReport struct {
 	CalleesTotal int                `json:"callees_total"`
 	TestsTotal   int                `json:"tests_total"`
 	BlastRadius  int                `json:"blast_radius"`          // count of transitively-affected nodes
+	BlastDepth   int                `json:"blast_depth"`           // depth the blast radius was traversed to (it's bounded, not the full closure)
 	Note         string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
 	Annotations  []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
 }
@@ -1318,6 +1319,7 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 	rep := &ContextReport{
 		Symbol: symbol, Definitions: []SourceMatch{},
 		Callers: []SymbolRef{}, Callees: []SymbolRef{}, Tests: []ImpactNode{},
+		BlastDepth: depth, // the blast radius below is bounded to this depth
 	}
 	src, err := svc.Source(cwd, symbol)
 	if err != nil {

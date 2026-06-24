@@ -941,6 +941,7 @@ func TestContextCardAndOverlay(t *testing.T) {
 		Tests:        []app.ImpactNode{{Symbol: "TestFoo", File: "a_test.go", StartLine: 1}},
 		TestsTotal:   1,
 		BlastRadius:  7,
+		BlastDepth:   3,
 		Annotations:  []graph.Annotation{{Source: "note", Note: "watch this"}},
 	}
 	title, lines := contextCard(rep)
@@ -953,7 +954,7 @@ func TestContextCardAndOverlay(t *testing.T) {
 		"Callers (5)", "Bar", "+4 more",
 		"Callees (0)", "(none)",
 		"Tests (1)", "TestFoo",
-		"Blast radius: 7", "Annotations (1)", "watch this",
+		"Blast radius: 7", "depth ≤ 3", "Annotations (1)", "watch this",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("context card missing %q:\n%s", want, body)

@@ -480,7 +480,11 @@ func contextCard(rep *app.ContextReport) (string, []string) {
 	}
 	list("Tests", rep.TestsTotal, tests)
 
-	add(sectionStyle.Render(fmt.Sprintf("Blast radius: %d transitively affected", rep.BlastRadius)))
+	blast := fmt.Sprintf("Blast radius: %d transitively affected", rep.BlastRadius)
+	if rep.BlastDepth > 0 { // honest about scope: it's depth-bounded, like the CLI's "(depth ≤ N)"
+		blast += fmt.Sprintf(" (depth ≤ %d)", rep.BlastDepth)
+	}
+	add(sectionStyle.Render(blast))
 	if len(rep.Annotations) > 0 {
 		add("")
 		add(sectionStyle.Render(fmt.Sprintf("Annotations (%d)", len(rep.Annotations))))

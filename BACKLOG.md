@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #180 (honesty/parity — blast-radius depth scope in context, surfaced everywhere) — dogfooding
+  codemap on itself (index + context/impact/path/find/symbols/status — all healthy), the one real gap: the
+  CLI context card qualifies blast radius as `(depth ≤ 3)` but the studio card said just "N transitively
+  affected" and the JSON/MCP had no depth field at all — so neither a studio user nor an agent learned the
+  blast radius is depth-bounded, not the full transitive closure (a subtle over-claim, cf. #167/#172). Added
+  `BlastDepth int` to ContextReport (`json:"blast_depth"`), set to the normalized traversal depth in
+  Service.Context; the studio card now shows "(depth ≤ N)" and the JSON carries `blast_depth` alongside
+  `blast_radius`. Confirmed: `context --json` → `"blast_radius":22,"blast_depth":3`; studio card →
+  "Blast radius: 2 transitively affected (depth ≤ 3)". Updated TestContextCardAndOverlay. `task check` +
+  studio.yml flow green (spec unchanged). COMMIT+PUSH.
 - 2026-06-24 #179 (studio polish — colorize the context overlay to match the rest of the TUI) — the #178
   context card shipped monochrome (plain text, for truncation safety) while every other studio surface is
   colored, so it looked out of place. Styled it to match: section headers (`Callers (N)` / `Callees (N)` /
