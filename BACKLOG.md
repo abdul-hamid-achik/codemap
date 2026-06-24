@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #185 (README accuracy — refresh the flagship `impact` example against the real binary) — audited
+  the README's command examples against the current binary (the loop's "accurate README that matches the
+  actual commands"). The input examples (context/callers --lsp/path/impact --depth/semantic --top/…) are all
+  valid current syntax, but the flagship `impact BlastRadius --depth 2` block — explicitly labelled "real
+  output, from codemap on itself" — had DRIFTED: blast radius 10→11, all line numbers shifted, and crucially
+  `app.Service.Context` now appears as a real depth-2 dependency (Context calls Impact since #155) — so the
+  example was both stale AND understated the tool's reach. Re-ran the command and updated the block to the
+  current truth; it now shows the tool catching that genuine cross-module dependency. Left the studio ASCII
+  mockup (509 nodes/35 files) as a representative layout illustration — recapturing it coherently needs a
+  live interactive studio frame I can't grab non-interactively, and it makes no "current data" claim. No Go
+  changed. COMMIT+PUSH.
 - 2026-06-24 #184 (validate the MCP/agent surface end-to-end + CI-guard the agent-trust path) — dogfooded
   the MCP server (the user's primary "use with a harness" goal) by driving real JSON-RPC tool calls over the
   newline-delimited stdio protocol: 20 tools, clean handshake/exit; codemap_context → full bundle with

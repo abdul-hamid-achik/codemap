@@ -177,26 +177,27 @@ $ codemap impact BlastRadius --depth 2
 Impact of BlastRadius (codemap)
   defined:        internal/graph/queries.go:140
   direct callers: 3
-  blast radius:   10 (depth ≤ 2)
+  blast radius:   11 (depth ≤ 2)
   tests covering: 6
   covering tests (run these):
      graph.TestBlastRadius                internal/graph/graph_test.go:305
      graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:347
-     app.TestQueryResultsCarrySignature   internal/app/app_test.go:131
-     app.TestImpactSurfacesAnnotations    internal/app/app_test.go:299
-     app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1010
-     app.TestServiceImpact                internal/app/app_test.go:1154
+     app.TestQueryResultsCarrySignature   internal/app/app_test.go:175
+     app.TestImpactSurfacesAnnotations    internal/app/app_test.go:343
+     app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1250
+     app.TestServiceImpact                internal/app/app_test.go:1427
   affected (blast radius):
-     [1] app.Service.Impact                   internal/app/service.go:898
+     [1] app.Service.Impact                   internal/app/service.go:983
    ✓ [1] graph.TestBlastRadius                internal/graph/graph_test.go:305
    ✓ [1] graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:347
-     [2] main.runImpact                       cmd/codemap/main.go:504
-   ✓ [2] app.TestQueryResultsCarrySignature   internal/app/app_test.go:131
-   ✓ [2] app.TestImpactSurfacesAnnotations    internal/app/app_test.go:299
-   ✓ [2] app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1010
-   ✓ [2] app.TestServiceImpact                internal/app/app_test.go:1154
-     [2] mcp.Server.handleImpact              internal/mcp/server.go:303
-     [2] tui.Model.impactCmd                  internal/tui/model.go:389
+     [2] main.runImpact                       cmd/codemap/main.go:572
+   ✓ [2] app.TestQueryResultsCarrySignature   internal/app/app_test.go:175
+   ✓ [2] app.TestImpactSurfacesAnnotations    internal/app/app_test.go:343
+   ✓ [2] app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1250
+   ✓ [2] app.TestServiceImpact                internal/app/app_test.go:1427
+     [2] app.Service.Context                  internal/app/service.go:1322
+     [2] mcp.Server.handleImpact              internal/mcp/server.go:320
+     [2] tui.Model.impactCmd                  internal/tui/model.go:522
 ```
 Long lists are capped for readability (the nearest blast-radius nodes and the
 first covering tests, with a `… (N more)` line); `--json` always carries the
