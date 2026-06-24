@@ -4,6 +4,33 @@
 > next unstarted task, do it, update status here. Convert relative dates to absolute.
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
+## 🏷️ Release — v0.7.0 (2026-06-24)
+**Multi-language breadth + reliability.** Headline since v0.6.0:
+- **More languages, riding the LSP backend.** **JavaScript** (one `typescript-language-server` serves
+  both TS and JS, calls resolving across the `.ts`↔`.js` boundary), **Python** (`pyright-langserver`),
+  and a real **JSX/TSX** call graph (`.tsx`/`.jsx` opened with the *react languageIds so `<Component/>`
+  usages resolve). `--precise` is the unified exact-resolution pass for all of them (go/types for Go,
+  callHierarchy for the LSP languages). `appendSymbols` drops parameter/local noise.
+- **`codemap doctor`** (CLI **and** MCP, the 19th tool) — checks the go toolchain, gopls, each language
+  server, and Ollama embeddings, with install hints; diagnoses "why isn't my X indexed?".
+- **Hybrid semantic search** — `semantic` (alias `search`) now fuses vector similarity with BM25 over
+  symbol/fqn (the store had it; it was never wired). Better keyword + meaning matches.
+- **Reliability:** every LSP request is bounded by a 30s timeout (a hung server can't freeze `index`);
+  skipped/timed-out files are counted and explained (CLI + studio); **incremental reindex now prunes
+  files deleted on disk** (was leaving ghost symbols in find/callers/search — a real trust bug).
+- **`orphans` you can trust** — follows functions wired by *value* (cobra `RunE`, `mux.HandleFunc`), so
+  framework handlers aren't false dead-code; `hotspots` stays a clean call-only metric.
+- **studio:** `ctrl+g` opens any symbol in the Graph walker; `ctrl+r` preserves the project's precision
+  (doesn't drop the call graph on refresh); honest empty-states and skip reporting.
+- **Parity & polish:** CLI↔MCP parity (`unannotate`, `doctor`); language-aware `--precise` onboarding
+  tips; markup (`.vue`/`.html`/`.css`) recognized as "planned"; every engine/precise surface names all
+  four languages; a scannable languages table in the README.
+
+Pre-release: CGO_ENABLED=0 full suite + `-race` green · golangci-lint v2 0 issues · gofmt/vet clean ·
+`goreleaser check` + snapshot cross-compiled all 5 pure-Go targets · tree clean. Tagging `v0.7.0`
+triggers `.github/workflows/release.yml` → goreleaser → binaries + `abdul-hamid-achik/homebrew-tap`.
+Ships: CLI · **MCP (19 tools)** · studio TUI · graph+vectors+LSP (Go · TypeScript · JavaScript · Python).
+
 ## 🏷️ Release — v0.6.0 (2026-06-24)
 **TypeScript becomes a first-class language**, plus trustworthy dead-code analysis and richer studio
 navigation. Headline since v0.5.0:
