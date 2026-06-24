@@ -193,6 +193,12 @@ var (
 		Args:  cobra.NoArgs,
 		RunE:  runProjects,
 	}
+	branchStatusCmd = &cobra.Command{
+		Use:   "branch-status [path]",
+		Short: "Show the git branch/commit state used to key per-branch index snapshots (read-only)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runBranchStatus,
+	}
 	docsCmd = &cobra.Command{
 		Use:   "docs [topic]",
 		Short: "Print the agent guide to codemap (topics: overview, workflow, commands, annotations, accuracy, ecosystem)",
@@ -241,7 +247,48 @@ func init() {
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
 		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
-		annotateCmd, annotationsCmd)
+		annotateCmd, annotationsCmd, branchStatusCmd)
+}
+
+// runBranchStatus reports the read-only git state of the repo at the given path
+// (or cwd) — the foundation for branch-aware index switching. No writes.
+func runBranchStatus(cmd *cobra.Command, args []string) error {
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if len(args) > 0 {
+		dir = args[0]
+	}
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	st, err := app.NewService(sess).BranchStatus(cmd.Context(), dir)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(st)
+	}
+	if !st.IsRepo {
+		fmt.Printf("%s is not inside a git repository — per-branch index snapshots don't apply.\n", dir)
+		return nil
+	}
+	branch := st.Branch
+	if st.Detached {
+		branch = "(detached HEAD)"
+	}
+	sha := st.SHA
+	if len(sha) > 12 {
+		sha = sha[:12]
+	}
+	fmt.Printf("Repo:   %s\n  hash:   %s\n  branch: %s\n  commit: %s\n", st.RepoRoot, st.RepoHash, branch, sha)
+	if st.Key != "" {
+		fmt.Printf("  index key: %s\n", st.Key)
+	}
+	return nil
 }
 
 // --- command handlers (thin: resolve flags, call internal/app, render) ---

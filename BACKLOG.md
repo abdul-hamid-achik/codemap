@@ -206,7 +206,12 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 > the entering branch's snapshot — else incremental reindex. codemap CANNOT copy a file (single shared
 > graph.db + codemap.veclite sliced by project), so it **serializes its project slice** and restores via
 > WipeProject + bulk-insert; vecgrep just file-copies its per-branch veclite.
-- [ ] **BD.1** `internal/git/branch.go` — `CurrentBranch`/`HeadSHA`/`RepoRoot`/`IsDetached`/`SanitizeBranch`/`RepoHash` via `git` shell-out (no CGO git lib). Ship read-only `branch-status` first to validate detection (detached HEAD + worktrees) before any writes.
+- [x] **BD.1** `internal/git/branch.go` — `CurrentBranch`/`HeadSHA`/`RepoRoot`/`IsDetached`/`SanitizeBranch`
+  (always-hash for collision-free path segments)/`RepoHash` (sha1[:12] of the symlink-resolved root) +
+  `Inspect`→`Status`, all via `git` shell-out (`exec.CommandContext`, no CGO). Read-only `codemap branch-status
+  [path] [--json]` (Service `BranchStatus` + CLI) reports branch/sha/detached/repoHash/key. Tests
+  `TestInspect`/`TestSanitizeBranch`/`TestRepoHashStable` (init a temp repo, commit, detached-HEAD); task check
+  green; dogfood-verified on codemap itself.
 - [ ] **BD.2** `internal/snapshot/snapshot.go` — `Export(graph, vectors, projectID, project, dir, profile, baseSHA)` → `nodes/edges/index_state/annotations/vectors.jsonl` + `snapshot.json` (**deterministic ordering** so fcheap dedups identical slices). `Import` = WipeProject + DeleteByProject then bulk re-insert, **gated on embeddingProfile match**. New graph helpers `ProjectEdges`/`ProjectIndexState`; new `vector.Store.IterByProject` (mirror DeleteByProject). ⚠ **Merge (don't blow away) annotations** on import.
 - [ ] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper: `Save(dir,tool,name,tags,sourceSHA)->stashID` (parse `--json`), `Restore(id,toDir)` (check `Verified`), `List(tags)`. fcheap binary path from config/PATH.
 - [ ] **BD.4** `internal/branchstate/state.go` — pointer file `RegistryDir()/branches/<repoHash>.json` (atomic temp+rename): branch→{stash_id, base_sha, profile, counts}. `Rebuild` from `fcheap list --tag`.

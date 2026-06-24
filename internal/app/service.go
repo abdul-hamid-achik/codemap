@@ -14,6 +14,7 @@ import (
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
+	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
@@ -399,6 +400,14 @@ func (svc *Service) Projects() (*ProjectsReport, error) {
 		})
 	}
 	return rep, nil
+}
+
+// BranchStatus reports the git state of the repo at cwd — current branch, HEAD
+// sha, detached, and the stable repo/branch keys that per-branch index snapshots
+// are keyed by. Read-only (no writes, no index changes); the foundation for
+// branch-aware index switching (BD.*). A non-git directory reports IsRepo:false.
+func (svc *Service) BranchStatus(ctx context.Context, cwd string) (git.Status, error) {
+	return git.Inspect(ctx, cwd)
 }
 
 // AnnotationsReport is returned by the annotation read methods.
