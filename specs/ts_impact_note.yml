@@ -1,0 +1,43 @@
+version: 1
+name: ts_impact_note
+intent: |
+    On a name-based index, TypeScript/JavaScript/Python have NO call graph (it exists
+    only under --precise via callHierarchy). Before, impact/callers returned a
+    confidently-empty result + untested:true for a TS symbol — reading as ground-truth
+    "no callers / no tests" when it really means "unresolved". Now they return a clear
+    `resolution` note pointing at `index --precise` instead, and DON'T claim untested.
+    (FIX.md §1.) Needs typescript-language-server (isolates CODEMAP_DATA only, not HOME,
+    so the asdf shim resolves).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P/src\"; printf '{\"compilerOptions\":{\"target\":\"ES2020\",\"module\":\"ESNext\",\"strict\":true},\"include\":[\"src\"]}\\n' > \"$P/tsconfig.json\"; printf 'export function getCols(n){ return n*2 }\\nexport function run(){ return getCols(21) }\\n' > \"$P/src/a.ts\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== index (name-based, no --precise) =='; \"$CM\" index --no-embed 2>&1 | grep -i graph; echo '== impact getCols =='; \"$CM\" impact getCols; echo '== callers getCols =='; \"$CM\" callers getCols"
+    cwd: "."
+terminal:
+    cols: 110
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 30000
+    - snapshot: ts_impact_note
+outcomes:
+    - id: impact_states_unavailable
+      description: impact on a TS symbol without --precise explains the call graph is unavailable, not empty
+      verify:
+        screen:
+            contains: "call graph not available"
+    - id: points_at_precise
+      description: the note tells you how to resolve it
+      verify:
+        screen:
+            contains: "index --precise"
+    - id: clean_exit
+      description: the commands exit cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:2e1f305809b0ffa06bd042421085db58af9c2196caa085f5f321021b1cbd9f09

@@ -5,6 +5,25 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #198 (FIX.md §1 — impact/callers/callees stop confidently returning []/untested:true for TS/JS/
+  Python without a call graph) — the user's 0.10.0 punch list (FIX.md, dogfooding graphite): the flagship
+  blast-radius queries returned `direct_callers:[], tests:[], untested:true` for a TS function with 106 real
+  tests — a confidently-WRONG empty (worse than erroring; `[]` reads as "none" not "unresolved"). Root cause:
+  TS/JS/Python have NO name-based call edges (only --precise/callHierarchy builds them), so on the default
+  name-based index those symbols have zero call edges → empty results → Untested=true. Fix (ask 1, the
+  honesty increment, planned via a 3-agent workflow): added `noNameBasedCallLang` + `Service.callGraphUnavailable`
+  (lang has no name-based edges AND !hasPreciseEdges); when it fires, Impact suppresses Untested and sets a
+  `Resolution` note ("call graph not available for <lang> without precise indexing — … run 'codemap index
+  --precise'"), relation (callers/callees) sets Resolution on an empty result, Context propagates it. New
+  `resolution` JSON field on ImpactReport/RelationReport/ContextReport (flows through MCP automatically); CLI
+  (runImpact gates the untested line on it; runCallers/runCallees print it) + studio Impact tab (shows the
+  note instead of the ⚠ untested chip) + docs.go accuracy topic updated. Verified on a TS fixture: name-based
+  → `untested:false` + resolution note (was untested:true); `--precise` → resolution gone, callers resolved;
+  Go untested behavior unchanged. Added TestCallGraphUnavailableDetection (CI-runnable) + specs/ts_impact_note.yml.
+  `task check` + typescript/javascript/python/precise/query flows green. COMMIT+PUSH. (FOLLOW-UP = ask 2:
+  actually resolve TS callers/tests — scoped per-symbol callHierarchy, and heuristic describe/it→covers test
+  edges since test bodies live in anonymous it() callbacks that #196 now filters; that's why a --precise TS
+  symbol can still show untested. Next: FIX.md §2 nav history, §3 source highlighting.)
 - 2026-06-24 #197 (resolve qualified names — accept the form hotspots/orphans/find PRINT; sweep finding C) —
   hotspots/orphans/find display package-qualified names (`ui.DefaultTheme`, `pkg.Type.Method`) but
   callers/callees/impact/context/source/path REJECTED them ("no symbol named"), so copy-pasting a name from

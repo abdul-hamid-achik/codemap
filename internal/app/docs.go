@@ -108,7 +108,9 @@ pass; for the LSP languages (TypeScript, JavaScript, Python) it drives the langu
 server's callHierarchy. It resolves every call to the one it invokes and replaces the
 name-based call edges, so EVERY query (callers, callees, impact, hotspots, path) becomes
 exact at once. (The LSP languages have NO name-based call edges, so --precise is what gives
-TS/JS/Python a call graph at all.) The Go pass
+TS/JS/Python a call graph at all — so without it, impact/callers/callees on a TS/JS/Python symbol
+return a "resolution" note saying the call graph is unavailable, NOT a confidently-empty result or
+untested:true; the callers/tests are unresolved, not absent.) The Go pass
 needs the go toolchain + a buildable module; packages that don't type-check keep
 name-based edges (per-package degrade), and no go/go.mod falls back wholesale with a
 "note" — never worse than name-based, never a hard error. Opt-in: without --precise the

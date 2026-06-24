@@ -554,10 +554,13 @@ func (m Model) renderImpact(w, h int) string {
 		}
 		cover := fmt.Sprintf("%d direct callers · %d in blast radius · %d covering tests",
 			len(rep.DirectCallers), len(rep.BlastRadius), len(rep.Tests))
-		if rep.Untested {
+		if rep.Untested && rep.Resolution == "" { // don't flag "untested" when the call graph is just unresolved
 			cover += "   " + errorStyle.Render("⚠ untested")
 		}
 		b.WriteString("\n" + countStyle.Render(cover) + "\n")
+		if rep.Resolution != "" { // TS/JS/Python without --precise: the empty counts are unresolved, not absent
+			b.WriteString(errorStyle.Render("⚠ ") + mutedStyle.Render(truncate(rep.Resolution, w-2)) + "\n")
+		}
 		if rep.Note != "" { // ambiguous name: the counts above merge same-named defs
 			b.WriteString(errorStyle.Render("⚠ ") + mutedStyle.Render(truncate(rep.Note, w-2)) + "\n")
 		}

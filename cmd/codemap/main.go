@@ -519,6 +519,9 @@ func runCallers(cmd *cobra.Command, args []string) error {
 	if rep.Note != "" {
 		fmt.Println("⚠ " + rep.Note)
 	}
+	if rep.Resolution != "" {
+		fmt.Println("⚠ " + rep.Resolution)
+	}
 	renderAnnotations(rep.Annotations)
 	return nil
 }
@@ -568,6 +571,9 @@ func runCallees(cmd *cobra.Command, args []string) error {
 	if rep.Note != "" {
 		fmt.Println("⚠ " + rep.Note)
 	}
+	if rep.Resolution != "" {
+		fmt.Println("⚠ " + rep.Resolution)
+	}
 	renderAnnotations(rep.Annotations)
 	return nil
 }
@@ -605,7 +611,9 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  direct callers: %d\n", len(rep.DirectCallers))
 	fmt.Printf("  blast radius:   %d (depth ≤ %d)\n", len(rep.BlastRadius), depth)
 	fmt.Printf("  tests covering: %d\n", len(rep.Tests))
-	if rep.Untested {
+	if rep.Resolution != "" {
+		fmt.Println("  ⚠ " + rep.Resolution)
+	} else if rep.Untested {
 		fmt.Println("  ⚠ no tests reach this symbol")
 	}
 	renderAnnotations(rep.Annotations)

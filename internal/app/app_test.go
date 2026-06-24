@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
@@ -169,6 +170,55 @@ func TestCallersFoundDistinguishesTypoFromNoCallers(t *testing.T) {
 		t.Fatal(err)
 	} else if !leaf.Found {
 		t.Error("Helper exists, so Callees should report Found=true")
+	}
+}
+
+// TestCallGraphUnavailableDetection guards the §1 honesty fix: impact/callers must
+// flag (not confidently-empty) a no-name-based-call-edge language (TS/JS/Python) on a
+// name-based index, but stay silent for Go and once the index has precise edges.
+func TestCallGraphUnavailableDetection(t *testing.T) {
+	for _, l := range []string{"typescript", "javascript", "python"} {
+		if !noNameBasedCallLang(l) {
+			t.Errorf("%q has no name-based call edges and should be flagged", l)
+		}
+	}
+	for _, l := range []string{"go", "ruby", "c", ""} {
+		if noNameBasedCallLang(l) {
+			t.Errorf("%q has name-based call edges and must NOT be flagged", l)
+		}
+	}
+
+	isolate(t)
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := g.UpsertProject("p", "/p", "typescript")
+	tsNode := &graph.Node{ProjectID: pid, FilePath: "a.ts", Symbol: "compute", FQN: "compute", Kind: graph.KindFunction, Language: "typescript", SourceHash: "h"}
+	tsID, _ := g.AddNode(tsNode)
+	goNode := &graph.Node{ProjectID: pid, FilePath: "b.go", Symbol: "Run", FQN: "Run", Kind: graph.KindFunction, Language: "go", SourceHash: "h"}
+	goID, _ := g.AddNode(goNode)
+
+	// Name-based index: a TS symbol's call graph is unavailable (unresolved, not absent).
+	if lang, yes := svc.callGraphUnavailable(g, pid, []graph.Node{*tsNode}); !yes || lang != "typescript" {
+		t.Errorf("TS on name-based index: want (typescript,true), got (%q,%v)", lang, yes)
+	}
+	// A Go symbol on the same index has real name-based call edges → available.
+	if _, yes := svc.callGraphUnavailable(g, pid, []graph.Node{*goNode}); yes {
+		t.Error("Go symbol must not be flagged unavailable on a name-based index")
+	}
+	// Once the project has ANY precise edges, the call graph is resolved → not flagged.
+	if _, err := g.AddEdgeProv(goID, tsID, graph.EdgeCalls, 1.0, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+	if _, yes := svc.callGraphUnavailable(g, pid, []graph.Node{*tsNode}); yes {
+		t.Error("TS symbol must not be flagged once the index has precise edges")
 	}
 }
 

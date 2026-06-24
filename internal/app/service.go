@@ -311,6 +311,34 @@ func (svc *Service) hasPreciseEdges(g *graph.Store, pid int64) bool {
 	return err == nil && n > 0
 }
 
+// noNameBasedCallLang reports whether a language has NO name-based call edges — its
+// call graph exists ONLY under `index --precise` (callHierarchy). For these, empty
+// callers/callees/blast/tests on a name-based index means "unresolved", not "none".
+func noNameBasedCallLang(lang string) bool {
+	switch lang {
+	case "typescript", "javascript", "python":
+		return true
+	}
+	return false
+}
+
+// callGraphUnavailable returns the language (and true) when the queried symbol's call
+// graph can't be resolved on the current index: its language has no name-based call
+// edges AND the project has no precise edges. Callers use this to replace a
+// confidently-empty callers/blast/tests result (and a misleading untested:true) with
+// an honest "run --precise" note — so `[]` never reads as ground-truth "none".
+func (svc *Service) callGraphUnavailable(g *graph.Store, pid int64, nodes []graph.Node) (string, bool) {
+	if svc.hasPreciseEdges(g, pid) {
+		return "", false // a precise index resolved the call graph — empty really means empty
+	}
+	for _, n := range nodes {
+		if noNameBasedCallLang(n.Language) {
+			return n.Language, true
+		}
+	}
+	return "", false
+}
+
 // embeddedCount reports how many vectors exist for the named project and whether
 // that count is known. It never creates the veclite store: if the file is absent
 // the project is structure-only, which is a known 0 — so a structure-only project
@@ -548,6 +576,7 @@ type RelationReport struct {
 	Found       bool               `json:"found"` // whether the symbol exists in the index — distinguishes a typo from a real symbol with no callers/callees (both yield empty Results)
 	Results     []SymbolRef        `json:"results"`
 	Note        string             `json:"note,omitempty"`        // set when precise resolution fell back to name-based
+	Resolution  string             `json:"resolution,omitempty"`  // set when the call graph is unresolved (TS/JS/Python without --precise) — results are unavailable, not absent
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to the queried symbol
 }
 
@@ -673,6 +702,11 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 		} else {
 			rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — these results merge all of them; reindex with 'codemap index --precise' for exact per-method edges, or use --lsp for one method", symbol, len(defs))
 		}
+	}
+	// Empty results for a no-name-based-call language on a non-precise index mean
+	// "unresolved", not "no callers" — flag it instead of a confident empty.
+	if lang, yes := svc.callGraphUnavailable(g, p.ID, defs); yes && len(rep.Results) == 0 {
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang)
 	}
 	rep.Annotations = symbolAnnotations(g, p.ID, symbol)
 	return rep, nil
@@ -996,6 +1030,7 @@ type ImpactReport struct {
 	Tests         []ImpactNode       `json:"tests"`
 	Untested      bool               `json:"untested"`
 	Note          string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
+	Resolution    string             `json:"resolution,omitempty"`  // set when the call graph is unresolved (e.g. TS/JS/Python without --precise) — direct_callers/blast_radius/tests are unavailable, not empty
 	Annotations   []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
@@ -1077,6 +1112,13 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		}
 	}
 	rep.Untested = len(rep.Tests) == 0
+	// If the symbol's language has no name-based call graph and the index isn't
+	// precise, the empty callers/blast/tests are UNRESOLVED, not absent — say so and
+	// don't claim "untested" (that fired for a function with 106 real tests).
+	if lang, yes := svc.callGraphUnavailable(g, p.ID, locs); yes {
+		rep.Untested = false
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang)
+	}
 
 	// Surface any annotations pinned to this symbol — by the query name or by a
 	// resolved FQN/symbol of its definition sites — so analysis shows pinned
@@ -1325,6 +1367,7 @@ type ContextReport struct {
 	BlastRadius  int                `json:"blast_radius"`          // count of transitively-affected nodes
 	BlastDepth   int                `json:"blast_depth"`           // depth the blast radius was traversed to (it's bounded, not the full closure)
 	Note         string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
+	Resolution   string             `json:"resolution,omitempty"`  // set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
 	Annotations  []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
 }
 
@@ -1381,6 +1424,7 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 		if rep.Note == "" {
 			rep.Note = imp.Note
 		}
+		rep.Resolution = imp.Resolution // carry the "call graph unavailable without --precise" honesty note
 	}
 	return rep, nil
 }
