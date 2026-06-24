@@ -5,6 +5,18 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #179 (studio polish — colorize the context overlay to match the rest of the TUI) — the #178
+  context card shipped monochrome (plain text, for truncation safety) while every other studio surface is
+  colored, so it looked out of place. Styled it to match: section headers (`Callers (N)` / `Callees (N)` /
+  `Tests (N)` / `Blast radius:` / `Annotations`) in sectionStyle, symbol names in symStyle, kinds/locations/
+  docs muted, the ambiguity note in errorStyle, annotation sources in countStyle. Safety: switched the
+  overlay's no-gutter render path from rune-based `truncate` to lipgloss `MaxWidth` (ANSI-aware, same clip
+  the frame already uses) so escape codes don't get miscounted; kept every label/name inside a single
+  styled segment so substring/`Contains` lookups (and TestContextCardAndOverlay) stay intact. Considered
+  fixing the footer status-clipping I hit in #178 but confirmed it's BY DESIGN (seedTabs carries a ~38-wide
+  status and TestFooterCompactsWhenNarrow deliberately expects the rich hint at 120 anyway — the footer
+  prioritizes the keybinding hint over full status text), so left it. `task check` + studio.yml flow green
+  (spec unchanged — the .txt snapshot stays ANSI-stripped & readable; color rides in the .svg/.json). COMMIT+PUSH.
 - 2026-06-24 #178 (studio FEATURE — the context "orient" overlay: flagship parity across all three surfaces)
   — `context` (the one-call symbol bundle: definition + callers + callees + tests + blast radius +
   annotations) was exposed in the CLI (`codemap context`) and MCP (`codemap_context`) but had NO studio

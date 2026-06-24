@@ -103,7 +103,9 @@ func (m Model) renderSource(w, h int) string {
 			gutter := mutedStyle.Render(fmt.Sprintf("%4d ", i+1))
 			b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
 		} else {
-			b.WriteString(truncate(m.srcLines[i], w) + "\n")
+			// the context card carries lipgloss styling, so clip ANSI-aware
+			// (rune-based truncate would miscount the escape codes).
+			b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(m.srcLines[i]) + "\n")
 		}
 	}
 	return b.String()

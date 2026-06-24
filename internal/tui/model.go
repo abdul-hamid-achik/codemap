@@ -410,26 +410,29 @@ func (m Model) contextViewCmd(sym string) tea.Cmd {
 	}
 }
 
-// contextCard renders a ContextReport into a scrollable, monochrome card (plain
-// text so the overlay's rune-based truncation stays correct) matching the source
-// overlay's look: flush-left section headers, indented detail rows.
+// contextCard renders a ContextReport into a scrollable card styled to match the
+// rest of the studio: flush-left section headers, indented detail rows, symbol
+// names highlighted and locations muted. Each line is rendered ANSI-aware by the
+// overlay (lipgloss MaxWidth), so styling is safe; every label/name is kept in a
+// single styled segment so substring lookups (and tests) stay intact.
 func contextCard(rep *app.ContextReport) (string, []string) {
 	title := rep.Symbol
 	var ls []string
 	add := func(s string) { ls = append(ls, s) }
 	refRow := func(r app.SymbolRef) string {
-		return fmt.Sprintf("  %s  %s  %s:%d", displayName(r.FQN, r.Symbol), r.Kind, r.File, r.StartLine)
+		return "  " + symStyle.Render(displayName(r.FQN, r.Symbol)) + "  " +
+			mutedStyle.Render(fmt.Sprintf("%s  %s:%d", r.Kind, r.File, r.StartLine))
 	}
 	list := func(label string, total int, rows []string) {
-		add(fmt.Sprintf("%s (%d)", label, total))
+		add(sectionStyle.Render(fmt.Sprintf("%s (%d)", label, total)))
 		if len(rows) == 0 {
-			add("  (none)")
+			add(mutedStyle.Render("  (none)"))
 		}
 		for _, r := range rows {
 			add(r)
 		}
 		if total > len(rows) {
-			add(fmt.Sprintf("  … +%d more", total-len(rows)))
+			add(mutedStyle.Render(fmt.Sprintf("  … +%d more", total-len(rows))))
 		}
 		add("")
 	}
@@ -438,23 +441,23 @@ func contextCard(rep *app.ContextReport) (string, []string) {
 		d := rep.Definitions[0]
 		title = displayName(d.FQN, d.Symbol)
 		if d.Signature != "" {
-			add(d.Signature)
+			add(symStyle.Render(d.Signature))
 		} else {
-			add(strings.TrimSpace(d.Kind + " " + d.Symbol))
+			add(symStyle.Render(strings.TrimSpace(d.Kind + " " + d.Symbol)))
 		}
 		if d.Doc != "" {
 			for _, dl := range strings.Split(strings.TrimRight(d.Doc, "\n"), "\n") {
-				add("  " + dl)
+				add(mutedStyle.Render("  " + dl))
 			}
 		}
 		add("")
 		for _, def := range rep.Definitions {
-			add(fmt.Sprintf("  %s:%d-%d", def.File, def.StartLine, def.EndLine))
+			add(mutedStyle.Render(fmt.Sprintf("  %s:%d-%d", def.File, def.StartLine, def.EndLine)))
 		}
 		add("")
 	}
 	if rep.Note != "" {
-		add("⚠ " + rep.Note)
+		add(errorStyle.Render("⚠ " + rep.Note))
 		add("")
 	}
 
@@ -472,20 +475,21 @@ func contextCard(rep *app.ContextReport) (string, []string) {
 
 	tests := make([]string, 0, len(rep.Tests))
 	for _, t := range rep.Tests {
-		tests = append(tests, fmt.Sprintf("  %s  %s:%d", displayName(t.FQN, t.Symbol), t.File, t.StartLine))
+		tests = append(tests, "  "+symStyle.Render(displayName(t.FQN, t.Symbol))+"  "+
+			mutedStyle.Render(fmt.Sprintf("%s:%d", t.File, t.StartLine)))
 	}
 	list("Tests", rep.TestsTotal, tests)
 
-	add(fmt.Sprintf("Blast radius: %d transitively affected", rep.BlastRadius))
+	add(sectionStyle.Render(fmt.Sprintf("Blast radius: %d transitively affected", rep.BlastRadius)))
 	if len(rep.Annotations) > 0 {
 		add("")
-		add(fmt.Sprintf("Annotations (%d)", len(rep.Annotations)))
+		add(sectionStyle.Render(fmt.Sprintf("Annotations (%d)", len(rep.Annotations))))
 		for _, a := range rep.Annotations {
 			note := a.Note
 			if note == "" {
 				note = a.Data
 			}
-			add(strings.TrimRight(fmt.Sprintf("  [%s] %s", a.Source, note), " "))
+			add("  " + countStyle.Render("["+a.Source+"]") + " " + strings.TrimRight(note, " "))
 		}
 	}
 	return title, ls
