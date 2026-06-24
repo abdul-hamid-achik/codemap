@@ -26,6 +26,7 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap path <from> <to>` | Shortest call path between two symbols |
 | `codemap symbols <file>` | Outline a file's symbols with their signatures (a structured alternative to reading it) |
 | `codemap source <symbol>` | Print a symbol's source code (the body behind its signature) |
+| `codemap context <symbol> [--depth N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, covering tests, blast-radius size, and pinned annotations. Replaces separate `source`/`callers`/`callees`/`impact` calls; the `codemap_context` MCP tool returns the same JSON for agents |
 
 The fast default uses the indexed graph (name-based resolution; same-named methods can over-match,
 e.g. `callers Close` lists callers of every `Close`). **The best fix is to reindex once with

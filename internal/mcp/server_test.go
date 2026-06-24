@@ -89,7 +89,7 @@ func TestMCPServer(t *testing.T) {
 	for _, tool := range lt.Tools {
 		got[tool.Name] = true
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_context", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}
@@ -164,6 +164,7 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 	}{
 		{"codemap_callers", map[string]any{"path": proj, "symbol": "Run"}},
 		{"codemap_impact", map[string]any{"path": proj, "symbol": "Run"}},
+		{"codemap_context", map[string]any{"path": proj, "symbol": "Run"}},
 		{"codemap_find", map[string]any{"path": proj, "query": "Run"}},
 		{"codemap_semantic", map[string]any{"path": proj, "query": "run"}},
 		{"codemap_hotspots", map[string]any{"path": proj}},

@@ -175,6 +175,12 @@ var (
 		Args:  cobra.ExactArgs(1),
 		RunE:  runSource,
 	}
+	contextCmd = &cobra.Command{
+		Use:   "context <symbol>",
+		Short: "Everything about a symbol in one call: definition, callers, callees, tests, notes",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runContext,
+	}
 	projectsCmd = &cobra.Command{
 		Use:   "projects",
 		Short: "List all projects registered with codemap and their index sizes",
@@ -217,6 +223,7 @@ func init() {
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
+	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
@@ -227,7 +234,7 @@ func init() {
 	annotationsCmd.Flags().Int64("rm", 0, "remove the annotation with this id")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd)
 }
 

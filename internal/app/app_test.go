@@ -403,6 +403,71 @@ func TestServiceStaleness(t *testing.T) {
 	}
 }
 
+// TestServiceContext checks the one-call bundle composes definition, callers,
+// callees, covering tests, and blast radius for a symbol.
+func TestServiceContext(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\n// A does the thing.\nfunc A() { B() }\n\nfunc B() {}\n\nfunc C() { A() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "a_test.go"),
+		[]byte("package app\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) { A() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Context(proj, "A", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatal("A should be found")
+	}
+	if len(rep.Definitions) != 1 || !strings.Contains(rep.Definitions[0].Signature, "func A") {
+		t.Errorf("definitions: want 1 with signature, got %+v", rep.Definitions)
+	}
+	if !strings.Contains(rep.Definitions[0].Doc, "A does the thing") {
+		t.Errorf("definition should carry the docstring, got %q", rep.Definitions[0].Doc)
+	}
+	has := func(refs []SymbolRef, sym string) bool {
+		for _, r := range refs {
+			if r.Symbol == sym {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(rep.Callers, "C") {
+		t.Errorf("callers should include C, got %+v", rep.Callers)
+	}
+	if !has(rep.Callees, "B") {
+		t.Errorf("callees should include B, got %+v", rep.Callees)
+	}
+	if len(rep.Tests) == 0 {
+		t.Errorf("A should have a covering test (TestA), got none")
+	}
+	if rep.BlastRadius < 1 {
+		t.Errorf("A should have a non-empty blast radius, got %d", rep.BlastRadius)
+	}
+
+	// Unknown symbol → not found, no error.
+	if miss, err := svc.Context(proj, "NotASymbol", 3); err != nil {
+		t.Fatal(err)
+	} else if miss.Found {
+		t.Errorf("unknown symbol should report Found=false, got %+v", miss)
+	}
+}
+
 func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

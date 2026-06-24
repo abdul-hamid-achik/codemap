@@ -30,9 +30,9 @@ store, and the project registry — so other tools can inspect the same store.`}
 
   1. codemap index             # build the graph (+ embeddings if Ollama is up)
   2. find the entry point      # codemap_semantic "<intent>" OR codemap_find <name>
-  3. understand it             # codemap_impact <sym>  (callers + blast radius + tests)
+  3. orient on a symbol        # codemap_context <sym>  (def + callers + callees + tests, ONE call)
+  4. go deeper                 # codemap_impact (blast radius) · codemap_source (full body)
                                # codemap_callers / codemap_callees (add precise:true on Go)
-  4. read it                   # codemap_source <sym>  (the body, no file open)
   5. trace flow                # codemap_path <from> <to>  (shortest call chain)
   6. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
 
@@ -59,8 +59,10 @@ files; use codemap_source when you need the implementation.`},
   studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, projects, semantic,
-find, callers, callees, impact, path, symbols, source, hotspots, orphans, annotate,
-annotations). callers/callees accept precise:true. codemap_docs returns this guide.`},
+find, callers, callees, impact, path, symbols, source, context, hotspots, orphans,
+annotate, annotations). codemap_context bundles a symbol's definition+callers+
+callees+tests in one call. callers/callees accept precise:true. codemap_docs returns
+this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
 external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a

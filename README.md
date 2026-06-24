@@ -206,6 +206,7 @@ complete set.
 | `symbols` | list a file's symbols (structured alternative to reading it) |
 | `find` | find symbols by name (offline) |
 | `source` | print a symbol's source code (the body behind its signature) |
+| `context` | **one call, everything about a symbol**: definition, callers, callees, covering tests, blast radius, notes |
 | `docs` | print the agent guide to codemap (`docs [topic]`) |
 | `annotate` / `annotations` | pin / list notes + external data on a symbol or call path |
 | `impact` | blast radius + test coverage for a symbol (`--depth`) |

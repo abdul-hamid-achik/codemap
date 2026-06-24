@@ -5,6 +5,22 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #155 (harness — `context`: one-call symbol bundle, the 20th MCP tool) — user asked to keep
+  making codemap usable with an agent harness (and leverage charm.land). Biggest remaining harness gap
+  was ROUND-TRIPS: orienting on a symbol meant 4 calls (source+callers+callees+impact). New `codemap
+  context <symbol>` (CLI) + `codemap_context` (MCP, now 20 tools) returns it all in ONE call:
+  definition(s) with signature/doc/source, callers, callees, covering tests, blast-radius size, and
+  pinned annotations. `Service.Context` COMPOSES the existing queries (so caps, ambiguity notes, and
+  annotation-surfacing stay in one place — no new backend). `--json`/MCP carry the complete bundle
+  (incl. source bodies) for agents; the human card is a compact, scannable overview (callers/callees/
+  tests capped to 8 with `(+N)`). **charm.land leverage**: the human card's section labels are styled
+  with lipgloss, gated on stdout being a TTY (`x/term`) so piped/--json output stays plain — verified
+  both (plain when piped, ANSI under glyph's terminal). The agent guide (`codemap_docs`) now lists
+  context as step 3 "orient on a symbol (ONE call)". Dogfooded on `context Impact` (8 callers incl. the
+  new Service.Context itself, 10 callees, 5 tests, blast 20). Tests: `TestServiceContext`, MCP
+  tool-presence + not-indexed-guard cases; new `specs/context.yml` flow. Docs: README/docs/cli.md/
+  CLAUDE.md(20 tools)/AGENTS.md/agent-guide. Full suite + lint(0) + fmt green. Closes the round-trip gap
+  from my agent-readiness list (after #153 staleness). COMMIT+PUSH.
 - 2026-06-24 #154 (studio — surface index staleness in the header, leveraging #153) — studio showed
   nothing about freshness, so a person exploring the graph after editing code had no cue the graph was
   behind. Now the header shows `⚠ stale C/N/D (ctrl+r)` (changed/new/deleted, amber) when the working

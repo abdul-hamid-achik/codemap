@@ -140,6 +140,12 @@ type sourceInput struct {
 	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+type contextInput struct {
+	Symbol string `json:"symbol" jsonschema:"the symbol to gather full context for"`
+	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
+}
+
 // emptyInput is for tools that take no arguments (e.g. codemap_projects).
 type emptyInput struct{}
 
@@ -225,6 +231,10 @@ func (s *Server) register() {
 		Name:        "codemap_source",
 		Description: "Return a symbol's source code (the implementation behind its signature), read from the indexed file's line range — so you can read a definition without opening the whole file.",
 	}, s.handleSource)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_context",
+		Description: "Everything about a symbol in ONE call: its definition(s) with source, who calls it, what it calls, the tests covering it, the blast-radius size, and any pinned annotations. Prefer this when orienting on an unfamiliar symbol — it replaces separate codemap_source + codemap_callers + codemap_callees + codemap_impact round-trips.",
+	}, s.handleContext)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_projects",
 		Description: "List every project registered with codemap and its index size (nodes, edges, files) — discover what's indexed. Queries target one project at a time (via path/cwd).",
@@ -360,6 +370,14 @@ func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in s
 		return r, v, nil
 	}
 	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol)
+	return result(rep, err)
+}
+
+func (s *Server) handleContext(_ context.Context, _ *sdkmcp.CallToolRequest, in contextInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Context(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
 }
 

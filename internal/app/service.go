@@ -1217,6 +1217,65 @@ func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
 	return rep, nil
 }
 
+// ContextReport is the one-call bundle for a symbol: its definition(s) with
+// source, who calls it, what it calls, the tests that cover it, the blast-radius
+// size, and any pinned annotations. It exists so a person or agent gets a
+// complete picture in a single query instead of stitching together source +
+// callers + callees + impact (four round-trips for a harness).
+type ContextReport struct {
+	Symbol      string             `json:"symbol"`
+	Project     string             `json:"project"`
+	Found       bool               `json:"found"`
+	Definitions []SourceMatch      `json:"definitions"`           // signature, doc, file:line, and source body per matching def
+	Callers     []SymbolRef        `json:"callers"`               // who calls it
+	Callees     []SymbolRef        `json:"callees"`               // what it calls
+	Tests       []ImpactNode       `json:"tests"`                 // tests covering it (run these)
+	BlastRadius int                `json:"blast_radius"`          // count of transitively-affected nodes
+	Note        string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
+	Annotations []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
+}
+
+// Context assembles the one-call bundle for a symbol by composing the existing
+// queries (Source, Callers, Callees, Impact) so the relationship logic, caps,
+// and ambiguity notes stay in one place. depth bounds the blast-radius count
+// (defaults to 3, like Impact). Returns Found=false (not an error) for an
+// unknown symbol.
+func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, error) {
+	if depth <= 0 {
+		depth = 3
+	}
+	rep := &ContextReport{
+		Symbol: symbol, Definitions: []SourceMatch{},
+		Callers: []SymbolRef{}, Callees: []SymbolRef{}, Tests: []ImpactNode{},
+	}
+	src, err := svc.Source(cwd, symbol)
+	if err != nil {
+		return nil, err
+	}
+	rep.Project = src.Project
+	rep.Definitions = src.Matches
+	rep.Annotations = src.Annotations
+	rep.Found = len(src.Matches) > 0
+	if !rep.Found {
+		return rep, nil // unknown symbol: empty bundle, no point querying relations
+	}
+	if ca, cErr := svc.Callers(cwd, symbol); cErr == nil {
+		rep.Callers = ca.Results
+		rep.Note = ca.Note
+	}
+	if ce, cErr := svc.Callees(cwd, symbol); cErr == nil {
+		rep.Callees = ce.Results
+	}
+	if imp, iErr := svc.Impact(cwd, symbol, depth); iErr == nil {
+		rep.Tests = imp.Tests
+		rep.BlastRadius = len(imp.BlastRadius)
+		if rep.Note == "" {
+			rep.Note = imp.Note
+		}
+	}
+	return rep, nil
+}
+
 // readLineRange returns lines [start, end] (1-based, inclusive) of a file.
 func readLineRange(path string, start, end int) (string, error) {
 	data, err := os.ReadFile(path)

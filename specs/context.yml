@@ -1,0 +1,46 @@
+version: 1
+name: context
+intent: |
+    `codemap context <symbol>` is the one-call bundle for orienting on a symbol:
+    its definition (signature + doc), who calls it, what it calls, the tests that
+    cover it, and the blast-radius size — replacing separate source/callers/
+    callees/impact calls. This is the primary "give me everything about X" surface
+    for an agent harness (and the codemap_context MCP tool returns the same JSON).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\n\\n// Auth validates the token.\\nfunc Auth() { parse() }\\nfunc parse() {}\\nfunc Login() { Auth() }\\n' > \"$P/a.go\"; printf 'package app\\nimport \"testing\"\\nfunc TestAuth(t *testing.T) { Auth() }\\n' > \"$P/a_test.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; \"$CM\" context Auth"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: context
+outcomes:
+    - id: shows_definition
+      description: the bundle shows the symbol's definition with its signature
+      verify:
+        screen:
+            contains: "func Auth()"
+    - id: shows_callers
+      description: the bundle lists who calls the symbol
+      verify:
+        screen:
+            contains: "callers"
+    - id: shows_callees_and_tests
+      description: the bundle lists what it calls and the covering tests
+      verify:
+        screen:
+            contains: "callees"
+    - id: clean_exit
+      description: context exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:799cb42ccefdd9a3c67057dc5161cf548f1a4c53c929359be77ff07a91d7d5c7
