@@ -6,6 +6,7 @@
 package extract
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 )
@@ -70,6 +71,25 @@ type Extractor interface {
 	Language() string
 	// ExtractFile parses src (the contents of relPath) into a FileResult.
 	ExtractFile(relPath string, src []byte) (*FileResult, error)
+}
+
+// CallEdge is one resolved call from a caller declaration to a callee, located by
+// the callee's declaration position (root-relative file + 1-based line, matching a
+// node's StartLine). External callees (a dependency / lib outside the project) have
+// no graph node. Produced by a CallResolver (e.g. the LSP backend's callHierarchy).
+type CallEdge struct {
+	FromFQN  string
+	ToFile   string
+	ToLine   int
+	External bool
+}
+
+// CallResolver is an optional extractor capability: resolve a file's outgoing
+// calls precisely (the LSP backend does this via callHierarchy). The indexer runs
+// it under --precise to add exact call edges for languages with no cheap
+// name-based call extraction (e.g. TypeScript).
+type CallResolver interface {
+	CallEdges(ctx context.Context, relPath string) ([]CallEdge, error)
 }
 
 // LanguageForPath maps a file path to a codemap language id, or "" if unknown.

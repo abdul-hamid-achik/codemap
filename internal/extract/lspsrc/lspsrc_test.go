@@ -71,6 +71,49 @@ func TestAppendSymbolsNesting(t *testing.T) {
 	}
 }
 
+func TestCallEdgesTypeScript(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not on PATH")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "callee.ts"),
+		[]byte("export function callee() { return 1; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "caller.ts"),
+		[]byte("import { callee } from \"./callee\";\n\nexport function caller() { return callee(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	e, err := New(ctx, "typescript", "typescript", dir, "typescript-language-server", "--stdio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	// Open both files so callHierarchy resolves cross-file.
+	for _, f := range []string{"callee.ts", "caller.ts"} {
+		src, _ := os.ReadFile(filepath.Join(dir, f))
+		if _, err := e.ExtractFile(f, src); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	edges, err := e.CallEdges(ctx, "caller.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, ed := range edges {
+		if ed.FromFQN == "caller" && !ed.External && ed.ToFile == "callee.ts" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected caller -> callee.ts edge, got %+v", edges)
+	}
+}
+
 func TestLineSlice(t *testing.T) {
 	lines := []string{"a", "b", "c", "d"}
 	if got := lineSlice(lines, 1, 2); got != "b\nc" {

@@ -742,6 +742,19 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-23 #106 (multi-lang — slice C1: TS call extraction) — **`lspsrc.CallEdges` resolves
+  TypeScript calls via LSP callHierarchy.** First de-risked with a probe: confirmed `tsserver`
+  `prepareCallHierarchy` + `outgoingCalls` resolve a cross-file call (`caller → callee`) correctly after
+  `didOpen`, ~30ms, no warm-up needed for a small project — so the reviewer's "cold server" risk didn't
+  bite (will revisit for large repos). New neutral `extract.CallEdge` {FromFQN, ToFile, ToLine,
+  External} + `extract.CallResolver` interface. `lspsrc.Extractor` implements it: `CallEdges(relPath)`
+  re-walks documentSymbols and, for each function/method/constructor, prepares call hierarchy at the
+  symbol's SelectionRange and maps each outgoing call's callee to its declaration position (callee
+  outside the project root ⇒ External, no node). Additive — not wired into indexing yet (slice C2), so
+  zero behavior change. Test `TestCallEdgesTypeScript` (server-gated): `caller → callee.ts` edge
+  resolves. Full suite + lint v2 (0) + CGO_ENABLED=0 build green; fmt clean. COMMIT+PUSH. Next: C2 wires
+  it into the indexer under `--precise` (write ProvPrecise edges via a posTo position-join, like Go's
+  resolvePreciseEdges) so callers/impact/hotspots work for TS.
 - 2026-06-23 #105 (multi-lang — TS E2E flow) — **`specs/typescript.yml` demonstrates LSP-backed
   TypeScript indexing end-to-end** — hits the directive's "demonstrate value via … LSP" channel for a
   non-Go language and guards the new feature. Indexes a `.ts` file (class + method + function) and shows

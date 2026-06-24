@@ -17,8 +17,11 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
 )
 
-// Extractor satisfies extract.Extractor by driving a language server.
-var _ extract.Extractor = (*Extractor)(nil)
+// Extractor satisfies extract.Extractor (and CallResolver) by driving a language server.
+var (
+	_ extract.Extractor    = (*Extractor)(nil)
+	_ extract.CallResolver = (*Extractor)(nil)
+)
 
 // Extractor wraps an LSP session for one language at one project root.
 type Extractor struct {
@@ -64,6 +67,62 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 		appendSymbols(res, lines, e.lang, "", s)
 	}
 	return res, nil
+}
+
+// CallEdges resolves the outgoing calls of every function/method in relPath via
+// the server's callHierarchy, returning one edge per resolved call (the callee
+// located by its declaration position). Implements extract.CallResolver. The file
+// must already be open in the server (ExtractFile did didOpen); callHierarchy
+// resolves cross-file because the whole project's files were opened first.
+func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
+	uri := lsp.URI(filepath.Join(e.root, relPath))
+	syms, err := e.client.DocumentSymbols(ctx, uri)
+	if err != nil {
+		return nil, err
+	}
+	var out []extract.CallEdge
+	e.walkCallEdges(ctx, uri, "", syms, &out)
+	return out, nil
+}
+
+func (e *Extractor) walkCallEdges(ctx context.Context, uri, parentFQN string, syms []lsp.DocumentSymbol, out *[]extract.CallEdge) {
+	for _, s := range syms {
+		fqn := s.Name
+		if parentFQN != "" {
+			fqn = parentFQN + "." + s.Name
+		}
+		if isCallable(s.Kind) {
+			items, err := e.client.PrepareCallHierarchy(ctx, uri, s.SelectionRange.Start)
+			if err == nil && len(items) > 0 {
+				calls, _ := e.client.OutgoingCalls(ctx, items[0])
+				for _, c := range calls {
+					file, external := e.relOf(c.To.URI)
+					*out = append(*out, extract.CallEdge{
+						FromFQN:  fqn,
+						ToFile:   file,
+						ToLine:   c.To.Range.Start.Line + 1, // 1-based, matches node StartLine
+						External: external,
+					})
+				}
+			}
+		}
+		e.walkCallEdges(ctx, uri, fqn, s.Children, out)
+	}
+}
+
+func isCallable(kind int) bool {
+	return kind == lsp.SymbolFunction || kind == lsp.SymbolMethod || kind == lsp.SymbolConstructor
+}
+
+// relOf turns a callee's file:// URI into a root-relative path; external=true when
+// the callee is outside the project (a dependency / lib, with no graph node).
+func (e *Extractor) relOf(uri string) (rel string, external bool) {
+	p := strings.TrimPrefix(uri, "file://")
+	r, err := filepath.Rel(e.root, p)
+	if err != nil || strings.HasPrefix(r, "..") {
+		return "", true
+	}
+	return r, false
 }
 
 // Close shuts the language server down.
