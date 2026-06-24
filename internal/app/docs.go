@@ -16,12 +16,12 @@ offline. It precomputes structure once, then answers narrow questions in a few
 calls instead of many file reads — for both people (CLI + the studio TUI) and
 agents (a stdio MCP server).
 
-Indexes Go (stdlib go/parser, full call graph) and TypeScript + JavaScript (via
-one typescript-language-server when installed: symbols + structure always, plus a
+Indexes Go (stdlib go/parser, full call graph), TypeScript + JavaScript (one
+typescript-language-server, across the .ts<->.js boundary), and Python (pyright-
+langserver) when the servers are installed: symbols + structure always, plus a
 precise call graph under 'index --precise' so callers/impact/hotspots/path work
-for TS/JS, across the .ts<->.js boundary). Other languages are recognized and
-reported as skipped (more in progress); --no-lsp disables the LSP backend.
-Semantic search is language-agnostic.
+for them. Other languages are recognized and reported as skipped (more in
+progress); --no-lsp disables the LSP backend. Semantic search is language-agnostic.
 
 Data lives under XDG paths (or ~/.codemap): the graph DB, the veclite vector
 store, and the project registry — so other tools can inspect the same store.`},

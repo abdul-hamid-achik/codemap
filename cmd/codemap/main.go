@@ -200,7 +200,7 @@ func init() {
 
 	indexCmd.Flags().Bool("reindex", false, "wipe and rebuild the whole project index")
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
-	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript via callHierarchy) — eliminates same-named over-matching and gives TS a call graph")
+	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph")
 	indexCmd.Flags().Bool("no-lsp", false, "skip language-server-backed extraction (e.g. TypeScript via typescript-language-server)")
 	initCmd.Flags().Bool("local", false, "create a .codemap directory inside the project")
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")

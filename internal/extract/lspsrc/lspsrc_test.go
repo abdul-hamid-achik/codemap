@@ -51,7 +51,7 @@ func TestAppendSymbolsNesting(t *testing.T) {
 			{Name: "bar", Kind: lsp.SymbolMethod, Range: lsp.Range{Start: lsp.Position{Line: 1}, End: lsp.Position{Line: 1}}},
 		},
 	}
-	appendSymbols(res, lines, "typescript", "", sym)
+	appendSymbols(res, lines, "typescript", "", false, sym)
 
 	if len(res.Symbols) != 2 {
 		t.Fatalf("symbols = %d, want 2", len(res.Symbols))
@@ -68,6 +68,46 @@ func TestAppendSymbolsNesting(t *testing.T) {
 	}
 	if by["Foo.bar"].StartLine != 2 {
 		t.Errorf("Foo.bar StartLine = %d, want 2 (1-based)", by["Foo.bar"].StartLine)
+	}
+}
+
+// TestAppendSymbolsSkipsParams verifies a function's nested Variable children
+// (parameters/locals, as pyright reports them) are dropped, while the function
+// and a module-level variable are kept — so the graph isn't cluttered with param
+// nodes like add.a / add.b.
+func TestAppendSymbolsSkipsParams(t *testing.T) {
+	res := &extract.FileResult{Path: "m.py", Language: "python"}
+	lines := []string{"def add(a, b):", "    return a + b"}
+	fn := lsp.DocumentSymbol{
+		Name: "add", Kind: lsp.SymbolFunction,
+		Range: lsp.Range{Start: lsp.Position{Line: 0}, End: lsp.Position{Line: 1}},
+		Children: []lsp.DocumentSymbol{
+			{Name: "a", Kind: lsp.SymbolVariable, Range: lsp.Range{Start: lsp.Position{Line: 0}, End: lsp.Position{Line: 0}}},
+			{Name: "b", Kind: lsp.SymbolVariable, Range: lsp.Range{Start: lsp.Position{Line: 0}, End: lsp.Position{Line: 0}}},
+		},
+	}
+	modVar := lsp.DocumentSymbol{
+		Name: "CONFIG", Kind: lsp.SymbolVariable,
+		Range: lsp.Range{Start: lsp.Position{Line: 2}, End: lsp.Position{Line: 2}},
+	}
+	appendSymbols(res, lines, "python", "", false, fn)
+	appendSymbols(res, lines, "python", "", false, modVar)
+
+	by := map[string]string{}
+	for _, s := range res.Symbols {
+		by[s.FQN] = s.Kind
+	}
+	if by["add"] != extract.KindFunction {
+		t.Errorf("add should be a function, got %q", by["add"])
+	}
+	if _, ok := by["add.a"]; ok {
+		t.Error("function parameter add.a must be dropped, not a node")
+	}
+	if _, ok := by["add.b"]; ok {
+		t.Error("function parameter add.b must be dropped, not a node")
+	}
+	if by["CONFIG"] != extract.KindVariable {
+		t.Errorf("module-level variable CONFIG should be kept, got %q", by["CONFIG"])
 	}
 }
 

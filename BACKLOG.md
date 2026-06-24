@@ -767,6 +767,22 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #120 (multi-lang — Python via pyright) — **Python is now first-class**, riding the
+  LSP plumbing as a second `ServerSpec` row (`pyright-langserver --stdio`, its own process). De-risked
+  with a probe first: pyright extracts symbols AND `callHierarchy` resolves (`compute → add`). One real
+  wrinkle — pyright reports a function's **parameters/locals as nested Variable symbols** (`add.a`,
+  `add.b`), which would clutter the graph. Fixed generally in `appendSymbols`: a new `insideCallable`
+  flag drops Variable symbols nested inside a function/method, while keeping module/class-level
+  variables — so no param nodes for any LSP language. Verified live: `symbols calc.py` → just `add` +
+  `compute` (no params), `callers add` → `compute` (precise Python call graph). `.py` was already
+  mapped by `LanguageForPath`; missing-pyright is auto-surfaced via the existing MissingServers advisory.
+  Tests: lspsrc `TestAppendSymbolsSkipsParams` (params dropped, module var kept) + updated
+  `TestAppendSymbolsNesting` signature; index `TestIndexPython` (server-gated: indexed, no param node,
+  cross-function precise edge). New `specs/python.yml` E2E (3 outcomes green, contractHash stamped).
+  Docs swept to **Go + TypeScript + JavaScript + Python** across README/AGENTS/CLAUDE/docs.go/
+  quick-start/cli.md + the `--precise` flag help (TS/JS/Python via callHierarchy). Full suite + lint(0)
+  + fmt green; pure-Go (pyright is a spawned subprocess). COMMIT+PUSH. Next: structure-only markup
+  (Vue/HTML/CSS/Docker) via a Pass-2b, or polish.
 - 2026-06-24 #119 (multi-lang — JavaScript via server-sharing; cross-language call graph) — the
   natural completion of the LSP epic: **JavaScript is now first-class**, riding all existing machinery.
   `typescript-language-server` handles JS natively, so the blocker was only avoiding a double-spawn for

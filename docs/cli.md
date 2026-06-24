@@ -7,7 +7,7 @@ Every query command accepts `--json` for machine-readable output.
 | Command | Description |
 |---|---|
 | `codemap init [--local]` | Register the current directory as a project |
-| `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly (Go via go/types, TypeScript via callHierarchy) |
+| `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy) |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
 | `codemap projects` | List all registered projects and their index sizes |
 | `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, annotations, accuracy, ecosystem) |

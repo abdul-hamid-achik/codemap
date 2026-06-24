@@ -14,10 +14,10 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
   `ollama pull nomic-embed-text`. Structure-only indexing works without it.
 - Optionally, **`gopls`** for `--lsp` precise Go results.
 
-> Indexes **Go** (full graph) and **TypeScript + JavaScript** (structure + semantic search always,
-> plus a precise call graph under `--precise`, when `typescript-language-server` is installed — one
-> server handles both; `--no-lsp` to skip). Other languages are recognized and reported as skipped
-> (more in progress).
+> Indexes **Go** (full graph), **TypeScript + JavaScript** (one `typescript-language-server`), and
+> **Python** (`pyright-langserver`) — structure + semantic search always, plus a precise call graph
+> under `--precise` when the relevant server is installed (`--no-lsp` to skip). Other languages are
+> recognized and reported as skipped (more in progress).
 
 ## Index a project
 

@@ -21,7 +21,7 @@ Three surfaces over one store (the ecosystem pattern, see vecgrep/noted):
 Key features:
 - **Structural graph** — nodes (files, functions, types, methods, tests) + `calls`/`defines` edges
   in pure-Go SQLite (Go call edges are name-based by default, exact via `go/types` with `--precise`;
-  TypeScript/JavaScript call edges come only from `--precise` via `callHierarchy`;
+  TypeScript/JavaScript/Python call edges come only from `--precise` via `callHierarchy`;
   `imports`/`implements`/`references`/`overrides` edge types are reserved for the planned LSP/tree-sitter
   backends).
 - **Semantic search** — node source text embedded via Ollama (`nomic-embed-text`, 768-dim)
@@ -126,16 +126,18 @@ task install         # go install ./cmd/codemap
 
 ## Architecture Notes
 
-### Extraction (Go + TypeScript + JavaScript)
+### Extraction (Go + TypeScript + JavaScript + Python)
 - **`gosrc` (`go/parser`) is always registered** (Go: full call graph; `--precise` adds exact edges
   via `go/types`). **`lspsrc` (the LSP backend) is now wired in**: `IndexProject` runs a present-aware
   `registerLSP` that, for each `lspsrc.DefaultServers` spec, spawns its server **once** if any of the
   server's languages are present and the binary is on PATH, then registers an extractor per present
   language sharing that one connection (via `Extractor.Bind`) — so **one `typescript-language-server`
   serves both TypeScript and JavaScript** (`.ts/.tsx` + `.js/.jsx/.mjs/.cjs`), each routed with its own
-  LSP `languageId`. Calls resolve **across** the `.ts`↔`.js` boundary. Symbols + `defines` edges
-  always; call edges via `callHierarchy` under `--precise`, resolved in `Indexer.resolveLSPCallEdges`.
-  A Go-only repo never spawns a server; `defer ix.Close()` reaps any that were.
+  LSP `languageId`. Calls resolve **across** the `.ts`↔`.js` boundary. **Python** uses
+  `pyright-langserver` (its own spec/process). Symbols + `defines` edges always; call edges via
+  `callHierarchy` under `--precise`, resolved in `Indexer.resolveLSPCallEdges`. `appendSymbols` drops
+  Variable symbols nested inside a callable (pyright reports params/locals as variables). A Go-only repo
+  never spawns a server; `defer ix.Close()` reaps any that were.
 - Languages present but missing their server are recorded in `Result.MissingServers` and surfaced
   as an actionable "install X" message; genuinely-unsupported languages are still `Result.Unsupported`
   ("skipped, planned"). `--no-lsp` disables the LSP backend.

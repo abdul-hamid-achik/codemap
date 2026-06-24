@@ -22,7 +22,7 @@ type ServerSpec struct {
 // is on PATH and the project actually contains files of that language. A single
 // typescript-language-server serves both TypeScript and JavaScript (.ts/.tsx and
 // .js/.jsx/.mjs/.cjs); codemap spawns it once and routes each file with its own
-// languageId. Python (pyright) is a future one-row addition.
+// languageId. Python uses pyright-langserver (a separate process).
 var DefaultServers = []ServerSpec{
 	{
 		Cmd:  "typescript-language-server",
@@ -31,5 +31,10 @@ var DefaultServers = []ServerSpec{
 			{Lang: "typescript", LangID: "typescript"},
 			{Lang: "javascript", LangID: "javascript"},
 		},
+	},
+	{
+		Cmd:   "pyright-langserver",
+		Args:  []string{"--stdio"},
+		Langs: []LangBinding{{Lang: "python", LangID: "python"}},
 	},
 }

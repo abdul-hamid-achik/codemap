@@ -74,7 +74,7 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 	res := &extract.FileResult{Path: relPath, Language: e.lang}
 	lines := strings.Split(string(src), "\n")
 	for _, s := range syms {
-		appendSymbols(res, lines, e.lang, "", s)
+		appendSymbols(res, lines, e.lang, "", false, s)
 	}
 	return res, nil
 }
@@ -147,8 +147,14 @@ func (e *Extractor) Close() error {
 // appendSymbols recursively maps an LSP DocumentSymbol (and its children) into
 // extract.Symbols. parentFQN builds a dotted fully-qualified name from nesting
 // (e.g. ClassName.method), which is how class-based languages scope members.
-func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN string, s lsp.DocumentSymbol) {
+func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN string, insideCallable bool, s lsp.DocumentSymbol) {
 	kind := mapKind(s)
+	// Some servers (notably pyright) report a function's parameters and locals as
+	// nested Variable symbols — skip those so the graph isn't cluttered with param
+	// nodes. Module- and class-level variables (not inside a callable) are kept.
+	if kind == extract.KindVariable && insideCallable {
+		kind = ""
+	}
 	fqn := s.Name
 	if parentFQN != "" {
 		fqn = parentFQN + "." + s.Name
@@ -165,8 +171,11 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 			Source:    lineSlice(lines, s.Range.Start.Line, s.Range.End.Line),
 		})
 	}
+	// A function/method's children are its params and locals; mark them so nested
+	// Variable symbols are dropped (above).
+	childInside := insideCallable || kind == extract.KindFunction || kind == extract.KindMethod
 	for _, child := range s.Children {
-		appendSymbols(res, lines, lang, fqn, child)
+		appendSymbols(res, lines, lang, fqn, childInside, child)
 	}
 }
 

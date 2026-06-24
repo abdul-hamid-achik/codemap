@@ -163,6 +163,50 @@ func TestIndexJavaScriptMixed(t *testing.T) {
 	}
 }
 
+// TestIndexPython proves pyright-langserver indexes Python into the same node/
+// edge model: functions become nodes (no parameter-variable noise) and --precise
+// resolves the call graph via callHierarchy. Server-gated.
+func TestIndexPython(t *testing.T) {
+	if _, err := exec.LookPath("pyright-langserver"); err != nil {
+		t.Skip("pyright-langserver not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "calc.py", "def add(a, b):\n    return a + b\n\ndef compute(x):\n    return add(x, 1)\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("py", dir, "python")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := ix.IndexProject(ctx, pid, "py", dir, Options{Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Languages["python"] == 0 {
+		t.Errorf("expected Python indexed, got languages %v", res.Languages)
+	}
+	// Functions are nodes; parameters (a, b, x) are not.
+	if ns, _ := g.FindNodesBySymbol(pid, "add"); len(ns) == 0 {
+		t.Fatal("Python function add was not indexed")
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "a"); len(ns) != 0 {
+		t.Error("function parameter 'a' should not be a graph node")
+	}
+	// Precise call edge: compute -> add.
+	callers, err := g.Callers(pid, "add")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, c := range callers {
+		if c.Symbol == "compute" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("callers of add should include compute (precise Python edge), got %+v", callers)
+	}
+}
+
 // TestIndexTypeScriptDisabledByNoLSP confirms --no-lsp keeps TS unindexed
 // regardless of installed servers (deterministic, never spawns a server).
 func TestIndexTypeScriptDisabledByNoLSP(t *testing.T) {

@@ -1,0 +1,40 @@
+version: 1
+name: python
+intent: |
+    pyright-langserver indexes Python into codemap's graph: functions become nodes
+    (without parameter-variable noise), and `index --precise` resolves the call
+    graph via callHierarchy (compute → add). Needs pyright-langserver + node
+    (local-only; CI skips flows).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P\"; printf 'def add(a, b):\\n    return a + b\\n\\ndef compute(x):\\n    return add(x, 1)\\n' > \"$P/calc.py\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== index (precise) =='; \"$CM\" index --precise --no-embed 2>&1 | grep -iE 'scanned|graph|precise'; echo '== symbols (no params) =='; \"$CM\" symbols calc.py; echo '== languages =='; \"$CM\" status | grep -i languages; echo '== callers of add() =='; \"$CM\" callers add"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 60000
+    - snapshot: python
+outcomes:
+    - id: py_indexed
+      description: a Python function becomes a graph node
+      verify:
+        screen:
+            contains: "add"
+    - id: language_python
+      description: the project is recognized as python
+      verify:
+        screen:
+            contains: "python"
+    - id: call_graph
+      description: compute calling add resolves via --precise (callHierarchy)
+      verify:
+        screen:
+            contains: "compute"
+contractHash: sha256:34c2bea2b0d17d96f4771aef3322c5336aafad6f2f4dafec873f0d6b3b1c0634
