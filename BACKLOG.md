@@ -238,7 +238,14 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   temp+rename), `Lookup`, `Record` (stamps time), `Rebuild(ctx, repoHash)` from `FcheapList([codemap-index,
   repo:<hash>])` parsing `branch:<name>` tags (newest stash per branch). `TestStateRoundTrip` +
   `TestRebuildFromFcheap` (real fcheap, gated); task check green.
-- [ ] **BD.5** `internal/app/branchswitch.go` — `BranchSnapshot`/`BranchSwitch`/`BranchStatus` Service methods; orchestrate snapshot-old → restore-or-reindex-new; base-sha staleness via `git merge-base --is-ancestor`; reuse `Service.Index` profile gate; detect daemon lock.
+- [x] **BD.5** `internal/app/branchswitch.go` — the orchestration keystone. `BranchSnapshot(ctx, root, branch)`:
+  `git.Inspect` → `snapshot.Export(g, vec, pid, name, tmp, profile, sha)` (vec/profile only if embedded) →
+  `snapshot.FcheapSave` (tags codemap-index/repo:/branch:) → `branchstate.Record`+`Save`. `BranchSwitch(ctx,
+  root, from, to)`: snapshot `from`, then restore `to`'s stash (`FcheapRestore`+`snapshot.Import`) when it exists,
+  the profile matches (`profileCompatible`), and `git.IsAncestor(baseSHA, HEAD)` is fresh — else incremental
+  reindex via `svc.Index`. Clean no-op on detached HEAD / non-git. New `git.IsAncestor` (`merge-base
+  --is-ancestor`). **End-to-end test `TestBranchSwitchRestoresSnapshot`** (feature→main restores main's snapshot:
+  FeatureOnly gone, MainOnly back, no reindex; git+fcheap-gated). task check green. **Branch-switch is functional.**
 - [ ] **BD.6** `cmd/codemap/main.go` — `branch-switch [--from --to --root --force-reindex --install-hook --json]`, `branch-snapshot`, `branch-status`. `--install-hook` writes `.git/hooks/post-checkout` (worktree/`core.hooksPath`-aware; check the hook `flag` arg so it skips `git checkout -- file`).
 - [ ] **BD.7** `internal/mcp/server.go` — `codemap_branch_switch` / `codemap_branch_status` tools.
 

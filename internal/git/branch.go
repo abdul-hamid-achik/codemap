@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -46,6 +47,23 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 // HeadSHA returns the full commit sha at HEAD (empty on an unborn branch).
 func HeadSHA(ctx context.Context, dir string) (string, error) {
 	return run(ctx, dir, "rev-parse", "HEAD")
+}
+
+// IsAncestor reports whether ancestorSHA is an ancestor of (or equal to) ref — so
+// ref's history reaches ancestorSHA. Used to tell whether a branch snapshot taken
+// at ancestorSHA is still fresh for the current HEAD (a rebase/amend makes the old
+// sha unreachable → not an ancestor → reindex). A definitive non-ancestor is a
+// false result, not an error; only an unexpected git failure errors.
+func IsAncestor(ctx context.Context, dir, ancestorSHA, ref string) (bool, error) {
+	err := exec.CommandContext(ctx, "git", "-C", dir, "merge-base", "--is-ancestor", ancestorSHA, ref).Run()
+	if err == nil {
+		return true, nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // IsDetached reports whether HEAD points directly at a commit rather than a branch.
