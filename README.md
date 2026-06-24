@@ -189,7 +189,7 @@ Impact of Stats (codemap)
 
 | Command | What it does |
 |---|---|
-| `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`, `--precise`), show stats |
+| `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`, `--no-lsp`, `--precise`), show stats |
 | `doctor` | check the environment — toolchains, language servers, embeddings — with install hints |
 | `projects` | list all registered projects and their index sizes |
 | `callers` / `callees` / `path` | call-graph navigation (`--lsp` on callers/callees for exact gopls results) |

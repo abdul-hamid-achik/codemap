@@ -44,12 +44,12 @@
 |---|---|
 | `?` | Toggle a full-screen keybinding help overlay (works on any tab) |
 | `1`–`4` / `tab` / `shift+tab` | Switch tabs |
-| `↑` / `↓` | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), or a blast-radius node (Impact) |
+| `↑` / `↓` (`k` / `j`) | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), or a blast-radius node (Impact); `k`/`j` work on Graph & Metrics (on Search/Impact those keys type into the query box) |
 | `pgup` / `pgdn` | Jump a page through any of those lists (plus `home`/`end` on Graph and Metrics) |
 | `→` / `←` (`l` / `h`) | (Graph) move focus between the hub list and the callers/callees pane |
 | `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection · or run the query after editing the text |
 | `backspace` | (Graph) step back to the previous centered node while walking |
-| `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
+| `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓` or `k`/`j`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
 | `ctrl+g` (any tab) | **open the selection in the Graph walker** — re-centers the Graph on the selected hit/blast node/row and switches to it, focused on the callers/calls pane, so any symbol becomes a place to start walking the call graph (not just the hubs) |
 | `p` | (Graph) recompute the centered node's callers/callees precisely via gopls (Go) |
 | `ctrl+r` | Reindex the project and refresh, without leaving studio — keeps the project's precision (re-runs `--precise` when it already has a precise call graph, so the graph isn't dropped) |

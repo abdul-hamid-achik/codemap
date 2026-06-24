@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #144 (docs accuracy — `--no-lsp` in the CLI reference tables + studio `k/j` in docs) —
+  systematically diffed the documented surface against the actual binary: pulled every command's real
+  flags (`codemap <cmd> --help`), the 19 MCP tool names, and the global flags, and compared to README /
+  docs/cli.md / docs/studio.md. One genuine drift: **`index --no-lsp` was missing from both
+  command-reference tables** (docs/cli.md:10 and the README `## Commands` table) — it was mentioned in
+  prose (README:117, quick-start, AGENTS, the agent guide) but absent exactly where someone scans "what
+  flags does index take." Added it to both with an accurate description (skips the LSP backend; Go still
+  indexed via go/parser, TS/JS/Python skipped, no tsserver/pyright spawned). Also synced docs/studio.md
+  with the in-app help from #143 — added the `k/j` vim aliases (noting they're Graph/Metrics/Source only,
+  since on the text-input tabs those keys type into the query). Everything else verified accurate: README
+  table covers all 23 commands, docs/cli.md flag/default values match (`--depth` 3, `--top` 20/50/10/50),
+  docs/studio.md already documented home/end + source-view keys, MCP=19 tools. Docs-only (no Go changed).
+  Markdown tables validated (balanced pipes). COMMIT+PUSH.
 - 2026-06-24 #143 (polish — studio `?` help overlay is now an accurate, complete keymap) — audited the
   studio TUI for navigation discoverability. The width-constrained per-tab footers can't list every key
   (and `spread` drops the right-hand status when a hint overflows, so cramming keys risks wrapping the

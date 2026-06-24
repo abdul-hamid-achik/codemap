@@ -7,7 +7,7 @@ Every query command accepts `--json` for machine-readable output.
 | Command | Description |
 |---|---|
 | `codemap init [--local]` | Register the current directory as a project |
-| `codemap index [--reindex] [--no-embed] [--precise]` | Index (incremental — re-indexes changed files and prunes deleted ones); `--reindex` rebuilds, `--no-embed` skips embeddings, `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy) |
+| `codemap index [--reindex] [--no-embed] [--no-lsp] [--precise]` | Index (incremental — re-indexes changed files and prunes deleted ones); `--reindex` rebuilds, `--no-embed` skips embeddings, `--no-lsp` skips the language-server backend (Go is still indexed via `go/parser`; TS/JS/Python files are skipped — no `typescript-language-server`/`pyright` spawned), `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy) |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds) |
 | `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python), Ollama embeddings — with install hints (`--json`) |
 | `codemap projects` | List all registered projects and their index sizes |
