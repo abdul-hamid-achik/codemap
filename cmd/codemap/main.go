@@ -261,6 +261,9 @@ func init() {
 	branchSnapshotCmd.Flags().String("branch", "", "branch to snapshot (default: the current git branch)")
 	branchSnapshotCmd.Flags().String("root", "", "repository root (default: cwd)")
 
+	// Per-setting override flags (config file < env < flag) for every tunable.
+	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
+
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
 		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, daemonCmd)
@@ -1273,7 +1276,12 @@ func sigOrName(signature, fqn, symbol string) string {
 
 func openSession(cmd *cobra.Command) (*app.Session, error) {
 	cfgPath, _ := cmd.Flags().GetString("config")
-	return app.Open(cfgPath)
+	sess, err := app.Open(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	applyConfigFlags(cmd, sess.Config) // flags win over config file + env
+	return sess, nil
 }
 
 func jsonOut(cmd *cobra.Command) bool {

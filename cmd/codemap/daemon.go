@@ -56,6 +56,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	applyConfigFlags(cmd, cfg) // flags win over config file + env
 	dc := cfg.Daemon
 	d, err := daemon.Start(cmd.Context(), root, daemon.Config{
 		Debounce:    time.Duration(dc.DebounceMS) * time.Millisecond,
@@ -65,6 +66,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 			MaxInFlight: dc.EmbedMaxInFlight,
 			CacheSize:   dc.EmbedCacheSize,
 		},
+		Overrides: func(c *config.Config) { applyConfigFlags(cmd, c) },
 	})
 	if err != nil {
 		return err

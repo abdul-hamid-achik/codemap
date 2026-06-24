@@ -30,6 +30,10 @@ type Config struct {
 	Debounce    time.Duration        // watcher debounce
 	Throttle    embed.ThrottleConfig // applied to the embedder when embedding is on
 	NoEmbed     bool                 // structure-only (skip Ollama; used by tests)
+	// Overrides, if set, is applied to the daemon's freshly-loaded config after it
+	// opens its session, so CLI-flag overrides (exclude, embedding) reach the
+	// daemon's own indexer/embedder — not just the debounce/throttle in this struct.
+	Overrides func(*config.Config)
 }
 
 // Info is the daemon's status (also persisted to daemon.json).
@@ -83,6 +87,9 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	sess, err := app.Open("")
 	if err != nil {
 		return nil, err
+	}
+	if cfg.Overrides != nil {
+		cfg.Overrides(sess.Config) // CLI flags win over the daemon's config file + env
 	}
 	svc := app.NewService(sess)
 
