@@ -767,6 +767,19 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #123 (investigation — Vue SFC deferred; Volar needs special init) — user asked for Vue
+  SFC support. `vue-language-server` (Volar 3.2.5) IS installed, but a probe showed it **hangs** with
+  codemap's generic LSP client: `New`/initialize returns, but the first `documentSymbol` never responds
+  (40s context-deadline-exceeded). Cause: Volar 3.x requires `initializationOptions` carrying the
+  TypeScript SDK path (`typescript.tsdk` → a dir with `tsserverlibrary.js`) and a `vue` block; without
+  it Volar can't load TS and silently stalls. Our `lsp.Client.Initialize` sends no per-server
+  `initializationOptions`. **Deliberately NOT shipped** — a naive row would make `index` hang on every
+  `.vue` file (worst failure mode). `.vue` stays unmapped in `LanguageForPath`, so SFCs are safely
+  skipped (reported unsupported), never hung. Proper Vue support is a scoped future increment: (1) add
+  `initializationOptions` support to `lsp.Client.Initialize` (also unblocks rust-analyzer etc.); (2)
+  discover a `tsdk` path (project `node_modules/typescript/lib`, else a bundled/global TS) — fragile and
+  project-dependent; (3) a per-file request timeout so a stalling server degrades gracefully instead of
+  eating the whole index budget. Recommend doing (1)+(3) first (general robustness) before (2).
 - 2026-06-24 #122 (multi-lang — JSX/TSX call graph; per-file languageId) — user asked for JSX; a
   probe showed it was half-broken: a `.tsx` opened with `languageId:typescript` extracts symbols but
   **resolves no JSX call edges** (`<Button/>` usage invisible), whereas `typescriptreact` resolves them.
