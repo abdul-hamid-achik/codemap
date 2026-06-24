@@ -256,9 +256,10 @@ For a one-off exact answer *without* reindexing, `callers`/`callees` also accept
 `callHierarchy`), which likewise degrades to name-based with a note when gopls can't resolve.
 
 `orphans` finds call-graph dead ends. It follows functions wired by *value* — handlers in a
-table like cobra's `RunE: runInit`, callbacks passed to a registrar — so those aren't flagged as
-dead (Go). It still can't see callers reached via interface dispatch or reflection, so treat its
-output as *candidates*, not proof.
+table like cobra's `RunE: runInit`, callbacks passed to a registrar — and excludes methods that
+implement well-known stdlib interfaces (`error`, `fmt.Stringer`, `Unwrap`, the JSON/text
+marshalers), so those aren't flagged as dead (Go). It still can't see callers reached via
+*custom* interface dispatch or reflection, so treat its output as *candidates*, not proof.
 
 ## Use it from an agent (MCP)
 

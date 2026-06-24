@@ -467,6 +467,45 @@ func TestHotspotsCountsCallsNotReferences(t *testing.T) {
 	}
 }
 
+// TestOrphansExcludesInterfaceMethods pins that methods implementing well-known
+// stdlib interfaces (Error/String/Unwrap/Marshal*) aren't flagged as dead code —
+// they're dispatch-invoked, so always false positives — while a plain dead method
+// or function still is.
+func TestOrphansExcludesInterfaceMethods(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(sym, kind string) {
+		if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "f.go", Symbol: sym, FQN: "p.T." + sym, Kind: kind, Language: "go", SourceHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("Error", KindMethod)        // error interface — dispatch-invoked, never an orphan
+	mk("String", KindMethod)       // fmt.Stringer
+	mk("MarshalJSON", KindMethod)  // json.Marshaler
+	mk("doThing", KindMethod)      // a plain dead method — should be flagged
+	mk("lonelyFunc", KindFunction) // a plain dead function — should be flagged
+
+	orph, err := s.Orphans(pid, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, n := range orph {
+		got[n.Symbol] = true
+	}
+	for _, m := range []string{"Error", "String", "MarshalJSON"} {
+		if got[m] {
+			t.Errorf("%s is a stdlib-interface method (dispatch-invoked) — must not be a dead-code candidate", m)
+		}
+	}
+	if !got["doThing"] {
+		t.Error("doThing is a plain uncalled method — should be an orphan")
+	}
+	if !got["lonelyFunc"] {
+		t.Error("lonelyFunc is a plain uncalled function — should be an orphan")
+	}
+}
+
 // TestOrphansExcludesValueReferenced verifies a function reachable only as a
 // value (a `references` edge, e.g. a cobra `RunE: handler`) is NOT flagged as
 // dead code — while the node that references it, if itself uncalled, still is.

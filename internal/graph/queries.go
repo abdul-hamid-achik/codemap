@@ -378,13 +378,23 @@ func (s *Store) Orphans(projectID int64, limit int) ([]Node, error) {
 	// A node is dead only if nothing calls it AND nothing references it as a value
 	// (e.g. `RunE: handler`, `register(callback)`, a function stored in a slice/map)
 	// — otherwise framework handlers wired by value would all look like dead code.
+	//
+	// Also exclude methods that implement well-known stdlib interfaces (error,
+	// fmt.Stringer, errors.Unwrap, the JSON/text marshalers): they're invoked via
+	// interface dispatch, which a name/types call graph can't see, so they would
+	// ALWAYS be false positives. These names are conventionally reserved for those
+	// interfaces, so a method with one is effectively never meaningful dead code
+	// (every error type has an Error method) — dropping them keeps the candidate
+	// list signal-rich on real Go code. Custom-interface methods are still listed
+	// (hence "candidates").
 	q := "SELECT " + nodeColsAs("n") + ` FROM nodes n
 		WHERE n.project_id = ? AND n.kind IN (?, ?)
 		AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.target_id = n.id AND e.edge_type IN (?, ?))
 		AND NOT (n.kind = ? AND n.symbol IN ('main', 'init'))
+		AND NOT (n.kind = ? AND n.symbol IN ('Error', 'String', 'Unwrap', 'MarshalJSON', 'UnmarshalJSON', 'MarshalText', 'UnmarshalText'))
 		ORDER BY n.file_path, n.start_line
 		LIMIT ?`
-	return s.queryNodes(q, projectID, KindFunction, KindMethod, EdgeCalls, EdgeReferences, KindFunction, limit)
+	return s.queryNodes(q, projectID, KindFunction, KindMethod, EdgeCalls, EdgeReferences, KindFunction, KindMethod, limit)
 }
 
 // Path returns the shortest call path from one symbol to another (following

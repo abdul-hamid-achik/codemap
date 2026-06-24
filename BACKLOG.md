@@ -5,6 +5,20 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #164 (usability — `orphans` no longer floods with stdlib-interface-method false positives) —
+  dogfooded codemap on an EXTERNAL repo (~/projects/vecgrep, 65 files/889 nodes): indexed cleanly, 1170
+  precise edges, sane hotspots — codemap works well on someone else's real Go code (good validation, no
+  bug). But it confirmed the dominant `orphans` noise: interface methods. ~half of orphans output on real
+  Go is `Error()`/`String()`/`Unwrap()` etc. — invoked via interface dispatch (which a name/types graph
+  can't see), so ALWAYS false positives, and every error type has an `Error`. Fix: `Store.Orphans` now
+  excludes methods named for well-known stdlib interfaces (error/fmt.Stringer/errors.Unwrap/json+text
+  marshalers) — same mechanism as the existing main/init exclusion. These names are conventionally
+  reserved, so a method with one is effectively never meaningful dead code; CUSTOM-interface methods are
+  still listed (output stays "candidates"). Codemap's own orphans 12→8 (the 4 Error/String entries gone;
+  remaining 8 are custom-interface test fakes + bubbletea Init/View — legitimately candidates). Test
+  `TestOrphansExcludesInterfaceMethods` (Error/String/MarshalJSON excluded; plain dead method/func still
+  flagged). Updated the MCP `codemap_orphans` description + README orphans note. Full suite + lint(0) +
+  fmt green. COMMIT+PUSH.
 - 2026-06-24 #163 (accuracy — capture calls inside package-level closures; fewer false orphans) — the
   #162 dogfooding flagged `runStudio`/`isInteractiveTerminal` as orphans, but they ARE used — called
   inside `rootCmd`'s inline `RunE: func(){...}`. Root-caused: `callRefs` only walks `*ast.FuncDecl`
