@@ -9,6 +9,7 @@ require (
 	github.com/abdul-hamid-achik/veclite v0.20.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/charmbracelet/x/term v0.2.2
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/tools v0.45.0

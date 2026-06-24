@@ -273,7 +273,13 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 > socket (fixes the multi-process veclite lock), and throttles Ollama so background re-embeds don't
 > saturate it or starve interactive search. (codemap has NO watcher today and embeds inline per-file with
 > no dedup; vecgrep already has a dormant `internal/index/watcher.go`.)
-- [ ] **BD.8** Port a watcher into `internal/index/watcher.go` (fsnotify + debounce/coalesce; filter via `IndexConfig.Exclude` + `extract.LanguageForPath`; codemap doesn't yet import fsnotify). Wire the delete path: removed/renamed → `graph.DeleteNodesInFile` + `DeleteFileHash` + `vectors.DeleteByFile` (reuse `pruneDeleted`).
+- [x] **BD.8** `internal/index/watcher.go` — a `Watcher` over **fsnotify** (added v1.10.1; codemap's first FS
+  watch) with debounce/coalesce. `NewWatcher(root, WatchConfig{Debounce~500ms, Excluded}, onChange)` adds
+  watches for the whole tree (fsnotify is non-recursive; skips excluded/dot dirs), filters events to
+  recognized source (`extract.LanguageForPath != ""` + not excluded), coalesces a burst into
+  create/write→toIndex + remove/rename→toRemove (rel paths), and fires `onChange(toIndex, toRemove)` on the
+  quiet-tick. Handles new-dir creation (watch + queue moved-in files). `Run(ctx)`/`Close`. `TestWatcher`
+  (create/modify/delete + excluded-dir-ignored; 3× no flake; race-clean); task check green. (Daemon wiring = BD.11.)
 - [ ] **BD.9** `Indexer.IndexFiles(ctx, projectID, name, root, rels, opts)` — run the existing `indexFile` loop over only changed rels + `resolveEdges` (the SHA256 hash check already makes it incremental). The watcher's reindex target.
 - [ ] **BD.10** `internal/embed/throttle.go` — `ThrottledProvider` (embed.Provider decorator): content-hash **dedup** (codemap has none today), coalescing queue + bounded worker pool (`EmbedWorkers`, default 2), token-bucket rate (`x/time/rate`, `EmbedRPS`) + max-in-flight, **two priority lanes** (query > background), backpressure. Replaces inline `ix.embedder.Embed` under the daemon.
 - [ ] **BD.11** `internal/daemon/` — `Daemon{session, watcher, throttle, mcpHandler, listener}`: open the sole write Session, write `daemon.{sock,json,lock}` under `config.DataDir()`, accept-loop on the unix socket routing `mcp.*` frames (newline-JSON, **never Content-Length**) + `daemon.*` control RPCs; idle-timeout + SIGTERM-clean teardown.
