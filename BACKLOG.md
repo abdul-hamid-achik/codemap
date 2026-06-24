@@ -767,6 +767,12 @@ structure browsing + semantic search for TS) · **C** TS call edges (callHierarc
 ProvPrecise bypassing Pass-2's name fan-out) · then JS/Python rows · then markup structure layer.
 Adversarial reviews flagged two slice-1 fixes (both incorporated in A): the spawned server was never
 `Wait()`'d (zombie) and the "install the server" message is gated on FilesScanned==0 (slice B fix).
+- 2026-06-24 #132 (docs — scannable languages table in the README) — the first question a visitor
+  asks ("does it support my language?") was buried in a dense prose blockquote. Replaced it with a
+  4-column table (Language · How · Extensions · Call graph) covering Go, TypeScript/JavaScript (one
+  tsserver, JSX/TSX-aware, cross-`.ts↔.js`), and Python (pyright) — making it instantly clear what's
+  supported, which server, and that a call graph needs `--precise` for the LSP languages. Cross-links
+  `codemap doctor`; notes markup as planned. Docs-only; no behavior change. COMMIT+PUSH.
 - 2026-06-24 #131 (studio — reindex reports skipped files, like the CLI) — closing the #125 honesty
   loop on the #1 surface: the studio `ctrl+r` reindex status said "reindexed: N files · N nodes · N
   edges" even when files were **skipped** (e.g. a language server timed out), silently hiding it — while

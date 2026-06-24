@@ -104,11 +104,18 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for `--lsp` precise Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-> **Languages:** **Go** (full graph), **TypeScript + JavaScript** (one `typescript-language-server`,
-> for `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`), and **Python** (`pyright-langserver`, for `.py`) —
-> structure + semantic search always, plus a precise call graph under `--precise`. The language servers
-> are auto-enabled when installed; install the relevant one, or use `--no-lsp` to skip. Other recognized
-> languages are reported as skipped; broader support is in progress.
+**Languages** — structure + semantic search work for all of these; a precise call graph
+(`callers`/`callees`/`impact`/`hotspots`/`path`) needs `--precise`:
+
+| Language | How | Extensions | Call graph |
+|---|---|---|---|
+| **Go** | built-in `go/parser` (+ `go/types` for `--precise`) | `.go` | name-based by default; exact with `--precise` |
+| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` | `--precise` only |
+| **Python** | `pyright-langserver` | `.py` | `--precise` only |
+
+The language servers auto-enable when installed — run [`codemap doctor`](docs/cli.md) to see which are
+detected, or `--no-lsp` to skip. Structure-only markup (Vue/HTML/CSS) is planned; other recognized
+languages are reported as skipped. Semantic search is language-agnostic.
 
 ### From source
 
