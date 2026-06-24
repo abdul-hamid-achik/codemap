@@ -5,6 +5,14 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #191 (configuration.md — document all 9 env vars + the full exclude list) — first validated the
+  Python LSP flagship by dogfooding (pyright: cross-file run→helper, correct orphans top/unused_helper,
+  precise edges — works as well as TS; no bug). Then audited docs/configuration.md against the code: it
+  documented 5 `CODEMAP_*` env vars but the code reads 9 — missing `CODEMAP_CONFIG_DIR`, `CODEMAP_CACHE`,
+  `CODEMAP_EMBEDDING_PROVIDER`, `CODEMAP_EMBEDDING_DISTANCE` (the provider/distance are real knobs a user
+  might want to set). Added an "## Environment variables" table listing all 9 with what each overrides
+  (verified against config.go applyEnv + paths.go). Also the default-exclude prose listed `*.pb.go` but the
+  code also excludes `*_pb.go` (the other protobuf naming convention) — added it. No Go changed. COMMIT+PUSH.
 - 2026-06-24 #190 (quick-start — `--precise` was described as Go-only, misleading polyglot onboarding) —
   audited docs/quick-start.md (commands/examples otherwise accurate, no drift — uses generic symbols, not
   codemap-on-itself). One real onboarding trap: the copy-paste Index block said `index --precise # exact

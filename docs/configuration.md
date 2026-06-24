@@ -16,13 +16,28 @@ to a path inside the repo if you want a repo-local index too.
 
 ## Precedence (highest → lowest)
 
-1. Environment variables (`CODEMAP_CONFIG`, `CODEMAP_DATA`, `CODEMAP_EMBEDDING_MODEL`,
-   `CODEMAP_OLLAMA_URL`, `CODEMAP_EMBEDDING_DIMENSIONS`, …)
+1. Environment variables (`CODEMAP_*` — see [Environment variables](#environment-variables) below)
 2. Project-root `codemap.yaml` / `codemap.yml`
 3. Project `.config/codemap.yaml`
 4. Global `$XDG_CONFIG_HOME/codemap/config.yaml`
 5. `~/.codemap/config.yaml` (legacy, if present)
 6. Built-in defaults
+
+## Environment variables
+
+Each overrides the corresponding config-file value (and takes precedence over it):
+
+| Variable | Overrides |
+|---|---|
+| `CODEMAP_CONFIG` | path to a specific config file |
+| `CODEMAP_CONFIG_DIR` | the config directory |
+| `CODEMAP_DATA` | the data directory (graph DB, veclite store, project registry) |
+| `CODEMAP_CACHE` | the cache directory |
+| `CODEMAP_EMBEDDING_PROVIDER` | `embedding.provider` (e.g. `ollama`) |
+| `CODEMAP_EMBEDDING_MODEL` | `embedding.model` (e.g. `nomic-embed-text`) |
+| `CODEMAP_OLLAMA_URL` | `embedding.ollama_url` |
+| `CODEMAP_EMBEDDING_DIMENSIONS` | `embedding.dimensions` |
+| `CODEMAP_EMBEDDING_DISTANCE` | `embedding.distance` (e.g. `cosine`) |
 
 ## config.yaml
 
@@ -46,8 +61,8 @@ index:
 ```
 
 The default exclude list also covers `build`, `.next`, `.nuxt`, `target`, `env`, `site-packages`,
-`*.gen.go`, `*.pb.go`, and `*.lock`; any dot-prefixed directory (`.git`, `.venv`, `.tox`, …) is skipped
-automatically. Setting `exclude` replaces the defaults, so include the ones you still want.
+`*.gen.go`, `*.pb.go`, `*_pb.go`, and `*.lock`; any dot-prefixed directory (`.git`, `.venv`, `.tox`, …) is
+skipped automatically. Setting `exclude` replaces the defaults, so include the ones you still want.
 
 ## Embedding profile guard
 
