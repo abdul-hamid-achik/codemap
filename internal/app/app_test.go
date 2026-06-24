@@ -909,6 +909,7 @@ func TestServiceDoctor(t *testing.T) {
 		"data directory", "go toolchain", "gopls",
 		"typescript-language-server (typescript/javascript)",
 		"pyright-langserver (python)", "embeddings (Ollama)",
+		"background daemon",
 	} {
 		if !names[want] {
 			t.Errorf("doctor missing check %q (have %v)", want, names)

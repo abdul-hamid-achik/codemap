@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -98,7 +99,30 @@ func (svc *Service) Doctor(ctx context.Context) *DoctorReport {
 		add("embeddings (Ollama)", true, "model "+model, "")
 	}
 
+	// Background daemon (optional): is one watching the tree + keeping the index
+	// fresh? A plain socket-connect probe — app can't import the daemon package
+	// (that would cycle: daemon imports app), and connectivity is enough for a
+	// health check. It also avoids resetting the daemon's idle timer.
+	if daemonReachable() {
+		add("background daemon", true, "running — keeping the index fresh", "")
+	} else {
+		add("background daemon", false, "not running (optional)",
+			"run 'codemap daemon start' to watch the tree and reindex automatically")
+	}
+
 	return rep
+}
+
+// daemonReachable reports whether a codemap daemon is listening on its control
+// socket. A stale socket file with no listener fails the dial, so this is true
+// only for a live daemon.
+func daemonReachable() bool {
+	c, err := net.DialTimeout("unix", config.DaemonSocketPath(), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }
 
 func specLangs(spec lspsrc.ServerSpec) string {
