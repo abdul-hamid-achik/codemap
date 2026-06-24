@@ -136,7 +136,25 @@ func (m Model) header() string {
 		right += "  " + warnStyle.Render(fmt.Sprintf("⚠ stale %d/%d/%d (ctrl+r)",
 			m.stale.Changed, m.stale.New, m.stale.Deleted))
 	}
+	// Live signal that a background daemon is keeping the index fresh automatically
+	// (only shown while one is running — a quiet positive indicator, not noise).
+	if chip := m.daemonChip(); chip != "" {
+		right += "  " + chip
+	}
 	return spread(left, right, m.width)
+}
+
+// daemonChip renders a compact green indicator when a background daemon is
+// watching this project, including its branch when known; "" when none runs.
+func (m Model) daemonChip() string {
+	if m.daemon == nil {
+		return ""
+	}
+	label := "● daemon"
+	if m.daemon.Branch != "" {
+		label += " " + m.daemon.Branch
+	}
+	return daemonOnStyle.Render(label)
 }
 
 func (m Model) tabBar() string {

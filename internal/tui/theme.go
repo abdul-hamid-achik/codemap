@@ -28,4 +28,6 @@ var (
 	dimSelectedStyle = lipgloss.NewStyle().Foreground(colorInk).Background(lipgloss.Color("#23323A"))
 	dividerStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3F4B"))
 	countStyle       = lipgloss.NewStyle().Foreground(colorMuted)
+	// daemonOnStyle marks the live "background daemon is watching" header indicator.
+	daemonOnStyle = lipgloss.NewStyle().Foreground(colorSym)
 )

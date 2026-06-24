@@ -11,6 +11,7 @@ import (
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/daemon"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
@@ -913,6 +914,28 @@ func TestHeaderShowsStaleness(t *testing.T) {
 	m, _ = applyMsg(m, stalenessMsg{st: &index.Staleness{}})
 	if strings.Contains(m.render(), "stale") {
 		t.Error("header should not warn when the index is fresh")
+	}
+}
+
+func TestHeaderShowsDaemon(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
+		Project: "demo", Registered: true, Nodes: 10, Edges: 5, Files: 3,
+	}})
+	// No daemon running → no indicator.
+	if strings.Contains(m.render(), "● daemon") {
+		t.Error("header should not show a daemon indicator when none is running")
+	}
+	// Daemon running → green indicator carrying the branch.
+	m, _ = applyMsg(m, daemonMsg{info: &daemon.Info{PID: 123, Watching: true, Branch: "main", ProjectName: "demo"}})
+	out := m.render()
+	if !strings.Contains(out, "● daemon") || !strings.Contains(out, "main") {
+		t.Errorf("header should show the live daemon indicator + branch:\n%s", out)
+	}
+	// Daemon stops (a later poll returns nil) → indicator disappears.
+	m, _ = applyMsg(m, daemonMsg{info: nil})
+	if strings.Contains(m.render(), "● daemon") {
+		t.Error("header should drop the daemon indicator once the daemon stops")
 	}
 }
 

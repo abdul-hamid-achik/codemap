@@ -7,11 +7,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/daemon"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
@@ -107,6 +109,7 @@ type Model struct {
 	statusMsg  string
 	errMsg     string
 	status     *app.StatusReport
+	daemon     *daemon.Info     // live background-daemon state (nil = none running); polled periodically
 	stale      *index.Staleness // index drift vs the working tree (computed async; nil until known)
 	orphans    []app.SymbolRef  // dead-code candidates, for the Metrics overview
 	metricsSel int              // selected row in the Metrics right column (hubs+orphans)
@@ -304,7 +307,7 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 
 // Init loads project status, the call graph, and dead-code candidates.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd(), m.stalenessCmd())
+	return tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd(), m.stalenessCmd(), m.daemonCmd(), daemonTick())
 }
 
 // ---- commands ----
@@ -315,6 +318,25 @@ func (m Model) statusCmd() tea.Cmd {
 		st, err := svc.Status(dir)
 		return statusMsg{st: st, err: err}
 	}
+}
+
+// daemonPollInterval is how often studio re-checks whether a background daemon is
+// keeping the index fresh — cheap (a sub-millisecond socket dial that fails fast
+// when none is running), so it can run on a steady tick without being noticeable.
+const daemonPollInterval = 4 * time.Second
+
+type daemonMsg struct{ info *daemon.Info }
+type daemonTickMsg struct{}
+
+// daemonCmd queries the live daemon state once (off the UI goroutine).
+func (m Model) daemonCmd() tea.Cmd {
+	return func() tea.Msg { return daemonMsg{info: daemon.QueryStatus()} }
+}
+
+// daemonTick schedules the next daemon poll; the handler re-arms it, so the
+// indicator stays live as a daemon starts or stops while studio is open.
+func daemonTick() tea.Cmd {
+	return tea.Tick(daemonPollInterval, func(time.Time) tea.Msg { return daemonTickMsg{} })
 }
 
 // stalenessCmd checks how far the index has drifted from the working tree, off
@@ -662,6 +684,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case daemonMsg:
+		m.daemon = msg.info
+		return m, nil
+
+	case daemonTickMsg:
+		return m, tea.Batch(m.daemonCmd(), daemonTick())
+
 	case stalenessMsg:
 		m.stale = msg.st
 		return m, nil
@@ -750,7 +779,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Refresh everything the new index affects. The reindex just made the graph
 		// fresh, so clear the stale indicator immediately and re-confirm async.
 		m.stale = nil
-		return m, tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd(), m.stalenessCmd())
+		return m, tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd(), m.stalenessCmd(), m.daemonCmd())
 
 	case semanticMsg:
 		if msg.err != nil {
