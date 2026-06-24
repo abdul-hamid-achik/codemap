@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -67,6 +68,11 @@ type Result struct {
 	// index.max_file_bytes — surfaced so a silently-missing file (often generated)
 	// is explained, not just counted in FilesSkipped.
 	Oversized []string `json:"oversized,omitempty"`
+	// Generated lists source files skipped because they carry the canonical
+	// "// Code generated ... DO NOT EDIT." marker (protoc, sqlc, stringer, …) —
+	// detected by header regardless of filename, on top of the *_gen.go/*.pb.go
+	// exclude globs. Surfaced so a skipped generated file is explained.
+	Generated []string `json:"generated,omitempty"`
 	// Unsupported maps a recognized source language (e.g. "typescript") to the
 	// number of files skipped because codemap has no extractor for it yet (v0.1
 	// indexes Go). Lets callers explain a "0 indexed" result.
@@ -382,6 +388,15 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		res.Oversized = append(res.Oversized, ft.rel)
 		// Track the hash of this scanned-but-skipped file so staleness doesn't
 		// report it as perpetually "new"; a content change re-picks it up.
+		return false, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
+	}
+	if isGenerated(content) {
+		// Generated code (protoc/sqlc/stringer/…) isn't hand-written source — skip
+		// it so it doesn't pollute find/symbols/orphans. Detected by the canonical
+		// header regardless of filename (the *_gen.go/*.pb.go globs catch the rest).
+		// Record the hash like oversized, so staleness doesn't flag it as "new".
+		res.FilesSkipped++
+		res.Generated = append(res.Generated, ft.rel)
 		return false, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
 	}
 
@@ -762,4 +777,31 @@ func embedText(s extract.Symbol) string {
 func sha256hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// generatedHeaderRE matches the canonical machine-generated-file marker that
+// Go tooling (protoc-gen-go, sqlc, stringer, mockgen, …) emits and that `go`
+// itself recognizes: a line `// Code generated <by what>. DO NOT EDIT.`.
+var generatedHeaderRE = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)
+
+// isGenerated reports whether src carries the canonical generated-file header.
+// Per the Go convention the marker appears before the package clause, so only
+// the leading region is scanned (cheap, and avoids a stray match deeper in a
+// file). Catches generated code regardless of filename, complementing the
+// *_gen.go / *.pb.go exclude globs.
+func isGenerated(src []byte) bool {
+	limit := len(src)
+	if limit > 4096 {
+		limit = 4096
+	}
+	for _, line := range strings.Split(string(src[:limit]), "\n") {
+		line = strings.TrimSpace(line)
+		if generatedHeaderRE.MatchString(line) {
+			return true
+		}
+		if strings.HasPrefix(line, "package ") { // real code started; marker must precede it
+			break
+		}
+	}
+	return false
 }

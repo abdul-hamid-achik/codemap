@@ -47,7 +47,7 @@ func DefaultConfig() *Config {
 				"dist-*", "build-*", "coverage", // build-output variants (dist-chrome, build-web) + test coverage — minified/generated code, not source
 				".next", ".nuxt", "target", "__pycache__",
 				"venv", "env", "site-packages", // Python virtualenvs / installed deps
-				"*.min.js", "*.gen.go", "*.pb.go", "*_pb.go", "*.lock",
+				"*.min.js", "*.gen.go", "*_gen.go", "*.pb.go", "*_pb.go", "*.lock",
 			},
 		},
 	}

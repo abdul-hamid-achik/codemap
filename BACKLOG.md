@@ -80,8 +80,11 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     `index_state` (in `indexFile`), so staleness no longer reports them as perpetually "new" and a
     re-index clears the false drift. The parse error is still surfaced once. Test
     `TestStalenessTracksParseErrorFile`; `task check` green.
-  - [ ] **B** — generated Go still indexed; add `*_gen.go` glob to default excludes AND detect the
-    `// Code generated … DO NOT EDIT.` first-line header (robust across sqlc/protobuf/stringer).
+  - [x] **B** — generated code skipped two ways: `*_gen.go` added to default excludes (config.go, caught by
+    both the indexer + staleness walks) AND a header heuristic `isGenerated` (canonical
+    `// Code generated … DO NOT EDIT.` before the package clause) in `indexFile` — robust across
+    sqlc/protobuf/stringer regardless of filename; skipped files surface in `Result.Generated` + record their
+    hash (no false staleness). Tests `TestIndexSkipsGeneratedCode`/`TestIsGenerated`; `task check` green.
 - [ ] **P4 — studio for humans** (capped — human surface on an agent-first project; do the cheap wins,
   defer the rest until P0 lands): mouse support (`run.go:14` passes zero options — no `WithMouseCellMotion`);
   drive `ctrl+r` from empty/cold states instead of telling the user to open a shell (`view.go:399-408`).
