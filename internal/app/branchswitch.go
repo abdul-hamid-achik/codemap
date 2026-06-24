@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/branchstate"
 	"github.com/abdul-hamid-achik/codemap/internal/git"
@@ -53,18 +56,25 @@ func (svc *Service) BranchSnapshot(ctx context.Context, root, branch string) err
 		}
 	}
 
+	// Key the snapshot on the BRANCH's tip sha (not HEAD): the hook snapshots the
+	// branch it just left while HEAD is already on the new one.
+	sha := st.SHA
+	if bsha, berr := git.BranchSHA(ctx, root, branch); berr == nil && bsha != "" {
+		sha = bsha
+	}
+
 	tmp, err := os.MkdirTemp("", "codemap-snap-")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 
-	m, err := snapshot.Export(g, vec, p.ID, name, tmp, profile, st.SHA)
+	m, err := snapshot.Export(g, vec, p.ID, name, tmp, profile, sha)
 	if err != nil {
 		return err
 	}
 	tags := []string{"codemap-index", "repo:" + st.RepoHash, "branch:" + git.SanitizeBranch(branch)}
-	stashID, err := snapshot.FcheapSave(ctx, tmp, "codemap", name+"@"+branch, tags, st.SHA)
+	stashID, err := snapshot.FcheapSave(ctx, tmp, "codemap", name+"@"+branch, tags, sha)
 	if err != nil {
 		return err
 	}
@@ -76,7 +86,7 @@ func (svc *Service) BranchSnapshot(ctx context.Context, root, branch string) err
 	}
 	bs.RepoRoot, bs.RepoHash, bs.ProjectName, bs.ActiveBranch = st.RepoRoot, st.RepoHash, name, branch
 	bs.Record(branch, branchstate.BranchEntry{
-		StashID: stashID, BaseSHA: st.SHA, EmbeddingProfile: profile,
+		StashID: stashID, BaseSHA: sha, EmbeddingProfile: profile,
 		NodeCount: m.Nodes, VectorCount: m.Vectors,
 	})
 	return bs.Save(statePath)
@@ -94,6 +104,14 @@ func (svc *Service) BranchSwitch(ctx context.Context, root, from, to string) err
 	}
 	if !st.IsRepo || st.Detached {
 		return nil
+	}
+	statePath := branchstate.StatePath(st.RepoHash)
+	// The post-checkout hook only knows the target branch, so default `from` to the
+	// last-active branch recorded in the pointer file.
+	if from == "" {
+		if bs0, lerr := branchstate.Load(statePath); lerr == nil {
+			from = bs0.ActiveBranch
+		}
 	}
 	// Snapshot the branch we're leaving (best effort — a failed snapshot of `from`
 	// must not block loading `to`).
@@ -117,7 +135,6 @@ func (svc *Service) BranchSwitch(ctx context.Context, root, from, to string) err
 		curProfile = emb.Profile().String()
 	}
 
-	statePath := branchstate.StatePath(st.RepoHash)
 	bs, err := branchstate.Load(statePath)
 	if err != nil {
 		return err
@@ -183,4 +200,75 @@ func (svc *Service) restoreSnapshot(ctx context.Context, g *graph.Store, pid int
 // treated as compatible.
 func profileCompatible(snap, current string) bool {
 	return snap == "" || current == "" || snap == current
+}
+
+const hookMarker = "# codemap-branch-index (auto-switch the code index on checkout)"
+
+// InstallPostCheckoutHook idempotently installs a git post-checkout hook that runs
+// `codemap branch-switch` on a branch checkout, so the code index follows the
+// working tree automatically. It resolves the repo's hooks dir (worktree/
+// core.hooksPath-aware) and appends a guarded block to any existing hook, creating
+// a shebang'd hook if none exists. codemapBin is the executable to invoke (default
+// "codemap"). Returns the hook path.
+func InstallPostCheckoutHook(ctx context.Context, root, codemapBin string) (string, error) {
+	st, err := git.Inspect(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	if !st.IsRepo {
+		return "", fmt.Errorf("%s is not a git repository", root)
+	}
+	if codemapBin == "" {
+		codemapBin = "codemap"
+	}
+	hooksDir, err := git.HooksDir(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(hooksDir, "post-checkout")
+	block := hookBlock(codemapBin, st.RepoRoot)
+
+	existing, rerr := os.ReadFile(path)
+	switch {
+	case errors.Is(rerr, os.ErrNotExist):
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+block), 0o755); err != nil {
+			return "", err
+		}
+	case rerr != nil:
+		return "", rerr
+	case strings.Contains(string(existing), hookMarker):
+		return path, nil // already installed — idempotent
+	default:
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o755)
+		if err != nil {
+			return "", err
+		}
+		if _, werr := f.WriteString("\n" + block); werr != nil {
+			f.Close()
+			return "", werr
+		}
+		if err := f.Close(); err != nil {
+			return "", err
+		}
+		_ = os.Chmod(path, 0o755)
+	}
+	return path, nil
+}
+
+// hookBlock is the guarded shell snippet appended to post-checkout. post-checkout
+// receives $1=prev-HEAD $2=new-HEAD $3=flag (1 for a branch checkout, 0 for a file
+// checkout), so it only fires on branch switches and never blocks the checkout.
+func hookBlock(codemapBin, repoRoot string) string {
+	return hookMarker + "\n" +
+		`if [ "$3" = "1" ]; then` + "\n" +
+		"  " + codemapBin + ` branch-switch --to "$(git rev-parse --abbrev-ref HEAD)" --root ` + shellQuote(repoRoot) + " >/dev/null 2>&1 || true\n" +
+		"fi\n"
+}
+
+// shellQuote single-quotes s for safe embedding in the POSIX-sh hook.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

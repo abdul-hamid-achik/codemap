@@ -33,13 +33,13 @@ func RepoRoot(ctx context.Context, dir string) (string, error) {
 }
 
 // CurrentBranch returns the checked-out branch name, or "" when HEAD is detached.
+// It uses symbolic-ref (with -q), which works even on an UNBORN branch (a fresh
+// repo with no commits, where `rev-parse --abbrev-ref HEAD` would fail); a detached
+// HEAD has no symbolic ref, so the lookup fails and we report "".
 func CurrentBranch(ctx context.Context, dir string) (string, error) {
-	b, err := run(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
+	b, err := run(ctx, dir, "symbolic-ref", "--short", "-q", "HEAD")
 	if err != nil {
-		return "", err
-	}
-	if b == "HEAD" { // detached HEAD reports the literal "HEAD"
-		return "", nil
+		return "", nil // detached HEAD (no symbolic ref)
 	}
 	return b, nil
 }
@@ -47,6 +47,14 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 // HeadSHA returns the full commit sha at HEAD (empty on an unborn branch).
 func HeadSHA(ctx context.Context, dir string) (string, error) {
 	return run(ctx, dir, "rev-parse", "HEAD")
+}
+
+// BranchSHA returns the commit sha at the tip of a branch (or any rev). Used so a
+// branch's snapshot is keyed by ITS tip, not whatever HEAD happens to be — the
+// post-checkout hook snapshots the branch it just left while HEAD is already on the
+// new one.
+func BranchSHA(ctx context.Context, dir, branch string) (string, error) {
+	return run(ctx, dir, "rev-parse", branch)
 }
 
 // IsAncestor reports whether ancestorSHA is an ancestor of (or equal to) ref — so
@@ -66,13 +74,11 @@ func IsAncestor(ctx context.Context, dir, ancestorSHA, ref string) (bool, error)
 	return false, err
 }
 
-// IsDetached reports whether HEAD points directly at a commit rather than a branch.
+// IsDetached reports whether HEAD points directly at a commit rather than a branch
+// (no symbolic ref). Call only within a known git repository.
 func IsDetached(ctx context.Context, dir string) (bool, error) {
-	b, err := run(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return false, err
-	}
-	return b == "HEAD", nil
+	_, err := run(ctx, dir, "symbolic-ref", "--short", "-q", "HEAD")
+	return err != nil, nil
 }
 
 // Status is a read-only snapshot of a directory's git state, used to key and
@@ -130,6 +136,23 @@ func SanitizeBranch(name string) string {
 	}
 	h := sha1.Sum([]byte(name))
 	return s + "-" + hex.EncodeToString(h[:])[:8]
+}
+
+// HooksDir returns the repository's git hooks directory as an absolute path,
+// honoring worktrees and core.hooksPath (via `git rev-parse --git-path hooks`).
+func HooksDir(ctx context.Context, dir string) (string, error) {
+	out, err := run(ctx, dir, "rev-parse", "--git-path", "hooks")
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(out) {
+		return out, nil
+	}
+	abs, err := filepath.Abs(dir) // git returned it relative to dir (we ran with -C dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(abs, out), nil
 }
 
 // RepoHash is a stable identifier for a repository: the first 12 hex of the sha1

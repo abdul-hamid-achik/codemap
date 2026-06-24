@@ -199,6 +199,16 @@ var (
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runBranchStatus,
 	}
+	branchSwitchCmd = &cobra.Command{
+		Use:   "branch-switch",
+		Short: "Switch the code index to a git branch (snapshots the old branch, restores/reindexes the new)",
+		RunE:  runBranchSwitch,
+	}
+	branchSnapshotCmd = &cobra.Command{
+		Use:   "branch-snapshot",
+		Short: "Stash the current branch's code index into fcheap so it can be restored on switch-back",
+		RunE:  runBranchSnapshot,
+	}
 	docsCmd = &cobra.Command{
 		Use:   "docs [topic]",
 		Short: "Print the agent guide to codemap (topics: overview, workflow, commands, annotations, accuracy, ecosystem)",
@@ -244,10 +254,94 @@ func init() {
 	annotateCmd.Flags().String("note", "", "free-form note text")
 	annotateCmd.Flags().String("data", "", "opaque data payload (e.g. JSON from a DB query)")
 	annotationsCmd.Flags().Int64("rm", 0, "remove the annotation with this id")
+	branchSwitchCmd.Flags().String("from", "", "branch being left (default: the last active branch)")
+	branchSwitchCmd.Flags().String("to", "", "branch to switch to (default: the current git branch)")
+	branchSwitchCmd.Flags().String("root", "", "repository root (default: cwd)")
+	branchSwitchCmd.Flags().Bool("install-hook", false, "install a git post-checkout hook that auto-switches the index on every branch checkout")
+	branchSnapshotCmd.Flags().String("branch", "", "branch to snapshot (default: the current git branch)")
+	branchSnapshotCmd.Flags().String("root", "", "repository root (default: cwd)")
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
 		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
-		annotateCmd, annotationsCmd, branchStatusCmd)
+		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd)
+}
+
+// runBranchSwitch switches the code index to a branch (or installs the git hook
+// that does it automatically on checkout).
+func runBranchSwitch(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("root")
+	if root == "" {
+		if wd, err := os.Getwd(); err == nil {
+			root = wd
+		}
+	}
+	if install, _ := cmd.Flags().GetBool("install-hook"); install {
+		bin := "codemap"
+		if exe, err := os.Executable(); err == nil { // pin the running binary so the hook works off-PATH
+			bin = exe
+		}
+		path, err := app.InstallPostCheckoutHook(cmd.Context(), root, bin)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("installed git post-checkout hook: %s\n", path)
+		return nil
+	}
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	svc := app.NewService(sess)
+	to, _ := cmd.Flags().GetString("to")
+	from, _ := cmd.Flags().GetString("from")
+	if to == "" {
+		st, _ := svc.BranchStatus(cmd.Context(), root)
+		to = st.Branch
+	}
+	if to == "" {
+		return fmt.Errorf("no target branch (detached HEAD or not a git repository) — pass --to")
+	}
+	if err := svc.BranchSwitch(cmd.Context(), root, from, to); err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(map[string]string{"switched_to": to})
+	}
+	fmt.Printf("code index switched to branch %q\n", to)
+	return nil
+}
+
+// runBranchSnapshot stashes the current branch's index into fcheap.
+func runBranchSnapshot(cmd *cobra.Command, _ []string) error {
+	root, _ := cmd.Flags().GetString("root")
+	if root == "" {
+		if wd, err := os.Getwd(); err == nil {
+			root = wd
+		}
+	}
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	svc := app.NewService(sess)
+	branch, _ := cmd.Flags().GetString("branch")
+	if branch == "" {
+		st, _ := svc.BranchStatus(cmd.Context(), root)
+		branch = st.Branch
+	}
+	if branch == "" {
+		return fmt.Errorf("no branch to snapshot (detached HEAD or not a git repository) — pass --branch")
+	}
+	if err := svc.BranchSnapshot(cmd.Context(), root, branch); err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(map[string]string{"snapshotted": branch})
+	}
+	fmt.Printf("snapshotted branch %q\n", branch)
+	return nil
 }
 
 // runBranchStatus reports the read-only git state of the repo at the given path

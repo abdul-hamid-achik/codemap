@@ -246,7 +246,15 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   reindex via `svc.Index`. Clean no-op on detached HEAD / non-git. New `git.IsAncestor` (`merge-base
   --is-ancestor`). **End-to-end test `TestBranchSwitchRestoresSnapshot`** (feature→main restores main's snapshot:
   FeatureOnly gone, MainOnly back, no reindex; git+fcheap-gated). task check green. **Branch-switch is functional.**
-- [ ] **BD.6** `cmd/codemap/main.go` — `branch-switch [--from --to --root --force-reindex --install-hook --json]`, `branch-snapshot`, `branch-status`. `--install-hook` writes `.git/hooks/post-checkout` (worktree/`core.hooksPath`-aware; check the hook `flag` arg so it skips `git checkout -- file`).
+- [x] **BD.6** `cmd/codemap/main.go` — `branch-switch [--from --to --root --install-hook --json]` +
+  `branch-snapshot [--branch --root --json]` wired to `svc.BranchSwitch`/`svc.BranchSnapshot` (default to the
+  current git branch). `--install-hook` → `app.InstallPostCheckoutHook` writes an executable, idempotent,
+  guarded `.git/hooks/post-checkout` (resolves the hooks dir via `git.HooksDir`; appends to an existing hook;
+  fires only when `$3==1`, a branch checkout) that runs `codemap branch-switch --to <current>`. `BranchSwitch`
+  defaults `from` to the pointer-file `ActiveBranch` (hook only knows `to`); snapshots key on the branch's tip
+  sha (`git.BranchSHA`), not HEAD. Robustness: `CurrentBranch`/`IsDetached` now use `symbolic-ref` (works on an
+  UNBORN branch). Tests `TestInstallPostCheckoutHook` + from-defaulting in `TestBranchSwitchRestoresSnapshot`;
+  task check green.
 - [ ] **BD.7** `internal/mcp/server.go` — `codemap_branch_switch` / `codemap_branch_status` tools.
 
 ### Feature B — background daemon (incremental sync + Ollama throttle)

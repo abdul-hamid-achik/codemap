@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/abdul-hamid-achik/codemap/internal/snapshot"
 )
@@ -98,5 +100,75 @@ func TestBranchSwitchRestoresSnapshot(t *testing.T) {
 	}
 	if ns, _ := g.FindNodesBySymbol(pid, "MainOnly"); len(ns) != 1 {
 		t.Errorf("after switching to main, MainOnly should be restored, got %d nodes", len(ns))
+	}
+
+	// Switch back to feature using from-DEFAULTING (no --from → uses the recorded
+	// ActiveBranch="main"). FeatureOnly comes back from feature's snapshot.
+	if err := svc.BranchSwitch(ctx, root, "", "feature"); err != nil {
+		t.Fatal(err)
+	}
+	if ns, _ := g.FindNodesBySymbol(pid, "FeatureOnly"); len(ns) != 1 {
+		t.Errorf("after switching back to feature (from-default), FeatureOnly should be restored, got %d", len(ns))
+	}
+}
+
+// TestInstallPostCheckoutHook checks the hook writer: it creates an executable
+// post-checkout hook with the guarded branch-switch command, is idempotent, and
+// appends to (preserves) a pre-existing hook. Git-gated; no fcheap needed.
+func TestInstallPostCheckoutHook(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	path, err := InstallPostCheckoutHook(ctx, root, "codemap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, hookMarker) || !strings.Contains(s, "branch-switch --to") {
+		t.Errorf("hook missing marker/command:\n%s", s)
+	}
+	if !strings.Contains(s, `"$3" = "1"`) {
+		t.Errorf("hook should fire only on a branch checkout (flag $3 == 1):\n%s", s)
+	}
+	if fi, _ := os.Stat(path); fi.Mode()&0o111 == 0 {
+		t.Errorf("hook is not executable: %v", fi.Mode())
+	}
+	// Idempotent: a second install does not duplicate the block.
+	if _, err := InstallPostCheckoutHook(ctx, root, "codemap"); err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := os.ReadFile(path)
+	if strings.Count(string(b2), hookMarker) != 1 {
+		t.Errorf("re-install duplicated the hook block")
+	}
+
+	// Appending to a pre-existing hook preserves the original content.
+	root2 := t.TempDir()
+	runGit(t, root2, "init", "-q")
+	hooks2, err := git.HooksDir(ctx, root2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(hooks2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pre := filepath.Join(hooks2, "post-checkout")
+	if err := os.WriteFile(pre, []byte("#!/bin/sh\necho original\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallPostCheckoutHook(ctx, root2, "codemap"); err != nil {
+		t.Fatal(err)
+	}
+	b3, _ := os.ReadFile(pre)
+	if !strings.Contains(string(b3), "echo original") || !strings.Contains(string(b3), hookMarker) {
+		t.Errorf("append should preserve the original and add the block:\n%s", b3)
 	}
 }
