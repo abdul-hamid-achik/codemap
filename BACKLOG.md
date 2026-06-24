@@ -226,7 +226,12 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     a `vec *vector.Store` param (nil = graph-only); Import clears + re-inserts vectors with the new node ids.
     `TestVectorRoundTrip` (restored vector points at the new node id + is searchable); task check green.
     **BD.2 complete.**
-- [ ] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper: `Save(dir,tool,name,tags,sourceSHA)->stashID` (parse `--json`), `Restore(id,toDir)` (check `Verified`), `List(tags)`. fcheap binary path from config/PATH.
+- [x] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper over the real fcheap CLI (verified v0.24.1):
+  `FcheapSave(dir,tool,name,tags,sourceSHA)→stashID` (`save … --no-scan --json`, parse `.id`),
+  `FcheapRestore(id,toDir)→verified` (`restore … --json`, check `.status=="restored"` + `.verified`),
+  `FcheapList(tags)→[]StashInfo` (`list --json` + single server-side `--tag`, extra tags AND-matched
+  client-side). `FcheapBinary`/`FcheapStashDir` overridable. `TestFcheapRoundTrip` (real save→list→restore,
+  gated on `fcheap` on PATH); task check green.
 - [ ] **BD.4** `internal/branchstate/state.go` — pointer file `RegistryDir()/branches/<repoHash>.json` (atomic temp+rename): branch→{stash_id, base_sha, profile, counts}. `Rebuild` from `fcheap list --tag`.
 - [ ] **BD.5** `internal/app/branchswitch.go` — `BranchSnapshot`/`BranchSwitch`/`BranchStatus` Service methods; orchestrate snapshot-old → restore-or-reindex-new; base-sha staleness via `git merge-base --is-ancestor`; reuse `Service.Index` profile gate; detect daemon lock.
 - [ ] **BD.6** `cmd/codemap/main.go` — `branch-switch [--from --to --root --force-reindex --install-hook --json]`, `branch-snapshot`, `branch-status`. `--install-hook` writes `.git/hooks/post-checkout` (worktree/`core.hooksPath`-aware; check the hook `flag` arg so it skips `git checkout -- file`).
