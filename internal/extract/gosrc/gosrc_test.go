@@ -133,6 +133,78 @@ func TestExtractGo(t *testing.T) {
 	}
 }
 
+// TestExtractVarConst pins finding D: package-level var/const are indexed as
+// KindVariable symbols (one per name), so version.Version, sentinel errors, and
+// const blocks are findable — while the blank identifier and function-local
+// var/const stay out of the index.
+func TestExtractVarConst(t *testing.T) {
+	const src = `package version
+
+import "errors"
+
+// Version is the build version.
+var Version = "1.2.3"
+
+// ErrNotFound is returned when a thing is missing.
+var ErrNotFound = errors.New("not found")
+
+const (
+	StatusOK     = 200
+	StatusTeapot = 418
+)
+
+var maxRetries int = 3
+
+var _ = "blank is ignored"
+
+func F() {
+	var local = 1 // function-local: must NOT be indexed
+	const localConst = 2
+	_ = local
+	_ = localConst
+}
+`
+	res, err := New().ExtractFile("version.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"Version", "ErrNotFound", "StatusOK", "StatusTeapot", "maxRetries"} {
+		s := findSym(res.Symbols, name)
+		if s == nil {
+			t.Errorf("missing %s symbol", name)
+			continue
+		}
+		if s.Kind != extract.KindVariable {
+			t.Errorf("%s kind = %q, want variable", name, s.Kind)
+		}
+		if s.FQN != "version."+name {
+			t.Errorf("%s FQN = %q, want version.%s", name, s.FQN, name)
+		}
+	}
+	// blank identifier and function-local var/const are not symbols.
+	for _, name := range []string{"_", "local", "localConst"} {
+		if findSym(res.Symbols, name) != nil {
+			t.Errorf("%q must not be indexed (blank/local)", name)
+		}
+	}
+	// docstring + typed signature are carried.
+	if v := findSym(res.Symbols, "Version"); v != nil {
+		if !strings.Contains(v.Docstring, "build version") {
+			t.Errorf("Version doc = %q", v.Docstring)
+		}
+		if !strings.Contains(v.Signature, "var Version") {
+			t.Errorf("Version signature = %q, want it to start with 'var Version'", v.Signature)
+		}
+	}
+	if mr := findSym(res.Symbols, "maxRetries"); mr != nil && !strings.Contains(mr.Signature, "var maxRetries int") {
+		t.Errorf("maxRetries signature = %q, want declared type rendered", mr.Signature)
+	}
+	if ok := findSym(res.Symbols, "StatusOK"); ok != nil && !strings.HasPrefix(ok.Signature, "const ") {
+		t.Errorf("StatusOK signature = %q, want 'const ' prefix", ok.Signature)
+	}
+}
+
 func TestExtractTestFile(t *testing.T) {
 	src := `package sample
 

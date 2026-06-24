@@ -47,12 +47,15 @@ func (e Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult,
 			res.References = append(res.References, callRefs(fset, sym.FQN, d)...)
 			res.References = append(res.References, valueRefs(fset, sym.FQN, d)...)
 		case *ast.GenDecl:
-			if d.Tok == token.TYPE {
+			switch d.Tok {
+			case token.TYPE:
 				for _, spec := range d.Specs {
 					if ts, ok := spec.(*ast.TypeSpec); ok {
 						res.Symbols = append(res.Symbols, typeSymbol(fset, src, pkg, d, ts))
 					}
 				}
+			case token.VAR, token.CONST:
+				res.Symbols = append(res.Symbols, valueSymbols(fset, src, pkg, d)...)
 			}
 		}
 	}
@@ -111,6 +114,62 @@ func typeSymbol(fset *token.FileSet, src []byte, pkg string, gd *ast.GenDecl, ts
 		Docstring: doc,
 		Source:    source,
 	}
+}
+
+// valueSymbols extracts package-level var/const declarations as KindVariable
+// symbols — one per declared name (skipping the blank identifier `_`). They
+// aren't callable, so they get no call edges; they exist so find/source/symbols/
+// semantic can locate them (e.g. version.Version, sentinel errors like
+// `var ErrX = errors.New(...)`, and const blocks). Only top-level decls reach
+// here — function-local var/const live inside FuncDecl bodies, which this never
+// walks — so locals stay out of the index.
+func valueSymbols(fset *token.FileSet, src []byte, pkg string, gd *ast.GenDecl) []extract.Symbol {
+	kw := gd.Tok.String() // "var" or "const"
+	var syms []extract.Symbol
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		doc := strings.TrimSpace(vs.Doc.Text())
+		if doc == "" && gd.Doc != nil {
+			doc = strings.TrimSpace(gd.Doc.Text())
+		}
+		typeStr := ""
+		if vs.Type != nil {
+			typeStr = " " + exprString(fset, vs.Type)
+		}
+		start := fset.Position(vs.Pos())
+		end := fset.Position(vs.End())
+		source := sliceSrc(src, start.Offset, end.Offset)
+		for _, name := range vs.Names {
+			if name.Name == "_" { // blank identifier declares nothing findable
+				continue
+			}
+			syms = append(syms, extract.Symbol{
+				Name:      name.Name,
+				FQN:       pkg + "." + name.Name,
+				Kind:      extract.KindVariable,
+				Language:  "go",
+				StartLine: fset.Position(name.Pos()).Line,
+				EndLine:   end.Line,
+				Signature: kw + " " + name.Name + typeStr,
+				Docstring: doc,
+				Source:    source,
+			})
+		}
+	}
+	return syms
+}
+
+// exprString renders an AST expression (e.g. a var/const's declared type) to its
+// source-like string. Returns "" if printing fails.
+func exprString(fset *token.FileSet, e ast.Expr) string {
+	var b strings.Builder
+	if err := printer.Fprint(&b, fset, e); err != nil {
+		return ""
+	}
+	return b.String()
 }
 
 // signature renders a func declaration without its body or doc comment.
