@@ -114,6 +114,11 @@ func (m Model) header() string {
 	case m.status != nil:
 		right = mutedStyle.Render(m.status.Project + " · not indexed")
 	}
+	// Surface index drift so you know the graph is behind the code — ctrl+r refreshes.
+	if m.stale != nil && m.stale.Any() {
+		right += "  " + warnStyle.Render(fmt.Sprintf("⚠ stale %d/%d/%d (ctrl+r)",
+			m.stale.Changed, m.stale.New, m.stale.Deleted))
+	}
 	return spread(left, right, m.width)
 }
 

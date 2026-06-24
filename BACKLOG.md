@@ -5,6 +5,17 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #154 (studio — surface index staleness in the header, leveraging #153) — studio showed
+  nothing about freshness, so a person exploring the graph after editing code had no cue the graph was
+  behind. Now the header shows `⚠ stale C/N/D (ctrl+r)` (changed/new/deleted, amber) when the working
+  tree has drifted — making the existing ctrl+r reindex discoverable exactly when it's needed. Computed
+  ASYNC (a new `stalenessCmd` in `Init`'s batch via `Service.Staleness`) so studio startup stays instant —
+  the indicator just appears once known; a fresh project (zeros) shows nothing. ctrl+r reindex clears it
+  immediately (m.stale=nil) and re-confirms. New amber `warnStyle` (Monokai yellow, distinct from the
+  pink errorStyle). Test `TestHeaderShowsStaleness` (no warning before known / warns on drift + mentions
+  ctrl+r / silent when fresh). studio.yml unaffected (its fresh fixture shows no warning — verified).
+  docs/studio.md ctrl+r row updated. Full suite + lint(0) + fmt green. Closes the loop on #153 across both
+  the agent surface (status/MCP) and the human surface (studio). COMMIT+PUSH.
 - 2026-06-24 #153 (feature — index staleness signal: the #1 agent-trust gap) — an agent that edits code
   then queries got pre-edit results SILENTLY; nothing surfaced that the index was behind the working tree.
   Now `status` (CLI + MCP `codemap_status`) reports drift. Computed WITHOUT language servers (the whole

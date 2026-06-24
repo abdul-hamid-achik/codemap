@@ -45,6 +45,9 @@ type statusMsg struct {
 	st  *app.StatusReport
 	err error
 }
+type stalenessMsg struct {
+	st *index.Staleness
+}
 type semanticMsg struct {
 	query string
 	hits  []app.SemanticHit
@@ -101,8 +104,9 @@ type Model struct {
 	statusMsg  string
 	errMsg     string
 	status     *app.StatusReport
-	orphans    []app.SymbolRef // dead-code candidates, for the Metrics overview
-	metricsSel int             // selected row in the Metrics right column (hubs+orphans)
+	stale      *index.Staleness // index drift vs the working tree (computed async; nil until known)
+	orphans    []app.SymbolRef  // dead-code candidates, for the Metrics overview
+	metricsSel int              // selected row in the Metrics right column (hubs+orphans)
 
 	// search tab
 	search      textinput.Model
@@ -195,7 +199,7 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 
 // Init loads project status, the call graph, and dead-code candidates.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd())
+	return tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd(), m.stalenessCmd())
 }
 
 // ---- commands ----
@@ -205,6 +209,17 @@ func (m Model) statusCmd() tea.Cmd {
 	return func() tea.Msg {
 		st, err := svc.Status(dir)
 		return statusMsg{st: st, err: err}
+	}
+}
+
+// stalenessCmd checks how far the index has drifted from the working tree, off
+// the UI thread (a walk+hash) so studio startup stays instant — the indicator
+// just appears once it's known. A failure is swallowed (nil = no warning).
+func (m Model) stalenessCmd() tea.Cmd {
+	svc, dir := m.service, m.startDir
+	return func() tea.Msg {
+		st, _ := svc.Staleness(dir)
+		return stalenessMsg{st: st}
 	}
 }
 
@@ -419,6 +434,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case stalenessMsg:
+		m.stale = msg.st
+		return m, nil
+
 	case graphHubsMsg:
 		m.graphLoaded = true
 		if msg.err != nil {
@@ -497,8 +516,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "⚠ " + msg.rep.Warning
 			}
 		}
-		// Refresh everything the new index affects.
-		return m, tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd())
+		// Refresh everything the new index affects. The reindex just made the graph
+		// fresh, so clear the stale indicator immediately and re-confirm async.
+		m.stale = nil
+		return m, tea.Batch(m.statusCmd(), m.hubsCmd(), m.orphansCmd(), m.stalenessCmd())
 
 	case semanticMsg:
 		if msg.err != nil {

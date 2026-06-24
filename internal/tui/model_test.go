@@ -12,6 +12,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
+	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
 func testModel() Model {
@@ -806,6 +807,28 @@ func TestOpenInGraphFromSearch(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("ctrl+g should fire a detail load for the centered symbol")
+	}
+}
+
+func TestHeaderShowsStaleness(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{
+		Project: "demo", Registered: true, Nodes: 10, Edges: 5, Files: 3,
+	}})
+	// Before staleness is known (async), no warning.
+	if strings.Contains(m.render(), "stale") {
+		t.Error("header should not warn before staleness is known")
+	}
+	// Drift reported → header warns and points at ctrl+r.
+	m, _ = applyMsg(m, stalenessMsg{st: &index.Staleness{Changed: 2, New: 1}})
+	out := m.render()
+	if !strings.Contains(out, "stale") || !strings.Contains(out, "ctrl+r") {
+		t.Errorf("header should warn about a stale index and mention ctrl+r:\n%s", out)
+	}
+	// A fresh index (all zeros) → no warning.
+	m, _ = applyMsg(m, stalenessMsg{st: &index.Staleness{}})
+	if strings.Contains(m.render(), "stale") {
+		t.Error("header should not warn when the index is fresh")
 	}
 }
 
