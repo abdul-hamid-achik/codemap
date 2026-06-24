@@ -5,6 +5,23 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #145 (usability + honesty — cap `impact`'s human-facing lists; make the doc examples real)
+  — dogfooding `impact` on hubs surfaced a real flood: `runImpact` printed EVERY covering test and EVERY
+  blast-radius node (e.g. `impact Stats --depth 2` = 26 tests + 35 nodes = 61 lines; `impact Open` = 85
+  + 132). Worse, the README/docs examples showed a `… (N more)` truncation that **the code never actually
+  produced** — a promise the binary didn't keep. Fixed both: added a tested generic helper `capList` and
+  caps (`impactTestsCap`=10, `impactBlastCap`=20); the blast radius is BFS depth-ordered so the cap keeps
+  the NEAREST (most relevant) nodes, and each truncated list now prints `… (N more — use --json for all
+  [, or lower --depth])`. `--json`/MCP are untouched (they return before rendering, so agents still get
+  the complete set); the studio Impact tab is already viewport-bounded. Then regenerated BOTH doc examples
+  from the real binary so they're truthful: README now shows `impact BlastRadius --depth 2` (self-
+  referential — all 4 surfaces appear as callers, full 10-node radius with ✓ tests, under the cap so
+  nothing elided), docs/cli.md shows `impact windowStart --depth 2` (demonstrates the `⚠ no tests reach
+  this symbol` honesty warning); both annotated that long lists are capped with --json for the full set.
+  Test `TestCapList` (under/at/over cap, keeps leading items, empty). Full suite + lint(0) + fmt green.
+  Confirmed clean while dogfooding (no bugs): `callers Close` correctly warns `⚠ "Close" matches 7
+  definitions … reindex with --precise`, and not-found across callers/find/impact/source all give honest
+  messages. COMMIT+PUSH.
 - 2026-06-24 #144 (docs accuracy — `--no-lsp` in the CLI reference tables + studio `k/j` in docs) —
   systematically diffed the documented surface against the actual binary: pulled every command's real
   flags (`codemap <cmd> --help`), the 19 MCP tool names, and the global flags, and compared to README /

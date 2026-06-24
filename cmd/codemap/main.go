@@ -542,18 +542,26 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	// subset of the blast radius, but spelling them out beats hunting for ✓.
 	if len(rep.Tests) > 0 {
 		fmt.Println("  covering tests (run these):")
-		for _, t := range rep.Tests {
+		tests, more := capList(rep.Tests, impactTestsCap)
+		for _, t := range tests {
 			fmt.Printf("     %-36s %s:%d\n", disp(t.FQN, t.Symbol), t.File, t.StartLine)
+		}
+		if more > 0 {
+			fmt.Printf("     … (%d more — use --json for all)\n", more)
 		}
 	}
 	if len(rep.BlastRadius) > 0 {
 		fmt.Println("  affected (blast radius):")
-		for _, n := range rep.BlastRadius {
+		nodes, more := capList(rep.BlastRadius, impactBlastCap)
+		for _, n := range nodes {
 			marker := " "
 			if n.Kind == "test" {
 				marker = "✓"
 			}
 			fmt.Printf("   %s [%d] %-36s %s:%d\n", marker, n.Depth, disp(n.FQN, n.Symbol), n.File, n.StartLine)
+		}
+		if more > 0 {
+			fmt.Printf("   … (%d more — use --json for all, or lower --depth)\n", more)
 		}
 	}
 	return nil
@@ -963,6 +971,24 @@ func disp(fqn, symbol string) string {
 		return fqn
 	}
 	return symbol
+}
+
+// Caps for the human-facing `impact` lists. A hub can have hundreds of
+// dependents; dumping them all floods the terminal. The blast radius is
+// depth-ordered (BFS), so the cap keeps the nearest — most relevant — nodes.
+// `--json` always carries the complete set for agents/scripts.
+const (
+	impactTestsCap = 10
+	impactBlastCap = 20
+)
+
+// capList returns the first n items of xs (all, if fewer) and how many were
+// elided, so callers can print a "… (N more)" line.
+func capList[T any](xs []T, n int) (shown []T, more int) {
+	if len(xs) <= n {
+		return xs, 0
+	}
+	return xs[:n], len(xs) - n
 }
 
 // sigOrName shows the signature (which includes the name and parameters) when

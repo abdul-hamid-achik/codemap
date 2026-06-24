@@ -166,24 +166,34 @@ The flagship `impact` answers *what breaks if I change this, and what do I run t
 (real output, from codemap on itself):
 
 ```
-$ codemap impact Stats --depth 2
-Impact of Stats (codemap)
-  defined:        internal/graph/store.go:291
-  direct callers: 4
-  blast radius:   18 (depth ≤ 2)
-  tests covering: 9
+$ codemap impact BlastRadius --depth 2
+Impact of BlastRadius (codemap)
+  defined:        internal/graph/queries.go:140
+  direct callers: 3
+  blast radius:   10 (depth ≤ 2)
+  tests covering: 6
   covering tests (run these):
-     graph.TestStats            internal/graph/graph_test.go:387
-     app.TestServiceLifecycle   internal/app/app_test.go:29
-     index.TestIndexProject     internal/index/indexer_test.go:87
-     … (6 more)
+     graph.TestBlastRadius                internal/graph/graph_test.go:305
+     graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:347
+     app.TestQueryResultsCarrySignature   internal/app/app_test.go:131
+     app.TestImpactSurfacesAnnotations    internal/app/app_test.go:299
+     app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1010
+     app.TestServiceImpact                internal/app/app_test.go:1154
   affected (blast radius):
-     [1] app.Service.Status          internal/app/service.go:165
-     [1] index.Indexer.IndexProject  internal/index/indexer.go:89
-   ✓ [1] graph.TestStats             internal/graph/graph_test.go:387
-     [2] main.runStatus              cmd/codemap/main.go:252
-     … (14 more)
+     [1] app.Service.Impact                   internal/app/service.go:898
+   ✓ [1] graph.TestBlastRadius                internal/graph/graph_test.go:305
+   ✓ [1] graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:347
+     [2] main.runImpact                       cmd/codemap/main.go:504
+   ✓ [2] app.TestQueryResultsCarrySignature   internal/app/app_test.go:131
+   ✓ [2] app.TestImpactSurfacesAnnotations    internal/app/app_test.go:299
+   ✓ [2] app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1010
+   ✓ [2] app.TestServiceImpact                internal/app/app_test.go:1154
+     [2] mcp.Server.handleImpact              internal/mcp/server.go:303
+     [2] tui.Model.impactCmd                  internal/tui/model.go:389
 ```
+Long lists are capped for readability (the nearest blast-radius nodes and the
+first covering tests, with a `… (N more)` line); `--json` always carries the
+complete set.
 
 ## Commands
 

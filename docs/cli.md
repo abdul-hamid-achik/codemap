@@ -74,13 +74,23 @@ embedder or creates an empty vector store in that case.
 ## Example
 
 ```bash
-$ codemap impact AddNode --depth 3
-Impact of AddNode (codemap)
-  defined:        internal/graph/store.go:185
-  direct callers: 8
-  blast radius:   14 (depth ≤ 3)
-  tests covering: 11
-   ✓ [1] TestAddGetNode    internal/graph/graph_test.go:70
-     [1] indexFile         internal/index/indexer.go:182
-     [2] IndexProject      internal/index/indexer.go:85
+$ codemap impact windowStart --depth 2
+Impact of windowStart (codemap)
+  defined:        internal/tui/view.go:779
+  direct callers: 4
+  blast radius:   7 (depth ≤ 2)
+  tests covering: 0
+  ⚠ no tests reach this symbol
+  affected (blast radius):
+     [1] tui.Model.refBlock                   internal/tui/view.go:288
+     [1] tui.metricBlock                      internal/tui/view.go:457
+     [1] tui.Model.renderImpact               internal/tui/view.go:485
+     [1] tui.Model.renderSearch               internal/tui/view.go:581
+     [2] tui.Model.body                       internal/tui/view.go:162
+     [2] tui.Model.hubDetail                  internal/tui/view.go:230
+     [2] tui.Model.metricsLists               internal/tui/view.go:415
 ```
+
+For symbols with many dependents the human-facing lists are capped — the nearest
+blast-radius nodes and the first covering tests, with a `… (N more)` line. `--json`
+always carries the complete set.

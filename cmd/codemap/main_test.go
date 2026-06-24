@@ -35,6 +35,29 @@ func TestPreciseEdgeNote(t *testing.T) {
 	}
 }
 
+// TestCapList pins the impact list-capping: hubs can have hundreds of
+// dependents, so the human-facing `impact` lists are bounded (the full set is in
+// --json). Under the cap nothing is elided; over it, the remainder is reported.
+func TestCapList(t *testing.T) {
+	xs := []int{1, 2, 3, 4, 5}
+	if shown, more := capList(xs, 10); len(shown) != 5 || more != 0 {
+		t.Errorf("under cap: got %v more=%d, want all 5 and 0", shown, more)
+	}
+	if shown, more := capList(xs, 5); len(shown) != 5 || more != 0 {
+		t.Errorf("exactly at cap: got %v more=%d, want all 5 and 0", shown, more)
+	}
+	shown, more := capList(xs, 3)
+	if len(shown) != 3 || more != 2 {
+		t.Errorf("over cap: got %v more=%d, want first 3 and 2 more", shown, more)
+	}
+	if shown[0] != 1 || shown[2] != 3 {
+		t.Errorf("cap should keep the leading (nearest) items, got %v", shown)
+	}
+	if shown, more := capList([]int{}, 3); len(shown) != 0 || more != 0 {
+		t.Errorf("empty: got %v more=%d, want empty and 0", shown, more)
+	}
+}
+
 // TestSemanticSearchAlias guards the `search` alias for `semantic` — it matches
 // the studio "Search" tab so users moving between the TUI and CLI aren't tripped.
 func TestSemanticSearchAlias(t *testing.T) {
