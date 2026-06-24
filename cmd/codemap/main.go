@@ -679,7 +679,11 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 	defer sess.Close()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
-	rep, err := app.NewService(sess).Hotspots(cwd, top)
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.Hotspots(cwd, top)
 	if err != nil {
 		return err
 	}
@@ -687,7 +691,9 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 		return printJSON(rep)
 	}
 	if len(rep.Hotspots) == 0 {
-		fmt.Println("no hotspots (is the project indexed?)")
+		// Indexed (requireIndexed passed) but no call edges → almost always a
+		// TS/JS/Python project indexed name-based, which has no call graph.
+		fmt.Printf("no hotspots in %s (no call edges — TypeScript/JavaScript/Python need 'codemap index --precise')\n", rep.Project)
 		return nil
 	}
 	fmt.Printf("Hotspots in %s:\n", rep.Project)
@@ -771,7 +777,11 @@ func runFind(cmd *cobra.Command, args []string) error {
 	defer sess.Close()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
-	rep, err := app.NewService(sess).FindSymbols(cwd, strings.Join(args, " "), top)
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.FindSymbols(cwd, strings.Join(args, " "), top)
 	if err != nil {
 		return err
 	}
@@ -779,7 +789,8 @@ func runFind(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	if len(rep.Hits) == 0 {
-		fmt.Printf("no symbols matching %q (is the project indexed?)\n", rep.Query)
+		// requireIndexed passed, so the project IS indexed — the name just isn't here.
+		fmt.Printf("no symbols matching %q\n", rep.Query)
 		return nil
 	}
 	for _, h := range rep.Hits {
@@ -796,7 +807,11 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	}
 	defer sess.Close()
 	cwd, _ := os.Getwd()
-	rep, err := app.NewService(sess).Symbols(cwd, args[0])
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.Symbols(cwd, args[0])
 	if err != nil {
 		return err
 	}
@@ -804,7 +819,8 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	if len(rep.Symbols) == 0 {
-		fmt.Printf("no symbols in %s (is the project indexed?)\n", rep.File)
+		// requireIndexed passed, so the project IS indexed — the file path isn't.
+		fmt.Printf("no symbols in %s (file not in the index — check the path, relative to the project root)\n", rep.File)
 		return nil
 	}
 	fmt.Printf("%s (%d symbols):\n", rep.File, len(rep.Symbols))

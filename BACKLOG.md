@@ -5,6 +5,19 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #183 (onboarding — consistent, actionable cold-start across ALL query commands + a flow to pin it)
+  — dogfooded the first-run experience (fresh dir, query before indexing). status/context/semantic/impact/
+  path/orphans all gave the clear "Project X is not indexed yet. Run 'codemap index'." (they gate on
+  requireIndexed), but find/hotspots/symbols did NOT — they fell back to a weak "(is the project indexed?)"
+  parenthetical that reads like "your symbol doesn't exist" rather than "index first." Added requireIndexed
+  to runFind/runHotspots/runSymbols so every query command gives the same actionable guidance. Since
+  requireIndexed now guarantees the project is indexed past that gate, refined the now-misleading empty
+  messages: find → "no symbols matching X" (the name really isn't here); hotspots → "no hotspots in X (no
+  call edges — TS/JS/Python need --precise)"; symbols → "no symbols in X (file not in the index — check the
+  path, relative to the project root)". Added specs/onboarding.yml (pure-Go): query-before-index → "Run
+  'codemap index'", then index → the same query finds the symbol (2 outcomes, stamped). config.yml +
+  incremental.yml still green (they assert the "no symbols matching" substring, preserved). `task check`
+  green. COMMIT+PUSH.
 - 2026-06-24 #182 (validate the flagship pillars end-to-end + protect vectors from a plausible regression) —
   dogfood pass over the two flagships. GRAPHS/precise: reindexed codemap with `--precise` (go/types) — 1704
   call edges resolved exactly (10 unresolved), name-collision hotspot inflation gone (name-based showed
