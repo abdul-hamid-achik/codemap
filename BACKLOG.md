@@ -5,6 +5,16 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #156 (docs — README front door caught up to the agent-harness story) — the README had
+  drifted behind recent features: the MCP section said **"Tools (19)"** and omitted `codemap_context`
+  (a real accuracy bug — now 20, list cross-checked to exactly match the server, no diffs either way),
+  the quick-start never showed `context` (now the flagship orient command) or surfaced `status`
+  freshness, and the features list didn't mention the agent-harness ergonomics. Fixes: quick-start now
+  has an "orient on a symbol — one call" step (`context`) and a `status` freshness line (steps renumbered);
+  a new **"Built for agent harnesses"** feature bullet (one-call `context` + staleness-aware `status`);
+  the MCP tools list bumped to 20 with `codemap_context`, plus a "the two an agent reaches for first"
+  callout (context + status-freshness). Verified: actual `AddTool` count = 20, README tool names ≡ server
+  tool names. Docs-only (no Go changed). COMMIT+PUSH.
 - 2026-06-24 #155 (harness — `context`: one-call symbol bundle, the 20th MCP tool) — user asked to keep
   making codemap usable with an agent harness (and leverage charm.land). Biggest remaining harness gap
   was ROUND-TRIPS: orienting on a symbol meant 4 calls (source+callers+callees+impact). New `codemap

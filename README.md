@@ -29,6 +29,9 @@ instead of dozens of file reads.
 - **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
   transitive blast radius (everything affected by a change), and which tests cover those
   paths (flagging untested code).
+- **Built for agent harnesses** — `context <symbol>` bundles definition + callers + callees +
+  tests + blast radius in **one call** (no four-round-trip stitching), and `status` reports index
+  *freshness* (files changed since indexing) so an agent reindexes before trusting a stale answer.
 - **Multi-project registry** — one shared store indexes all your repos; `projects` lists what's
   indexed, and any query targets one project (resolved from cwd, or `--path`).
 - **Annotations** — pin notes and external data (DB rows from mongosh/postgres, vidtrace/vecgrep
@@ -142,21 +145,25 @@ codemap index --precise            # exact call edges (Go via go/types; TS/JS/Py
 # Indexes your code, not your dependencies: node_modules, venv, vendor, dist, build,
 # __pycache__, .git (and any dotdir) are skipped by default — configurable via `exclude`.
 
-# 2. Navigate the call graph
+# 2. Orient on a symbol — everything in one call (definition, callers, callees, tests)
+codemap context authenticateUser   # the one-call overview (agents: codemap_context)
+
+# 3. Navigate the call graph
 codemap callers authenticateUser   # who calls it (fast, name-based)
 codemap callers authenticateUser --lsp   # exact callers via gopls (Go)
 codemap callees authenticateUser   # what it calls
 codemap path     Handler Login     # shortest call path between two symbols
 
-# 3. Analyze impact and structure
+# 4. Analyze impact and structure
 codemap impact   authenticateUser --depth 3   # callers + blast radius + tests
 codemap hotspots --top 20          # most-referenced symbols (hubs)
 codemap orphans                    # functions with no callers (dead-code candidates)
+codemap status                     # stats + warns if the index is stale vs your files
 
-# 4. Search by meaning (needs an embedded index)
+# 5. Search by meaning (needs an embedded index)
 codemap semantic "jwt validation middleware" --top 10
 
-# 5. Explore visually
+# 6. Explore visually
 codemap studio
 ```
 
@@ -276,16 +283,20 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-Tools (19): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+Tools (20): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
 `codemap_orphans`, `codemap_path`, `codemap_symbols`, `codemap_find`, `codemap_source`,
-`codemap_projects`, `codemap_docs`, `codemap_annotate`, `codemap_annotations`,
+`codemap_context`, `codemap_projects`, `codemap_docs`, `codemap_annotate`, `codemap_annotations`,
 `codemap_unannotate`. Each takes an
-optional `path` (the project directory) and returns JSON. `codemap_callers` / `codemap_callees`
-accept `precise: true` for exact, gopls-resolved results (Go); `codemap_source` returns a symbol's
-body; `codemap_projects` lists what's indexed; **`codemap_docs`** returns an agent guide so a
-harness can learn the tool; **`codemap_annotate` / `codemap_annotations`** pin notes and external
-data (DB rows, findings) to symbols and call paths — a knowledge layer over the graph (see below).
+optional `path` (the project directory) and returns JSON. The two an agent reaches for first:
+**`codemap_context <symbol>`** bundles a symbol's definition, callers, callees, covering tests and
+blast radius in **one call** (instead of four), and **`codemap_status`** reports index *freshness* —
+a `stale` count of files changed/added/removed since indexing, so the agent knows to reindex before
+trusting results. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
+gopls-resolved results (Go); `codemap_source` returns a symbol's body; `codemap_projects` lists
+what's indexed; **`codemap_docs`** returns an agent guide so a harness can learn the tool;
+**`codemap_annotate` / `codemap_annotations`** pin notes and external data (DB rows, findings) to
+symbols and call paths — a knowledge layer over the graph (see below).
 
 Results carry each symbol's **signature** (e.g. `func (s *Store) Hotspots(projectID int64, limit
 int) ([]Hotspot, error)`) and **docstring**, so an agent understands what callers/callees/hits are
