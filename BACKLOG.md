@@ -5,6 +5,14 @@
 > Started 2026-06-23. Cron `ffee7a2b` (every 5 min). See AGENTS.md / SPEC.md for design.
 
 ## Iteration log (post-v0.7.0)
+- 2026-06-24 #170 (flow — verify + guard the JSX/TSX call graph, a distinctive claimed feature) —
+  the README/CLAUDE claim "`<Component/>` usages resolve" (#122) had NO flow, and neither typescript.yml
+  (plain TS) nor javascript.yml (TS+JS) exercises JSX. Dogfooded it: a `<Leaf/>` usage in a `.tsx`
+  resolves as a call (`callers Leaf` → `Page`), and a `<Icon/>` in a `.jsx` too (`callers Icon` →
+  `Toolbar`) — via `index --precise` (callHierarchy), `.tsx`=typescriptreact / `.jsx`=javascriptreact on
+  one typescript-language-server. Works for BOTH extensions. Captured as `specs/jsx.yml` (3 outcomes:
+  tsx + jsx component-usage call edges + precise). contractHash stamped; CLAUDE.md flows note + AGENTS.md
+  listing updated. No Go changed. The claimed JSX value prop is now demonstrated + guarded. COMMIT+PUSH.
 - 2026-06-24 #169 (usability — `annotations` flags dangling notes after a refactor) — knowledge-layer
   hygiene gap: `annotate` warns at creation if the target is unknown, but an EXISTING annotation silently
   dangles after the symbol is renamed/removed — `annotations` listed it normally with no hint it no longer

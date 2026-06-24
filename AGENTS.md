@@ -77,7 +77,8 @@ codemap/
 │                              #   layer) · staleness (drift) · incremental (reindex updates) ·
 │                              #   index_progress (TTY bar) · mcp_serve
 │                              #   (stdio JSON-RPC) · studio (gopls) · semantic (vectors+Ollama)
-│                              #   · precise/typescript/javascript/python · polyglot (Go+TS+Py one repo)
+│                              #   · precise/typescript/javascript/python · jsx (<Component/> call edges)
+│                              #   · polyglot (Go+TS+Py one repo)
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md SPEC.md LICENSE

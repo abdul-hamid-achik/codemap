@@ -1,0 +1,42 @@
+version: 1
+name: jsx
+intent: |
+    codemap builds a real call graph through JSX/TSX: a `<Component/>` usage is a
+    call edge to that component. `.tsx` is opened as typescriptreact and `.jsx` as
+    javascriptreact (one typescript-language-server), so `index --precise`
+    (callHierarchy) resolves component usages — callers of a component include the
+    component that renders it. Distinct from typescript.yml (plain TS). Needs
+    typescript-language-server + node; not run in CI.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P\"; printf 'export function Leaf() { return null; }\\nexport function Page() { return <Leaf />; }\\n' > \"$P/App.tsx\"; printf 'export function Icon() { return null; }\\nexport function Toolbar() { return <Icon />; }\\n' > \"$P/widget.jsx\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== index --precise (TSX + JSX) =='; \"$CM\" index --no-embed --precise 2>&1 | grep -iE 'graph|precise'; echo '== TSX: <Leaf/> resolves — callers of Leaf =='; \"$CM\" callers Leaf; echo '== JSX: <Icon/> resolves — callers of Icon =='; \"$CM\" callers Icon"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 45000
+    - snapshot: jsx
+outcomes:
+    - id: tsx_component_call
+      description: a <Leaf/> usage in a .tsx file resolves as a call (callers of Leaf include Page)
+      verify:
+        screen:
+            contains: "Page"
+    - id: jsx_component_call
+      description: a <Icon/> usage in a .jsx file resolves as a call (callers of Icon include Toolbar)
+      verify:
+        screen:
+            contains: "Toolbar"
+    - id: precise_resolved
+      description: the precise pass resolves the JSX/TSX call edges
+      verify:
+        screen:
+            contains: "precise"
+contractHash: sha256:976c7575cf74628f460b70cae714e1096d636f7db187c9d582c9b9d788bb5588

@@ -64,8 +64,9 @@ Surfaces / key files:
 `task build` · `task flows` (glyphrun) when specs change. Flows are **local-only** (CI skips
 them): `studio.yml` needs `gopls`, `semantic.yml` needs a local Ollama with `nomic-embed-text`,
 `precise.yml` needs the `go` toolchain (it runs `index --precise`); `typescript.yml` +
-`javascript.yml` (one server, mixed TS+JS, cross-language call graph) + `studio_ts.yml` (studio
-driving a TS call graph in the Graph tab) need `typescript-language-server` + `node`; `python.yml`
+`javascript.yml` (one server, mixed TS+JS, cross-language call graph) + `jsx.yml` (`<Component/>`
+usages resolve as call edges in `.tsx`/`.jsx`) + `studio_ts.yml` (studio driving a TS call graph in
+the Graph tab) need `typescript-language-server` + `node`; `python.yml`
 needs `pyright-langserver` + `node`; and `polyglot.yml` (Go+TS+Python in one repo, the unified precise
 pass across go/types + callHierarchy) needs ALL of them. The toolchain-dependent flows only isolate
 `CODEMAP_DATA`, not `HOME`, so an asdf shim still resolves — the rest are pure-Go.
