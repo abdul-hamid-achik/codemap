@@ -1240,6 +1240,156 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	return rep, nil
 }
 
+// RelatedFile is one file structurally related to a target file, with why and how
+// strongly. reason ∈ caller|callee|test (codemap's call graph supersedes the
+// import-text heuristics a semantic tool would otherwise use). confidence is a
+// ranking hint (0..1), not a probability.
+type RelatedFile struct {
+	RelativePath string  `json:"relative_path"`
+	Reason       string  `json:"reason"`
+	Confidence   float64 `json:"confidence"`
+}
+
+// RelatedFilesReport is the committed cross-tool contract (codemap⇄vecgrep C1):
+// the files related to one file, via the resolved call/test graph. indexed
+// distinguishes "project not indexed" (false) from "indexed, nothing related"
+// (true + empty Related) — a non-error, non-nil answer either way.
+type RelatedFilesReport struct {
+	Project string        `json:"project"`
+	File    string        `json:"file"`
+	Indexed bool          `json:"indexed"`
+	Related []RelatedFile `json:"related"`
+}
+
+// RelatedFiles returns the files related to file through the structural graph:
+// the files of its callers, its callees, and the tests covering its symbols —
+// aggregated and de-duplicated per (path, reason). It is the one-call replacement
+// for a sibling fanning out symbols→impact per symbol. Graceful: an unindexed
+// project returns Indexed=false with an empty list, never an error.
+func (svc *Service) RelatedFiles(cwd, file string) (*RelatedFilesReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &RelatedFilesReport{Project: name, File: file, Related: []RelatedFile{}}
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return rep, nil // indexed:false
+	}
+	if err != nil {
+		return nil, err
+	}
+	rep.Indexed = true
+
+	nodes, err := g.NodesInFile(p.ID, file)
+	if err != nil {
+		return nil, err
+	}
+	// Keep the strongest confidence seen per (reason, path); skip self-references.
+	best := map[string]RelatedFile{}
+	add := func(path, reason string, conf float64) {
+		if path == "" || path == file {
+			return
+		}
+		key := reason + "\x00" + path
+		if ex, ok := best[key]; !ok || conf > ex.Confidence {
+			best[key] = RelatedFile{RelativePath: path, Reason: reason, Confidence: conf}
+		}
+	}
+	for _, n := range nodes {
+		if n.Symbol == "" { // the file node itself
+			continue
+		}
+		callers, err := g.Callers(p.ID, n.Symbol)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range callers {
+			add(c.FilePath, "caller", 0.9)
+		}
+		callees, err := g.Callees(p.ID, n.Symbol)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range callees {
+			add(c.FilePath, "callee", 0.7)
+		}
+		for _, t := range heuristicTestCoverage(g, p.ID, p.Path, n.Symbol) {
+			add(t.File, "test", 1.0)
+		}
+	}
+	for _, rf := range best {
+		rep.Related = append(rep.Related, rf)
+	}
+	// Deterministic order: strongest first, then path, then reason.
+	sort.Slice(rep.Related, func(i, j int) bool {
+		a, b := rep.Related[i], rep.Related[j]
+		if a.Confidence != b.Confidence {
+			return a.Confidence > b.Confidence
+		}
+		if a.RelativePath != b.RelativePath {
+			return a.RelativePath < b.RelativePath
+		}
+		return a.Reason < b.Reason
+	})
+	return rep, nil
+}
+
+// SymbolAtReport resolves a file:line position to its enclosing symbol (C2).
+// Resolution is "exact" (line is the definition line), "enclosing" (line falls
+// inside the symbol's body), or "none" (no symbol there).
+type SymbolAtReport struct {
+	File       string `json:"file"`
+	Line       int    `json:"line"`
+	Symbol     string `json:"symbol,omitempty"`
+	FQN        string `json:"fqn,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	StartLine  int    `json:"start_line,omitempty"`
+	EndLine    int    `json:"end_line,omitempty"`
+	Resolution string `json:"resolution"`
+}
+
+// SymbolAt resolves a file:line to the enclosing symbol node — the entry point
+// that lets a sibling tool's file:line result join onto the graph. Never errors on
+// a miss: an unresolved position returns Resolution="none".
+func (svc *Service) SymbolAt(cwd, file string, line int) (*SymbolAtReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &SymbolAtReport{File: file, Line: line, Resolution: "none"}
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return rep, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	n, ok, err := g.NodeAtLine(p.ID, file, line)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return rep, nil
+	}
+	rep.Symbol, rep.FQN, rep.Kind = n.Symbol, n.FQN, n.Kind
+	rep.StartLine, rep.EndLine = n.StartLine, n.EndLine
+	if n.StartLine == line {
+		rep.Resolution = "exact"
+	} else {
+		rep.Resolution = "enclosing"
+	}
+	return rep, nil
+}
+
 // joinNote appends an additional note to an existing one (which may be empty).
 func joinNote(existing, add string) string {
 	if existing == "" {

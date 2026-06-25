@@ -238,6 +238,31 @@ func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {
 	return s.scanIDs("SELECT target_id FROM edges WHERE source_id=? AND edge_type=?", sourceID, EdgeCalls)
 }
 
+// NodeAtLine returns the symbol node in file whose [StartLine, EndLine] range
+// encloses line, preferring the innermost (smallest range) when symbols nest. The
+// file node itself (empty Symbol) is never returned. ok is false when no symbol
+// encloses the line. This is the file:line → enclosing-symbol entry point that lets
+// sibling tools (which emit file:line) join their results onto the graph.
+func (s *Store) NodeAtLine(projectID int64, file string, line int) (Node, bool, error) {
+	nodes, err := s.NodesInFile(projectID, file)
+	if err != nil {
+		return Node{}, false, err
+	}
+	var best Node
+	found := false
+	for _, n := range nodes {
+		if n.Symbol == "" { // skip the file node
+			continue
+		}
+		if n.StartLine <= line && line <= n.EndLine {
+			if !found || (n.EndLine-n.StartLine) < (best.EndLine-best.StartLine) {
+				best, found = n, true
+			}
+		}
+	}
+	return best, found, nil
+}
+
 // Hotspot is a node with its incoming-usage count (hub detection).
 type Hotspot struct {
 	Node     Node

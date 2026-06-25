@@ -116,6 +116,17 @@ type impactInput struct {
 	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
 }
 
+type relatedFilesInput struct {
+	File string `json:"file" jsonschema:"project-relative file path to find related files for"`
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
+type symbolAtInput struct {
+	File string `json:"file" jsonschema:"project-relative file path"`
+	Line int    `json:"line" jsonschema:"1-based line number to resolve to its enclosing symbol"`
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
 type limitInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Top  int    `json:"top,omitempty" jsonschema:"maximum results"`
@@ -216,6 +227,14 @@ func (s *Server) register() {
 		Name:        "codemap_impact",
 		Description: "Impact analysis for a symbol: definition sites, direct callers, the transitive blast radius (everything affected by a change), and which tests cover those paths. The flagship query — one call replaces many file reads.",
 	}, s.handleImpact)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_related_files",
+		Description: "Files structurally related to a file via the call/test graph: the files of its callers, its callees, and the tests covering its symbols, each with a reason (caller|callee|test) and a confidence. Graph-accurate alternative to import-text heuristics; returns {indexed:false} when the project isn't indexed.",
+	}, s.handleRelatedFiles)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_symbol_at",
+		Description: "Resolve a file:line position to its enclosing symbol (FQN, kind, line range). The entry point for joining external file:line results (search hits, stack traces, diffs) onto the code graph. resolution is exact|enclosing|none.",
+	}, s.handleSymbolAt)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_hotspots",
 		Description: "List the most-referenced symbols (hubs) in a project.",
@@ -366,6 +385,16 @@ func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in i
 		return r, v, nil
 	}
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
+	return result(rep, err)
+}
+
+func (s *Server) handleRelatedFiles(_ context.Context, _ *sdkmcp.CallToolRequest, in relatedFilesInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.RelatedFiles(cwdOf(in.Path), in.File)
+	return result(rep, err)
+}
+
+func (s *Server) handleSymbolAt(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolAtInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.SymbolAt(cwdOf(in.Path), in.File, in.Line)
 	return result(rep, err)
 }
 

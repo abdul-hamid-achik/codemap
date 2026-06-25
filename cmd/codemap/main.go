@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -138,8 +139,20 @@ var (
 	impactCmd = &cobra.Command{
 		Use:   "impact <symbol>",
 		Short: "Impact analysis: blast radius (transitive callers) + test coverage",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1), // 0 args when --at <file>:<line> resolves the symbol
 		RunE:  runImpact,
+	}
+	relatedFilesCmd = &cobra.Command{
+		Use:   "related-files <file>",
+		Short: "Files related to a file via the call/test graph (callers, callees, covering tests)",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRelatedFiles,
+	}
+	symbolAtCmd = &cobra.Command{
+		Use:   "symbol-at <file>:<line>",
+		Short: "Resolve a file:line position to its enclosing symbol (FQN, kind, range)",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSymbolAt,
 	}
 	semanticCmd = &cobra.Command{
 		Use:     "semantic <query>",
@@ -246,6 +259,7 @@ func init() {
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
+	impactCmd.Flags().String("at", "", "resolve the symbol from a position instead of a name: <file>:<line>")
 	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
@@ -266,7 +280,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, impactCmd, relatedFilesCmd, symbolAtCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, daemonCmd)
 }
 
@@ -758,7 +772,29 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	rep, err := svc.Impact(cwd, args[0], depth)
+	// Resolve the target symbol: either a positional name or --at <file>:<line>.
+	symbol := ""
+	if len(args) > 0 {
+		symbol = args[0]
+	}
+	if at, _ := cmd.Flags().GetString("at"); at != "" {
+		file, line, perr := parseFileLine(at)
+		if perr != nil {
+			return perr
+		}
+		sa, serr := svc.SymbolAt(cwd, file, line)
+		if serr != nil {
+			return serr
+		}
+		if sa.Resolution == "none" {
+			return fmt.Errorf("no symbol found at %s", at)
+		}
+		symbol = sa.Symbol
+	}
+	if symbol == "" {
+		return fmt.Errorf("impact needs a <symbol> argument or --at <file>:<line>")
+	}
+	rep, err := svc.Impact(cwd, symbol, depth)
 	if err != nil {
 		return err
 	}
@@ -811,6 +847,77 @@ func runImpact(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   … (%d more — use --json for all, or lower --depth)\n", more)
 		}
 	}
+	return nil
+}
+
+// parseFileLine splits a "path/to/file.go:42" position. The file part may itself
+// contain no colon issues since we split on the LAST colon (Windows-style drive
+// letters aren't a concern for project-relative paths).
+func parseFileLine(s string) (string, int, error) {
+	i := strings.LastIndex(s, ":")
+	if i < 0 {
+		return "", 0, fmt.Errorf("expected <file>:<line>, got %q", s)
+	}
+	line, err := strconv.Atoi(s[i+1:])
+	if err != nil || line < 1 {
+		return "", 0, fmt.Errorf("invalid line number in %q", s)
+	}
+	return s[:i], line, nil
+}
+
+func runRelatedFiles(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	svc := app.NewService(sess)
+	rep, err := svc.RelatedFiles(cwd, args[0])
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if !rep.Indexed {
+		fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", rep.Project)
+		return nil
+	}
+	if len(rep.Related) == 0 {
+		fmt.Printf("No files related to %s in the graph.\n", rep.File)
+		return nil
+	}
+	fmt.Printf("Files related to %s (%s)\n", rep.File, rep.Project)
+	for _, r := range rep.Related {
+		fmt.Printf("  %-7s %s\n", r.Reason, r.RelativePath)
+	}
+	return nil
+}
+
+func runSymbolAt(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	file, line, err := parseFileLine(args[0])
+	if err != nil {
+		return err
+	}
+	rep, err := app.NewService(sess).SymbolAt(cwd, file, line)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if rep.Resolution == "none" {
+		fmt.Printf("No symbol at %s:%d\n", file, line)
+		return nil
+	}
+	fmt.Printf("%s  %s:%d-%d  (%s, %s)\n", disp(rep.FQN, rep.Symbol), rep.File, rep.StartLine, rep.EndLine, rep.Kind, rep.Resolution)
 	return nil
 }
 
