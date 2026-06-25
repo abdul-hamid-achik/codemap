@@ -202,7 +202,17 @@ guarded by golden contract tests in both CIs.
 
 **🎉 codemap ⇄ vecgrep integration COMPLETE** — 7 flows live on both mains (F1 related-files, F4 symbol-at,
 F3 annotate, F2 rerank, G4 status cross-read, G1 semantic backfill, G2 memory recall), all golden-tested,
-all live-verified. codemap FEEDS structure → vecgrep; codemap FETCHES meaning + memory ← vecgrep. CUT: G3, F5, EI.14.
+all live-verified, and **documented** (docs/ecosystem.md + cli/config/agent-guide, commit d305cac). codemap
+FEEDS structure → vecgrep; codemap FETCHES meaning + memory ← vecgrep. CUT: G3, F5, EI.14. Optional
+follow-ups: attach memories in Impact too (left in Context to keep the flagship hot-path exec-free); the
+F3 annotation rebind rule on rename (annotations are name-keyed → survive reindex, orphan on rename).
+
+## 🚩 Release point — v0.14.0 ready (9 feat/fix commits since v0.13.0, unreleased on main)
+Indexing speedup (batch/concurrent embed + `--embed-max-chars`), Homebrew brews→cask migration, studio
+alt+1–4 tab fix, and the **entire codemap⇄vecgrep integration**. Release-worthy; awaiting explicit user auth
+(standing rule). NOTE for the cut: this is the FIRST cask release — do the tap-side migration
+(`tap_migrations.json` + delete `Formula/codemap.rb`) right after GoReleaser publishes `Casks/codemap.rb`
+(see "NEXT-RELEASE MUST-DO" above).
 - Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
   G2 (memory_recall into context/impact — needs the `['codemap',<project>]` tag governance). **Cut:** G3 (shared
   veclite read), F5, EI.14 (KnowledgeGraph), EI.15 (shelved with G3).
