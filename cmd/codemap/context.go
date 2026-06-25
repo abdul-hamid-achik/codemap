@@ -99,6 +99,12 @@ func runContext(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("  %s %d (depth ≤ %d)\n", label("blast radius:"), rep.BlastRadius, rep.BlastDepth)
 	renderAnnotations(rep.Annotations)
+	if len(rep.Memories) > 0 {
+		fmt.Printf("  %s (via vecgrep)\n", label("memories:"))
+		for _, m := range rep.Memories {
+			fmt.Printf("     · %s\n", firstLine(m.Content))
+		}
+	}
 	return nil
 }
 
