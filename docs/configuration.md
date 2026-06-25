@@ -46,6 +46,8 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_EMBED_BATCH_SIZE` | `index.embed_batch_size` |
 | `CODEMAP_EMBED_CONCURRENCY` | `index.embed_concurrency` |
 | `CODEMAP_EMBED_MAX_CHARS` | `index.embed_max_chars` |
+| `CODEMAP_VECGREP_ENABLED` | `vecgrep.enabled` |
+| `CODEMAP_VECGREP_BIN` | `vecgrep.bin` |
 | `CODEMAP_DAEMON_DEBOUNCE_MS` | `daemon.debounce_ms` |
 | `CODEMAP_DAEMON_IDLE_TIMEOUT_MIN` | `daemon.idle_timeout_min` |
 | `CODEMAP_DAEMON_EMBED_RPS` | `daemon.embed_rps` |
@@ -102,6 +104,9 @@ daemon:                   # background indexer (codemap daemon)
   embed_rps: 0            # background embed rate to Ollama (0 = unlimited)
   embed_max_in_flight: 2  # max concurrent embed calls
   embed_cache_size: 4096  # embedding dedup cache (entries)
+vecgrep:                  # sibling-tool integration (see Ecosystem)
+  enabled: true           # use vecgrep for semantic search when codemap has no embeddings, + memory recall
+  bin: ""                 # path to the vecgrep binary (resolved via $PATH if empty)
 ```
 
 The default exclude list also covers `build`, build-output variants (`dist-*`, `build-*`, e.g.

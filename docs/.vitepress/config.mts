@@ -34,6 +34,12 @@ export default defineConfig({
           { text: 'MCP server', link: '/mcp' },
         ],
       },
+      {
+        text: 'Ecosystem',
+        items: [
+          { text: 'codemap ⇄ vecgrep', link: '/ecosystem' },
+        ],
+      },
     ],
     socialLinks: [
       { icon: 'github', link: 'https://github.com/abdul-hamid-achik/codemap' },

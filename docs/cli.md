@@ -25,6 +25,8 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap callees <symbol> --lsp` | **Precise** callees via gopls (Go) |
 | `codemap path <from> <to>` | Shortest call path between two symbols |
 | `codemap symbols <file>` | Outline a file's symbols with their signatures (a structured alternative to reading it) |
+| `codemap symbol-at <file>:<line>` | Resolve a file:line position to its enclosing symbol (FQN, kind, range) — the entry point for joining external `file:line` results (search hits, stack traces, diffs) onto the graph. Also `codemap impact --at <file>:<line>` |
+| `codemap related-files <file>` | Files related to a file via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence |
 | `codemap source <symbol>` | Print a symbol's source code (the body behind its signature) |
 | `codemap context <symbol> [--depth N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, covering tests, blast-radius size, and pinned annotations. Replaces separate `source`/`callers`/`callees`/`impact` calls; the `codemap_context` MCP tool returns the same JSON for agents |
 

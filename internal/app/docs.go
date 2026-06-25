@@ -128,7 +128,14 @@ code. A harness can chain them:
 Example bug-fix flow: vidtrace a repro → vecgrep the codebase for the relevant
 area → codemap_impact / codemap_path to learn what a change would affect and
 what tests cover it → plan the fix → fcheap to persist the artifacts. All share
-local XDG storage, so findings can be cross-referenced.`},
+local XDG storage, so findings can be cross-referenced.
+
+codemap ⇄ vecgrep is wired directly (when the vecgrep binary is on PATH): if a
+project has no codemap embeddings, codemap_semantic falls back to vecgrep's index
+and maps hits onto the graph (mode:"vecgrep"); codemap_context surfaces vecgrep
+agent-memories scoped to this project via status's project_key tag; and
+codemap_status reports sibling indexes. It degrades silently when vecgrep is
+absent. Disable with vecgrep.enabled=false.`},
 }
 
 // DocTopicNames returns the available `codemap docs` topics, in order.
