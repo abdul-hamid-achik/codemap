@@ -154,6 +154,12 @@ var (
 		Args:  cobra.ExactArgs(1),
 		RunE:  runSymbolAt,
 	}
+	secretImpactCmd = &cobra.Command{
+		Use:   "secret-impact [<KEY>...]",
+		Short: "Code blast radius of rotating secret keys: which symbols read each key, + covering tests (value-free — only key NAMES)",
+		Args:  cobra.ArbitraryArgs, // 0 args is valid with --via-vault
+		RunE:  runSecretImpact,
+	}
 	semanticCmd = &cobra.Command{
 		Use:     "semantic <query>",
 		Aliases: []string{"search"}, // matches the studio "Search" tab and the common mental model
@@ -261,6 +267,9 @@ func init() {
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	impactCmd.Flags().String("at", "", "resolve the symbol from a position instead of a name: <file>:<line>")
+	secretImpactCmd.Flags().Int("depth", 3, "max hops for each key's blast radius")
+	secretImpactCmd.Flags().String("via-vault", "", "fetch the key NAMES from `tvault -p <project> list` (value-free) instead of passing them")
+	secretImpactCmd.Flags().String("prefix", "", "with --via-vault, only keys with this prefix (e.g. STRIPE_)")
 	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
@@ -281,7 +290,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, relatedFilesCmd, symbolAtCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, impactCmd, relatedFilesCmd, symbolAtCmd, secretImpactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, daemonCmd)
 }
 
@@ -966,6 +975,84 @@ func runSymbolAt(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	fmt.Printf("%s  %s:%d-%d  (%s, %s)\n", disp(rep.FQN, rep.Symbol), rep.File, rep.StartLine, rep.EndLine, rep.Kind, rep.Resolution)
+	return nil
+}
+
+// fetchVaultKeys shells `tvault [-p project] list [--prefix p] --json` to get the
+// project's secret key NAMES (a JSON array of strings — value-free). The ONLY tvault
+// verb it runs is `list`; `tvault get` is never reachable, so secret values can't
+// enter codemap.
+func fetchVaultKeys(ctx context.Context, project, prefix string) ([]string, error) {
+	tvault, err := exec.LookPath("tvault")
+	if err != nil {
+		return nil, fmt.Errorf("--via-vault needs tinyvault: 'tvault' not found on PATH")
+	}
+	args := []string{"-p", project, "list", "--json"}
+	if prefix != "" {
+		args = append(args, "--prefix", prefix)
+	}
+	out, err := exec.CommandContext(ctx, tvault, args...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("tvault list failed for project %q: %w", project, err)
+	}
+	var keys []string
+	if err := json.Unmarshal(out, &keys); err != nil {
+		return nil, fmt.Errorf("parse tvault list output: %w", err)
+	}
+	return keys, nil
+}
+
+func runSecretImpact(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	depth, _ := cmd.Flags().GetInt("depth")
+	keys := append([]string{}, args...)
+	if vault, _ := cmd.Flags().GetString("via-vault"); vault != "" {
+		prefix, _ := cmd.Flags().GetString("prefix")
+		vk, ferr := fetchVaultKeys(cmd.Context(), vault, prefix)
+		if ferr != nil {
+			return ferr
+		}
+		keys = append(keys, vk...)
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("supply one or more secret key names, or --via-vault <project> to fetch them")
+	}
+	rep, err := app.NewService(sess).SecretImpact(cwd, keys, depth)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if !rep.Indexed {
+		fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", rep.Project)
+		return nil
+	}
+	for _, k := range rep.Keys {
+		warn := ""
+		if k.Untested {
+			warn = "  ⚠ untested"
+		}
+		fmt.Printf("%s — %d reader(s), blast radius %d, %d covering test(s)%s\n",
+			k.Key, len(k.UsedBy), k.BlastRadius, k.CoveringTests, warn)
+		for _, u := range k.UsedBy {
+			fmt.Printf("    %s  %s:%d\n", disp(u.FQN, u.Symbol), u.File, u.Line)
+		}
+	}
+	if len(rep.OrphanKeys) > 0 {
+		fmt.Printf("no code usages found (verify before treating as dead): %s\n", strings.Join(rep.OrphanKeys, ", "))
+	}
+	if !rep.Precise {
+		fmt.Println("⚠ " + rep.Note)
+	}
+	if rep.Stale {
+		fmt.Println("⚠ index is stale — reindex before trusting a rotation")
+	}
 	return nil
 }
 

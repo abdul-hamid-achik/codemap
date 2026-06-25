@@ -127,6 +127,12 @@ type symbolAtInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+type secretImpactInput struct {
+	Keys  []string `json:"keys" jsonschema:"secret key NAMES to analyze (e.g. STRIPE_KEY) — names only, never values"`
+	Path  string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth int      `json:"depth,omitempty" jsonschema:"max hops for each key's blast radius (default 3)"`
+}
+
 type limitInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Top  int    `json:"top,omitempty" jsonschema:"maximum results"`
@@ -235,6 +241,10 @@ func (s *Server) register() {
 		Name:        "codemap_symbol_at",
 		Description: "Resolve a file:line position to its enclosing symbol (FQN, kind, line range). The entry point for joining external file:line results (search hits, stack traces, diffs) onto the code graph. resolution is exact|enclosing|none.",
 	}, s.handleSymbolAt)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_secret_impact",
+		Description: "Code blast radius of rotating secret keys: for each key NAME, the symbols that read it (os.Getenv/os.environ/process.env), the transitive callers affected, and the covering tests (untested=true is a loud warning). Operates on key NAMES only — never reads, requests, or returns secret values. Pairs with tinyvault's value-free key inventory. blast radius is name-based unless the index is precise (precise:false note); reindex --precise for exact figures.",
+	}, s.handleSecretImpact)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_hotspots",
 		Description: "List the most-referenced symbols (hubs) in a project.",
@@ -395,6 +405,11 @@ func (s *Server) handleRelatedFiles(_ context.Context, _ *sdkmcp.CallToolRequest
 
 func (s *Server) handleSymbolAt(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolAtInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.SymbolAt(cwdOf(in.Path), in.File, in.Line)
+	return result(rep, err)
+}
+
+func (s *Server) handleSecretImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in secretImpactInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.SecretImpact(cwdOf(in.Path), in.Keys, in.Depth)
 	return result(rep, err)
 }
 
