@@ -160,6 +160,12 @@ var (
 		Args:  cobra.ArbitraryArgs, // 0 args is valid with --via-vault
 		RunE:  runSecretImpact,
 	}
+	requiredKeysCmd = &cobra.Command{
+		Use:   "required-keys <entrypoint>",
+		Short: "Least-privilege key set: which candidate secret keys an entrypoint's call tree actually reads (for tvault seal/export)",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRequiredKeys,
+	}
 	semanticCmd = &cobra.Command{
 		Use:     "semantic <query>",
 		Aliases: []string{"search"}, // matches the studio "Search" tab and the common mental model
@@ -270,6 +276,10 @@ func init() {
 	secretImpactCmd.Flags().Int("depth", 3, "max hops for each key's blast radius")
 	secretImpactCmd.Flags().String("via-vault", "", "fetch the key NAMES from `tvault -p <project> list` (value-free) instead of passing them")
 	secretImpactCmd.Flags().String("prefix", "", "with --via-vault, only keys with this prefix (e.g. STRIPE_)")
+	requiredKeysCmd.Flags().Int("depth", 5, "max hops of the entrypoint's callee closure")
+	requiredKeysCmd.Flags().StringSlice("keys", nil, "candidate key names to test (e.g. STRIPE_KEY,DATABASE_URL)")
+	requiredKeysCmd.Flags().String("via-vault", "", "use all of `tvault -p <project> list` as the candidate keys (value-free)")
+	requiredKeysCmd.Flags().String("prefix", "", "with --via-vault, restrict candidates to this prefix")
 	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
@@ -290,7 +300,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, relatedFilesCmd, symbolAtCmd, secretImpactCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, impactCmd, relatedFilesCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, daemonCmd)
 }
 
@@ -1052,6 +1062,44 @@ func runSecretImpact(cmd *cobra.Command, args []string) error {
 	}
 	if rep.Stale {
 		fmt.Println("⚠ index is stale — reindex before trusting a rotation")
+	}
+	return nil
+}
+
+func runRequiredKeys(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	depth, _ := cmd.Flags().GetInt("depth")
+	keys, _ := cmd.Flags().GetStringSlice("keys")
+	if vault, _ := cmd.Flags().GetString("via-vault"); vault != "" {
+		prefix, _ := cmd.Flags().GetString("prefix")
+		vk, ferr := fetchVaultKeys(cmd.Context(), vault, prefix)
+		if ferr != nil {
+			return ferr
+		}
+		keys = append(keys, vk...)
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("supply candidate keys with --keys K1,K2 or --via-vault <project>")
+	}
+	rep, err := app.NewService(sess).RequiredKeys(cwd, args[0], keys, depth)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if !rep.Found {
+		printNoSymbol(rep.Entrypoint, rep.Project)
+		return nil
+	}
+	// One key per line — pipe-friendly: `… | xargs -I{} tvault seal --key {}`.
+	for _, k := range rep.RequiredKeys {
+		fmt.Println(k)
 	}
 	return nil
 }

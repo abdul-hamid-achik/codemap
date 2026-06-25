@@ -137,3 +137,38 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// TestRequiredKeys proves least-privilege scoping: only keys read within the
+// entrypoint's transitive call tree are required; a key read elsewhere is excluded.
+func TestRequiredKeys(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	src := "package app\nimport \"os\"\n" +
+		"func Reader() string { return os.Getenv(\"STRIPE_KEY\") }\n" +
+		"func Middle() string { return Reader() }\n" +
+		"func Entry() string { return Middle() }\n" +
+		"func Unrelated() string { return os.Getenv(\"DATABASE_URL\") }\n"
+	if err := os.WriteFile(filepath.Join(proj, "a.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.RequiredKeys(proj, "Entry", []string{"STRIPE_KEY", "DATABASE_URL"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatal("Entry should be found")
+	}
+	// Entry→Middle→Reader reads STRIPE_KEY; DATABASE_URL is read only by Unrelated.
+	if len(rep.RequiredKeys) != 1 || rep.RequiredKeys[0] != "STRIPE_KEY" {
+		t.Errorf("required_keys = %v, want [STRIPE_KEY] (DATABASE_URL is outside Entry's call tree)", rep.RequiredKeys)
+	}
+}

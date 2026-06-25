@@ -259,7 +259,7 @@ _v0.14.0 shipped 2026-06-25._
   `{key, used_by[], blast_radius, covering_tests, untested, unresolved[], precise, stale}` + value-leak test
   (emit file:line, never line content). Frame as "candidate usage + impact", not authoritative rotation gate.
   Keep `orphan_keys` labeled "no usages found, verify"; **CUT `unmanaged_keys` from v1**.
-- [ ] **EI.13** — `codemap callees <entrypoint> --keys` → `required_keys[]` for `vault_seal`/`vault_export_env{keys}`
+- [x] **EI.13** — `codemap required-keys <entrypoint>` (DONE + live-verified) → `required_keys[]` for `vault_seal`/`vault_export_env{keys}`
   (tinyvault side verified done). Rides the Slice 2 scanner (keys read by the transitive callees).
 
 ### Shared substrate (veclite; deepest — after the wins above)

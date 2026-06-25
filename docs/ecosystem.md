@@ -90,6 +90,13 @@ index over-counts (`precise:false` — reindex `--precise` for exact figures), a
 literals (Go is exact via `go/scanner`; comments are excluded, but a name in an unrelated string equality
 can still appear).
 
+**`codemap required-keys <entrypoint>`** derives the *least-privilege* key set: which candidate keys the
+entrypoint's transitive call tree actually reads. Pipe it to seal/inject only what a code path needs:
+
+```bash
+codemap required-keys Checkout --via-vault payments | xargs -I{} tvault seal --key {}
+```
+
 **`codemap index --via-vault <project>`** runs indexing inside `tvault run -p <project>` so the language
 servers (gopls/pyright/tsserver) inherit the project's private-registry creds (`GOPRIVATE`/`NPM_TOKEN`/…)
 when resolving private dependencies during the precise pass. codemap only ever invokes `tvault run`/`list` —

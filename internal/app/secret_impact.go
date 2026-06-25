@@ -126,3 +126,64 @@ func (svc *Service) SecretImpact(cwd string, keys []string, depth int) (*SecretI
 	}
 	return rep, nil
 }
+
+// RequiredKeysReport is the minimal set of secret keys an entrypoint's transitive
+// call tree actually reads — for least-privilege sealing (seal/inject only these).
+type RequiredKeysReport struct {
+	Project      string   `json:"project"`
+	Entrypoint   string   `json:"entrypoint"`
+	Found        bool     `json:"found"`
+	RequiredKeys []string `json:"required_keys"`
+	Note         string   `json:"note,omitempty"`
+}
+
+// RequiredKeys returns the subset of candidateKeys that are read by entrypoint or
+// anything in its transitive callee set (forward call-graph closure to depth hops).
+// This is the EI.13 least-privilege seal scope: tinyvault can then seal/export only
+// the keys this code path needs. Value-free — keys are names; codemap only scans
+// its own indexed source.
+func (svc *Service) RequiredKeys(cwd, entrypoint string, candidateKeys []string, depth int) (*RequiredKeysReport, error) {
+	if depth <= 0 {
+		depth = 5 // least-privilege wants a deeper closure than the blast-radius default
+	}
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	root, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil, err
+	}
+	rep := &RequiredKeysReport{Project: name, Entrypoint: entrypoint, RequiredKeys: []string{}}
+	p, err := g.GetProjectByName(name)
+	if errors.Is(err, graph.ErrNotFound) {
+		return rep, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	closure, err := g.CalleeClosure(p.ID, entrypoint, depth)
+	if err != nil {
+		return nil, err
+	}
+	if len(closure) == 0 {
+		return rep, nil // entrypoint not in the graph
+	}
+	rep.Found = true
+	files, err := g.IndexedFiles(p.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range candidateKeys {
+		for _, site := range scanLiteralUsages(root, files, key) {
+			if n, ok, nerr := g.NodeAtLine(p.ID, site.File, site.Line); nerr == nil && ok && closure[n.ID] {
+				rep.RequiredKeys = append(rep.RequiredKeys, key)
+				break
+			}
+		}
+	}
+	if !svc.hasPreciseEdges(g, p.ID) {
+		rep.Note = "callee closure is name-based; reindex with --precise for an exact least-privilege set"
+	}
+	return rep, nil
+}

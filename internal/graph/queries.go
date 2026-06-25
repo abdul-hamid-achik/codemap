@@ -238,6 +238,47 @@ func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {
 	return s.scanIDs("SELECT target_id FROM edges WHERE source_id=? AND edge_type=?", sourceID, EdgeCalls)
 }
 
+// CalleeClosure returns the set of node ids reachable from symbol's definition
+// node(s) by following call edges FORWARD up to maxDepth hops (the start nodes are
+// included). Cycle-safe. Answers "what does this entrypoint's call tree touch" —
+// the basis for least-privilege analysis (which secret keys a code path needs).
+func (s *Store) CalleeClosure(projectID int64, symbol string, maxDepth int) (map[int64]bool, error) {
+	starts, err := s.startNodeIDs(projectID, symbol)
+	if err != nil {
+		return nil, err
+	}
+	reached := make(map[int64]bool, len(starts))
+	type item struct {
+		id    int64
+		depth int
+	}
+	var queue []item
+	for _, id := range starts {
+		if !reached[id] {
+			reached[id] = true
+			queue = append(queue, item{id, 0})
+		}
+	}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.depth >= maxDepth {
+			continue
+		}
+		callees, err := s.calleeIDs(cur.id)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range callees {
+			if !reached[c] {
+				reached[c] = true
+				queue = append(queue, item{c, cur.depth + 1})
+			}
+		}
+	}
+	return reached, nil
+}
+
 // NodeAtLine returns the symbol node in file whose [StartLine, EndLine] range
 // encloses line, preferring the innermost (smallest range) when symbols nest. The
 // file node itself (empty Symbol) is never returned. ok is false when no symbol

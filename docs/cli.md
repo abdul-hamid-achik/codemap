@@ -52,6 +52,7 @@ callers reached via interface dispatch or reflection — treat its output as dea
 |---|---|
 | `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, and covering tests |
 | `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). |
+| `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. |
 | `codemap hotspots [--top N]` | Most-referenced symbols (hubs) |
 | `codemap orphans [--top N]` | Functions/methods with no callers (dead-code candidates) |
 
