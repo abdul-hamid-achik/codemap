@@ -1,0 +1,41 @@
+version: 1
+name: cache_cli
+intent: |
+    `codemap cache` provides save/restore/list/drop subcommands for fcheap-backed
+    index caching. When fcheap is not on PATH, all commands degrade gracefully
+    (list returns empty, save/restore skip). This spec verifies the cache
+    subcommand group exists and `cache list` runs without error on a fresh
+    project (no fcheap → empty list, no crash).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\nfunc Alpha() {}\\n' > \"$P/a.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed --cache=false >/dev/null 2>&1; echo '== cache list (no fcheap) =='; \"$ROOT/bin/codemap\" cache list 2>&1; echo '== cache help =='; \"$ROOT/bin/codemap\" cache --help 2>&1 | head -20"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: cache_output
+outcomes:
+    - id: cache_subcommand_exists
+      description: the cache subcommand group is registered
+      verify:
+        screen:
+            contains: "Available Commands"
+    - id: cache_list_runs
+      description: cache list runs without crashing (even without fcheap)
+      verify:
+        screen:
+            contains: "cached"
+    - id: clean_exit
+      description: the command exits 0
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:571be5480f36d50681bbb35c61e971715f46b81c7b34a765f5fe55740ffb2a56

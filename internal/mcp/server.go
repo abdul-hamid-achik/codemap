@@ -204,6 +204,20 @@ type branchSwitchInput struct {
 	From string `json:"from,omitempty" jsonschema:"branch being left; defaults to the last active branch"`
 }
 
+type cacheInput struct {
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
+type cacheListInput struct {
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
+type cacheDropInput struct {
+	StashID string `json:"stash_id" jsonschema:"fcheap stash ID to remove from the cache vault"`
+	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	All     bool   `json:"all,omitempty" jsonschema:"drop ALL cached indexes for this project (not just one)"`
+}
+
 func (s *Server) register() {
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_init",
@@ -305,6 +319,22 @@ func (s *Server) register() {
 		Name:        "codemap_branch_switch",
 		Description: "Switch the code index to a git branch: snapshots the current branch's index into fcheap and restores the target branch's snapshot (or reindexes when stale/absent), so the graph follows the working tree with no full reindex. Defaults 'to' to the current git branch; a non-git dir or detached HEAD is a no-op.",
 	}, s.handleBranchSwitch)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_cache_save",
+		Description: "Save the current project index (graph + vectors) to the fcheap stash vault as a content-addressed cache entry. The cache key is a tree hash of all indexed file paths+content hashes, so two branches with identical code share one entry. Best-effort — returns a note if fcheap isn't available.",
+	}, s.handleCacheSave)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_cache_restore",
+		Description: "Restore a project index from a matching fcheap cache entry (same tree hash + embedding profile), skipping extraction and embedding entirely. Returns the restored stash ID and tree hash, or a 'no matching cache' note.",
+	}, s.handleCacheRestore)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_cache_list",
+		Description: "List cached indexes for a project in the fcheap vault, with stash IDs, tree hashes, and dates.",
+	}, s.handleCacheList)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_cache_drop",
+		Description: "Remove a cached index from the fcheap vault by stash_id, or all cached indexes for the project when all=true. Frees disk space when indexes are no longer needed.",
+	}, s.handleCacheDrop)
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -356,6 +386,36 @@ func (s *Server) handleBranchSwitch(ctx context.Context, _ *sdkmcp.CallToolReque
 		return result(nil, err)
 	}
 	return result(map[string]string{"switched_to": to}, nil)
+}
+
+func (s *Server) handleCacheSave(ctx context.Context, _ *sdkmcp.CallToolRequest, in cacheInput) (*sdkmcp.CallToolResult, any, error) {
+	stashID, treeHash, err := s.svc.CacheSave(ctx, cwdOf(in.Path))
+	if err != nil {
+		return result(nil, err)
+	}
+	return result(map[string]string{"action": "saved", "stash_id": stashID, "tree_hash": treeHash}, nil)
+}
+
+func (s *Server) handleCacheRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, in cacheInput) (*sdkmcp.CallToolResult, any, error) {
+	restored, stashID, err := s.svc.CacheRestore(ctx, cwdOf(in.Path))
+	if err != nil {
+		return result(nil, err)
+	}
+	action := "miss"
+	if restored {
+		action = "restored"
+	}
+	return result(map[string]string{"action": action, "stash_id": stashID}, nil)
+}
+
+func (s *Server) handleCacheList(ctx context.Context, _ *sdkmcp.CallToolRequest, in cacheListInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.CacheList(ctx, cwdOf(in.Path), false)
+	return result(rep, err)
+}
+
+func (s *Server) handleCacheDrop(ctx context.Context, _ *sdkmcp.CallToolRequest, in cacheDropInput) (*sdkmcp.CallToolResult, any, error) {
+	dropped, err := s.svc.CacheDrop(ctx, cwdOf(in.Path), in.StashID, in.All)
+	return result(map[string]any{"dropped": dropped}, err)
 }
 
 func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, in semanticInput) (*sdkmcp.CallToolResult, any, error) {

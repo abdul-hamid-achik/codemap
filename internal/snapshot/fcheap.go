@@ -17,6 +17,13 @@ var FcheapBinary = "fcheap"
 // uses fcheap's default store.
 var FcheapStashDir = ""
 
+// FcheapAvailable reports whether the fcheap binary is on PATH, so cache
+// operations can no-op cleanly when it isn't installed.
+func FcheapAvailable() bool {
+	_, err := exec.LookPath(FcheapBinary)
+	return err == nil
+}
+
 // StashInfo is one stash as reported by `fcheap list --json`.
 type StashInfo struct {
 	ID        string   `json:"id"`
@@ -133,4 +140,16 @@ func hasAllTags(have, want []string) bool {
 		}
 	}
 	return true
+}
+
+// FcheapDrop permanently deletes a stash from fcheap's vault. Requires force=true
+// (the fcheap CLI's --force flag) to prevent accidental loss. Returns nil if the
+// stash doesn't exist (idempotent).
+func FcheapDrop(ctx context.Context, stashID string, force bool) error {
+	args := []string{"drop", stashID}
+	if force {
+		args = append(args, "--force")
+	}
+	_, err := fcheapRun(ctx, args...)
+	return err
 }

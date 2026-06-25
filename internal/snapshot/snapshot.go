@@ -11,6 +11,7 @@ package snapshot
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -251,13 +252,25 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 	if err := g.WipeProject(projectID); err != nil {
 		return nil, err
 	}
+
+	// Batch the node + edge + index-state re-insertion in one transaction so the
+	// full restore is one fsync, not N. The WipeProject above is its own
+	// transaction (atomic delete), so a failure here leaves an empty project —
+	// which is correct (a failed restore shouldn't leave a half-populated graph).
+	tx, err := g.BeginTx(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }() // safe: Commit renders this a no-op
+
 	newID := make([]int64, len(snodes))
 	for i, sn := range snodes {
-		id, err := g.AddNode(&graph.Node{
+		n := &graph.Node{
 			ProjectID: projectID, FilePath: sn.FilePath, Symbol: sn.Symbol, FQN: sn.FQN, Kind: sn.Kind,
 			Language: sn.Language, StartLine: sn.StartLine, EndLine: sn.EndLine,
 			Signature: sn.Signature, Docstring: sn.Docstring, SourceHash: sn.SourceHash,
-		})
+		}
+		id, err := graph.AddNodeTx(tx, n)
 		if err != nil {
 			return nil, err
 		}
@@ -272,7 +285,7 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 		if e.Source < 0 || e.Source >= len(newID) || e.Target < 0 || e.Target >= len(newID) {
 			return nil, fmt.Errorf("snapshot edge references node index out of range")
 		}
-		if _, err := g.AddEdgeProv(newID[e.Source], newID[e.Target], e.EdgeType, e.Weight, e.Provenance); err != nil {
+		if _, err := graph.AddEdgeProvTx(tx, newID[e.Source], newID[e.Target], e.EdgeType, e.Weight, e.Provenance); err != nil {
 			return nil, err
 		}
 	}
@@ -282,9 +295,12 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 		return nil, err
 	}
 	for _, e := range idx {
-		if err := g.SetFileHash(projectID, e.FilePath, e.FileHash); err != nil {
+		if err := graph.SetFileHashTx(tx, projectID, e.FilePath, e.FileHash); err != nil {
 			return nil, err
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 
 	var sanns []snapAnnotation

@@ -1,0 +1,40 @@
+version: 1
+name: timing
+intent: |
+    codemap index now reports phase-level wall-clock timing (extract, precise,
+    embed) in the summary line, so a user can tell whether a slow index is bound
+    by extraction, embedding, or the precise pass. This pins the timing output
+    format: a "time:" line with the total and a parenthetical breakdown.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\nfunc Alpha() {}\\nfunc Bravo() {}\\n' > \"$P/a.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed 2>&1 | grep -E 'time:|Indexed'"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: timing_output
+outcomes:
+    - id: timing_line_present
+      description: the index summary includes a "time:" line with phase breakdown
+      verify:
+        screen:
+            contains: "time:"
+    - id: extract_phase_shown
+      description: the extract phase duration is shown
+      verify:
+        screen:
+            contains: "extract"
+    - id: clean_exit
+      description: index exits 0
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:c9d419cae9411c58353d2d2896e1625a1d08d6b18349b69e02b0f82bb36f889d

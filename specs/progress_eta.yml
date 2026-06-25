@@ -1,0 +1,41 @@
+version: 1
+name: progress_eta
+intent: |
+    The live progress bar during `codemap index` now shows an estimated time
+    remaining (ETA) based on the observed throughput. This spec verifies the bar
+    renders and runs cleanly — the ETA text itself is time-dependent so we check
+    for the summary (which appears after the bar clears) rather than the ETA
+    string itself.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; i=1; while [ $i -le 20 ]; do printf 'package app\\n\\nfunc F%s() { G%s() }\\nfunc G%s() {}\\n' \"$i\" \"$i\" \"$i\" > \"$P/f$i.go\"; i=$((i+1)); done; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - snapshot: bar_running
+    - wait:
+        screen:
+            contains: "Indexed"
+        timeoutMs: 20000
+    - snapshot: done
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 5000
+outcomes:
+    - id: summary_printed
+      description: the index summary prints after the bar clears
+      verify:
+        screen:
+            contains: "20 scanned"
+    - id: clean_exit
+      description: index with progress bar exits 0
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:ae11841cabd0b088776ce643d25692e3035b8f760b5afe88e01453ea0b4efd7c

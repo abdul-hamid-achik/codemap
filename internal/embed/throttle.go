@@ -108,51 +108,71 @@ func (t *ThrottledProvider) embed(ctx context.Context, texts []string, lim *rate
 		}
 		idxs[h] = append(idxs[h], i)
 	}
-	for _, h := range order {
-		v, err, _ := t.group.Do(h, func() (any, error) {
-			if cv, ok := t.getCache(h); ok { // another goroutine may have filled it
-				return cv, nil
-			}
-			vec, eerr := t.embedOne(ctx, rep[h], lim)
-			if eerr != nil {
-				return nil, eerr
-			}
-			t.putCache(h, vec)
-			return vec, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		vec := v.([]float32)
-		for _, i := range idxs[h] {
-			out[i] = vec
-		}
+	if len(order) == 0 {
+		return out, nil // all cache hits
 	}
-	return out, nil
-}
 
-// embedOne sends one text through the rate limiter + max-in-flight gate to the
-// inner provider.
-func (t *ThrottledProvider) embedOne(ctx context.Context, txt string, lim *rate.Limiter) ([]float32, error) {
-	if lim != nil {
-		if err := lim.Wait(ctx); err != nil {
-			return nil, err
+	// Batch the unique misses into one inner.Embed call instead of one-at-a-time.
+	// The singleflight key is a hash of the sorted unique-miss hashes, so two
+	// concurrent embed calls with the exact same set of misses share one batch.
+	// Rate-limit at the batch level (one token per batch, not per text).
+	batchKey := batchHash(order)
+	result, err, _ := t.group.Do(batchKey, func() (any, error) {
+		// Re-check cache inside singleflight — another batch may have filled some.
+		var missOrder []string
+		var missTexts []string
+		missIdxs := make(map[string][]int)
+		for _, h := range order {
+			if cv, ok := t.getCache(h); ok {
+				for _, i := range idxs[h] {
+					out[i] = cv
+				}
+				continue
+			}
+			missOrder = append(missOrder, h)
+			missTexts = append(missTexts, rep[h])
+			missIdxs[h] = idxs[h]
 		}
-	}
-	select {
-	case t.sem <- struct{}{}:
-		defer func() { <-t.sem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	vecs, err := t.inner.Embed(ctx, []string{txt})
+		if len(missTexts) == 0 {
+			return out, nil
+		}
+
+		if lim != nil {
+			if err := lim.Wait(ctx); err != nil {
+				return nil, err
+			}
+		}
+		select {
+		case t.sem <- struct{}{}:
+			defer func() { <-t.sem }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+
+		vecs, eerr := t.inner.Embed(ctx, missTexts)
+		if eerr != nil {
+			return nil, eerr
+		}
+		if len(vecs) != len(missTexts) {
+			return nil, fmt.Errorf("throttle: inner provider returned %d vectors for %d texts", len(vecs), len(missTexts))
+		}
+		for j, h := range missOrder {
+			t.putCache(h, vecs[j])
+			for _, i := range missIdxs[h] {
+				out[i] = vecs[j]
+			}
+		}
+		return out, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if len(vecs) != 1 {
-		return nil, fmt.Errorf("throttle: inner provider returned %d vectors for 1 text", len(vecs))
-	}
-	return vecs[0], nil
+	// The singleflight result is the same `out` slice (shared across concurrent
+	// callers with the same batchKey). For callers whose misses were filled by
+	// another batch, the out slice is already populated. For the winner, it
+	// populated out. Either way, out is correct.
+	_ = result.([][]float32)
+	return out, nil
 }
 
 func (t *ThrottledProvider) getCache(h string) ([]float32, bool) {
@@ -178,5 +198,18 @@ func (t *ThrottledProvider) putCache(h string, v []float32) {
 
 func hashText(s string) string {
 	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// batchHash produces a deterministic singleflight key for a set of unique-miss
+// hashes. Two concurrent embed calls with the exact same set of misses share one
+// batch — one rate-limit token, one inner.Embed call.
+func batchHash(order []string) string {
+	h := sha256.New()
+	for _, hsh := range order {
+		h.Write([]byte(hsh))
+		h.Write([]byte{0}) // separator
+	}
+	sum := h.Sum(nil)
 	return hex.EncodeToString(sum[:])
 }

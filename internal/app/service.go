@@ -61,6 +61,13 @@ type IndexReport struct {
 	PreciseNote     string `json:"precise_note,omitempty"`
 	// Languages maps each indexed language to its file count (e.g. "go", "typescript").
 	Languages map[string]int `json:"languages,omitempty"`
+	// Phase timing (wall-clock milliseconds). Extract covers the parse + graph
+	// write pass; Embed covers Ollama + vector inserts; Precise covers the opt-in
+	// go/types + LSP callHierarchy passes; Total is end-to-end. Zero when N/A.
+	ExtractMs int `json:"extract_ms,omitempty"`
+	EmbedMs   int `json:"embed_ms,omitempty"`
+	PreciseMs int `json:"precise_ms,omitempty"`
+	TotalMs   int `json:"total_ms,omitempty"`
 }
 
 // StatusReport is returned by Status.
@@ -182,6 +189,10 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.PreciseSkipped = res.PreciseSkipped
 	rep.PreciseNote = res.PreciseNote
 	rep.Languages = res.Languages
+	rep.ExtractMs = res.ExtractMs
+	rep.EmbedMs = res.EmbedMs
+	rep.PreciseMs = res.PreciseMs
+	rep.TotalMs = res.TotalMs
 	if adv := indexAdvisory(res); adv != "" {
 		if rep.Warning != "" {
 			rep.Warning += "; " + adv

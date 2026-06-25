@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
@@ -261,8 +262,9 @@ func TestIndexFilesIncremental(t *testing.T) {
 }
 
 // TestIndexProjectOnFileHook pins the progress hook: OnFile fires exactly once
-// per scanned file, 1-based and monotonic, with total == FilesScanned and a
-// non-empty rel path. This is what the CLI progress bar rides on.
+// per scanned file, with total == FilesScanned and a non-empty rel path. The
+// done counter is 1-based and unique (no duplicates) but not necessarily
+// monotonic — Go files are indexed in parallel, so the order is non-deterministic.
 func TestIndexProjectOnFileHook(t *testing.T) {
 	g, v := newStores(t)
 	dir := setupProject(t)
@@ -273,9 +275,16 @@ func TestIndexProjectOnFileHook(t *testing.T) {
 		done, total int
 		rel         string
 	}
-	var calls []call
+	var (
+		mu    sync.Mutex
+		calls []call
+	)
 	res, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{
-		OnFile: func(done, total int, rel string) { calls = append(calls, call{done, total, rel}) },
+		OnFile: func(done, total int, rel string) {
+			mu.Lock()
+			calls = append(calls, call{done, total, rel})
+			mu.Unlock()
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -283,10 +292,16 @@ func TestIndexProjectOnFileHook(t *testing.T) {
 	if len(calls) != res.FilesScanned {
 		t.Fatalf("OnFile fired %d times, want FilesScanned=%d", len(calls), res.FilesScanned)
 	}
+	// Every done value must be unique and in [1, FilesScanned].
+	seen := make(map[int]bool, len(calls))
 	for i, c := range calls {
-		if c.done != i+1 {
-			t.Errorf("call %d: done=%d, want %d (1-based monotonic)", i, c.done, i+1)
+		if c.done < 1 || c.done > res.FilesScanned {
+			t.Errorf("call %d: done=%d out of range [1,%d]", i, c.done, res.FilesScanned)
 		}
+		if seen[c.done] {
+			t.Errorf("call %d: done=%d fired more than once", i, c.done)
+		}
+		seen[c.done] = true
 		if c.total != res.FilesScanned {
 			t.Errorf("call %d: total=%d, want FilesScanned=%d", i, c.total, res.FilesScanned)
 		}

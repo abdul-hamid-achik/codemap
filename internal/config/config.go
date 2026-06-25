@@ -62,6 +62,12 @@ type IndexConfig struct {
 	// (and a large one for network providers — openai/cohere/voyage).
 	EmbedBatchSize   int `yaml:"embed_batch_size"`
 	EmbedConcurrency int `yaml:"embed_concurrency"`
+	// ExtractConcurrency is how many Go files are extracted in parallel (default
+	// 4). The gosrc extractor is stateless (pure go/parser), so parsing is
+	// CPU-bound and benefits from goroutines; graph writes serialize on the
+	// single-connection pool, so the parallelism overlaps parsing with I/O. LSP
+	// files stay sequential (stateful server connection). 0 defaults to 4.
+	ExtractConcurrency int `yaml:"extract_concurrency"`
 	// EmbedMaxChars caps the per-node text sent to the embedder (0 = no cap, the
 	// default). Embedding cost is ~linear in tokens, so a cap (e.g. 512) trades some
 	// long-body recall for a faster reindex; docstring+signature are kept first.
@@ -79,9 +85,10 @@ func DefaultConfig() *Config {
 			Distance:   "cosine",
 		},
 		Index: IndexConfig{
-			MaxFileBytes:     1 << 20, // 1 MiB
-			EmbedBatchSize:   64,
-			EmbedConcurrency: 4,
+			MaxFileBytes:       1 << 20, // 1 MiB
+			EmbedBatchSize:     64,
+			EmbedConcurrency:   4,
+			ExtractConcurrency: 4,
 			Exclude: []string{
 				".git", "node_modules", "vendor", "dist", "build",
 				"dist-*", "build-*", "coverage", // build-output variants (dist-chrome, build-web) + test coverage — minified/generated code, not source
@@ -213,6 +220,11 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("CODEMAP_EMBED_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Index.EmbedConcurrency = n
+		}
+	}
+	if v := os.Getenv("CODEMAP_EXTRACT_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Index.ExtractConcurrency = n
 		}
 	}
 	if v := os.Getenv("CODEMAP_EMBED_MAX_CHARS"); v != "" {

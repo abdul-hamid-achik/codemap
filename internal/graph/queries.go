@@ -539,26 +539,10 @@ func (s *Store) reconstructPath(end int64, parent map[int64]int64) ([]Node, erro
 	return out, nil
 }
 
-// UpdateNodeVecID links a node to its veclite record id (for semantic search).
-func (s *Store) UpdateNodeVecID(id int64, vecID string) error {
-	_, err := s.db.Exec("UPDATE nodes SET vec_id=?, updated_at=? WHERE id=?", vecID, now(), id)
-	return err
-}
-
 // ProjectNodes returns all nodes in a project, ordered by id. Used to build the
 // project-wide symbol index for reference resolution.
 func (s *Store) ProjectNodes(projectID int64) ([]Node, error) {
 	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? ORDER BY id", projectID)
-}
-
-// WipeProject deletes all nodes (edges cascade) and index state for a project.
-// Used by a full reindex.
-func (s *Store) WipeProject(projectID int64) error {
-	if _, err := s.db.Exec("DELETE FROM nodes WHERE project_id=?", projectID); err != nil {
-		return err
-	}
-	_, err := s.db.Exec("DELETE FROM index_state WHERE project_id=?", projectID)
-	return err
 }
 
 // ProjectEdges returns every edge whose source node is in the project, ordered by

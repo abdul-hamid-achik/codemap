@@ -21,6 +21,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
+	"github.com/abdul-hamid-achik/codemap/internal/snapshot"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
 
@@ -96,6 +97,15 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	// Wrap the embedder in the throttle so background re-indexing is gentle on Ollama.
 	if !cfg.NoEmbed {
 		sess.SetEmbedder(embed.NewThrottled(sess.Embedder(), cfg.Throttle))
+	}
+
+	// Try restoring from a fcheap cache before the initial index — if a matching
+	// cache entry exists (same tree hash + embedding profile), the restore imports
+	// the graph+vectors so the incremental pass below only catches residual drift
+	// instead of a full extraction+embed.
+	if snapshot.FcheapAvailable() {
+		restored, _, _ := svc.CacheRestore(parent, root)
+		_ = restored // on hit the incremental Index below reconciles; on miss it runs normally
 	}
 
 	// One-time (incremental) index registers the project and brings it current.
@@ -207,7 +217,10 @@ func (d *Daemon) Stop() {
 }
 
 // onChange is the watcher callback: incrementally (re)index the changed/removed
-// files and record the reindex time.
+// watcher callback: incrementally (re)index the changed/removed files and
+// record the reindex time. After a significant sync (>= minCacheSyncFiles),
+// best-effort cache the index to fcheap so a restart or branch-switch restores
+// quickly.
 func (d *Daemon) onChange(toIndex, toRemove []string) {
 	d.resetIdle()
 	rels := append(append([]string{}, toIndex...), toRemove...)
@@ -221,7 +234,18 @@ func (d *Daemon) onChange(toIndex, toRemove []string) {
 	d.info.LastReindexAt = nowRFC3339()
 	d.mu.Unlock()
 	_ = d.writeState()
+
+	// Best-effort cache after significant syncs (avoid caching on every single
+	// file save — only when a batch of changes lands).
+	if len(rels) >= minCacheSyncFiles && snapshot.FcheapAvailable() {
+		go func() { _ = d.svc.MaybeCacheAfterIndex(d.ctx, d.root) }()
+	}
 }
+
+// minCacheSyncFiles is the minimum number of changed+removed files in a single
+// watcher event before the daemon caches the index to fcheap. Caching on every
+// single-file save would be wasteful; this thresholds to meaningful batches.
+const minCacheSyncFiles = 3
 
 func (d *Daemon) serve() {
 	for {

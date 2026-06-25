@@ -138,3 +138,25 @@ func TestPreciseTips(t *testing.T) {
 		t.Error("empty project should get no tips")
 	}
 }
+
+// TestIndexWatchFlagRegistered verifies the --watch flag is registered on the
+// index command with the right help text, so `codemap index --watch` is
+// discoverable and routes to the daemon.
+func TestIndexWatchFlagRegistered(t *testing.T) {
+	f := indexCmd.Flags().Lookup("watch")
+	if f == nil {
+		t.Fatal("--watch flag not registered on index command")
+	}
+	if !strings.Contains(f.Usage, "daemon") || !strings.Contains(f.Usage, "fresh") {
+		t.Errorf("--watch usage = %q, want it to mention daemon and fresh", f.Usage)
+	}
+}
+
+// TestIndexNoTipsFlag verifies the --no-tips flag is registered, so users can
+// silence the post-index advisory tips in scripts/CI.
+func TestIndexNoTipsFlagRegistered(t *testing.T) {
+	f := indexCmd.Flags().Lookup("no-tips")
+	if f == nil {
+		t.Fatal("--no-tips flag not registered on index command")
+	}
+}

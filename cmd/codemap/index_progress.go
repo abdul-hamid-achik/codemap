@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
@@ -40,9 +41,11 @@ type progressModel struct {
 	prog        progress.Model
 	done, total int
 	file        string
-	embedding   bool // switched to the embedding phase (the long part of a reindex)
-	finished    bool // indexing reported done
-	canceled    bool // user pressed ctrl+c
+	embedding   bool      // switched to the embedding phase (the long part of a reindex)
+	finished    bool      // indexing reported done
+	canceled    bool      // user pressed ctrl+c
+	start       time.Time // when the first progress event arrived
+	embedStart  time.Time // when the embedding phase started (for ETA)
 }
 
 func newProgressModel() progressModel {
@@ -54,6 +57,9 @@ func (m progressModel) Init() tea.Cmd { return nil }
 func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fileMsg:
+		if m.start.IsZero() {
+			m.start = time.Now()
+		}
 		m.done, m.total, m.file = msg.done, msg.total, msg.file
 		var pct float64
 		if msg.total > 0 {
@@ -63,6 +69,9 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case embedMsg:
 		// Parsing is fast; embedding is the wait. Switch the bar to it so it doesn't
 		// sit at 100% silently while Ollama works through the nodes.
+		if m.embedStart.IsZero() {
+			m.embedStart = time.Now()
+		}
 		m.embedding, m.done, m.total, m.file = true, msg.done, msg.total, ""
 		var pct float64
 		if msg.total > 0 {
@@ -96,10 +105,60 @@ func (m progressModel) View() tea.View {
 	switch {
 	case m.embedding:
 		line += "  embedding"
+		if eta := m.eta(m.embedStart); eta != "" {
+			line += "  ~" + eta + " left"
+		}
 	case m.file != "":
 		line += "  " + truncStr(m.file, 26)
+		if eta := m.eta(m.start); eta != "" {
+			line += "  ~" + eta + " left"
+		}
 	}
 	return tea.NewView(line) // inline (AltScreen defaults false) — a transient one-liner
+}
+
+// eta returns a human-readable remaining-time estimate based on elapsed time
+// and the current completion rate. Returns "" until enough data is available
+// (at least 2 items done and 1 second elapsed) for a meaningful estimate.
+func (m progressModel) eta(start time.Time) string {
+	if m.done < 2 || m.total <= m.done || start.IsZero() {
+		return ""
+	}
+	elapsed := time.Since(start)
+	if elapsed < time.Second {
+		return ""
+	}
+	remaining := m.total - m.done
+	rate := float64(m.done) / elapsed.Seconds()
+	if rate <= 0 {
+		return ""
+	}
+	eta := time.Duration(float64(remaining)/rate) * time.Second
+	if eta < time.Second {
+		return "<1s"
+	}
+	return formatETA(eta)
+}
+
+// formatETA renders a duration compactly: "45s", "2m30s", "1h05m".
+func formatETA(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		s := int(d.Seconds()) - m*60
+		if s == 0 {
+			return fmt.Sprintf("%dm", m)
+		}
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) - h*60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh%02dm", h, m)
 }
 
 // runIndexWithBar runs an index while showing a live progress bar, then returns

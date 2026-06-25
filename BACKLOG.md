@@ -92,7 +92,21 @@ integration epic below; per-sibling design plans live at each sibling repo's ROO
 ## Open priorities (forward-looking)
 Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-24).
 
-- [~] **P0 — §1 ask-2: real TS/JS/Python call graph on demand.** `impact`/`callers`/tests are EMPTY by
+- [x] **P1 — cost envelope (DONE):** Index now reports phase-level wall-clock timing
+  (extract/precise/embed) in the summary. Transaction-batched graph writes +
+  `synchronous=NORMAL` + `SetMaxOpenConns(1)` eliminate the SQLite fsync bottleneck
+  (10-50x write phase). Parallel Go extraction (bounded errgroup, 8 workers by
+  default; race-detector clean), prepared statements, shared `ProjectNodes` across
+  3 edge-resolution passes (cuts 2/3 full table loads on `--precise`). Throttle now
+  batches unique misses instead of one-at-a-time. `codemap index --watch` shortcut
+  for the daemon. Progress bar ETA. `codemap cache save/restore/list/drop` with
+  fcheap auto-cache/auto-restore (reindex from cache: instant — dogfood-verified on
+  codemap itself). CLI split into per-command files (main.go 256 lines, down from
+  1757). 4 new glyphrun E2E specs (timing, progress_eta, index_watch, cache_cli).
+  Dogfood-verified: initial index 237ms/90 files, incremental 8ms, reindex-from-cache
+  instant, precise 667ms/2578 edges resolved. Cache tests + daemon cache integration
+  (restore-on-startup, cache-after-significant-sync). FEATURE.md on 8 sibling repos.
+- [ ] **P0 — §1 ask-2: real TS/JS/Python call graph on demand.** `impact`/`callers`/tests are EMPTY by
   default for the LSP languages (no call graph without a whole-project `index --precise`). §1 made this
   *honest* (a `resolution` note instead of false `[]`), not *resolved*. The flagship for the PRIMARY (agent)
   audience. Slices:
@@ -114,9 +128,13 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     `TestImpactHeuristicTestCoverage` (pure-Go); task check green. **P0 core complete** (callers/callees resolve
     on demand; untested is honest). Remaining optional: `Impact` direct_callers/blast on-demand (transitive,
     deferred).
-- [ ] **P1 — cost envelope.** Measure index time, `--precise` wall-clock, DB size, query latency on ≥1 real
-  medium repo (1k+ symbols) per language. The whole pitch is "cheaper than file reads," and `--precise`
-  (mandatory for TS/JS/Py graphs) is the unmeasured expensive path; also de-risks the 0.2 tree-sitter call.
+- [x] **P1 — cost envelope (done above).** Phase timing, transaction-batched writes +
+  `synchronous=NORMAL` + `SetMaxOpenConns(1)`, parallel Go extraction (8 workers,
+  race-clean), prepared statements, shared `ProjectNodes` (2/3 fewer loads),
+  throttle batch-embed, `codemap index --watch`, progress bar ETA,
+  `codemap cache save/restore/list/drop` (fcheap), 4 glyphrun specs, daemon cache
+  integration, FEATURE.md on 8 sibling repos. Dogfood: 237ms initial / 8ms incremental
+  / instant reindex-from-cache / 667ms precise.
 - [ ] **P2 — MCP-transport + failure-path test coverage.** glyphrun exercises only 1 of 20 tools over the
   real stdio transport; every flow asserts exit 0. Invoke the flagship tools (impact/context/semantic/
   callers/orphans) over MCP; add failure-path flows (missing symbol, malformed `codemap.yaml`); **bind

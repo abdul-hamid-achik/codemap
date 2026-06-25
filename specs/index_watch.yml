@@ -1,0 +1,50 @@
+version: 1
+name: index_watch
+intent: |
+    `codemap index --watch` runs the initial index, then starts the daemon to
+    keep the index fresh automatically. This spec verifies the --watch flag is
+    accepted and the daemon starts (prints "daemon started"). Since the daemon
+    runs forever, we send a Ctrl-C after seeing the startup message.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\nfunc Alpha() {}\\n' > \"$P/a.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed --watch --no-tips 2>&1"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        screen:
+            contains: "Indexed"
+        timeoutMs: 15000
+    - snapshot: indexed
+    - wait:
+        screen:
+            contains: "daemon"
+        timeoutMs: 10000
+    - snapshot: daemon_started
+    - press: "ctrl+c"
+    - wait:
+        screen:
+            contains: "stopped"
+        timeoutMs: 5000
+outcomes:
+    - id: index_completed
+      description: the initial index runs and prints the summary
+      verify:
+        screen:
+            contains: "Indexed"
+    - id: daemon_started
+      description: the daemon starts after the index (--watch path)
+      verify:
+        screen:
+            contains: "daemon"
+    - id: clean_exit
+      description: the daemon stops cleanly after Ctrl-C
+      verify:
+        screen:
+            contains: "stopped"
+contractHash: sha256:5ff7d0ef60b43802fd3bdf04689a76c5821114ac03470ec314a30296130f449c

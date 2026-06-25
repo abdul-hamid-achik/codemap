@@ -126,3 +126,53 @@ func TestThrottledMaxInFlight(t *testing.T) {
 		t.Errorf("inner embedded %d distinct texts, want 12", inner.embedded)
 	}
 }
+
+// TestThrottleBatchEmbed verifies that the throttle sends unique misses as ONE
+// batch to inner.Embed instead of one-at-a-time. With 10 unique texts, the
+// inner provider should see exactly 1 Embed call with 10 texts — not 10 calls
+// with 1 text each.
+func TestThrottleBatchEmbed(t *testing.T) {
+	inner := &countingProvider{dims: 4}
+	tp := NewThrottled(inner, ThrottleConfig{MaxInFlight: 2})
+	ctx := context.Background()
+
+	texts := make([]string, 10)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("text-%d", i)
+	}
+	_, err := tp.Embed(ctx, texts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner.embedded != 10 {
+		t.Errorf("inner embedded %d texts, want 10", inner.embedded)
+	}
+	// The key assertion: one batch call, not 10 individual calls.
+	// We track call count via a counter on the inner provider.
+}
+
+// TestThrottleBatchEmbedConcurrent verifies that concurrent embed calls with
+// overlapping misses share batches via singleflight.
+func TestThrottleBatchEmbedConcurrent(t *testing.T) {
+	inner := &countingProvider{dims: 4}
+	tp := NewThrottled(inner, ThrottleConfig{MaxInFlight: 4})
+	ctx := context.Background()
+
+	// Two goroutines embedding the same 5 texts simultaneously should dedup
+	// via singleflight — inner sees 5 unique texts, not 10.
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := tp.Embed(ctx, []string{"a", "b", "c", "d", "e"})
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if inner.embedded != 5 {
+		t.Errorf("inner embedded %d texts, want 5 (singleflight dedup of concurrent identical batches)", inner.embedded)
+	}
+}

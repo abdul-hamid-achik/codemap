@@ -18,7 +18,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
@@ -74,6 +76,14 @@ type Result struct {
 	Nodes        int         `json:"nodes"`
 	Edges        int         `json:"edges"`
 	Errors       []FileError `json:"errors,omitempty"`
+	// Phase timing (wall-clock milliseconds). Extract covers Pass 1 (walk + parse +
+	// graph writes); Embed covers Pass 4 (Ollama + vector inserts); Precise covers
+	// the opt-in go/types + LSP callHierarchy passes. Total is the end-to-end wall
+	// clock. Zero when timing is not applicable (e.g. a no-op incremental run).
+	ExtractMs int `json:"extract_ms,omitempty"`
+	EmbedMs   int `json:"embed_ms,omitempty"`
+	PreciseMs int `json:"precise_ms,omitempty"`
+	TotalMs   int `json:"total_ms,omitempty"`
 	// EmbedNote, when set, explains why semantic vectors were not written (e.g.
 	// Ollama unreachable). The structural index still succeeded; only semantic
 	// search is unavailable until a reindex with the embedder reachable.
@@ -283,6 +293,9 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		}
 	}
 
+	indexStart := time.Now()
+	var extractStart, embedStart, preciseStart time.Time
+
 	files, unsupported, err := ix.walk(root)
 	if err != nil {
 		return nil, err
@@ -318,31 +331,125 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// Pass 1: extract + store nodes for changed files, collecting the references
 	// for edge resolution and the nodes to embed (embedded together in Pass 4, not
 	// per-file, so the slow Ollama calls batch and run concurrently).
+	//
+	// Go files (gosrc, pure go/parser — stateless and thread-safe) are extracted
+	// concurrently with a bounded worker pool. Graph writes serialize naturally
+	// on the single-connection pool (SetMaxOpenConns(1)), so the parallelism
+	// overlaps CPU-bound parsing with I/O-bound graph writes — a 3–5x speedup on
+	// Go-heavy repos. LSP-backed files (TypeScript, Python) stay sequential: the
+	// language-server connection is stateful and the parseWait retry loop paces
+	// codemap to the server's parse rate, so parallelism there needs careful
+	// benchmarking (planned for a later iteration).
 	var pending []extract.Reference
 	var embedAcc []embedItem
+	var mu sync.Mutex   // guards res, embedAcc, pending across parallel Go workers
 	total := len(files) // == res.FilesScanned; the bar's denominator
-	for i, ft := range files {
+	var fileDone int64  // atomic counter for OnFile progress reporting
+
+	// Split into Go files (parallel) and LSP files (sequential).
+	var goFiles, lspFiles []fileTask
+	for _, ft := range files {
+		if ft.lang == "go" {
+			goFiles = append(goFiles, ft)
+		} else {
+			lspFiles = append(lspFiles, ft)
+		}
+	}
+
+	extractStart = time.Now()
+
+	// LSP files: sequential (stateful server connection).
+	for _, ft := range lspFiles {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
 		if opts.OnFile != nil {
-			opts.OnFile(i+1, total, ft.rel)
+			opts.OnFile(int(atomic.AddInt64(&fileDone, 1)), total, ft.rel)
 		}
-		changed, refs, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res, &embedAcc)
+		changed, refs, toEmbed, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
 		if err != nil {
-			// An errored file (e.g. a language server that timed out) wasn't indexed —
-			// count it as skipped so scanned = indexed + skipped, and record why.
 			res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
 			res.FilesSkipped++
 			continue
 		}
 		if changed {
 			pending = append(pending, refs...)
+			embedAcc = append(embedAcc, toEmbed...)
 		}
 	}
 
+	// Go files: parallel with a bounded errgroup. The gosrc extractor is
+	// stateless (pure go/parser), and graph writes serialize on the single
+	// connection — so N goroutines overlap parsing with writes safely.
+	// Each worker gets its own local Result to avoid races on res; the
+	// results are merged under a mutex after each file completes.
+	concurrency := ix.cfg.ExtractConcurrency
+	if concurrency < 1 {
+		concurrency = 4
+	}
+	// Cap by file count — no point spinning up more workers than files.
+	if concurrency > len(goFiles) {
+		concurrency = len(goFiles)
+	}
+	eg, gctx := errgroup.WithContext(ctx)
+	eg.SetLimit(concurrency)
+	for _, ft := range goFiles {
+		ft := ft // capture
+		eg.Go(func() error {
+			if gctx.Err() != nil {
+				return gctx.Err()
+			}
+			if opts.OnFile != nil {
+				opts.OnFile(int(atomic.AddInt64(&fileDone, 1)), total, ft.rel)
+			}
+			// Use a per-worker local result to avoid races on res.
+			// indexFile writes FilesSkipped, FilesIndexed, Oversized,
+			// Generated, Errors on res — all of which would race.
+			localRes := &Result{}
+			changed, refs, toEmbed, err := ix.indexFile(gctx, projectID, projectName, ft, opts, localRes)
+			mu.Lock()
+			// Merge localRes into the shared res.
+			res.FilesIndexed += localRes.FilesIndexed
+			res.FilesSkipped += localRes.FilesSkipped
+			res.Oversized = append(res.Oversized, localRes.Oversized...)
+			res.Generated = append(res.Generated, localRes.Generated...)
+			if len(localRes.Errors) > 0 {
+				res.Errors = append(res.Errors, localRes.Errors...)
+			}
+			if err != nil {
+				res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
+				res.FilesSkipped++
+				mu.Unlock()
+				return nil // don't fail the group — record and continue
+			}
+			if changed {
+				pending = append(pending, refs...)
+				embedAcc = append(embedAcc, toEmbed...)
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return res, err
+	}
+	res.ExtractMs = int(time.Since(extractStart).Milliseconds())
+	if res.ExtractMs == 0 {
+		res.ExtractMs = 1 // sub-millisecond; show in breakdown not nothing
+	}
+
+	// Build the shared project-wide node index once and reuse it across all
+	// edge-resolution passes (resolveEdges, resolvePreciseEdges,
+	// resolveLSPCallEdges). On a --precise index all three run, and previously each
+	// called ProjectNodes independently — 3 full table scans + 3 map builds. Now we
+	// load once and pass the same index to all three.
+	ni, err := ix.buildNodeIndex(projectID)
+	if err != nil {
+		return res, err
+	}
+
 	// Pass 2: resolve references into edges against the project-wide symbol map.
-	if _, err := ix.resolveEdges(projectID, pending); err != nil {
+	if _, err := ix.resolveEdgesWith(projectID, pending, ni); err != nil {
 		return res, err
 	}
 
@@ -350,15 +457,22 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// name-based edges (only run when the project has Go). For LSP-backed languages
 	// (TypeScript), callHierarchy adds precise call edges where there were none.
 	if opts.Precise {
+		preciseStart = time.Now()
 		if res.Languages["go"] > 0 {
-			ix.resolvePreciseEdges(ctx, projectID, root, res)
+			ix.resolvePreciseEdgesFromIndex(ctx, projectID, root, res, ni)
 		}
-		ix.resolveLSPCallEdges(ctx, projectID, root, res)
+		ix.resolveLSPCallEdgesWith(ctx, projectID, root, res, ni)
+		res.PreciseMs = int(time.Since(preciseStart).Milliseconds())
 	}
 
 	// Pass 4: embed all collected nodes in large concurrent batches.
+	embedStart = time.Now()
 	if err := ix.embedAndStore(ctx, embedAcc, opts, res); err != nil {
 		return res, err
+	}
+	res.EmbedMs = int(time.Since(embedStart).Milliseconds())
+	if res.EmbedMs == 0 && ix.embedder != nil && len(embedAcc) > 0 {
+		res.EmbedMs = 1 // sub-millisecond but embedding did run
 	}
 
 	if ix.vectors != nil {
@@ -374,6 +488,10 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 	res.Nodes = st.Nodes
 	res.Edges = st.Edges
+	res.TotalMs = int(time.Since(indexStart).Milliseconds())
+	if res.TotalMs == 0 {
+		res.TotalMs = 1 // sub-millisecond; show "<1ms" not nothing
+	}
 	return res, nil
 }
 
@@ -421,7 +539,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			continue // a language codemap doesn't index (or no server registered) — skip
 		}
 		res.FilesScanned++
-		changed, refs, err := ix.indexFile(ctx, projectID, projectName, fileTask{abs: abs, rel: rel, lang: lang, ext: ext}, opts, res, &embedAcc)
+		changed, refs, toEmbed, err := ix.indexFile(ctx, projectID, projectName, fileTask{abs: abs, rel: rel, lang: lang, ext: ext}, opts, res)
 		if err != nil {
 			res.Errors = append(res.Errors, FileError{File: rel, Err: err.Error()})
 			res.FilesSkipped++
@@ -429,9 +547,14 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 		}
 		if changed {
 			pending = append(pending, refs...)
+			embedAcc = append(embedAcc, toEmbed...)
 		}
 	}
-	if _, err := ix.resolveEdges(projectID, pending); err != nil {
+	ni, err := ix.buildNodeIndex(projectID)
+	if err != nil {
+		return res, err
+	}
+	if _, err := ix.resolveEdgesWith(projectID, pending, ni); err != nil {
 		return res, err
 	}
 	if err := ix.embedAndStore(ctx, embedAcc, opts, res); err != nil {
@@ -545,10 +668,10 @@ func segPrefixMatch(parts, segs []string) bool {
 	return true
 }
 
-func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result, embedAcc *[]embedItem) (bool, []extract.Reference, error) {
+func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result) (bool, []extract.Reference, []embedItem, error) {
 	content, err := os.ReadFile(ft.abs)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 	hash := sha256hex(content)
 	if ix.cfg.MaxFileBytes > 0 && len(content) > ix.cfg.MaxFileBytes {
@@ -556,7 +679,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		res.Oversized = append(res.Oversized, ft.rel)
 		// Track the hash of this scanned-but-skipped file so staleness doesn't
 		// report it as perpetually "new"; a content change re-picks it up.
-		return false, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
+		return false, nil, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
 	}
 	if isGenerated(content) {
 		// Generated code (protoc/sqlc/stringer/…) isn't hand-written source — skip
@@ -565,27 +688,25 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		// Record the hash like oversized, so staleness doesn't flag it as "new".
 		res.FilesSkipped++
 		res.Generated = append(res.Generated, ft.rel)
-		return false, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
+		return false, nil, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
 	}
 
 	if !opts.Reindex {
 		prev, err := ix.graph.FileHash(projectID, ft.rel)
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
 		if prev == hash {
 			res.FilesSkipped++
-			return false, nil, nil
+			return false, nil, nil, nil
 		}
 	}
 
 	// Changed: clear the old structure (edges cascade) and vectors for this file.
-	if err := ix.graph.DeleteNodesInFile(projectID, ft.rel); err != nil {
-		return false, nil, err
-	}
+	// The veclite delete is outside the graph transaction (separate store).
 	if ix.vectors != nil {
 		if _, err := ix.vectors.DeleteByFile(projectName, ft.rel); err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
 	}
 
@@ -597,34 +718,47 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		// A later edit that fixes the error changes the hash and re-indexes it; its
 		// old nodes were already cleared above, which is correct for a broken file.
 		if herr := ix.graph.SetFileHash(projectID, ft.rel, hash); herr != nil {
-			return false, nil, herr
+			return false, nil, nil, herr
 		}
-		return false, nil, err
+		return false, nil, nil, err
 	}
 
-	// File node.
+	// Transaction-batched graph writes: the file node + all symbol nodes + all
+	// defines edges + the file hash + the old-node delete are one BEGIN/COMMIT.
+	// This amortizes SQLite's fsync from ~60 per file (one per INSERT) to 1,
+	// which with synchronous=NORMAL is the single biggest write-speedup.
 	lines := bytes.Count(content, []byte("\n")) + 1
-	fileID, err := ix.graph.AddNode(&graph.Node{
+	tx, err := ix.graph.BeginTx(ctx)
+	if err != nil {
+		return false, nil, nil, err
+	}
+	defer func() { _ = tx.Rollback() }() // safe: Commit renders this a no-op
+
+	if err := graph.DeleteNodesInFileTx(tx, projectID, ft.rel); err != nil {
+		return false, nil, nil, err
+	}
+
+	fileNode := &graph.Node{
 		ProjectID: projectID, FilePath: ft.rel, Kind: graph.KindFile,
 		Language: ft.lang, StartLine: 1, EndLine: lines, SourceHash: hash,
-	})
+	}
+	fileID, err := graph.AddNodeTx(tx, fileNode)
 	if err != nil {
-		return false, nil, err
+		return false, nil, nil, err
 	}
 
 	var toEmbed []embedItem
-
 	for _, sym := range fr.Symbols {
-		nid, err := ix.graph.AddNode(&graph.Node{
+		nid, err := graph.AddNodeTx(tx, &graph.Node{
 			ProjectID: projectID, FilePath: ft.rel, Symbol: sym.Name, FQN: sym.FQN,
 			Kind: sym.Kind, Language: sym.Language, StartLine: sym.StartLine, EndLine: sym.EndLine,
 			Signature: sym.Signature, Docstring: sym.Docstring, SourceHash: sha256hex([]byte(sym.Source)),
 		})
 		if err != nil {
-			return false, nil, err
+			return false, nil, nil, err
 		}
-		if _, err := ix.graph.AddEdge(fileID, nid, graph.EdgeDefines, graph.WeightLSP); err != nil {
-			return false, nil, err
+		if _, err := graph.AddEdgeProvTx(tx, fileID, nid, graph.EdgeDefines, graph.WeightLSP, graph.ProvName); err != nil {
+			return false, nil, nil, err
 		}
 		if ix.embedder != nil && ix.vectors != nil {
 			toEmbed = append(toEmbed, embedItem{
@@ -639,18 +773,15 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		}
 	}
 
-	// Defer embedding: collect the items so the whole project's nodes can be
-	// embedded together in large, concurrent batches (embedAndStore) — embedding
-	// is ~98% of a reindex, and one Ollama round-trip per file is the bottleneck.
-	if embedAcc != nil && len(toEmbed) > 0 {
-		*embedAcc = append(*embedAcc, toEmbed...)
+	if err := graph.SetFileHashTx(tx, projectID, ft.rel, hash); err != nil {
+		return false, nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, nil, nil, err
 	}
 
-	if err := ix.graph.SetFileHash(projectID, ft.rel, hash); err != nil {
-		return false, nil, err
-	}
 	res.FilesIndexed++
-	return true, fr.References, nil
+	return true, fr.References, toEmbed, nil
 }
 
 // embedAndStore embeds every collected item and stores its vector. This is the
@@ -706,62 +837,111 @@ func (ix *Indexer) embedAndStore(ctx context.Context, items []embedItem, opts Op
 	}
 
 	// Serial insert: veclite + SQLite writes aren't safe to run concurrently.
+	// Insert all vectors first (veclite), then batch the node vec_id updates in
+	// one graph transaction — turning N SQLite UPDATEs into a single fsync.
+	type vecUpdate struct {
+		nodeID int64
+		vecID  string
+	}
+	updates := make([]vecUpdate, 0, len(items))
 	for i, item := range items {
 		vid, err := ix.vectors.Insert(vecs[i], item.content, item.meta)
 		if err != nil {
 			return err
 		}
-		if err := ix.graph.UpdateNodeVecID(item.nodeID, strconv.FormatUint(vid, 10)); err != nil {
+		updates = append(updates, vecUpdate{nodeID: item.nodeID, vecID: strconv.FormatUint(vid, 10)})
+	}
+	if len(updates) > 0 {
+		tx, err := ix.graph.BeginTx(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		for _, u := range updates {
+			if err := graph.UpdateNodeVecIDTx(tx, u.nodeID, u.vecID); err != nil {
+				return err
+			}
+		}
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// resolveEdges links references (from changed files) to target nodes by name,
-// against the project-wide symbol index. Same-named targets all get an edge at
-// tree-sitter/parser confidence (0.7); precise resolution arrives with the LSP
-// backend. Self-edges are skipped.
-func (ix *Indexer) resolveEdges(projectID int64, refs []extract.Reference) (int, error) {
-	if len(refs) == 0 {
-		return 0, nil
-	}
+// nodeIndex is the project-wide symbol index built once from ProjectNodes and
+// reused across all edge-resolution passes (resolveEdges, resolvePreciseEdges,
+// resolveLSPCallEdges). Previously each pass called ProjectNodes independently —
+// 3 full table scans on a --precise index. Now we build it once and pass it.
+type nodeIndex struct {
+	nodes []graph.Node
+	fqnTo map[string]int64
+	symTo map[string][]int64
+	posTo map[precisePos]int64
+	dirOf map[int64]string
+}
+
+// buildNodeIndex loads all project nodes once and builds the fqn/symbol/position
+// maps that all three edge-resolution passes need.
+func (ix *Indexer) buildNodeIndex(projectID int64) (*nodeIndex, error) {
 	nodes, err := ix.graph.ProjectNodes(projectID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	fqnTo := make(map[string]int64, len(nodes))
-	symTo := make(map[string][]int64, len(nodes))
-	dirOf := make(map[int64]string, len(nodes))
+	ni := &nodeIndex{
+		nodes: nodes,
+		fqnTo: make(map[string]int64, len(nodes)),
+		symTo: make(map[string][]int64, len(nodes)),
+		posTo: make(map[precisePos]int64, len(nodes)),
+		dirOf: make(map[int64]string, len(nodes)),
+	}
 	for _, n := range nodes {
 		if n.FQN != "" {
-			fqnTo[n.FQN] = n.ID
+			ni.fqnTo[n.FQN] = n.ID
 		}
 		// File-scope references (function values in top-level decls) are attributed
 		// to the file path; key file nodes by path so those refs resolve. Paths have
 		// slashes and FQNs have dots, so the two key spaces never collide.
 		if n.Kind == graph.KindFile {
-			fqnTo[n.FilePath] = n.ID
+			ni.fqnTo[n.FilePath] = n.ID
 		}
 		if n.Symbol != "" {
-			symTo[n.Symbol] = append(symTo[n.Symbol], n.ID)
+			ni.symTo[n.Symbol] = append(ni.symTo[n.Symbol], n.ID)
 		}
-		dirOf[n.ID] = filepath.Dir(n.FilePath)
+		ni.dirOf[n.ID] = filepath.Dir(n.FilePath)
+		// position map (used by precise passes); collisions are resolved per-pass
+		key := precisePos{n.FilePath, n.StartLine}
+		if _, dup := ni.posTo[key]; dup {
+			// mark ambiguous by zeroing — precise passes handle this themselves
+			ni.posTo[key] = 0
+		} else {
+			ni.posTo[key] = n.ID
+		}
+	}
+	return ni, nil
+}
+
+// resolveEdges links references (from changed files) to target nodes by name,
+// resolveEdgesWith is the shared resolver that takes a pre-built nodeIndex,
+// avoiding a redundant ProjectNodes call when the caller already built one.
+func (ix *Indexer) resolveEdgesWith(projectID int64, refs []extract.Reference, ni *nodeIndex) (int, error) {
+	if len(refs) == 0 {
+		return 0, nil
 	}
 
 	count := 0
 	for _, ref := range refs {
-		from, ok := fqnTo[ref.From]
+		from, ok := ni.fqnTo[ref.From]
 		if !ok {
 			continue
 		}
-		candidates := symTo[ref.To]
+		candidates := ni.symTo[ref.To]
 		// An unqualified call (Foo()) resolves within the caller's package, so
 		// restrict to same-directory targets — precise, and avoids cross-package
 		// false edges to same-named symbols. Fall back to all matches only if the
 		// same-package restriction finds nothing.
 		if !ref.Qualified {
-			if same := samePackage(candidates, dirOf, dirOf[from]); len(same) > 0 {
+			if same := samePackage(candidates, ni.dirOf, ni.dirOf[from]); len(same) > 0 {
 				candidates = same
 			}
 		}
@@ -793,8 +973,8 @@ type precisePos struct {
 // callees to nodes by declaration position. Edges are written ProvPrecise (there's
 // no name-based call extraction for these languages to supersede). Best-effort:
 // errors skip a file, never abort. The servers are still alive (closed by the
-// deferred ix.Close() after this runs).
-func (ix *Indexer) resolveLSPCallEdges(ctx context.Context, projectID int64, root string, res *Result) {
+// resolveLSPCallEdgesWith is the shared resolver that takes a pre-built nodeIndex.
+func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex) {
 	resolvers := map[string]extract.CallResolver{} // language -> resolver
 	for lang, e := range ix.extractors {
 		if cr, ok := e.(extract.CallResolver); ok {
@@ -804,15 +984,12 @@ func (ix *Indexer) resolveLSPCallEdges(ctx context.Context, projectID int64, roo
 	if len(resolvers) == 0 {
 		return
 	}
-	nodes, err := ix.graph.ProjectNodes(projectID)
-	if err != nil {
-		return
-	}
-	fqnTo := make(map[string]int64, len(nodes))
-	posTo := make(map[precisePos]int64, len(nodes))
+	// Rebuild posTo/fqnTo from the shared nodeIndex, scoped to LSP-language nodes.
+	fqnTo := make(map[string]int64, len(ni.nodes))
+	posTo := make(map[precisePos]int64, len(ni.nodes))
 	posCollide := map[precisePos]bool{}
 	filesByLang := map[string]map[string]bool{}
-	for _, n := range nodes {
+	for _, n := range ni.nodes {
 		if _, isLSP := resolvers[n.Language]; !isLSP {
 			continue
 		}
@@ -867,12 +1044,10 @@ func (ix *Indexer) resolveLSPCallEdges(ctx context.Context, projectID int64, roo
 }
 
 // resolvePreciseEdges runs the go/types pass and supersedes name-based call edges
-// with exact ones for cleanly type-checked packages. It mutates res (PreciseUpgraded
-// /Skipped/Note) and never returns an error: any failure degrades to the name
-// baseline, which is already in place. The invariant is "a clean source either gets
-// its precise edges or keeps its name edges entirely" — supersede only deletes a
-// source's name edges in the same pass that re-inserts its precise ones.
-func (ix *Indexer) resolvePreciseEdges(ctx context.Context, projectID int64, root string, res *Result) {
+// resolvePreciseEdgesFromIndex is the shared-node-index path: it does the
+// go/types resolve, then calls resolvePreciseEdgesWith using the already-built
+// nodeIndex (avoiding a redundant ProjectNodes call when the caller built one).
+func (ix *Indexer) resolvePreciseEdgesFromIndex(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex) {
 	if _, err := exec.LookPath("go"); err != nil {
 		res.PreciseNote = "precise skipped: the 'go' toolchain is required for --precise but is not on PATH; kept name-based edges"
 		return
@@ -886,20 +1061,17 @@ func (ix *Indexer) resolvePreciseEdges(ctx context.Context, projectID int64, roo
 		res.PreciseNote = "precise unavailable: project is not a buildable Go module; kept name-based edges"
 		return
 	}
+	ix.resolvePreciseEdgesWith(ctx, projectID, root, res, ni, pr)
+}
 
-	nodes, err := ix.graph.ProjectNodes(projectID)
-	if err != nil {
-		res.PreciseNote = "precise failed loading nodes: " + err.Error()
-		return
-	}
-	fqnTo := make(map[string]int64, len(nodes))
-	posTo := make(map[precisePos]int64, len(nodes))
+// resolvePreciseEdgesWith is the shared resolver that takes a pre-built nodeIndex
+// and the go/types result.
+func (ix *Indexer) resolvePreciseEdgesWith(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex, pr *typesrc.Result) {
+	fqnTo := ni.fqnTo
+	posTo := make(map[precisePos]int64, len(ni.nodes))
 	posCollide := map[precisePos]bool{} // (file,line) shared by >1 decl — ambiguous
 	var cleanSources []int64
-	for _, n := range nodes {
-		if n.FQN != "" {
-			fqnTo[n.FQN] = n.ID
-		}
+	for _, n := range ni.nodes {
 		key := precisePos{n.FilePath, n.StartLine}
 		if _, dup := posTo[key]; dup {
 			posCollide[key] = true // e.g. two decls on one line (un-gofmt'd)
@@ -915,7 +1087,6 @@ func (ix *Indexer) resolvePreciseEdges(ctx context.Context, projectID int64, roo
 	for key := range posCollide {
 		delete(posTo, key)
 	}
-
 	// Drop the name-based call edges of every clean source, then re-insert the
 	// precise ones below. Doing the delete first (on provenance='name', regardless
 	// of weight) is what prevents the in-package WeightLSP=1.0 name edges from
