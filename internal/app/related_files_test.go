@@ -149,3 +149,46 @@ func contains(ss []string, want string) bool {
 	}
 	return false
 }
+
+// TestAnnotationSurvivesReindex pins the F3 durability guarantee the vecgrep
+// integration relies on: an annotation (target = symbol name) outlives a full
+// --reindex, because annotations are keyed by name in a separate table — not by
+// node id — so the rebuilt node re-matches it. (On RENAME it orphans, by design;
+// codemap warns via NodeExistsByName.)
+func TestAnnotationSurvivesReindex(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "a.go"),
+		[]byte("package app\nfunc Target() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, matched, err := svc.AnnotateNode(proj, "Target", "vecgrep", "matched query", ""); err != nil || !matched {
+		t.Fatalf("annotate Target: matched=%v err=%v", matched, err)
+	}
+	// Full reindex wipes and rebuilds every node.
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Context(proj, "Target", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range rep.Annotations {
+		if a.Source == "vecgrep" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a name-keyed annotation must survive --reindex (the F3 durability guarantee)")
+	}
+}
