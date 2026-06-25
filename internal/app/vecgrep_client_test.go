@@ -95,3 +95,65 @@ func TestSemanticVecgrepEmptyResult(t *testing.T) {
 		t.Errorf("Mode = %q, want none when vecgrep returns no hits", rep.Mode)
 	}
 }
+
+// TestContextRecallsMemories: Context attaches project-scoped agent memories
+// recalled from vecgrep (G2).
+func TestContextRecallsMemories(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "a.go"),
+		[]byte("package app\nfunc Target() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := fakeVecgrep(t, `[{"id":"m1","content":"Target is a hot path; refactor pending","importance":0.8,"tags":["codemap","k"],"score":0.6}]`)
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.Config.Vecgrep = config.VecgrepConfig{Enabled: true, Bin: fake}
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Context(proj, "Target", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatal("Target should be found")
+	}
+	if len(rep.Memories) != 1 {
+		t.Fatalf("memories = %d, want 1", len(rep.Memories))
+	}
+	if rep.Memories[0].Importance != 0.8 || rep.Memories[0].Content == "" {
+		t.Errorf("memory not parsed: %+v", rep.Memories[0])
+	}
+}
+
+// TestContextNoMemoriesWhenVecgrepOff: Context omits memories when vecgrep is disabled.
+func TestContextNoMemoriesWhenVecgrepOff(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "a.go"),
+		[]byte("package app\nfunc Target() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.Config.Vecgrep = config.VecgrepConfig{Enabled: false}
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Context(proj, "Target", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Memories) != 0 {
+		t.Errorf("expected no memories when vecgrep off, got %d", len(rep.Memories))
+	}
+}

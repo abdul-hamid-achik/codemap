@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 )
@@ -48,6 +49,36 @@ func vecgrepSearch(ctx context.Context, cfg config.VecgrepConfig, cwd, query str
 		return nil
 	}
 	return hits
+}
+
+// vecgrepMemoryRecall shells vecgrep's global agent-memory store for memories
+// matching query AND carrying every tag (the scope tags ['codemap', <project_key>]
+// keep recall to this project — no cross-project leakage, per the G2 governance).
+// Returns nil — never an error — when vecgrep is disabled/absent or nothing matches.
+func vecgrepMemoryRecall(ctx context.Context, cfg config.VecgrepConfig, cwd, query string, tags []string, topK int) []MemoryNote {
+	if !cfg.Enabled {
+		return nil
+	}
+	bin := cfg.Bin
+	if bin == "" {
+		bin = "vecgrep"
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, bin, "memory", "recall", query,
+		"--tags", strings.Join(tags, ","), "--min-importance", "0.3",
+		"--limit", strconv.Itoa(topK), "--format", "json")
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var notes []MemoryNote
+	if err := json.Unmarshal(out, &notes); err != nil {
+		return nil
+	}
+	return notes
 }
 
 // semanticViaVecgrep answers a semantic query through vecgrep when codemap has no

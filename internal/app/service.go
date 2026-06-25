@@ -1727,6 +1727,20 @@ type ContextReport struct {
 	Note         string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
 	Resolution   string             `json:"resolution,omitempty"`  // set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
 	Annotations  []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
+	// Memories are TRANSIENT agent notes recalled by meaning from vecgrep's global
+	// memory store, scoped to this project via codemap's project_key (G2) — distinct
+	// from Annotations (codemap's own durable, symbol-pinned layer). Empty when
+	// vecgrep is absent/disabled or nothing matches.
+	Memories []MemoryNote `json:"memories,omitempty"`
+}
+
+// MemoryNote is one recalled agent memory (vecgrep's store) attached to a context
+// bundle — a shared scratchpad surfaced by meaning, never authoritative.
+type MemoryNote struct {
+	Content    string   `json:"content"`
+	Importance float64  `json:"importance"`
+	Tags       []string `json:"tags,omitempty"`
+	Score      float32  `json:"score"`
 }
 
 // contextListCap bounds each relationship list in a context bundle so one
@@ -1783,6 +1797,15 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 			rep.Note = imp.Note
 		}
 		rep.Resolution = imp.Resolution // carry the "call graph unavailable without --precise" honesty note
+	}
+	// G2: surface relevant agent memories from vecgrep's global store, scoped to
+	// this project by codemap's project_key (the leak-free recall convention).
+	// Best-effort sidecar: bounded, swallows failures, never blocks the bundle.
+	if root, _, rerr := svc.resolveProject(cwd); rerr == nil {
+		mctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		rep.Memories = vecgrepMemoryRecall(mctx, svc.s.Config.Vecgrep, cwd, symbol,
+			[]string{"codemap", git.RepoHash(root)}, 5)
+		cancel()
 	}
 	return rep, nil
 }
