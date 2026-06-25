@@ -163,13 +163,14 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 > codemap client that is **silently dead** — three field-shape/flag mismatches (impact `direct_callers`
 > vs `callers`; hotspots `in_degree` vs `refs`; annotate positional vs `--symbol`) each fail-soft to
 > heuristics with no trace. Channel = CLI `--json`, one hop, CLI-only (never MCP→MCP). **codemap-side work:**
-- [ ] **EI.6 / F1 (first slice)** — `codemap related-files <file> --json` → new `Service.RelatedFiles`
-  (reuse `svc.Impact` + `heuristicTestCoverage`); emit the committed C1 shape with explicit `indexed:bool`
-  + three typed states (indexed-false / error-exit / empty). vecgrep repoints its dead `RelatedFiles` to it.
-  Ship with a **cross-repo golden contract test in both CIs** (the safety net that would've caught all 3 no-ops).
-- [ ] **EI.1 / F4 (keystone, do next)** — file:line → enclosing-symbol resolver: `codemap symbol-at
-  <file>:<line> --json` + `impact --at <file>:<line>`, backed by new `graph.Store.NodeAtLine` (nodes-in-file
-  → enclosing by line range). codemap's outputs carry file+line but no input accepts one — unblocks F3/F5/EI.7/8/11.
+- [x] **EI.6 / F1 (first slice)** — **codemap side DONE** (commit 1c54074): `codemap related-files <file>
+  --json` + `codemap_related_files` MCP + `Service.RelatedFiles` (reuses graph Callers/Callees +
+  `heuristicTestCoverage`); emits C1 with `indexed` + golden contract fixture/test
+  (`testdata/contracts/related_files.json`). *vecgrep side (repoint client, delete dead structs): in
+  progress via spawned agent on branch `codemap-integration-f1`.*
+- [x] **EI.1 / F4 (keystone)** — **DONE** (commit 1c54074): `codemap symbol-at <file>:<line> --json` +
+  `impact --at <file>:<line>` + `codemap_symbol_at` MCP + `Service.SymbolAt` + `graph.Store.NodeAtLine`
+  (innermost enclosing by line range); resolution exact|enclosing|none; golden contract fixture/test.
 - [ ] **F3 fix** (vecgrep-side, gated on F4): drop `--symbol`, annotate positionally on the F4-resolved symbol +
   document the annotation `source` enum (EI.4) + specify the reindex/rename **rebind rule** before it ships.
 - Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
