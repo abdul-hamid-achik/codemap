@@ -185,9 +185,16 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 
 **Integration KEEP set COMPLETE & live on both mains** (codemap + vecgrep). The once-100%-dead integration
 now works across 4 flows (related-files, symbol-at/annotate, status cross-read, structural rerank), each
-guarded by golden contract tests in both CIs. Remaining = **deferred** flows needing decisions not code:
-G1 (semantic backfill — measure empty-embedding frequency first), G2 (memory_recall — write the
-`['codemap',<project>]` tag governance first).
+guarded by golden contract tests in both CIs.
+
+- [x] **G1 — semantic backfill** (codemap, commit 30b9211): measurement justified it (both indexed projects
+  are `vectors=0`; graphite is structure-only-in-codemap AND in vecgrep). `Service.Semantic` `Mode="none"`
+  → shells `vecgrep search --format json`, maps hits onto the graph (FQN/kind), `mode:"vecgrep"`. Config
+  `vecgrep.enabled` (default true) + `CODEMAP_VECGREP_*`. CLI-only one hop, degrades gracefully. Live-verified.
+- [~] **G2 — memory_recall** (Proposal E / EI.10): **governance SPEC written** (vecgrep/CODEMAP-INTEGRATION.md)
+  + enabler shipped (codemap exposes `project_key`=RepoHash, commit 74e3baf — codemap is the single authority
+  for the scope key, so `['codemap',<project_key>]` recall is leak-free). Build steps remaining: vecgrep memory
+  recall CLI `--format json` by tags → codemap Context/Impact recall+attach → docs.
 - Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
   G2 (memory_recall into context/impact — needs the `['codemap',<project>]` tag governance). **Cut:** G3 (shared
   veclite read), F5, EI.14 (KnowledgeGraph), EI.15 (shelved with G3).
