@@ -191,10 +191,18 @@ guarded by golden contract tests in both CIs.
   are `vectors=0`; graphite is structure-only-in-codemap AND in vecgrep). `Service.Semantic` `Mode="none"`
   → shells `vecgrep search --format json`, maps hits onto the graph (FQN/kind), `mode:"vecgrep"`. Config
   `vecgrep.enabled` (default true) + `CODEMAP_VECGREP_*`. CLI-only one hop, degrades gracefully. Live-verified.
-- [~] **G2 — memory_recall** (Proposal E / EI.10): **governance SPEC written** (vecgrep/CODEMAP-INTEGRATION.md)
-  + enabler shipped (codemap exposes `project_key`=RepoHash, commit 74e3baf — codemap is the single authority
-  for the scope key, so `['codemap',<project_key>]` recall is leak-free). Build steps remaining: vecgrep memory
-  recall CLI `--format json` by tags → codemap Context/Impact recall+attach → docs.
+- [x] **G2 — memory_recall** (Proposal E / EI.10) **COMPLETE & live**: `codemap_context` recalls
+  project-scoped agent memories from vecgrep's global store. codemap is the authority for the scope key
+  (`project_key`=RepoHash, 74e3baf); `Context` shells `vecgrep memory recall <sym> --tags codemap,<key>
+  --format json` and attaches a transient `memories` list (codemap fc9b161/1232c20). vecgrep added the
+  `memory recall/remember` CLI + a critical **exact tag-AND** fix — `veclite.Contains` is a substring match,
+  so it caught that `codemap` matched `codemapper` and a key matched its superstrings (vecgrep cca5ced).
+  **Live-verified incl. leak prevention**: 3 memories (correct key / different-project key / superstring key)
+  → `context` returned ONLY the correctly-scoped one. Remaining (optional): also attach in `Impact`; docs.
+
+**🎉 codemap ⇄ vecgrep integration COMPLETE** — 7 flows live on both mains (F1 related-files, F4 symbol-at,
+F3 annotate, F2 rerank, G4 status cross-read, G1 semantic backfill, G2 memory recall), all golden-tested,
+all live-verified. codemap FEEDS structure → vecgrep; codemap FETCHES meaning + memory ← vecgrep. CUT: G3, F5, EI.14.
 - Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
   G2 (memory_recall into context/impact — needs the `['codemap',<project>]` tag governance). **Cut:** G3 (shared
   veclite read), F5, EI.14 (KnowledgeGraph), EI.15 (shelved with G3).
