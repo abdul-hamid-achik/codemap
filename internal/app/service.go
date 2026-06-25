@@ -85,6 +85,12 @@ type StatusReport struct {
 	// vecgrep), discovered by name from their global registries — a hint that a
 	// richer/semantic view exists elsewhere, not an authoritative cross-index.
 	Siblings []string `json:"siblings,omitempty"`
+	// ProjectKey is the stable, collision-resistant identifier for this project
+	// (git.RepoHash). codemap is the AUTHORITY for it: ecosystem tools writing a
+	// codemap-scoped agent memory tag it ['codemap', <project_key>] using THIS
+	// value (not a re-derived one), so a global memory store can be recalled per
+	// project without cross-project leakage. See the G2 memory governance spec.
+	ProjectKey string `json:"project_key,omitempty"`
 }
 
 // Init registers cwd as a codemap project in the global registry.
@@ -250,7 +256,7 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep := &StatusReport{Project: name, Root: root}
+	rep := &StatusReport{Project: name, Root: root, ProjectKey: git.RepoHash(root)}
 	// Best-effort: note ecosystem siblings that also index this project (a richer
 	// semantic view may live there). Set before the not-registered return so it
 	// shows even when codemap itself hasn't indexed the project yet.
