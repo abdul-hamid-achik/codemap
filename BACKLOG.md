@@ -244,14 +244,23 @@ _v0.14.0 shipped 2026-06-25._
   `Memory{Content,Importance,Tags}` as "related notes" beside annotations (optional vecgrep memory client).
 
 ### Secrets (tinyvault; strictly value-free — only key names cross the seam)
-- [ ] **EI.11** `codemap_secret_impact`: accept keys[] (or call `vault_list_secrets_by_prefix`), find
-  os.Getenv/process.env/os.environ usages, resolve symbol, run codemap_impact → `{key,defined_at,
-  used_by_symbols,blast_radius_count,covering_tests}`; pin as annotation (source:tinyvault). Rotation blast radius.
-- [ ] **EI.12** `codemap index --via-vault <project>`: thin wrapper over `vault_run_with_secrets(command=
-  [codemap,index,--precise])` so registry creds (GOPRIVATE/NPM_TOKEN/PIP_INDEX_URL) reach spawned
-  gopls/pyright/tsserver. Docs + wrapper; tinyvault unchanged. (Realizes the original LSP-creds motivation.)
-- [ ] **EI.13** Least-privilege seal scope: codemap_callees from a service entrypoint → required_keys, emitted
-  for `vault_seal_for_recipients`/`vault_export_env --keys` (needs a tinyvault explicit-keys filter add).
+> Designed via investigate→design→critique workflow; full plan in `~/projects/tinyvault/CODEMAP-INTEGRATION.md`.
+> **Slice 0 + Slice 1 SHIPPED** (codemap 0fc71ae): `tinyvault` added to the annotate `--source` enum; and
+> **EI.12** below. Channel = CLI one-hop `--json`; key NAMES only cross (values never enter codemap).
+- [x] **EI.12** — `codemap index --via-vault <project>` re-execs the index inside `tvault run -p <project>`
+  so registry creds (GOPRIVATE/NPM_TOKEN/…) reach gopls/pyright/tsserver. **Hard-allowlisted to `tvault run`**
+  (no `tvault get` reachable → no value leak); LookPath-guarded, degrades when tvault absent. Live-verified.
+- [ ] **Scanner primitive (Slice 2, the only net-new cost)** — generalize `heuristicTestCoverage` into a
+  literal-scan over all indexed files, **WITH string-context filtering** (the critique's BLOCKING must-fix:
+  raw scan + SymbolAt can't tell a real `os.Getenv("K")` read from a comment/log mention inside a function →
+  use go/scanner token-kind, or drop non-string hits). Prerequisite for EI.11 + EI.13.
+- [ ] **EI.11 `codemap secret-impact` (Slice 3)** — scanner → `symbol-at` → `impact`. Default value-blind
+  `keys[]`; `--via-vault`/`--prefix` fetch the inventory via value-free `tvault list/search --json`. Output
+  `{key, used_by[], blast_radius, covering_tests, untested, unresolved[], precise, stale}` + value-leak test
+  (emit file:line, never line content). Frame as "candidate usage + impact", not authoritative rotation gate.
+  Keep `orphan_keys` labeled "no usages found, verify"; **CUT `unmanaged_keys` from v1**.
+- [ ] **EI.13** — `codemap callees <entrypoint> --keys` → `required_keys[]` for `vault_seal`/`vault_export_env{keys}`
+  (tinyvault side verified done). Rides the Slice 2 scanner (keys read by the transitive callees).
 
 ### Shared substrate (veclite; deepest — after the wins above)
 - [ ] **EI.14** Push call graph into veclite KnowledgeGraph (AddEntity/AddRelationship) + a named `structure`
