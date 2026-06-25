@@ -12,7 +12,7 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.14.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+Released through **v0.15.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI** (24 commands incl. `daemon`, `--json`), **MCP**
 (`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
@@ -31,6 +31,10 @@ formula users to the cask on `brew upgrade`) and deleted the stale `Formula/code
 abdul-hamid-achik/tap/codemap` is unchanged. (Research: GoReleaser discussion #5563, Homebrew brew#20800.)
 
 ## Release history (condensed — full detail in the vault archive)
+- **v0.15.0** — codemap⇄tinyvault secret-impact integration: `index --via-vault` (re-exec inside `tvault
+  run` so the language servers get private-registry creds), `secret-impact` (rotation blast radius — which
+  symbols read a key, transitive impact, covering tests, untested warning; value-free), `required-keys`
+  (least-privilege key set from a forward call-graph closure). Released 2026-06-25 (run 28146391476).
 - **v0.14.0** — codemap⇄vecgrep ecosystem integration (related-files, symbol-at, semantic fallback +
   project-scoped memory recall via vecgrep, project_key/sibling status), batched-concurrent embedding
   (big win for network providers), studio alt+1–4 tab fix, and the **first Homebrew cask release**.
