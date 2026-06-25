@@ -12,7 +12,7 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.13.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+Released through **v0.14.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI** (24 commands incl. `daemon`, `--json`), **MCP**
 (`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
@@ -24,7 +24,7 @@ radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
-## ⚠ NEXT-RELEASE MUST-DO — Homebrew formula→cask migration (one time)
+## ✅ DONE — Homebrew formula→cask migration (at v0.14.0, the first cask release)
 `.goreleaser.yaml` now publishes a **cask** (`Casks/codemap.rb`), not a formula (commit 1c165ad). The next
 tagged release will write the cask into the tap **alongside the stale `Formula/codemap.rb`** → an ambiguous
 formula+cask named `codemap`. So, **at the next release**, in `abdul-hamid-achik/homebrew-tap` (do these
@@ -37,6 +37,10 @@ Do NOT do these before the cask is published (deleting the formula early breaks 
 Homebrew brew#20800 enabled in-tap formula→cask migration.)
 
 ## Release history (condensed — full detail in the vault archive)
+- **v0.14.0** — codemap⇄vecgrep ecosystem integration (related-files, symbol-at, semantic fallback +
+  project-scoped memory recall via vecgrep, project_key/sibling status), batched-concurrent embedding
+  (big win for network providers), studio alt+1–4 tab fix, and the **first Homebrew cask release**.
+  Released 2026-06-25 (run 28144626270). Tap migrated formula→cask (tap_migrations.json + Formula removed).
 - **v0.13.0** — daemon observability. Live daemon state in `codemap status` + `codemap_status` (a `daemon`
   object in `--json`); `daemon start --no-embed` (structure-only); studio header `● daemon` indicator;
   `codemap doctor` daemon-health check; full daemon docs; glyphrun flows (`daemon.yml`, `exclude_extra.yml`).
@@ -207,12 +211,7 @@ FEEDS structure → vecgrep; codemap FETCHES meaning + memory ← vecgrep. CUT: 
 follow-ups: attach memories in Impact too (left in Context to keep the flagship hot-path exec-free); the
 F3 annotation rebind rule on rename (annotations are name-keyed → survive reindex, orphan on rename).
 
-## 🚩 Release point — v0.14.0 ready (9 feat/fix commits since v0.13.0, unreleased on main)
-Indexing speedup (batch/concurrent embed + `--embed-max-chars`), Homebrew brews→cask migration, studio
-alt+1–4 tab fix, and the **entire codemap⇄vecgrep integration**. Release-worthy; awaiting explicit user auth
-(standing rule). NOTE for the cut: this is the FIRST cask release — do the tap-side migration
-(`tap_migrations.json` + delete `Formula/codemap.rb`) right after GoReleaser publishes `Casks/codemap.rb`
-(see "NEXT-RELEASE MUST-DO" above).
+_v0.14.0 shipped 2026-06-25._
 - Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
   G2 (memory_recall into context/impact — needs the `['codemap',<project>]` tag governance). **Cut:** G3 (shared
   veclite read), F5, EI.14 (KnowledgeGraph), EI.15 (shelved with G3).
