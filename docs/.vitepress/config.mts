@@ -37,7 +37,7 @@ export default defineConfig({
       {
         text: 'Ecosystem',
         items: [
-          { text: 'codemap ⇄ vecgrep', link: '/ecosystem' },
+          { text: 'vecgrep · tinyvault', link: '/ecosystem' },
         ],
       },
     ],

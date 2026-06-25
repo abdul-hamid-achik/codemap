@@ -135,7 +135,14 @@ project has no codemap embeddings, codemap_semantic falls back to vecgrep's inde
 and maps hits onto the graph (mode:"vecgrep"); codemap_context surfaces vecgrep
 agent-memories scoped to this project via status's project_key tag; and
 codemap_status reports sibling indexes. It degrades silently when vecgrep is
-absent. Disable with vecgrep.enabled=false.`},
+absent. Disable with vecgrep.enabled=false.
+
+codemap ⇄ tinyvault answers secret rotation impact: codemap_secret_impact takes
+secret key NAMES (or --via-vault fetches them from tvault, value-free) and reports
+which symbols read each key, the rotation blast radius, and covering tests
+(untested=true warns of a key no test reaches). Key NAMES only cross the seam —
+codemap never reads secret values. codemap index --via-vault <project> runs the
+index inside 'tvault run' so language servers see private-registry creds.`},
 }
 
 // DocTopicNames returns the available `codemap docs` topics, in order.

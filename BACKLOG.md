@@ -250,11 +250,11 @@ _v0.14.0 shipped 2026-06-25._
 - [x] **EI.12** — `codemap index --via-vault <project>` re-execs the index inside `tvault run -p <project>`
   so registry creds (GOPRIVATE/NPM_TOKEN/…) reach gopls/pyright/tsserver. **Hard-allowlisted to `tvault run`**
   (no `tvault get` reachable → no value leak); LookPath-guarded, degrades when tvault absent. Live-verified.
-- [ ] **Scanner primitive (Slice 2, the only net-new cost)** — generalize `heuristicTestCoverage` into a
+- [x] **Scanner primitive (Slice 2)** — DONE (f2d0591), with the string-context must-fix — generalize `heuristicTestCoverage` into a
   literal-scan over all indexed files, **WITH string-context filtering** (the critique's BLOCKING must-fix:
   raw scan + SymbolAt can't tell a real `os.Getenv("K")` read from a comment/log mention inside a function →
   use go/scanner token-kind, or drop non-string hits). Prerequisite for EI.11 + EI.13.
-- [ ] **EI.11 `codemap secret-impact` (Slice 3)** — scanner → `symbol-at` → `impact`. Default value-blind
+- [x] **EI.11 `codemap secret-impact` (Slice 3)** — DONE + live-verified (f2d0591), — scanner → `symbol-at` → `impact`. Default value-blind
   `keys[]`; `--via-vault`/`--prefix` fetch the inventory via value-free `tvault list/search --json`. Output
   `{key, used_by[], blast_radius, covering_tests, untested, unresolved[], precise, stale}` + value-leak test
   (emit file:line, never line content). Frame as "candidate usage + impact", not authoritative rotation gate.

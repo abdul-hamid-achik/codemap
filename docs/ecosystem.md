@@ -1,4 +1,10 @@
-# Ecosystem — codemap ⇄ vecgrep
+# Ecosystem
+
+codemap is the *structural-intelligence hub* of a local, XDG-stored toolchain: it feeds the call/test
+graph to its siblings and fetches meaning, runtime, and secrets back, over each tool's CLI `--json`
+(one hop, never MCP→MCP). Two integrations are live: **vecgrep** (meaning) and **tinyvault** (secrets).
+
+## codemap ⇄ vecgrep
 
 codemap composes with [vecgrep](https://github.com/abdul-hamid-achik/vecgrep), a sibling local-first
 semantic code-search tool. They share an embedding space (Ollama `nomic-embed-text`) and address symbols
@@ -57,3 +63,34 @@ vecgrep memory remember "ValidateToken is a hot path; refactor pending" --tags "
 # …and it surfaces, scoped to this project, on:
 codemap context ValidateToken
 ```
+
+## codemap ⇄ tinyvault
+
+codemap pairs with [tinyvault](https://github.com/abdul-hamid-achik/tinyvault) (`tvault`), a local secret
+manager, to answer **"what code breaks if I rotate this secret?"** — without either tool crossing into the
+other's domain. tinyvault is the value-free *key-name authority* (it never knows where a key is used);
+codemap is the *code-location + blast-radius authority* (it has no notion of secrets). **Only key NAMES
+cross the seam — secret values never enter codemap**, so a rotation report is safe to paste into a PR,
+ticket, or LLM context.
+
+**`codemap secret-impact`** — for each secret key name, codemap scans its indexed source for the key's
+usages (`os.Getenv("KEY")`, `os.environ["KEY"]`, `process.env.KEY`), resolves each to the enclosing symbol,
+and unions the transitive callers + covering tests:
+
+```bash
+codemap secret-impact STRIPE_KEY DATABASE_URL          # explicit key names (value-blind, no tvault needed)
+codemap secret-impact --via-vault payments --prefix STRIPE_   # fetch the names from tvault (value-free)
+```
+
+Each key reports `used_by` (the reading symbols), `blast_radius`, `covering_tests`, and `untested` (a loud
+warning that you're about to rotate a key no test reaches). `orphan_keys` lists keys with no code usages
+(*verify before treating as dead* — dynamically-constructed names like `os.Getenv(prefix+x)` are invisible
+to a literal scan). The result is **candidate usage + impact**, not an authoritative gate: a name-based
+index over-counts (`precise:false` — reindex `--precise` for exact figures), and the scan finds string
+literals (Go is exact via `go/scanner`; comments are excluded, but a name in an unrelated string equality
+can still appear).
+
+**`codemap index --via-vault <project>`** runs indexing inside `tvault run -p <project>` so the language
+servers (gopls/pyright/tsserver) inherit the project's private-registry creds (`GOPRIVATE`/`NPM_TOKEN`/…)
+when resolving private dependencies during the precise pass. codemap only ever invokes `tvault run`/`list` —
+never `tvault get` — so secret values are unreachable. Degrades to a normal index when `tvault` is absent.
