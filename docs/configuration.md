@@ -43,6 +43,9 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_EMBEDDING_DIMENSIONS` | `embedding.dimensions` |
 | `CODEMAP_EMBEDDING_DISTANCE` | `embedding.distance` (e.g. `cosine`) |
 | `CODEMAP_EXCLUDE_EXTRA` | `index.exclude_extra` (comma-separated; appended) |
+| `CODEMAP_EMBED_BATCH_SIZE` | `index.embed_batch_size` |
+| `CODEMAP_EMBED_CONCURRENCY` | `index.embed_concurrency` |
+| `CODEMAP_EMBED_MAX_CHARS` | `index.embed_max_chars` |
 | `CODEMAP_DAEMON_DEBOUNCE_MS` | `daemon.debounce_ms` |
 | `CODEMAP_DAEMON_IDLE_TIMEOUT_MIN` | `daemon.idle_timeout_min` |
 | `CODEMAP_DAEMON_EMBED_RPS` | `daemon.embed_rps` |
@@ -58,6 +61,7 @@ Each config knob also has a flag, which wins over the file and env when set:
 | `--exclude` | `index.exclude` (replaces defaults) | `index` |
 | `--exclude-extra` | `index.exclude_extra` (appended) | `index`, `daemon start` |
 | `--max-file-bytes` | `index.max_file_bytes` | `index` |
+| `--embed-batch-size` / `--embed-concurrency` / `--embed-max-chars` | `index.embed_*` | `index` |
 | `--debounce` / `--idle-timeout` | `daemon.debounce_ms` / `daemon.idle_timeout_min` | `daemon start` |
 | `--embed-rps` / `--embed-max-in-flight` / `--embed-cache-size` | `daemon.embed_*` | `daemon start` |
 
@@ -89,6 +93,9 @@ index:
     - migrations
     - db/migrations
     - "**/testdata"
+  embed_batch_size: 64    # node texts per embedder request
+  embed_concurrency: 4    # concurrent embedder requests (big win for network providers)
+  embed_max_chars: 0      # cap per-node embed text (0 = no cap); lower = faster, less body recall
 daemon:                   # background indexer (codemap daemon)
   debounce_ms: 500        # coalesce a burst of edits into one reindex
   idle_timeout_min: 0     # shut down after N minutes idle (0 = never)
@@ -115,6 +122,30 @@ Both use the same **path-aware** glob semantics:
   everything under it, but not `app/db/migrations`.
 - **`**/` prefix** (`**/testdata`, `**/gen/protobuf`) — un-anchors a slash pattern so it matches at
   **any depth**.
+
+## Indexing performance
+
+Indexing structure (the graph) is fast — the time in a full index is almost entirely **embedding**
+(turning each symbol into a vector). If indexing feels slow, in order of impact:
+
+1. **Don't `--reindex` for routine updates.** Plain `codemap index` is incremental: it content-hashes
+   every file and **skips unchanged ones**, re-embedding only what changed. On a typical repo a no-op
+   `codemap index` is well under a second, while `--reindex` re-embeds *everything*. Reserve `--reindex`
+   for changing the embedding model or recovering a corrupt index.
+2. **`--no-embed`** indexes structure only (no Ollama) — near-instant, and `callers`/`impact`/`hotspots`
+   still work; you only lose semantic search until a later embed.
+3. **Embedder throughput.** With a local Ollama, embedding is GPU-bound, so:
+   - `--embed-max-chars N` (e.g. `512`) caps the text per symbol — embedding cost is ~linear in tokens,
+     so this is a near-linear speedup, trading some long-function-body recall (the docstring + signature
+     are always kept first).
+   - Raise Ollama's own parallelism: `OLLAMA_NUM_PARALLEL=8 ollama serve`, then `--embed-concurrency`
+     can overlap requests. A smaller model (e.g. `all-minilm`) embeds several times faster at some
+     quality cost.
+   - With a **network** embedder (OpenAI/Cohere/Voyage), per-request latency dominates, so `--embed-batch-size`
+     and `--embed-concurrency` are a large win (codemap batches and parallelizes requests by default).
+
+If the embedder is unreachable mid-index, the **structural index still succeeds** — codemap reports
+`embeddings skipped: …` and you can re-run later to add the vectors.
 
 ## Embedding profile guard
 
