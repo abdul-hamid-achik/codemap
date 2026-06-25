@@ -92,6 +92,21 @@ func VeclitePath() string { return filepath.Join(DataDir(), appName+".veclite") 
 // RegistryDir holds per-project registry entries and local index state.
 func RegistryDir() string { return filepath.Join(DataDir(), "projects") }
 
+// SiblingProjectIndexed reports whether a sibling ecosystem tool (e.g. "vecgrep")
+// has the named project indexed, by stat-ing its conventional global registry at
+// ~/.<tool>/projects/<name>. It is NAME-BASED: it matches when both tools derived
+// the same project name — the directory basename, which is the common case — so a
+// collision-renamed project may be missed. Best-effort discovery for a status
+// hint, never authoritative.
+func SiblingProjectIndexed(tool, name string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || name == "" {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(home, "."+tool, "projects", name))
+	return err == nil && fi.IsDir()
+}
+
 // DaemonSocketPath is the unix socket the background daemon listens on.
 func DaemonSocketPath() string { return filepath.Join(DataDir(), "daemon.sock") }
 

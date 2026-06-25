@@ -265,7 +265,7 @@ func init() {
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
 	findCmd.Flags().Int("top", 50, "maximum results")
-	annotateCmd.Flags().String("source", "note", "annotation source: note, mongosh, postgres, vidtrace, …")
+	annotateCmd.Flags().String("source", "note", "annotation producer (ecosystem convention): note, vecgrep, fcheap, vidtrace, cairntrace, glyphrun, mongosh, postgres")
 	annotateCmd.Flags().String("note", "", "free-form note text")
 	annotateCmd.Flags().String("data", "", "opaque data payload (e.g. JSON from a DB query)")
 	annotationsCmd.Flags().Int64("rm", 0, "remove the annotation with this id")
@@ -565,6 +565,9 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if rep.Stale != nil && rep.Stale.Any() {
 		fmt.Printf("  ⚠ index is stale: %d changed, %d new, %d deleted since last index — run 'codemap index' to refresh\n",
 			rep.Stale.Changed, rep.Stale.New, rep.Stale.Deleted)
+	}
+	if len(rep.Siblings) > 0 {
+		fmt.Printf("  also indexed in: %s\n", strings.Join(rep.Siblings, ", "))
 	}
 	printDaemonLine(out.Daemon)
 	return nil

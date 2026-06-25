@@ -81,6 +81,10 @@ type StatusReport struct {
 	// the CLI `status` and MCP codemap_status populate it via Staleness so an agent
 	// knows whether to reindex before trusting query results.
 	Stale *index.Staleness `json:"stale,omitempty"`
+	// Siblings lists ecosystem tools that also have this project indexed (currently
+	// vecgrep), discovered by name from their global registries — a hint that a
+	// richer/semantic view exists elsewhere, not an authoritative cross-index.
+	Siblings []string `json:"siblings,omitempty"`
 }
 
 // Init registers cwd as a codemap project in the global registry.
@@ -247,6 +251,14 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 		return nil, err
 	}
 	rep := &StatusReport{Project: name, Root: root}
+	// Best-effort: note ecosystem siblings that also index this project (a richer
+	// semantic view may live there). Set before the not-registered return so it
+	// shows even when codemap itself hasn't indexed the project yet.
+	for _, tool := range []string{"vecgrep"} {
+		if config.SiblingProjectIndexed(tool, name) {
+			rep.Siblings = append(rep.Siblings, tool)
+		}
+	}
 
 	p, err := g.GetProjectByName(name)
 	if errors.Is(err, graph.ErrNotFound) {

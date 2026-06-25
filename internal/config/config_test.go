@@ -284,3 +284,21 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 		t.Errorf("model = %q, want roundtrip", loaded.Embedding.Model)
 	}
 }
+
+func TestSiblingProjectIndexed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A vecgrep-style registry entry for "myproj".
+	if err := os.MkdirAll(filepath.Join(home, ".vecgrep", "projects", "myproj"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !SiblingProjectIndexed("vecgrep", "myproj") {
+		t.Error("should detect a vecgrep registry entry for myproj")
+	}
+	if SiblingProjectIndexed("vecgrep", "absent") {
+		t.Error("should not detect a project with no registry entry")
+	}
+	if SiblingProjectIndexed("vecgrep", "") {
+		t.Error("empty name must not match")
+	}
+}
