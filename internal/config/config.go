@@ -15,6 +15,14 @@ type Config struct {
 	Embedding EmbeddingConfig `yaml:"embedding"`
 	Index     IndexConfig     `yaml:"index"`
 	Daemon    DaemonConfig    `yaml:"daemon"`
+	Vecgrep   VecgrepConfig   `yaml:"vecgrep"`
+}
+
+// VecgrepConfig controls the optional fallback to the sibling vecgrep tool for
+// semantic search when codemap has no local embeddings (structure-only index).
+type VecgrepConfig struct {
+	Enabled bool   `yaml:"enabled"` // try vecgrep for semantic search when codemap has no vectors (default true)
+	Bin     string `yaml:"bin"`     // path to the vecgrep binary (resolved via $PATH if empty)
 }
 
 // DaemonConfig tunes the background daemon (`codemap daemon`).
@@ -89,6 +97,7 @@ func DefaultConfig() *Config {
 			EmbedMaxInFlight: 2,
 			EmbedCacheSize:   4096,
 		},
+		Vecgrep: VecgrepConfig{Enabled: true},
 	}
 }
 
@@ -210,6 +219,14 @@ func applyEnv(cfg *Config) {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Index.EmbedMaxChars = n
 		}
+	}
+	if v := os.Getenv("CODEMAP_VECGREP_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Vecgrep.Enabled = b
+		}
+	}
+	if v := os.Getenv("CODEMAP_VECGREP_BIN"); v != "" {
+		cfg.Vecgrep.Bin = v
 	}
 }
 

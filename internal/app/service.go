@@ -1063,8 +1063,17 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	// both a pointless embedder call (which would error if Ollama is down) and the
 	// creation of an empty veclite file.
 	if n, ok := svc.embeddedCount(name); ok && n == 0 {
+		// No local embeddings — but the sibling vecgrep may have embedded this same
+		// repo. Delegate to it and map its hits back onto the graph (FQN/kind), so
+		// semantic search works with no codemap embed pass. Degrades to the note below.
+		if hits := svc.semanticViaVecgrep(ctx, cwd, pid, query, topK); len(hits) > 0 {
+			rep.Mode = "vecgrep"
+			rep.Note = "semantic results via vecgrep (codemap has no local embeddings for this project)"
+			rep.Hits = hits
+			return rep, nil
+		}
 		rep.Mode = "none"
-		rep.Note = "no embeddings for this project — run 'codemap index' with Ollama running to enable semantic search, or use 'codemap find' for name search"
+		rep.Note = "no embeddings for this project — run 'codemap index' with Ollama running, index this repo in vecgrep, or use 'codemap find' for name search"
 		return rep, nil
 	}
 
