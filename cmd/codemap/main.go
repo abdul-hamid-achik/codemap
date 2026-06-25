@@ -255,6 +255,7 @@ func init() {
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
 	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph")
 	indexCmd.Flags().Bool("no-lsp", false, "skip language-server-backed extraction (e.g. TypeScript via typescript-language-server)")
+	indexCmd.Flags().String("via-vault", "", "re-run indexing inside `tvault run -p <project>` so registry creds (GOPRIVATE/NPM_TOKEN/…) reach the language servers")
 	initCmd.Flags().Bool("local", false, "drop a .codemap marker (so a repo-local codemap.yaml is found; index stays central)")
 	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
@@ -265,7 +266,7 @@ func init() {
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
 	findCmd.Flags().Int("top", 50, "maximum results")
-	annotateCmd.Flags().String("source", "note", "annotation producer (ecosystem convention): note, vecgrep, fcheap, vidtrace, cairntrace, glyphrun, mongosh, postgres")
+	annotateCmd.Flags().String("source", "note", "annotation producer (ecosystem convention): note, vecgrep, tinyvault, fcheap, vidtrace, cairntrace, glyphrun, mongosh, postgres")
 	annotateCmd.Flags().String("note", "", "free-form note text")
 	annotateCmd.Flags().String("data", "", "opaque data payload (e.g. JSON from a DB query)")
 	annotationsCmd.Flags().Int64("rm", 0, "remove the annotation with this id")
@@ -447,7 +448,51 @@ func indexFilesSummary(rep *app.IndexReport) string {
 	return line
 }
 
+// indexViaVault re-execs `codemap index` inside `tvault run -p <project>` so the
+// language servers spawned by the precise pass inherit the project's secrets
+// (private-registry creds: GOPRIVATE/NPM_TOKEN/PIP_INDEX_TOKEN). Returns done=true
+// when it handled the index (the re-exec'd child did the work); done=false to fall
+// through to a normal in-process index when tvault isn't installed. The ONLY tvault
+// subcommand it ever runs is `run` — no value-reading verb (`tvault get`) is
+// reachable from here, so secret VALUES can never enter codemap.
+func indexViaVault(cmd *cobra.Command, project string) (done bool, err error) {
+	tvault, lookErr := exec.LookPath("tvault")
+	if lookErr != nil {
+		fmt.Fprintln(os.Stderr, "warning: --via-vault set but 'tvault' is not on PATH; indexing without injected secrets")
+		return false, nil // fall through to a normal index
+	}
+	self, exeErr := os.Executable()
+	if exeErr != nil {
+		self = "codemap"
+	}
+	// Reconstruct the inner `codemap index`, dropping --via-vault (no recursion).
+	inner := []string{self, "index"}
+	for _, f := range []string{"reindex", "no-embed", "no-lsp", "precise"} {
+		if b, _ := cmd.Flags().GetBool(f); b {
+			inner = append(inner, "--"+f)
+		}
+	}
+	if cfg, _ := cmd.Flags().GetString("config"); cfg != "" {
+		inner = append(inner, "--config", cfg)
+	}
+	if j, _ := cmd.Flags().GetBool("json"); j {
+		inner = append(inner, "--json")
+	}
+	args := append([]string{"run", "-p", project, "--"}, inner...)
+	c := exec.CommandContext(cmd.Context(), tvault, args...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return true, c.Run()
+}
+
 func runIndex(cmd *cobra.Command, _ []string) error {
+	// --via-vault re-runs this index inside `tvault run` so the language servers
+	// (gopls/pyright/tsserver) see the project's registry creds. Handle it before
+	// opening a session — the real index happens in the re-exec'd child.
+	if vault, _ := cmd.Flags().GetString("via-vault"); vault != "" {
+		if done, err := indexViaVault(cmd, vault); done {
+			return err
+		}
+	}
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
