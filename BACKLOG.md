@@ -158,10 +158,28 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 > Per-sibling design plans live at each repo's ROOT — CODEMAP-INTEGRATION.md (vecgrep, veclite, tinyvault, file.cheap,
 > glyphrun, cairntrace).
 
+### codemap ⇄ vecgrep — validated plan (2026-06-24, deep cross-repo investigation)
+> Full plan: `~/projects/vecgrep/CODEMAP-INTEGRATION.md` (v2). **Key finding:** vecgrep already ships a
+> codemap client that is **silently dead** — three field-shape/flag mismatches (impact `direct_callers`
+> vs `callers`; hotspots `in_degree` vs `refs`; annotate positional vs `--symbol`) each fail-soft to
+> heuristics with no trace. Channel = CLI `--json`, one hop, CLI-only (never MCP→MCP). **codemap-side work:**
+- [ ] **EI.6 / F1 (first slice)** — `codemap related-files <file> --json` → new `Service.RelatedFiles`
+  (reuse `svc.Impact` + `heuristicTestCoverage`); emit the committed C1 shape with explicit `indexed:bool`
+  + three typed states (indexed-false / error-exit / empty). vecgrep repoints its dead `RelatedFiles` to it.
+  Ship with a **cross-repo golden contract test in both CIs** (the safety net that would've caught all 3 no-ops).
+- [ ] **EI.1 / F4 (keystone, do next)** — file:line → enclosing-symbol resolver: `codemap symbol-at
+  <file>:<line> --json` + `impact --at <file>:<line>`, backed by new `graph.Store.NodeAtLine` (nodes-in-file
+  → enclosing by line range). codemap's outputs carry file+line but no input accepts one — unblocks F3/F5/EI.7/8/11.
+- [ ] **F3 fix** (vecgrep-side, gated on F4): drop `--symbol`, annotate positionally on the F4-resolved symbol +
+  document the annotation `source` enum (EI.4) + specify the reindex/rename **rebind rule** before it ships.
+- Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
+  G2 (memory_recall into context/impact — needs the `['codemap',<project>]` tag governance). **Cut:** G3 (shared
+  veclite read), F5, EI.14 (KnowledgeGraph), EI.15 (shelved with G3).
+
 ### Foundation (unblocks everything; build first)
 - [ ] **EI.1** file:line → enclosing-symbol/FQN resolver as a first-class entry point: `codemap impact
   --at <file:line>` (CLI) + accept a position in the relevant MCP tool. The single join that wires every
-  sibling's file:line results onto the graph (used by EI.7/EI.8/EI.11).
+  sibling's file:line results onto the graph (used by EI.7/EI.8/EI.11). *(= F4 above; vecgrep is its first consumer.)*
 - [ ] **EI.2** `codemap impact --files a,b,c` aggregation: per-file symbols + aggregate blast_radius +
   covering tests (feeds fcheap diff-lift EI.9 and affected-specs EI.5).
 - [ ] **EI.3** Cross-read sibling registries: codemap_projects/codemap_status report `{name, abs_path,
