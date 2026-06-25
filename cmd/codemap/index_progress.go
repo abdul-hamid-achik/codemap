@@ -30,7 +30,8 @@ type (
 		done, total int
 		file        string
 	}
-	doneMsg struct{}
+	embedMsg struct{ done, total int } // embedding-phase progress (the long part)
+	doneMsg  struct{}
 )
 
 // progressModel is a minimal inline Bubble Tea program: a single animated
@@ -39,6 +40,7 @@ type progressModel struct {
 	prog        progress.Model
 	done, total int
 	file        string
+	embedding   bool // switched to the embedding phase (the long part of a reindex)
 	finished    bool // indexing reported done
 	canceled    bool // user pressed ctrl+c
 }
@@ -53,6 +55,15 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case fileMsg:
 		m.done, m.total, m.file = msg.done, msg.total, msg.file
+		var pct float64
+		if msg.total > 0 {
+			pct = float64(msg.done) / float64(msg.total)
+		}
+		return m, m.prog.SetPercent(pct)
+	case embedMsg:
+		// Parsing is fast; embedding is the wait. Switch the bar to it so it doesn't
+		// sit at 100% silently while Ollama works through the nodes.
+		m.embedding, m.done, m.total, m.file = true, msg.done, msg.total, ""
 		var pct float64
 		if msg.total > 0 {
 			pct = float64(msg.done) / float64(msg.total)
@@ -82,7 +93,10 @@ func (m progressModel) View() tea.View {
 	if m.total > 0 {
 		line += fmt.Sprintf("  %d/%d", m.done, m.total)
 	}
-	if m.file != "" {
+	switch {
+	case m.embedding:
+		line += "  embedding"
+	case m.file != "":
 		line += "  " + truncStr(m.file, 26)
 	}
 	return tea.NewView(line) // inline (AltScreen defaults false) — a transient one-liner
@@ -105,6 +119,9 @@ func runIndexWithBar(ctx context.Context, svc *app.Service, cwd string, opts ind
 	prog := tea.NewProgram(newProgressModel(), tea.WithContext(ctx))
 	opts.OnFile = func(done, total int, rel string) {
 		prog.Send(fileMsg{done: done, total: total, file: rel})
+	}
+	opts.OnEmbed = func(done, total int) {
+		prog.Send(embedMsg{done: done, total: total})
 	}
 
 	type indexOut struct {

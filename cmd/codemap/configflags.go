@@ -27,6 +27,9 @@ func registerConfigFlags(root, index, daemonStart *cobra.Command) {
 	}
 	index.Flags().StringSlice("exclude", nil, "path globs to skip, REPLACING the built-in defaults (.git, node_modules, …)")
 	index.Flags().Int("max-file-bytes", 1<<20, "skip files larger than this many bytes")
+	index.Flags().Int("embed-batch-size", 64, "node texts sent to the embedder per request")
+	index.Flags().Int("embed-concurrency", 4, "concurrent embedding requests (big win for network providers)")
+	index.Flags().Int("embed-max-chars", 0, "cap per-node embed text (0 = no cap); lower = faster reindex, less body recall")
 
 	df := daemonStart.Flags()
 	df.Duration("debounce", 500*time.Millisecond, "coalesce a burst of file edits within this window into one reindex")
@@ -69,6 +72,15 @@ func applyConfigFlags(cmd *cobra.Command, cfg *config.Config) {
 	}
 	if changed("max-file-bytes") {
 		cfg.Index.MaxFileBytes, _ = fs.GetInt("max-file-bytes")
+	}
+	if changed("embed-batch-size") {
+		cfg.Index.EmbedBatchSize, _ = fs.GetInt("embed-batch-size")
+	}
+	if changed("embed-concurrency") {
+		cfg.Index.EmbedConcurrency, _ = fs.GetInt("embed-concurrency")
+	}
+	if changed("embed-max-chars") {
+		cfg.Index.EmbedMaxChars, _ = fs.GetInt("embed-max-chars")
 	}
 	if changed("debounce") {
 		d, _ := fs.GetDuration("debounce")

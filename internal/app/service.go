@@ -148,7 +148,17 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	if err != nil {
 		return rep, err
 	}
-	rep.Embedded = vec != nil
+	// Embedding ran only if a vector store was wired AND the embed phase wasn't
+	// skipped by an embedder failure (EmbedNote) — the structural index still
+	// succeeded in that case, so report it as structure-only with the reason.
+	rep.Embedded = vec != nil && res.EmbedNote == ""
+	if res.EmbedNote != "" {
+		if rep.Warning != "" {
+			rep.Warning += "; " + res.EmbedNote
+		} else {
+			rep.Warning = res.EmbedNote
+		}
+	}
 	rep.FilesScanned = res.FilesScanned
 	rep.FilesIndexed = res.FilesIndexed
 	rep.FilesSkipped = res.FilesSkipped

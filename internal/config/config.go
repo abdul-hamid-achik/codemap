@@ -48,6 +48,16 @@ type IndexConfig struct {
 	// can skip your own folders (migrations, fixtures, generated/) without
 	// restating the defaults. Same glob semantics as Exclude.
 	ExcludeExtra []string `yaml:"exclude_extra"`
+	// EmbedBatchSize is how many node texts are sent to the embedder per request
+	// (default 64). EmbedConcurrency is how many such requests run at once (default
+	// 4). Embedding dominates a reindex; batching + concurrency is the main speedup
+	// (and a large one for network providers — openai/cohere/voyage).
+	EmbedBatchSize   int `yaml:"embed_batch_size"`
+	EmbedConcurrency int `yaml:"embed_concurrency"`
+	// EmbedMaxChars caps the per-node text sent to the embedder (0 = no cap, the
+	// default). Embedding cost is ~linear in tokens, so a cap (e.g. 512) trades some
+	// long-body recall for a faster reindex; docstring+signature are kept first.
+	EmbedMaxChars int `yaml:"embed_max_chars"`
 }
 
 // DefaultConfig returns the built-in defaults (lowest precedence).
@@ -61,7 +71,9 @@ func DefaultConfig() *Config {
 			Distance:   "cosine",
 		},
 		Index: IndexConfig{
-			MaxFileBytes: 1 << 20, // 1 MiB
+			MaxFileBytes:     1 << 20, // 1 MiB
+			EmbedBatchSize:   64,
+			EmbedConcurrency: 4,
 			Exclude: []string{
 				".git", "node_modules", "vendor", "dist", "build",
 				"dist-*", "build-*", "coverage", // build-output variants (dist-chrome, build-web) + test coverage — minified/generated code, not source
@@ -182,6 +194,21 @@ func applyEnv(cfg *Config) {
 			if p = strings.TrimSpace(p); p != "" {
 				cfg.Index.ExcludeExtra = append(cfg.Index.ExcludeExtra, p)
 			}
+		}
+	}
+	if v := os.Getenv("CODEMAP_EMBED_BATCH_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Index.EmbedBatchSize = n
+		}
+	}
+	if v := os.Getenv("CODEMAP_EMBED_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Index.EmbedConcurrency = n
+		}
+	}
+	if v := os.Getenv("CODEMAP_EMBED_MAX_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Index.EmbedMaxChars = n
 		}
 	}
 }

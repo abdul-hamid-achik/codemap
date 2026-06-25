@@ -18,6 +18,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"unicode/utf8"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
@@ -47,6 +51,12 @@ type Options struct {
 	// interactive CLI progress bar; studio and MCP leave it nil. It runs inline on
 	// the single indexing goroutine, so it must be cheap and non-blocking.
 	OnFile func(done, total int, rel string)
+	// OnEmbed, if non-nil, reports progress through the embedding phase: done is the
+	// number of nodes embedded so far, total the count to embed. Embedding is the
+	// long part of a reindex, so the CLI bar switches to it after the parse pass.
+	// It is called concurrently from embed workers, so it must be cheap and
+	// goroutine-safe (the CLI just forwards to a thread-safe Bubble Tea Send).
+	OnEmbed func(done, total int)
 }
 
 // FileError records a per-file failure that didn't abort the whole run.
@@ -64,6 +74,10 @@ type Result struct {
 	Nodes        int         `json:"nodes"`
 	Edges        int         `json:"edges"`
 	Errors       []FileError `json:"errors,omitempty"`
+	// EmbedNote, when set, explains why semantic vectors were not written (e.g.
+	// Ollama unreachable). The structural index still succeeded; only semantic
+	// search is unavailable until a reindex with the embedder reachable.
+	EmbedNote string `json:"embed_note,omitempty"`
 	// Oversized lists recognized source files skipped for exceeding
 	// index.max_file_bytes — surfaced so a silently-missing file (often generated)
 	// is explained, not just counted in FilesSkipped.
@@ -236,6 +250,23 @@ type fileTask struct {
 	ext  extract.Extractor
 }
 
+// embedItem is one node awaiting a semantic vector: its graph node id, the text
+// to embed, and the vector-store metadata. indexFile collects these across all
+// files so embedAndStore can embed them in large concurrent batches.
+type embedItem struct {
+	nodeID  int64
+	content string
+	meta    vector.NodeMeta
+}
+
+// Embedding-phase defaults. Apple-silicon nomic-embed-text peaks around batch
+// 64–128; a handful of concurrent requests overlaps HTTP/queue latency without
+// overwhelming Ollama. Both are configurable (IndexConfig + CODEMAP_EMBED_*).
+const (
+	defaultEmbedBatchSize   = 64
+	defaultEmbedConcurrency = 4
+)
+
 // IndexProject indexes root for the given registered project.
 func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectName, root string, opts Options) (*Result, error) {
 	res := &Result{}
@@ -284,9 +315,11 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		}
 	}
 
-	// Pass 1: extract + store nodes (and embeddings) for changed files. Collect
-	// the references emitted by changed files for edge resolution.
+	// Pass 1: extract + store nodes for changed files, collecting the references
+	// for edge resolution and the nodes to embed (embedded together in Pass 4, not
+	// per-file, so the slow Ollama calls batch and run concurrently).
 	var pending []extract.Reference
+	var embedAcc []embedItem
 	total := len(files) // == res.FilesScanned; the bar's denominator
 	for i, ft := range files {
 		if err := ctx.Err(); err != nil {
@@ -295,7 +328,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		if opts.OnFile != nil {
 			opts.OnFile(i+1, total, ft.rel)
 		}
-		changed, refs, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
+		changed, refs, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res, &embedAcc)
 		if err != nil {
 			// An errored file (e.g. a language server that timed out) wasn't indexed —
 			// count it as skipped so scanned = indexed + skipped, and record why.
@@ -321,6 +354,11 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 			ix.resolvePreciseEdges(ctx, projectID, root, res)
 		}
 		ix.resolveLSPCallEdges(ctx, projectID, root, res)
+	}
+
+	// Pass 4: embed all collected nodes in large concurrent batches.
+	if err := ix.embedAndStore(ctx, embedAcc, opts, res); err != nil {
+		return res, err
 	}
 
 	if ix.vectors != nil {
@@ -350,6 +388,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName, root string, rels []string, opts Options) (*Result, error) {
 	res := &Result{}
 	var pending []extract.Reference
+	var embedAcc []embedItem
 	for _, rel := range rels {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -382,7 +421,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			continue // a language codemap doesn't index (or no server registered) — skip
 		}
 		res.FilesScanned++
-		changed, refs, err := ix.indexFile(ctx, projectID, projectName, fileTask{abs: abs, rel: rel, lang: lang, ext: ext}, opts, res)
+		changed, refs, err := ix.indexFile(ctx, projectID, projectName, fileTask{abs: abs, rel: rel, lang: lang, ext: ext}, opts, res, &embedAcc)
 		if err != nil {
 			res.Errors = append(res.Errors, FileError{File: rel, Err: err.Error()})
 			res.FilesSkipped++
@@ -393,6 +432,9 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 		}
 	}
 	if _, err := ix.resolveEdges(projectID, pending); err != nil {
+		return res, err
+	}
+	if err := ix.embedAndStore(ctx, embedAcc, opts, res); err != nil {
 		return res, err
 	}
 	if ix.vectors != nil {
@@ -503,7 +545,7 @@ func segPrefixMatch(parts, segs []string) bool {
 	return true
 }
 
-func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result) (bool, []extract.Reference, error) {
+func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result, embedAcc *[]embedItem) (bool, []extract.Reference, error) {
 	content, err := os.ReadFile(ft.abs)
 	if err != nil {
 		return false, nil, err
@@ -570,11 +612,6 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		return false, nil, err
 	}
 
-	type embedItem struct {
-		nodeID  int64
-		content string
-		meta    vector.NodeMeta
-	}
 	var toEmbed []embedItem
 
 	for _, sym := range fr.Symbols {
@@ -592,7 +629,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		if ix.embedder != nil && ix.vectors != nil {
 			toEmbed = append(toEmbed, embedItem{
 				nodeID:  nid,
-				content: embedText(sym),
+				content: embedText(sym, ix.cfg.EmbedMaxChars),
 				meta: vector.NodeMeta{
 					NodeID: nid, Project: projectName, File: ft.rel, Symbol: sym.Name,
 					FQN: sym.FQN, Kind: sym.Kind, Language: sym.Language,
@@ -602,27 +639,11 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		}
 	}
 
-	if len(toEmbed) > 0 {
-		texts := make([]string, len(toEmbed))
-		for i := range toEmbed {
-			texts[i] = toEmbed[i].content
-		}
-		vecs, err := ix.embedder.Embed(ctx, texts)
-		if err != nil {
-			return false, nil, fmt.Errorf("embed %s: %w", ft.rel, err)
-		}
-		if len(vecs) != len(toEmbed) {
-			return false, nil, fmt.Errorf("embed %s: got %d vectors for %d symbols", ft.rel, len(vecs), len(toEmbed))
-		}
-		for i, item := range toEmbed {
-			vid, err := ix.vectors.Insert(vecs[i], item.content, item.meta)
-			if err != nil {
-				return false, nil, err
-			}
-			if err := ix.graph.UpdateNodeVecID(item.nodeID, strconv.FormatUint(vid, 10)); err != nil {
-				return false, nil, err
-			}
-		}
+	// Defer embedding: collect the items so the whole project's nodes can be
+	// embedded together in large, concurrent batches (embedAndStore) — embedding
+	// is ~98% of a reindex, and one Ollama round-trip per file is the bottleneck.
+	if embedAcc != nil && len(toEmbed) > 0 {
+		*embedAcc = append(*embedAcc, toEmbed...)
 	}
 
 	if err := ix.graph.SetFileHash(projectID, ft.rel, hash); err != nil {
@@ -630,6 +651,71 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	}
 	res.FilesIndexed++
 	return true, fr.References, nil
+}
+
+// embedAndStore embeds every collected item and stores its vector. This is the
+// heart of reindex performance: instead of one Ollama round-trip per file done
+// sequentially (embedding is ~98% of a reindex), it sends large batches
+// concurrently, then inserts the vectors serially (veclite/SQLite writes aren't
+// safe to parallelize). On any embed error it degrades gracefully — the
+// structural index is already complete — recording a note instead of failing.
+func (ix *Indexer) embedAndStore(ctx context.Context, items []embedItem, opts Options, res *Result) error {
+	if ix.embedder == nil || ix.vectors == nil || len(items) == 0 {
+		return nil
+	}
+	batchSize := ix.cfg.EmbedBatchSize
+	if batchSize <= 0 {
+		batchSize = defaultEmbedBatchSize
+	}
+	concurrency := ix.cfg.EmbedConcurrency
+	if concurrency <= 0 {
+		concurrency = defaultEmbedConcurrency
+	}
+
+	vecs := make([][]float32, len(items))
+	var done int64
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
+	for start := 0; start < len(items); start += batchSize {
+		start, end := start, min(start+batchSize, len(items))
+		g.Go(func() error {
+			texts := make([]string, end-start)
+			for i := start; i < end; i++ {
+				texts[i-start] = items[i].content
+			}
+			out, err := ix.embedder.Embed(gctx, texts)
+			if err != nil {
+				return err
+			}
+			if len(out) != len(texts) {
+				return fmt.Errorf("got %d vectors for %d inputs", len(out), len(texts))
+			}
+			copy(vecs[start:end], out)
+			if opts.OnEmbed != nil {
+				opts.OnEmbed(int(atomic.AddInt64(&done, int64(len(texts)))), len(items))
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		// Embeddings failed (e.g. Ollama unreachable). The structural index is
+		// already stored, so keep it and report — matching the long-standing
+		// "structure works without Ollama" behavior, just at the project level.
+		res.EmbedNote = "embeddings skipped: " + err.Error()
+		return nil
+	}
+
+	// Serial insert: veclite + SQLite writes aren't safe to run concurrently.
+	for i, item := range items {
+		vid, err := ix.vectors.Insert(vecs[i], item.content, item.meta)
+		if err != nil {
+			return err
+		}
+		if err := ix.graph.UpdateNodeVecID(item.nodeID, strconv.FormatUint(vid, 10)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolveEdges links references (from changed files) to target nodes by name,
@@ -885,8 +971,12 @@ func samePackage(ids []int64, dirOf map[int64]string, dir string) []int64 {
 }
 
 // embedText builds the text embedded for a symbol: docstring + signature +
-// source, so meaning and structure both inform the vector.
-func embedText(s extract.Symbol) string {
+// source, so meaning and structure both inform the vector. maxChars > 0 caps the
+// result (keeping the semantically-dense docstring+signature, truncating a long
+// body) — embedding cost is ~linear in tokens, so a cap trades some body recall
+// for a faster reindex. The leading docstring+signature are never truncated when
+// they alone fit, so a cap only ever drops the tail of a long source body.
+func embedText(s extract.Symbol, maxChars int) string {
 	var b strings.Builder
 	if s.Docstring != "" {
 		b.WriteString(s.Docstring)
@@ -897,7 +987,15 @@ func embedText(s extract.Symbol) string {
 		b.WriteByte('\n')
 	}
 	b.WriteString(s.Source)
-	return b.String()
+	out := b.String()
+	if maxChars > 0 && len(out) > maxChars {
+		// Truncate on a rune boundary so the embedder never sees a split UTF-8 rune.
+		out = out[:maxChars]
+		for len(out) > 0 && !utf8.ValidString(out) {
+			out = out[:len(out)-1]
+		}
+	}
+	return out
 }
 
 func sha256hex(b []byte) string {
