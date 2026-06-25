@@ -175,9 +175,19 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
   enum (note/vecgrep/fcheap/vidtrace/cairntrace/glyphrun/mongosh/postgres).
 - [x] **G4 codemap side** (commit 4f6c9a6): `codemap status` / `codemap_status` report a `siblings` list
   (ecosystem tools that also index the project, name-based stat of `~/.<tool>/projects/<name>`).
-- [~] **F3 fix** (vecgrep-side, now unblocked by F4): drop `--symbol`, resolve hit `file:line` via `codemap
-  symbol-at` → annotate positionally; skip on `resolution=none`. *In progress via the resumed agent
-  (branch `codemap-integration-f3-g4`), with F2-rest + vecgrep-side G4.* Still TODO: the reindex/rename **rebind rule**.
+- [x] **F3** (vecgrep, merged 58e0249): annotate resolves hit `file:line` via `codemap symbol-at` → pins the
+  graph-resolved symbol positionally; skips on `resolution=none` (no garbage pins). Still TODO: the reindex/rename **rebind rule**.
+- [x] **F2** (vecgrep, 58e0249): rerank uses `in_degree` + `shared_name` down-weighting only; dropped the dead
+  blast-radius parse + fixed the misleading docs (option b — made honest).
+- [x] **G4 vecgrep side** (58e0249): `vecgrep_status`/`vecgrep index` surface the codemap graph (`Graph: N
+  nodes, M edges (stale: …)`) — fixed a THIRD silent skew the golden tests caught (`StatusResult` parsed
+  `indexed`+`stale int` vs codemap's `registered`+`stale {changed,new,deleted}`). **Live-verified e2e.**
+
+**Integration KEEP set COMPLETE & live on both mains** (codemap + vecgrep). The once-100%-dead integration
+now works across 4 flows (related-files, symbol-at/annotate, status cross-read, structural rerank), each
+guarded by golden contract tests in both CIs. Remaining = **deferred** flows needing decisions not code:
+G1 (semantic backfill — measure empty-embedding frequency first), G2 (memory_recall — write the
+`['codemap',<project>]` tag governance first).
 - Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
   G2 (memory_recall into context/impact — needs the `['codemap',<project>]` tag governance). **Cut:** G3 (shared
   veclite read), F5, EI.14 (KnowledgeGraph), EI.15 (shelved with G3).
