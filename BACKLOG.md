@@ -171,8 +171,13 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 - [x] **EI.1 / F4 (keystone)** — **DONE** (commit 1c54074): `codemap symbol-at <file>:<line> --json` +
   `impact --at <file>:<line>` + `codemap_symbol_at` MCP + `Service.SymbolAt` + `graph.Store.NodeAtLine`
   (innermost enclosing by line range); resolution exact|enclosing|none; golden contract fixture/test.
-- [ ] **F3 fix** (vecgrep-side, gated on F4): drop `--symbol`, annotate positionally on the F4-resolved symbol +
-  document the annotation `source` enum (EI.4) + specify the reindex/rename **rebind rule** before it ships.
+- [x] **EI.4** (codemap side, commit 4f6c9a6): annotation `--source` help documents the recognized producer
+  enum (note/vecgrep/fcheap/vidtrace/cairntrace/glyphrun/mongosh/postgres).
+- [x] **G4 codemap side** (commit 4f6c9a6): `codemap status` / `codemap_status` report a `siblings` list
+  (ecosystem tools that also index the project, name-based stat of `~/.<tool>/projects/<name>`).
+- [~] **F3 fix** (vecgrep-side, now unblocked by F4): drop `--symbol`, resolve hit `file:line` via `codemap
+  symbol-at` → annotate positionally; skip on `resolution=none`. *In progress via the resumed agent
+  (branch `codemap-integration-f3-g4`), with F2-rest + vecgrep-side G4.* Still TODO: the reindex/rename **rebind rule**.
 - Deferred: G1 (semantic backfill into `Service.Semantic` Mode="none" — measure the empty-embedding case first),
   G2 (memory_recall into context/impact — needs the `['codemap',<project>]` tag governance). **Cut:** G3 (shared
   veclite read), F5, EI.14 (KnowledgeGraph), EI.15 (shelved with G3).
