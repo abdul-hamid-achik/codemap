@@ -66,6 +66,28 @@ func TestDigitTabSwitch(t *testing.T) {
 	}
 }
 
+// TestAltDigitTabSwitch: on an input tab a BARE digit types into the query, but
+// alt+digit still switches tabs (and leaves the typed query intact).
+func TestAltDigitTabSwitch(t *testing.T) {
+	m := testModel()
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "4", Code: '4'})) // Graph: 4 → Search
+	if m.active != tabSearch {
+		t.Fatalf("setup: want Search, got %v", m.active)
+	}
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "2", Code: '2'})) // bare digit types
+	if m.search.Value() != "2" {
+		t.Fatalf("setup: bare digit should type into search, got %q", m.search.Value())
+	}
+	// alt+3 switches to Impact from the input tab (real alt+digit has no Text).
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: '3', Mod: tea.ModAlt}))
+	if m.active != tabImpact {
+		t.Errorf("alt+3 should switch to Impact from Search, got %v", m.active)
+	}
+	if m.search.Value() != "2" {
+		t.Errorf("alt+digit must not edit the input; search query now %q", m.search.Value())
+	}
+}
+
 func TestQuitKeys(t *testing.T) {
 	m := testModel()
 	m.active = tabMetrics

@@ -58,6 +58,7 @@ func renderHelp() string {
 	}
 	b.WriteString(sectionStyle.Render("Global") + "\n")
 	row("1–4 / tab / shift+tab", "switch tabs")
+	row("alt+1–4", "switch tabs while a text input has focus (Search/Impact)")
 	row("ctrl+g", "open the selection in the Graph walker")
 	row("ctrl+s", "view the selected symbol's source")
 	row("ctrl+o", "orient: context card (callers/callees/tests/blast)")

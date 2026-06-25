@@ -43,7 +43,7 @@
 | Key | Action |
 |---|---|
 | `?` | Toggle a full-screen keybinding help overlay (works on any tab) |
-| `1`–`4` / `tab` / `shift+tab` | Switch tabs |
+| `1`–`4` / `tab` / `shift+tab` | Switch tabs. On **Search**/**Impact** a bare digit types into the query box (so `sha256`, `oauth2` work) — use `alt`+`1`–`4` to switch tabs while a text input is focused |
 | `↑` / `↓` (`k` / `j`) | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), or a blast-radius node (Impact); `k`/`j` work on Graph & Metrics (on Search/Impact those keys type into the query box) |
 | `pgup` / `pgdn` | Jump a page through any of those lists (plus `home`/`end` on Graph and Metrics) |
 | `→` / `←` (`l` / `h`) | (Graph) move focus between the hub list and the callers/callees pane |

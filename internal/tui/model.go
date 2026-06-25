@@ -876,7 +876,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.onActivate()
 	}
 
-	// Number keys switch tabs, but only when the focused tab isn't a text input.
+	// alt+1..4 switch tabs from ANY tab — including Search/Impact, where a bare
+	// digit is intentionally typed into the query/symbol input instead (so e.g.
+	// "sha256"/"oauth2" still work). Mirrors the alt+←/→ global-nav modifiers.
+	if after, ok := strings.CutPrefix(key, "alt+"); ok {
+		if d := digitToTab(after); d >= 0 {
+			m.active = tab(d)
+			m.syncFocus()
+			return m, m.onActivate()
+		}
+	}
+
+	// Bare number keys switch tabs too, but only when the focused tab isn't a text
+	// input (on Search/Impact the digit goes into the query — use alt+# to switch).
 	if m.active != tabSearch && m.active != tabImpact {
 		if d := digitToTab(key); d >= 0 {
 			m.active = tab(d)
