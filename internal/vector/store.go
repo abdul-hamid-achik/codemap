@@ -54,7 +54,28 @@ type Hit struct {
 type Store struct {
 	db   *veclite.DB
 	coll *veclite.Collection
+
+	// ownsDB is true when this Store opened the DB itself (via Open) and
+	// should close it on Close(). When created via OpenFromDB, the caller
+	// owns the DB and Close() is a no-op for the DB.
+	ownsDB bool
 }
+
+// OpenFromDB creates a Store from an already-opened veclite DB handle. This
+// is used by the session layer (which manages the DB handle via the
+// veclite/session package) so that collection creation is separated from
+// lock management. The caller retains ownership of the DB handle and must
+// close it after closing the Store.
+func OpenFromDB(db *veclite.DB, profile embed.EmbeddingProfile) (*Store, error) {
+	s := &Store{db: db, ownsDB: false}
+	if err := s.ensureCollection(profile); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// DB returns the underlying veclite.DB handle (for Reload calls).
+func (s *Store) DB() *veclite.DB { return s.db }
 
 // Open opens (creating if needed) the vector store at path and ensures the
 // codemap collection exists with an embedding space matching profile. If the
@@ -80,7 +101,7 @@ func open(path string, profile embed.EmbeddingProfile, readOnly bool) (*Store, e
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, ownsDB: true}
 	if err := s.ensureCollection(profile); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -259,8 +280,14 @@ func (s *Store) Count() int { return s.coll.Count() }
 // Sync flushes pending writes to disk.
 func (s *Store) Sync() error { return s.db.Sync() }
 
-// Close syncs and closes the store.
-func (s *Store) Close() error { return s.db.Close() }
+// Close syncs and closes the store. If the Store was created via OpenFromDB,
+// the DB handle is NOT closed (the caller/session owns it).
+func (s *Store) Close() error {
+	if s.ownsDB {
+		return s.db.Close()
+	}
+	return nil
+}
 
 func toHits(res []veclite.Result) []Hit {
 	hits := make([]Hit, 0, len(res))

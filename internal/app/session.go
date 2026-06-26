@@ -12,6 +12,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
+	vlsession "github.com/abdul-hamid-achik/veclite/session"
 )
 
 // Session holds resolved configuration and lazily-opened stores.
@@ -22,6 +23,10 @@ type Session struct {
 	vectors   *vector.Store
 	vectorsRO *vector.Store
 	embedder  embed.Provider // optional override (tests)
+
+	// vecSession manages the lazy dual-handle DB access (RO with shared
+	// flock, RW with exclusive flock). Created lazily on first vector open.
+	vecSession *vlsession.Session
 }
 
 // Open loads configuration (honoring the --config path / CODEMAP_CONFIG) and
@@ -64,16 +69,33 @@ func (s *Session) Embedder() embed.Provider {
 // providers).
 func (s *Session) SetEmbedder(p embed.Provider) { s.embedder = p }
 
-// Vectors opens (once) and returns the vector store, guarded by the configured
-// embedding profile.
-func (s *Session) Vectors() (*vector.Store, error) {
-	if s.vectors == nil {
-		v, err := vector.Open(config.VeclitePath(), s.Embedder().Profile())
-		if err != nil {
-			return nil, err
-		}
-		s.vectors = v
+// vecSess returns the veclite session, creating it lazily.
+func (s *Session) vecSess() *vlsession.Session {
+	if s.vecSession == nil {
+		s.vecSession = vlsession.New(vlsession.Config{
+			Path:       config.VeclitePath(),
+			Dimensions: s.Embedder().Profile().Dimensions,
+		})
 	}
+	return s.vecSession
+}
+
+// Vectors opens (once) and returns the vector store, guarded by the configured
+// embedding profile. Uses the veclite/session package for exclusive-lock
+// management (closes any cached RO handle first).
+func (s *Session) Vectors() (*vector.Store, error) {
+	if s.vectors != nil {
+		return s.vectors, nil
+	}
+	db, err := s.vecSess().ReadWrite()
+	if err != nil {
+		return nil, err
+	}
+	v, err := vector.OpenFromDB(db, s.Embedder().Profile())
+	if err != nil {
+		return nil, err
+	}
+	s.vectors = v
 	return s.vectors, nil
 }
 
@@ -87,7 +109,11 @@ func (s *Session) VectorsReadOnly() (*vector.Store, error) {
 		return s.vectors, nil
 	}
 	if s.vectorsRO == nil {
-		v, err := vector.OpenReadOnly(config.VeclitePath(), s.Embedder().Profile())
+		db, err := s.vecSess().ReadOnly()
+		if err != nil {
+			return nil, err
+		}
+		v, err := vector.OpenFromDB(db, s.Embedder().Profile())
 		if err != nil {
 			return nil, err
 		}
@@ -106,6 +132,10 @@ func (s *Session) Close() error {
 	if s.vectorsRO != nil {
 		err = errors.Join(err, s.vectorsRO.Close())
 		s.vectorsRO = nil
+	}
+	if s.vecSession != nil {
+		err = errors.Join(err, s.vecSession.Close())
+		s.vecSession = nil
 	}
 	if s.graph != nil {
 		err = errors.Join(err, s.graph.Close())
