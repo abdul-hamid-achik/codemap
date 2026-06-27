@@ -77,6 +77,13 @@ type Daemon struct {
 // socket. The returned Daemon runs until Stop, its context is cancelled, a
 // daemon.shutdown request arrives, or it idles out. Call Wait to block on it.
 func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
+	// Raise the open-file limit before anything opens descriptors. The recursive
+	// file watcher (created below) opens one FD per directory — on a large tree
+	// that exhausts the default soft limit before the unix socket can bind,
+	// surfacing as a misleading "listen unix ...: too many open files".
+	// Best-effort: it logs on failure and never aborts startup.
+	raiseFDLimit()
+
 	// Refuse if a live daemon already owns the socket; clear a stale one.
 	sockPath := config.DaemonSocketPath()
 	if c, err := net.DialTimeout("unix", sockPath, 200*time.Millisecond); err == nil {
