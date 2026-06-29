@@ -1,0 +1,46 @@
+version: 1
+name: risk
+intent: |
+    `codemap risk <symbol>` scores how risky a change to a symbol is — combining
+    untested coverage, fan-in (direct callers), cross-package spread, and name
+    ambiguity into one 0..1 score + a low/medium/high level, with the factors behind
+    it. Here Risky() has six callers and no test, so it must score HIGH with an
+    `untested` factor (the codemap_risk MCP tool returns the same JSON).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s' 'package app; func Risky() {}; func C1() { Risky() }; func C2() { Risky() }; func C3() { Risky() }; func C4() { Risky() }; func C5() { Risky() }; func C6() { Risky() }' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; \"$CM\" risk Risky"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: risk
+outcomes:
+    - id: risk_header
+      description: risk prints the scored symbol
+      verify:
+        screen:
+            contains: "Risk of Risky"
+    - id: high_level
+      description: an untested 6-caller symbol scores HIGH
+      verify:
+        screen:
+            contains: "HIGH"
+    - id: untested_factor
+      description: the untested factor is surfaced
+      verify:
+        screen:
+            contains: "untested"
+    - id: clean_exit
+      description: risk exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:e677cdc8cc0df64723ea21fb6f1b5d00c9c372aca3ac10d7ae26903bb77d8a87

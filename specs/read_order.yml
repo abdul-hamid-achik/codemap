@@ -1,0 +1,47 @@
+version: 1
+name: read_order
+intent: |
+    `codemap read-order` is the "where do I start reading?" guide an agent runs on
+    first contact with an unfamiliar repo: it ranks entrypoints (main(), cmd/,
+    module index files, exported API) and load-bearing hubs (call-graph in-degree)
+    into a reading order, each with the reason it ranked. Here a small program with
+    a main() and a Hub() (called by A and B) is indexed; main() must lead the order
+    and the Hub must surface (the codemap_read_order MCP tool returns the same JSON).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package main\\n\\nfunc helper() {}\\n\\nfunc main() {\\n\\thelper()\\n}\\n' > \"$P/main.go\"; printf 'package main\\n\\nfunc Hub() {}\\n\\nfunc A() { Hub() }\\n\\nfunc B() { Hub() }\\n' > \"$P/hub.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; \"$CM\" read-order --top 10"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: read_order
+outcomes:
+    - id: read_order_header
+      description: read-order prints its guide header
+      verify:
+        screen:
+            contains: "Read order (proj"
+    - id: main_leads
+      description: the program entrypoint main() leads the reading order
+      verify:
+        screen:
+            contains: "program entrypoint"
+    - id: hub_ranked
+      description: the load-bearing Hub is ranked as central
+      verify:
+        screen:
+            contains: "central"
+    - id: clean_exit
+      description: read-order exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:df2d3e4b3f727820b2c655ed645004f851749e89182a7bfc678e94cab29234d4

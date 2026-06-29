@@ -1,0 +1,47 @@
+version: 1
+name: file_impact
+intent: |
+    `codemap file-impact <file>` answers "what happens if I change or delete this
+    file?" — the file-level peer of impact (a symbol) and review (a diff). It
+    aggregates the file's symbols into dependent files, blast radius, covering tests,
+    and the safe-to-delete / breaking-change verdicts. Here a.go's Helper is called
+    from b.go (so a.go is depended on), while c.go's Lonely has no callers (so c.go
+    is safe to delete) — and the codemap_file_impact MCP tool returns the same JSON.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\n\\nfunc Helper() {}\\n\\nfunc A() { Helper() }\\n' > \"$P/a.go\"; printf 'package app\\n\\nfunc External() { Helper() }\\n' > \"$P/b.go\"; printf 'package app\\nimport \"testing\"\\nfunc TestHelper(t *testing.T) { Helper() }\\n' > \"$P/a_test.go\"; printf 'package app\\n\\nfunc Lonely() {}\\n' > \"$P/c.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== a.go =='; \"$CM\" file-impact a.go; echo '== c.go =='; \"$CM\" file-impact c.go"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: file_impact
+outcomes:
+    - id: file_impact_header
+      description: file-impact prints its per-file header
+      verify:
+        screen:
+            contains: "File impact: a.go"
+    - id: dependent_file
+      description: b.go (which calls into a.go) is reported as a dependent file
+      verify:
+        screen:
+            contains: "b.go"
+    - id: safe_to_delete
+      description: c.go (no callers) is reported safe to delete
+      verify:
+        screen:
+            contains: "safe to delete"
+    - id: clean_exit
+      description: file-impact exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:a03eb51d4ba47da824649ac7431a972ba783e372d2c90bf7da3dd05e09129366

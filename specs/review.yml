@@ -1,0 +1,47 @@
+version: 1
+name: review
+intent: |
+    `codemap review` is the diff-scoped query an agent runs AFTER editing: it maps
+    the working-tree git diff to the symbols it touches, then reports their blast
+    radius and the tests to run (regression test selection). Here a committed,
+    indexed project is edited inside Run(), and review must surface Run as a changed
+    symbol and TestRun as a covering test — "what did I just affect, and what should
+    I run?" in one call (the codemap_review MCP tool returns the same JSON).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\n\\nfunc Helper() {}\\n\\nfunc Run() {\\n\\tHelper()\\n}\\n' > \"$P/a.go\"; printf 'package app\\n\\nfunc Other() { Run() }\\n' > \"$P/b.go\"; printf 'package app\\nimport \"testing\"\\nfunc TestRun(t *testing.T) { Run() }\\n' > \"$P/a_test.go\"; cd \"$P\"; git init -q; git config user.email t@t; git config user.name t; git config commit.gpgsign false; git add -A; git commit -qm init >/dev/null 2>&1; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; printf 'package app\\n\\nfunc Helper() {}\\n\\nfunc Run() {\\n\\tHelper() // edited\\n}\\n' > \"$P/a.go\"; \"$CM\" review"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: review
+outcomes:
+    - id: review_header
+      description: review prints its scoped header
+      verify:
+        screen:
+            contains: "Review (proj"
+    - id: changed_symbol
+      description: the edited Run() is reported as a changed symbol
+      verify:
+        screen:
+            contains: "changed symbols:"
+    - id: selects_tests
+      description: review selects TestRun as a test to run for the change
+      verify:
+        screen:
+            contains: "tests to run:"
+    - id: clean_exit
+      description: review exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:d554c9ea82a30273f7abb4a281a7338f914b0457b47359b123722ee24a3fe6cd

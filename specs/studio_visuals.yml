@@ -1,0 +1,69 @@
+version: 1
+name: studio_visuals
+intent: |
+    studio's graphics surfaces render: the Graph tab toggles a neighborhood MAP of
+    the centered node (callers → node → callees) with `m`; the Metrics tab shows a
+    `shape` sparkline of the kind distribution beneath its animated bar charts; and
+    the Impact tab colors the blast radius as a depth HEATMAP (a `heat` legend, with
+    each node's depth tag colored hot→cool). This spec drives a real Go call graph
+    through the TUI and asserts each visual appears.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'module example.com/app\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf '%s' 'package app; func Helper() {}; func Run() { Helper(); Helper() }; func Top() { Run() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() { Run(); Helper() }' > \"$P/b.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed >/dev/null 2>&1; \"$ROOT/bin/codemap\" studio"
+    cwd: "."
+terminal:
+    cols: 120
+    rows: 40
+    profile: xterm-256color
+    alternateScreen: require
+steps:
+    - wait:
+        screen:
+            contains: "codemap studio"
+        timeoutMs: 8000
+    - wait:
+        screen:
+            contains: "Called by"
+        timeoutMs: 8000
+    # Graph tab: toggle the neighborhood map.
+    - press: "m"
+    - wait:
+        screen:
+            contains: "Neighborhood map"
+        timeoutMs: 5000
+    - snapshot: map
+    - press: "m"
+    # Metrics tab: the kind-distribution sparkline.
+    - press: "2"
+    - wait:
+        screen:
+            contains: "By kind"
+        timeoutMs: 5000
+    - wait:
+        screen:
+            contains: "shape"
+        timeoutMs: 5000
+    - snapshot: metrics_sparkline
+    # Impact tab: the blast-radius depth heatmap legend.
+    - press: "3"
+    - type: "Helper"
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "Blast radius"
+        timeoutMs: 8000
+    - wait:
+        screen:
+            contains: "heat"
+        timeoutMs: 5000
+    - snapshot: impact_heatmap
+    - press: "ctrl+c"
+outcomes:
+    - id: clean_exit
+      description: studio quits cleanly with status 0
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:27568ab9a4063985c8ff30942f6e6c09cbb9baa696f3afe4f2d61cb25680ebd1
