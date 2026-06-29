@@ -16,6 +16,10 @@
  ↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit · ? help
 ```
 
+While an async operation is running (indexing, a semantic search, an impact analysis, a precise
+recompute), the footer shows an **animated spinner** beside the status — a spring-driven frame loop
+that stops the instant the work completes, so an idle studio costs nothing.
+
 ## Tabs
 
 - **Graph** — a call-graph explorer. The hubs (most-referenced symbols) are jump points on
@@ -24,15 +28,23 @@
   can traverse "who calls this → who calls that → what does it call". `backspace` steps back
   along the path (the header shows the current depth), `←`/`h` returns focus to the hub list.
   Press `s` to read the selected symbol's **source code** in a scrollable overlay — navigate
-  the graph and read the implementation without leaving studio.
+  the graph and read the implementation without leaving studio. Press `m` to toggle a
+  **neighborhood map**: the centered node drawn as a boxed focal point with its callers flowing
+  down into it and its callees flowing out — a "you are here" diagram of the local call graph.
 - **Metrics** — an overview dashboard: node/edge/file counts and bar charts by kind and
-  language on the left; on the right, the two ends of the call graph — the **top hubs**
+  language on the left, with a one-line `shape` **sparkline** of the kind distribution beneath
+  them; on the right, the two ends of the call graph — the **top hubs**
   (most-referenced, load-bearing symbols) and the **dead-code candidates** (symbols with no
-  callers). Both lists are navigable with `↑`/`↓`: `enter` drills the selected symbol into
+  callers). The bar charts **animate in** with spring physics (charmbracelet/harmonica) each
+  time you land on the tab — they grow from zero with 1/8-cell partial blocks and settle with a
+  touch of overshoot (the frame loop stops the instant they settle, so an idle studio costs
+  nothing). Both lists are navigable with `↑`/`↓`: `enter` drills the selected symbol into
   Impact, `ctrl+s` reads its source, `ctrl+g` opens it in the Graph walker — so the overview is
   also a launchpad.
-- **Impact** — type a symbol, see its callers, blast radius, and which tests cover it. `ctrl+s`
-  reads the selected blast node's source; `ctrl+g` opens it in the Graph walker.
+- **Impact** — type a symbol, see its callers, blast radius, and which tests cover it. The blast
+  radius is a **depth heatmap**: each node's `[depth]` tag is colored from hot (a direct caller,
+  most likely affected) to cool (a distant transitive dependent), so the shape of the impact reads
+  at a glance. `ctrl+s` reads the selected blast node's source; `ctrl+g` opens it in the Graph walker.
 - **Search** — search by meaning (semantic, when an embedded index exists), automatically
   falling back to fast name search otherwise; the header shows which mode is active. `ctrl+s`
   reads the selected hit's source; `ctrl+g` opens it in the Graph walker to explore its call
