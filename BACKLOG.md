@@ -12,7 +12,7 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.15.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+Released through **v0.19.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI** (24 commands incl. `daemon`, `--json`), **MCP**
 (`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
@@ -24,7 +24,16 @@ radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
-## 🚧 Unreleased — agent-harness "review" keystone (diff-scoped intelligence)
+## ✅ v0.19.0 — agent-harness intelligence (released 2026-06-29)
+Five new one-call agent commands (CLI + MCP twin, **34 tools**): `review` (diff-scoped impact + regression
+test selection), `read-order` (entrypoint/hub ranking), `file-impact` (file dependents + blast + safe-to-delete
+verdict), `context-batch` (N symbols + shared callers), `risk` (change-risk score). A fully animated **studio
+TUI** (spring bar charts, kind-distribution sparkline, toggleable call-graph map, blast-radius depth heatmap,
+async loading spinner — one frame loop, harmonica). A refreshed in-band agent guide + a **"For agents"** docs
+page. **6 glyphrun E2E specs** + a multi-agent adversarial review that hardened it all. (v0.16–v0.18 were
+interim releases.) Details below.
+
+## (v0.16–v0.18 history is in the tags; the keystone narrative follows)
 New flagship for the agent edit loop: **`codemap review`** (CLI) + **`codemap_review`** (MCP, now 30
 tools). Maps the working-tree git diff — or `--staged` / `--since <ref>` — to the symbols it touches
 (`internal/git.ChangedFiles` parses `git diff -U0` hunks → `Symbols` range-intersection), then unions each
