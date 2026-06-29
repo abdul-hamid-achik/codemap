@@ -11,6 +11,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/harmonica"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/daemon"
@@ -136,6 +137,7 @@ type Model struct {
 	graphCallees     []app.SymbolRef
 	graphAnnotations []graph.Annotation // annotations pinned to the centered node
 	graphPrecise     bool               // hub detail is showing gopls-precise relations
+	graphMap         bool               // render the centered node's neighborhood as a map (toggle: m)
 
 	showHelp bool // a full-screen keybinding overlay, toggled with `?`
 
@@ -164,6 +166,27 @@ type Model struct {
 	// graphStack, which stays the within-Graph walk (backspace).
 	navHist []navState // back stack
 	navFwd  []navState // forward stack (cleared when a new drill forks history)
+
+	// Reveal animations (harmonica springs). metricsReveal scales the Metrics bar
+	// fill and mapReveal grows the Graph map's branches, each 0→1 on activation; both
+	// default to 1 (fully shown) so a directly-rendered model and the render tests see
+	// the finished UI. revealing = the shared frame loop is live. See anim.go.
+	revealSpring  harmonica.Spring
+	metricsReveal float64
+	metricsVel    float64
+	metricsActive bool
+	mapReveal     float64
+	mapVel        float64
+	mapActive     bool
+	revealing     bool
+	spinnerFrame  int // advances while busy() to animate the footer loading spinner
+}
+
+// busy reports whether an async operation is in flight — the initial load, or a
+// command whose status ends in "…" (searching/analyzing/indexing/resolving). Drives
+// the footer spinner and keeps the animation frame loop running until it clears.
+func (m Model) busy() bool {
+	return m.loading || strings.HasSuffix(m.statusMsg, "…")
 }
 
 // graphFocus is which pane of the Graph tab has keyboard focus.
@@ -295,13 +318,16 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 	i.Placeholder = "symbol name, e.g. Authenticate"
 
 	return Model{
-		ctx:      ctx,
-		service:  app.NewService(sess),
-		startDir: startDir,
-		active:   tabGraph,
-		loading:  true,
-		search:   s,
-		impact:   i,
+		ctx:           ctx,
+		service:       app.NewService(sess),
+		startDir:      startDir,
+		active:        tabGraph,
+		loading:       true,
+		search:        s,
+		impact:        i,
+		revealSpring:  newRevealSpring(),
+		metricsReveal: 1, // fully shown until a tab activation triggers the grow-in
+		mapReveal:     1, // fully shown until the map toggle triggers the grow-in
 	}
 }
 
@@ -691,6 +717,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case daemonTickMsg:
 		return m, tea.Batch(m.daemonCmd(), daemonTick())
 
+	case animTickMsg:
+		return m, m.advanceAnim()
+
 	case stalenessMsg:
 		m.stale = msg.st
 		return m, nil
@@ -812,7 +841,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		return m.handleKey(msg)
+		model, cmd := m.handleKey(msg)
+		// If the key kicked off an async op (status ends in "…"), spin the footer.
+		if nm, ok := model.(Model); ok && nm.busy() {
+			if k := nm.kickAnim(); k != nil {
+				return nm, tea.Batch(cmd, k)
+			}
+			return nm, cmd
+		}
+		return model, cmd
 	}
 	return m, nil
 }
@@ -869,11 +906,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		m.active = (m.active + 1) % tabCount
 		m.syncFocus()
-		return m, m.onActivate()
+		return m, m.onTabActivate()
 	case "shift+tab":
 		m.active = (m.active + tabCount - 1) % tabCount
 		m.syncFocus()
-		return m, m.onActivate()
+		return m, m.onTabActivate()
 	}
 
 	// alt+1..4 switch tabs from ANY tab — including Search/Impact, where a bare
@@ -883,7 +920,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if d := digitToTab(after); d >= 0 {
 			m.active = tab(d)
 			m.syncFocus()
-			return m, m.onActivate()
+			return m, m.onTabActivate()
 		}
 	}
 
@@ -893,7 +930,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if d := digitToTab(key); d >= 0 {
 			m.active = tab(d)
 			m.syncFocus()
-			return m, m.onActivate()
+			return m, m.onTabActivate()
 		}
 	}
 
@@ -1100,6 +1137,14 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 	case "s":
 		// view the selected node's source code in a scrollable overlay.
 		return m, m.viewSource()
+	case "m":
+		// toggle the centered node's neighborhood map (callers → node → callees);
+		// grow its branches in with a spring when switching it on.
+		m.graphMap = !m.graphMap
+		if m.graphMap {
+			return m, m.startMapReveal()
+		}
+		return m, nil
 	case "o":
 		// orient: the context card for the selected node (mirrors ctrl+o globally).
 		return m, m.viewContext()
@@ -1241,6 +1286,18 @@ func (m Model) onActivate() tea.Cmd {
 		return m.hubsCmd()
 	}
 	return nil
+}
+
+// onTabActivate runs onActivate and, when the new tab is Metrics, also triggers the
+// spring grow-in of its bar charts — so every switch to Metrics replays the reveal.
+func (m *Model) onTabActivate() tea.Cmd {
+	cmd := m.onActivate()
+	if m.active == tabMetrics {
+		if r := m.startMetricsReveal(); r != nil {
+			return tea.Batch(cmd, r)
+		}
+	}
+	return cmd
 }
 
 func digitToTab(key string) int {

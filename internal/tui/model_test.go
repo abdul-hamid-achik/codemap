@@ -636,6 +636,33 @@ func TestMetricsNavigationDrills(t *testing.T) {
 	}
 }
 
+func TestImpactDepthHeatmap(t *testing.T) {
+	// Each depth tier renders its [N] tag in a distinct heat color, hot→cool.
+	if !strings.Contains(depthHeat(1), "[1]") || !strings.Contains(depthHeat(5), "[5]") {
+		t.Error("depthHeat should tag the depth number")
+	}
+	if !strings.Contains(depthHeat(1), "249;38;114") { // colorBad — hottest
+		t.Errorf("depth 1 should be the hot color, got %q", depthHeat(1))
+	}
+	if !strings.Contains(depthHeat(3), "102;217;239") { // colorBar — cool
+		t.Errorf("depth 3 should be the cool color, got %q", depthHeat(3))
+	}
+	if depthHeat(1) == depthHeat(4) {
+		t.Error("a near and a far node should not share a heat color")
+	}
+	// The Impact tab shows the heat legend beside the Blast radius title.
+	m := sized(t, 100, 30)
+	m.active = tabImpact
+	m.impact.SetValue("X")
+	m, _ = applyMsg(m, impactMsg{symbol: "X", rep: &app.ImpactReport{
+		Symbol: "X", Found: true,
+		BlastRadius: []app.ImpactNode{{Symbol: "A", Depth: 1}, {Symbol: "B", Depth: 4}},
+	}})
+	if out := m.render(); !strings.Contains(out, "heat ") {
+		t.Errorf("Impact tab should show the depth-heat legend:\n%s", out)
+	}
+}
+
 func TestImpactNamesCoveringTests(t *testing.T) {
 	m := sized(t, 120, 40)
 	m.active = tabImpact
@@ -649,6 +676,69 @@ func TestImpactNamesCoveringTests(t *testing.T) {
 	out := m.render()
 	if !strings.Contains(out, "covered by") || !strings.Contains(out, "app.TestFoo") {
 		t.Errorf("impact should name the covering tests:\n%s", out)
+	}
+}
+
+func TestGraphMapToggle(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Authenticate", FQN: "auth.Authenticate", InDegree: 12}}})
+	m, _ = applyMsg(m, graphDetailMsg{symbol: "Authenticate",
+		callers: []app.SymbolRef{{Symbol: "Login", FQN: "api.Login", File: "api.go", StartLine: 10}},
+		callees: []app.SymbolRef{{Symbol: "parseJWT", FQN: "auth.parseJWT", File: "jwt.go", StartLine: 5}},
+	})
+	// Default: the list detail (not the map).
+	if out := m.render(); !strings.Contains(out, "Called by (1)") || strings.Contains(out, "Neighborhood map") {
+		t.Fatalf("default Graph detail should be the list view, not the map:\n%s", out)
+	}
+	// m toggles the neighborhood map: boxed focal node + caller/callee branches.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "m", Code: 'm'}))
+	if !m.graphMap {
+		t.Fatal("m should toggle the neighborhood map on")
+	}
+	out := m.render()
+	for _, want := range []string{"Neighborhood map", "auth.Authenticate", "called by (1)", "calls (1)", "╭", "╰"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("map view should contain %q:\n%s", want, out)
+		}
+	}
+	// Width is still respected with the box present.
+	for i, line := range strings.Split(out, "\n") {
+		if wd := lipgloss.Width(line); wd > 120 {
+			t.Errorf("map line %d width %d exceeds 120: %q", i, wd, line)
+		}
+	}
+	// m toggles back to the list.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "m", Code: 'm'}))
+	if m.graphMap || !strings.Contains(m.render(), "Called by (1)") {
+		t.Error("m should toggle back to the list detail")
+	}
+}
+
+func TestMapRevealLifecycle(t *testing.T) {
+	m := sized(t, 120, 40)
+	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Authenticate", FQN: "auth.Authenticate", InDegree: 12}}})
+	m, _ = applyMsg(m, graphDetailMsg{symbol: "Authenticate",
+		callers: []app.SymbolRef{{Symbol: "Login", FQN: "api.LoginHandler", File: "api.go", StartLine: 10}},
+		callees: []app.SymbolRef{{Symbol: "parseJWT", FQN: "auth.parseJWT", File: "jwt.go", StartLine: 5}},
+	})
+	m, cmd := applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "m", Code: 'm'}))
+	if !m.mapActive || m.mapReveal != 0 || cmd == nil {
+		t.Fatalf("toggling the map on should start the grow-in (active=%v reveal=%v cmd=%v)", m.mapActive, m.mapReveal, cmd != nil)
+	}
+	// At reveal 0 the branch lines haven't grown in yet (but the structure has).
+	if out := m.render(); strings.Contains(out, "api.LoginHandler") || !strings.Contains(out, "Neighborhood map") {
+		t.Errorf("at reveal 0 the map structure shows but the caller branch hasn't grown in yet:\n%s", out)
+	}
+	// Drive frames until the spring settles.
+	for i := 0; i < 600 && m.mapActive; i++ {
+		m, _ = applyMsg(m, animTickMsg{})
+	}
+	if m.mapActive || absf(1-m.mapReveal) > 0.01 {
+		t.Fatalf("map reveal never settled (active=%v reveal=%v)", m.mapActive, m.mapReveal)
+	}
+	// Fully revealed → the caller branch is now drawn.
+	if !strings.Contains(m.render(), "api.LoginHandler") {
+		t.Errorf("after settling, the map should show the caller branch")
 	}
 }
 

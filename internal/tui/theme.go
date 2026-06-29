@@ -1,6 +1,10 @@
 package tui
 
-import "charm.land/lipgloss/v2"
+import (
+	"fmt"
+
+	"charm.land/lipgloss/v2"
+)
 
 var (
 	colorInk    = lipgloss.Color("#E6E6E6")
@@ -30,4 +34,34 @@ var (
 	countStyle       = lipgloss.NewStyle().Foreground(colorMuted)
 	// daemonOnStyle marks the live "background daemon is watching" header indicator.
 	daemonOnStyle = lipgloss.NewStyle().Foreground(colorSym)
+
+	// heat1..heat3Style form the blast-radius depth heatmap (Impact tab): depth 1 is
+	// "hottest" (a direct caller, most likely affected) and fades to muted with depth.
+	heat1Style = lipgloss.NewStyle().Foreground(colorBad)  // depth 1 — direct
+	heat2Style = lipgloss.NewStyle().Foreground(colorWarn) // depth 2
+	heat3Style = lipgloss.NewStyle().Foreground(colorBar)  // depth 3
 )
+
+// depthHeat renders a blast-radius node's [depth] tag colored by how directly the
+// change reaches it — a one-glance heatmap from hot (near) to cool (far).
+func depthHeat(depth int) string {
+	var st lipgloss.Style
+	switch {
+	case depth <= 1:
+		st = heat1Style
+	case depth == 2:
+		st = heat2Style
+	case depth == 3:
+		st = heat3Style
+	default:
+		st = mutedStyle
+	}
+	return st.Render(fmt.Sprintf("[%d]", depth))
+}
+
+// heatLegend is a compact key for the depth heatmap shown beside the Blast radius
+// title: 1 (hot/direct) → 4+ (cool/distant).
+func heatLegend() string {
+	return mutedStyle.Render("heat ") + heat1Style.Render("1") + " " + heat2Style.Render("2") + " " +
+		heat3Style.Render("3") + " " + mutedStyle.Render("4+")
+}

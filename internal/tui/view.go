@@ -73,6 +73,7 @@ func renderHelp() string {
 	row("enter", "hubs → Impact · refs → re-center (walk)")
 	row("backspace", "step back along the walk")
 	row("s · p", "view source · precise relations (gopls)")
+	row("m", "toggle the neighborhood map (callers → node → calls)")
 	b.WriteString("\n" + sectionStyle.Render("Metrics") + "\n")
 	row("↑/↓ · k/j", "move the selection (also pgup/pgdn · home/end)")
 	row("enter", "drill the selected symbol into Impact")
@@ -171,18 +172,27 @@ func (m Model) tabBar() string {
 	return strings.Join(chips, " ")
 }
 
+// statusText is the right-aligned footer status: an error (if any) takes
+// precedence, otherwise the status message, prefixed with an animated spinner
+// while an async op is in flight (busy()).
+func (m Model) statusText() string {
+	if m.errMsg != "" {
+		return errorStyle.Render(m.errMsg)
+	}
+	if m.busy() {
+		return mutedStyle.Render(m.spinnerGlyph()+" ") + m.statusMsg
+	}
+	return m.statusMsg
+}
+
 func (m Model) footer() string {
 	var hint string
 	switch {
 	case m.showHelp:
-		return spread(mutedStyle.Render("? / esc close"), m.statusMsg, m.width)
+		return spread(mutedStyle.Render("? / esc close"), m.statusText(), m.width)
 	case m.srcView:
 		hint = "↑/↓ scroll · pgup/pgdn · g/G top/bottom · esc/q close · ctrl+c quit"
-		status := m.statusMsg
-		if m.errMsg != "" {
-			status = errorStyle.Render(m.errMsg)
-		}
-		return spread(mutedStyle.Render(hint), status, m.width)
+		return spread(mutedStyle.Render(hint), m.statusText(), m.width)
 	}
 	// Each tab has a rich hint and a compact fallback. The rich one shows on
 	// normal-width terminals; when it wouldn't fit, the compact one (terser
@@ -193,11 +203,11 @@ func (m Model) footer() string {
 	switch m.active {
 	case tabGraph:
 		if m.graphFocus == focusRefs {
-			hint = "↑/↓ ref · enter re-center · s source · ⌫ back · ← hubs · ctrl+c quit"
-			compact = "↑/↓ · enter re-center · s src · ⌫ back · ← hubs"
+			hint = "↑/↓ ref · enter re-center · m map · s source · ⌫ back · ← hubs · ctrl+c quit"
+			compact = "↑/↓ · enter re-center · m map · ⌫ back · ← hubs"
 		} else {
-			hint = "↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit"
-			compact = "↑/↓ · → walk · enter impact · s src · p precise"
+			hint = "↑/↓ hub · → walk · enter → impact · m map · s source · p precise · ctrl+c quit"
+			compact = "↑/↓ · → walk · enter impact · m map · s src"
 		}
 	case tabSearch:
 		hint = "type · enter search/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
@@ -214,11 +224,7 @@ func (m Model) footer() string {
 	if lipgloss.Width(hint) > m.width {
 		hint = compact
 	}
-	status := m.statusMsg
-	if m.errMsg != "" {
-		status = errorStyle.Render(m.errMsg)
-	}
-	return spread(mutedStyle.Render(hint), status, m.width)
+	return spread(mutedStyle.Render(hint), m.statusText(), m.width)
 }
 
 func (m Model) body(w, h int) string {
@@ -252,8 +258,12 @@ func (m Model) renderGraph(w, h int) string {
 	if rightW < 10 {
 		rightW = 10
 	}
+	detail := m.hubDetail(rightW, h)
+	if m.graphMap {
+		detail = m.hubMap(rightW, h)
+	}
 	left := lipgloss.NewStyle().Width(leftW).Height(h).Render(m.hubList(leftW, h))
-	right := lipgloss.NewStyle().Width(rightW).Height(h).Render(m.hubDetail(rightW, h))
+	right := lipgloss.NewStyle().Width(rightW).Height(h).Render(detail)
 	div := dividerStyle.Render(strings.TrimRight(strings.Repeat("│\n", h), "\n"))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", div, " ", right)
 }
@@ -352,6 +362,96 @@ func (m Model) hubDetail(w, h int) string {
 		b.WriteString(countStyle.Render("⟐ ") + truncate(line, w-2) + "\n")
 	}
 	return b.String()
+}
+
+// hubMap renders the centered node's call-graph neighborhood as a diagram: the
+// callers flow down into a boxed focal node, which flows down into its callees — a
+// compact "you are here" map of the local graph, toggled from the list detail with
+// `m`. Robust to any width (names truncate; the box spans the pane).
+func (m Model) hubMap(w, h int) string {
+	if m.graphSym == "" {
+		return mutedStyle.Render("select a hub")
+	}
+	hdr := title("Neighborhood map")
+	switch {
+	case m.graphPrecise:
+		hdr += "  " + countStyle.Render("precise · gopls")
+	case m.status != nil && m.status.PreciseEdges > 0:
+		hdr += "  " + countStyle.Render("precise · index")
+	}
+	if len(m.graphStack) > 0 {
+		hdr += "  " + mutedStyle.Render(fmt.Sprintf("· depth %d (⌫ back)", len(m.graphStack)))
+	}
+
+	budget := (h - 12) / 2
+	if budget < 1 {
+		budget = 1
+	}
+
+	var b strings.Builder
+	b.WriteString(hdr + "\n\n") // already styled; the frame's MaxWidth clamps any overflow
+
+	// Callers flow down into the node.
+	b.WriteString(mutedStyle.Render(truncate(fmt.Sprintf("  ┌ called by (%d)", len(m.graphCallers)), w)) + "\n")
+	writeMapRefs(&b, m.graphCallers, budget, w, m.mapReveal)
+	b.WriteString(titleStyle.Render("  ▼") + "\n")
+
+	// The boxed focal node. boxW stays ≤ w (renderGraph guarantees w ≥ 10) so the
+	// box can never exceed the pane; innerW ≥ 1 keeps the repeat counts valid.
+	boxW := w - 1
+	if boxW < 3 {
+		boxW = 3
+	}
+	innerW := boxW - 2
+	if innerW < 1 {
+		innerW = 1
+	}
+	name := truncate(" ◆ "+displayName(m.graphCenter.fqn, m.graphCenter.sym), innerW-1)
+	pad := innerW - lipgloss.Width(name)
+	if pad < 0 {
+		pad = 0
+	}
+	b.WriteString(titleStyle.Render("╭"+strings.Repeat("─", innerW)+"╮") + "\n")
+	b.WriteString(titleStyle.Render("│") + symStyle.Render(name) + strings.Repeat(" ", pad) + titleStyle.Render("│") + "\n")
+	b.WriteString(titleStyle.Render("╰"+strings.Repeat("─", innerW)+"╯") + "\n")
+
+	// The node flows down into its callees.
+	b.WriteString(titleStyle.Render("  ▲") + "\n")
+	b.WriteString(mutedStyle.Render(truncate(fmt.Sprintf("  └ calls (%d)", len(m.graphCallees)), w)) + "\n")
+	writeMapRefs(&b, m.graphCallees, budget, w, m.mapReveal)
+
+	b.WriteString("\n" + mutedStyle.Render(truncate("  m: list · ↑↓→ walk · enter: re-center", w)))
+	return b.String()
+}
+
+// writeMapRefs renders a relation branch of the neighborhood map — one "│ name"
+// spine line per ref, windowed to budget with a "+N more" tail. reveal∈[0,1] grows
+// the branch in (fewer lines while the spring climbs); the structure around it (the
+// box, the "called by"/"calls" headers) always renders, so reveal never hides it.
+func writeMapRefs(b *strings.Builder, refs []app.SymbolRef, budget, w int, reveal float64) {
+	if len(refs) == 0 {
+		b.WriteString(mutedStyle.Render(truncate("  │   (none)", w)) + "\n")
+		return
+	}
+	shown, more := refs, 0
+	if len(refs) > budget {
+		shown, more = refs[:budget], len(refs)-budget
+	}
+	visible := len(shown)
+	if reveal < 1 {
+		visible = int(float64(len(shown)) * clamp01(reveal))
+	}
+	nameW := w - 4
+	if nameW < 1 {
+		nameW = 1
+	}
+	for i := 0; i < visible; i++ {
+		r := shown[i]
+		b.WriteString(mutedStyle.Render("  │ ") + truncate(displayName(r.FQN, r.Symbol), nameW) + "\n")
+	}
+	if more > 0 && reveal >= 1 {
+		b.WriteString(mutedStyle.Render(truncate(fmt.Sprintf("  │   … +%d more", more), w)) + "\n")
+	}
 }
 
 // refBlock renders one relation list (callers or callees). base is the block's
@@ -476,9 +576,14 @@ func (m Model) metricsBars(w int) string {
 	barW := clamp(w-22, 8, 80)
 	var b strings.Builder
 	b.WriteString(sectionStyle.Render("By kind") + "\n")
-	b.WriteString(barChart(m.status.Kinds, barW))
+	b.WriteString(barChart(m.status.Kinds, barW, m.metricsReveal))
 	b.WriteString("\n" + sectionStyle.Render("By language") + "\n")
-	b.WriteString(barChart(m.status.Languages, barW))
+	b.WriteString(barChart(m.status.Languages, barW, m.metricsReveal))
+	// A compact sparkline of the kind distribution — the shape of the codebase at a
+	// glance, beneath the labelled bars.
+	if spark := sparkline(sortedValues(m.status.Kinds)); spark != "" {
+		b.WriteString("\n" + countStyle.Render("shape  ") + barStyle.Render(spark) + "\n")
+	}
 	return b.String()
 }
 
@@ -616,7 +721,7 @@ func (m Model) renderImpact(w, h int) string {
 			reserve++
 		}
 		b.WriteString("\n")
-		b.WriteString(sectionStyle.Render("Blast radius") + "\n")
+		b.WriteString(sectionStyle.Render("Blast radius") + "  " + heatLegend() + "\n")
 		br := rep.BlastRadius
 		budget := clamp(h-reserve, 1, 40)
 		start := windowStart(m.impactSel, budget, len(br))
@@ -640,7 +745,8 @@ func (m Model) renderImpact(w, h int) string {
 				if n.Kind == "test" {
 					marker = symStyle.Render("✓ ")
 				}
-				fmt.Fprintf(&b, " %s[%d] %s %s\n", marker, n.Depth, padRight(name, 32), mutedStyle.Render(loc))
+				// The [depth] tag is colored by the heatmap — hot (direct) → cool (far).
+				fmt.Fprintf(&b, " %s%s %s %s\n", marker, depthHeat(n.Depth), padRight(name, 32), mutedStyle.Render(loc))
 			}
 		}
 		if end < len(br) {
@@ -790,7 +896,14 @@ func spread(left, right string, width int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-func barChart(counts map[string]int, barW int) string {
+// partialBlocks indexes 1/8-width left block glyphs: index e ∈ 0..7 fills e/8 of a
+// cell. Index 0 is empty; index 8 (a full cell) is rendered as "█" by the caller.
+const partialBlocks = " ▏▎▍▌▋▊▉"
+
+// sparkBlocks are the 8 vertical levels for one-line sparklines (low → high).
+const sparkBlocks = "▁▂▃▄▅▆▇█"
+
+func barChart(counts map[string]int, barW int, reveal float64) string {
 	if len(counts) == 0 {
 		return mutedStyle.Render("  (none)") + "\n"
 	}
@@ -810,23 +923,81 @@ func barChart(counts map[string]int, barW int) string {
 	})
 	var b strings.Builder
 	for _, k := range keys {
-		fmt.Fprintf(&b, "  %s %s %d\n", padRight(k, 12), bar(counts[k], max, barW), counts[k])
+		fmt.Fprintf(&b, "  %s %s %d\n", padRight(k, 12), bar(counts[k], max, barW, reveal), counts[k])
 	}
 	return b.String()
 }
 
-func bar(n, max, width int) string {
+// bar renders a horizontal bar that is reveal∈[0,1] of its true length, using
+// 1/8-cell partial blocks so the spring grow-in (anim.go) looks smooth rather than
+// stepping one whole cell at a time. reveal=1 yields the bar's full length. The
+// returned string is always exactly width cells wide so the column stays aligned.
+func bar(n, max, width int, reveal float64) string {
 	if max <= 0 || width <= 0 {
 		return ""
 	}
-	filled := n * width / max
-	if filled < 1 && n > 0 {
-		filled = 1
+	frac := float64(n) / float64(max)
+	if frac > 1 {
+		frac = 1
 	}
-	if filled > width {
-		filled = width
+	eighths := int(frac*float64(width)*clamp01(reveal)*8 + 0.5)
+	if n > 0 && reveal > 0 && eighths == 0 {
+		eighths = 1 // a nonzero count always shows at least a sliver once revealed
 	}
-	return barStyle.Render(strings.Repeat("█", filled)) + strings.Repeat(" ", width-filled)
+	if eighths > width*8 {
+		eighths = width * 8
+	}
+	full := eighths / 8
+	part := eighths % 8
+	var fill strings.Builder
+	fill.WriteString(strings.Repeat("█", full))
+	cells := full
+	if part > 0 {
+		fill.WriteRune([]rune(partialBlocks)[part])
+		cells++
+	}
+	return barStyle.Render(fill.String()) + strings.Repeat(" ", width-cells)
+}
+
+// sortedValues returns a map's values sorted descending — the magnitudes a
+// sparkline plots, independent of label.
+func sortedValues(counts map[string]int) []int {
+	vals := make([]int, 0, len(counts))
+	for _, v := range counts {
+		vals = append(vals, v)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(vals)))
+	return vals
+}
+
+// sparkline renders values as a one-line bar graph using 1/8-height block glyphs,
+// each cell scaled to the max. Empty input yields "".
+func sparkline(vals []int) string {
+	if len(vals) == 0 {
+		return ""
+	}
+	max := 0
+	for _, v := range vals {
+		if v > max {
+			max = v
+		}
+	}
+	rs := []rune(sparkBlocks)
+	if max <= 0 {
+		return strings.Repeat(string(rs[0]), len(vals))
+	}
+	var b strings.Builder
+	for _, v := range vals {
+		idx := (v*(len(rs)-1)*2 + max) / (max * 2) // round to nearest level
+		if idx < 0 {
+			idx = 0
+		}
+		if idx > len(rs)-1 {
+			idx = len(rs) - 1
+		}
+		b.WriteRune(rs[idx])
+	}
+	return b.String()
 }
 
 func padRight(s string, w int) string {
