@@ -93,6 +93,14 @@ When a daemon is running, `codemap status` and the `codemap_status` MCP tool rep
 it (a `daemon` object in `--json`), `codemap doctor` lists it as a health check, and
 the [studio](/studio) header shows a live `● daemon` indicator.
 
+While a daemon is running, `codemap index` **delegates** the reindex to it over
+the control socket instead of opening a second write handle (which would
+collide with the daemon's exclusive database lock). The output is the normal
+`Indexed ...` summary, annotated with `via daemon (pid N)`, and forwards
+`--reindex` / `--precise` / `--no-lsp` / `--no-embed`. `--watch` is a no-op in
+this case (the daemon is already watching); `--exclude-extra` is not forwarded
+(stop + restart the daemon to change excludes).
+
 ## Example
 
 Given a small `store` package:

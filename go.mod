@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.4
-	github.com/abdul-hamid-achik/veclite v0.21.0
+	github.com/abdul-hamid-achik/veclite v0.22.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/fsnotify/fsnotify v1.10.1

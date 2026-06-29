@@ -64,6 +64,7 @@ type Daemon struct {
 	listener net.Listener
 
 	mu       sync.Mutex
+	indexMu  sync.Mutex // serializes index runs (watcher vs RPC reindex)
 	info     Info
 	idle     *time.Timer
 	stopOnce sync.Once
@@ -234,9 +235,12 @@ func (d *Daemon) onChange(toIndex, toRemove []string) {
 	if len(rels) == 0 {
 		return
 	}
+	d.indexMu.Lock()
 	if _, err := d.ix.IndexFiles(d.ctx, d.pid, d.name, d.root, rels, index.Options{}); err != nil {
+		d.indexMu.Unlock()
 		return
 	}
+	d.indexMu.Unlock()
 	d.mu.Lock()
 	d.info.LastReindexAt = nowRFC3339()
 	d.mu.Unlock()
@@ -282,14 +286,34 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		case "daemon.status":
 			_ = enc.Encode(d.snapshot())
 		case "daemon.reindex":
-			go func() {
-				_, _ = d.svc.Index(d.ctx, d.root, index.Options{}, !d.cfg.NoEmbed)
-				d.mu.Lock()
-				d.info.LastReindexAt = nowRFC3339()
-				d.mu.Unlock()
-				_ = d.writeState()
-			}()
-			_ = enc.Encode(map[string]string{"status": "reindexing"})
+			// Synchronous, parametrised reindex so a CLI `codemap index` that
+			// finds a running daemon can delegate and get the full IndexReport
+			// back (instead of opening a second write handle that would
+			// collide with the daemon's exclusive veclite lock). Embed defaults
+			// to the daemon's mode; an explicit embed field overrides it.
+			var r struct {
+				Reindex bool  `json:"reindex"`
+				Precise bool  `json:"precise"`
+				NoLSP   bool  `json:"no_lsp"`
+				Embed   *bool `json:"embed"`
+			}
+			_ = json.Unmarshal(sc.Bytes(), &r)
+			embed := !d.cfg.NoEmbed
+			if r.Embed != nil {
+				embed = *r.Embed
+			}
+			d.indexMu.Lock()
+			rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: r.Precise, NoLSP: r.NoLSP}, embed)
+			d.indexMu.Unlock()
+			if ierr != nil {
+				_ = enc.Encode(map[string]string{"error": ierr.Error()})
+				continue
+			}
+			d.mu.Lock()
+			d.info.LastReindexAt = nowRFC3339()
+			d.mu.Unlock()
+			_ = d.writeState()
+			_ = enc.Encode(rep)
 		case "daemon.shutdown":
 			_ = enc.Encode(map[string]string{"status": "shutting down"})
 			go d.Stop()

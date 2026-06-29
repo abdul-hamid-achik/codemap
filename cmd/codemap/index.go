@@ -35,6 +35,14 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 	}
+	// If a background daemon already owns the writable handle, delegate the
+	// reindex to it over the control socket. Opening a second write session
+	// here would collide with the daemon's exclusive veclite lock (the
+	// "database file is locked by PID ..." error). Delegating keeps the same
+	// output and forwards reindex/precise/no-lsp/no-embed flags.
+	if info := daemon.QueryStatus(); info != nil {
+		return indexViaDaemon(cmd, info)
+	}
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
@@ -90,59 +98,7 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	if rep.Warning != "" {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", rep.Warning)
-	}
-	fmt.Printf("Indexed %q (%s)\n", rep.Project, rep.Root)
-	fmt.Println(indexFilesSummary(rep))
-	fmt.Printf("  graph: %d nodes, %d edges (embeddings: %v)\n", rep.Nodes, rep.Edges, rep.Embedded)
-	if rep.TotalMs > 0 {
-		fmt.Printf("  time: %s", formatDuration(rep.TotalMs))
-		parts := make([]string, 0, 3)
-		if rep.ExtractMs > 0 {
-			parts = append(parts, "extract "+formatDuration(rep.ExtractMs))
-		}
-		if rep.PreciseMs > 0 {
-			parts = append(parts, "precise "+formatDuration(rep.PreciseMs))
-		}
-		if rep.EmbedMs > 0 {
-			parts = append(parts, "embed "+formatDuration(rep.EmbedMs))
-		}
-		if len(parts) > 0 {
-			fmt.Printf(" (%s)", strings.Join(parts, ", "))
-		}
-		fmt.Println()
-	}
-	if precise {
-		if rep.PreciseNote != "" {
-			fmt.Printf("  precise: %s\n", rep.PreciseNote)
-		} else {
-			// "skipped" are calls go/types DID resolve but whose target isn't an
-			// indexed node (stdlib/external functions) — not precision failures, so
-			// don't call them "unresolved" (that wrongly implies the pass fell short).
-			fmt.Printf("  precise: %d call edges resolved exactly (%d to external/stdlib code)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
-		}
-	} else {
-		// Surface --precise at the moment a user would most benefit: it refines Go's
-		// name-based edges, and it's the ONLY source of a call graph for the LSP
-		// languages (a TS/JS/Python project has no callers/impact without it).
-		noTips, _ := cmd.Flags().GetBool("no-tips")
-		if !noTips {
-			goAvailable := false
-			if _, lookErr := exec.LookPath("go"); lookErr == nil {
-				goAvailable = true
-			}
-			for _, tip := range preciseTips(rep.Languages, goAvailable) {
-				fmt.Println("  tip: " + tip)
-			}
-		}
-	}
-	for _, e := range rep.Errors {
-		fmt.Fprintf(os.Stderr, "  ! %s: %s\n", e.File, e.Err)
-	}
-	for _, f := range rep.Oversized {
-		fmt.Fprintf(os.Stderr, "  ~ %s: skipped — exceeds index.max_file_bytes (raise it to include this file)\n", f)
-	}
+	printIndexReport(cmd, rep, precise)
 	if watch, _ := cmd.Flags().GetBool("watch"); watch {
 		return startDaemonAfterIndex(cmd)
 	}
@@ -198,6 +154,92 @@ func indexViaVault(cmd *cobra.Command, project string) (done bool, err error) {
 	c := exec.CommandContext(cmd.Context(), tvault, args...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return true, c.Run()
+}
+
+// printIndexReport renders the human-facing summary of an IndexReport (the
+// "Indexed ..." block through errors/oversized). Shared by the local index
+// path and the daemon-delegated path so output is identical regardless of
+// which process did the work. JSON output is handled by the caller.
+func printIndexReport(cmd *cobra.Command, rep *app.IndexReport, precise bool) {
+	if rep.Warning != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", rep.Warning)
+	}
+	fmt.Printf("Indexed %q (%s)\n", rep.Project, rep.Root)
+	fmt.Println(indexFilesSummary(rep))
+	fmt.Printf("  graph: %d nodes, %d edges (embeddings: %v)\n", rep.Nodes, rep.Edges, rep.Embedded)
+	if rep.TotalMs > 0 {
+		fmt.Printf("  time: %s", formatDuration(rep.TotalMs))
+		parts := make([]string, 0, 3)
+		if rep.ExtractMs > 0 {
+			parts = append(parts, "extract "+formatDuration(rep.ExtractMs))
+		}
+		if rep.PreciseMs > 0 {
+			parts = append(parts, "precise "+formatDuration(rep.PreciseMs))
+		}
+		if rep.EmbedMs > 0 {
+			parts = append(parts, "embed "+formatDuration(rep.EmbedMs))
+		}
+		if len(parts) > 0 {
+			fmt.Printf(" (%s)", strings.Join(parts, ", "))
+		}
+		fmt.Println()
+	}
+	if precise {
+		if rep.PreciseNote != "" {
+			fmt.Printf("  precise: %s\n", rep.PreciseNote)
+		} else {
+			// "skipped" are calls go/types DID resolve but whose target isn't an
+			// indexed node (stdlib/external functions) — not precision failures, so
+			// don't call them "unresolved" (that wrongly implies the pass fell short).
+			fmt.Printf("  precise: %d call edges resolved exactly (%d to external/stdlib code)\n", rep.PreciseUpgraded, rep.PreciseSkipped)
+		}
+	} else {
+		// Surface --precise at the moment a user would most benefit: it refines Go's
+		// name-based edges, and it's the ONLY source of a call graph for the LSP
+		// languages (a TS/JS/Python project has no callers/impact without it).
+		noTips, _ := cmd.Flags().GetBool("no-tips")
+		if !noTips {
+			goAvailable := false
+			if _, lookErr := exec.LookPath("go"); lookErr == nil {
+				goAvailable = true
+			}
+			for _, tip := range preciseTips(rep.Languages, goAvailable) {
+				fmt.Println("  tip: " + tip)
+			}
+		}
+	}
+	for _, e := range rep.Errors {
+		fmt.Fprintf(os.Stderr, "  ! %s: %s\n", e.File, e.Err)
+	}
+	for _, f := range rep.Oversized {
+		fmt.Fprintf(os.Stderr, "  ~ %s: skipped — exceeds index.max_file_bytes (raise it to include this file)\n", f)
+	}
+}
+
+// indexViaDaemon delegates a reindex to an already-running daemon and renders
+// the result exactly like a local `codemap index`. Used when `codemap index` is
+// run while a daemon owns the writable handle, so the CLI never opens a second
+// write session (which would collide with the daemon's exclusive veclite lock).
+// Forwards --reindex/--precise/--no-lsp/--no-embed. --exclude-extra is NOT
+// forwarded (the daemon's excludes are fixed at start); stop + restart the
+// daemon to change them. --watch is a no-op (the daemon is already watching).
+func indexViaDaemon(cmd *cobra.Command, info *daemon.Info) error {
+	reindex, _ := cmd.Flags().GetBool("reindex")
+	precise, _ := cmd.Flags().GetBool("precise")
+	noLSP, _ := cmd.Flags().GetBool("no-lsp")
+	noEmbed, _ := cmd.Flags().GetBool("no-embed")
+	rep, err := daemon.Reindex(daemon.ReindexOpts{
+		Reindex: reindex, Precise: precise, NoLSP: noLSP, Embed: !noEmbed,
+	})
+	if err != nil {
+		return fmt.Errorf("delegate to daemon (pid %d): %w\n  stop it with 'codemap daemon stop', then re-run", info.PID, err)
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	printIndexReport(cmd, rep, precise)
+	fmt.Printf("  via daemon (pid %d)\n", info.PID)
+	return nil
 }
 
 // indexFilesSummary renders the "files:" line of `codemap index`. Recognized

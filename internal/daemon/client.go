@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"net"
 	"time"
 
@@ -49,4 +50,54 @@ type StatusWithDaemon struct {
 // so callers get one value to print or marshal.
 func AttachStatus(rep *app.StatusReport) StatusWithDaemon {
 	return StatusWithDaemon{StatusReport: rep, Daemon: QueryStatus()}
+}
+
+// ReindexOpts carries the index flags forwarded to a running daemon.
+type ReindexOpts struct {
+	Reindex bool // --reindex: wipe + rebuild
+	Precise bool // --precise: exact call edges
+	NoLSP   bool // --no-lsp: skip language-server extraction
+	Embed   bool // --no-embed inverts this: false = structure only
+}
+
+// reindexReadTimeout caps how long the CLI waits for a daemon reindex. A full
+// reindex with embeddings on a large tree can take many minutes, so this is
+// generous; if the daemon is truly stuck the caller still gets control back.
+const reindexReadTimeout = 30 * time.Minute
+
+// Reindex delegates a reindex to a running daemon over its control socket and
+// returns the daemon's IndexReport. It is used by `codemap index` when a daemon
+// is already running, so the CLI never opens a second write handle (which would
+// collide with the daemon's exclusive veclite lock). Returns an error if no
+// daemon is running, it doesn't respond in time, or the reindex itself failed.
+func Reindex(opts ReindexOpts) (*app.IndexReport, error) {
+	c, err := net.DialTimeout("unix", config.DaemonSocketPath(), time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("daemon not running: %w", err)
+	}
+	defer c.Close()
+	body := fmt.Sprintf(
+		`{"method":"daemon.reindex","reindex":%t,"precise":%t,"no_lsp":%t,"embed":%t}`+"\n",
+		opts.Reindex, opts.Precise, opts.NoLSP, opts.Embed,
+	)
+	if _, err := c.Write([]byte(body)); err != nil {
+		return nil, fmt.Errorf("send reindex: %w", err)
+	}
+	_ = c.SetReadDeadline(time.Now().Add(reindexReadTimeout))
+	sc := bufio.NewScanner(c)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	if !sc.Scan() {
+		return nil, fmt.Errorf("daemon closed connection without a response")
+	}
+	var rep app.IndexReport
+	if err := json.Unmarshal(sc.Bytes(), &rep); err != nil {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(sc.Bytes(), &errResp) == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("daemon: %s", errResp.Error)
+		}
+		return nil, fmt.Errorf("daemon: bad response (%w)", err)
+	}
+	return &rep, nil
 }
