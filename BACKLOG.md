@@ -24,6 +24,127 @@ radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
+## 🚧 Unreleased — agent-harness "review" keystone (diff-scoped intelligence)
+New flagship for the agent edit loop: **`codemap review`** (CLI) + **`codemap_review`** (MCP, now 30
+tools). Maps the working-tree git diff — or `--staged` / `--since <ref>` — to the symbols it touches
+(`internal/git.ChangedFiles` parses `git diff -U0` hunks → `Symbols` range-intersection), then unions each
+changed symbol's `impact` to return `{changed_symbols, blast_radius, covering_tests, untested, hotspots,
+stale, resolution}`. Answers *"what did I just affect, and what should I run?"* in one call instead of
+diff-parsing + chaining per-symbol `impact`. Reuses existing primitives end to end; degrades gracefully on
+a non-repo / unindexed project. New: `internal/git/diff.go` (+test), `internal/app/review.go` (+test),
+`cmd/codemap` `review`, MCP tool + agent instructions, docs (cli.md/mcp.md). Research-backed: diff-scoped
+queries + regression test selection are the top agent-facing gaps (Sourcegraph/Glean/GitNexus/TDAD survey).
+This is the keystone both **cairntrace** (`--since-codemap`) and **glyphrun** (`affected-specs`) build on —
+see their `FEATURES.md`.
+
+**studio TUI — harmonica animations + charts.** The Metrics bar charts now **animate in** with spring
+physics (`github.com/charmbracelet/harmonica`, promoted to a direct dep): a self-rescheduling 60fps frame
+loop grows the bars from zero with 1/8-cell partial-block glyphs and settles with slight overshoot, then
+**stops when settled** (idle studio costs nothing). Added a one-line `shape` **sparkline** of the kind
+distribution. New `internal/tui/anim.go` (spring + frame loop), `bar()` rewritten for sub-cell reveal,
+`sparkline()`/`sortedValues()` helpers, `anim_test.go`. Reveal defaults to 1.0 so non-interactive renders
+(and the bar tests) show full bars; only key-driven tab activation triggers the grow-in. `task race` clean.
+Docs: `studio.md`. No ntcharts (build-risk per CLAUDE.md) — hand-rolled, pure-Go.
+
+**read-order — "where do I start reading?" (entrypoint ranking).** New **`codemap read-order [query]`** (CLI)
++ **`codemap_read_order`** (MCP, now 31 tools): ranks functions/methods into a newcomer's reading guide by
+blending call-graph importance (in-degree hubs, via `g.Hotspots`) with entrypoint heuristics (`main()` always
+first, then `cmd/`/module-index files, exported public-API roots), each entry carrying a reason + score. The
+program `main()` is pinned to the top; optional `query` narrows by name/path; `resolution` set when there's no
+call graph (entrypoint-heuristics-only fallback). New `internal/app/readorder.go` (+`readorder_test.go`: rank
+order/query filter/top-cap/unindexed), CLI, MCP tool + agent instructions, docs (cli.md/mcp.md). Dogfooded on
+codemap (main → Session.Close → NewService → …). Research-backed (PageRank-importance + entry-point ID, the
+"key_entities" pattern).
+
+**glyphrun flows + a bug the flows caught.** Added `specs/review.yml` and `specs/read_order.yml` (stamped
+`contractHash`, both PASS via `glyph run`), exercising the new commands end to end through a real PTY; glyphrun
+`FEATURE.md` documents them. The `review` spec **caught a real bug**: on a symlinked checkout (`git rev-parse`
+returns a `/private` root while the index lives under `/var`) changed-file→symbol resolution silently found 0
+symbols. Fixed with `symbolsForChangedFile` (try the project-relative path first — matching the index's path
+form — then the git-root-absolute path). The `review` unit test no longer `EvalSymlinks`-dodges the case, so it
+now guards the fix. (Classic flow value: the unit tests passed because they sidestepped the symlink; the E2E
+flow on a real `/tmp` did not.)
+
+**Docs site — a "For agents" page.** Added `docs/agents.md` (VitePress nav + sidebar): the agent-workflow
+story in one place — the loop (read-order → context/context-batch → risk/file-impact → review-after-edit →
+survey) as a table, the honesty signals (`stale`/`resolution`/`note`/`untested`/`*_total`) that let an agent
+trust the answers, the precision model (`--precise`), and the annotation knowledge layer. The site builds
+clean (`vitepress build`). Mirrors the in-band `codemap docs workflow` guide for the website audience.
+
+**Agent guide refreshed (the discovery surface).** `internal/app/docs.go` (the `codemap docs` / `codemap_docs`
+agent guide) was stale — it taught none of the new commands, so an agent learning the tool wouldn't discover
+them. Updated the `workflow` loop (now: read-order → context/context-batch → risk/file-impact → review-AFTER-
+you-edit) and the `commands`/MCP-tools lists to cover `review`, `read-order`, `file-impact`, `risk`,
+`context-batch`. Added a `TestDocs` assertion that pins the guide against future staleness.
+
+**risk — change-risk score for a symbol.** New **`codemap risk <symbol>`** (CLI) + **`codemap_risk`** (MCP,
+now 34 tools): combines the signals codemap already computes — untested coverage (0.9), fan-in (0.3–0.5),
+cross-package spread (0.3), name ambiguity (0.2) — into a saturating probabilistic-OR `score` (0..1) + `level`
+(low/medium/high), each backed by the `factors` that produced it. "How careful should I be changing this?" /
+which of several edits is riskiest. Returns a note when the call graph is unresolved (no fan-in/coverage to
+score). New `internal/app/risk.go` (+`risk_test.go`: untested-hub HIGH, covered-leaf low, saturation,
+unindexed), CLI, MCP + agent instructions, docs (cli.md/mcp.md), glyphrun `specs/risk.yml` (stamped, PASS).
+Dogfooded (NewService MEDIUM, Open HIGH). Closes gap C from the research.
+
+**Hardening pass — multi-agent adversarial review of the whole feature diff.** Ran a 5-dimension workflow
+(correctness · edge-cases · TUI/race · API-consistency · test-gaps) over the new code, each finding
+adversarially verified (default-refute): **21 findings, 19 confirmed, 2 correctly rejected**. Fixed: (1) the
+`git diff -U0` parser mistook a hunk-body line beginning `+++` for a header → corrupted path → `review`
+silently dropped that file's symbols (now state-aware `inHunks`); (2) deleted files with C-quoted/non-ASCII
+paths were dropped (seed path from `--- a/…`, unquote-before-strip); (3) `context_batch` common-callers only
+saw each symbol's first 25 callers (now counts over the full `Callers()` set); (4) **HIGH** — `file-impact`
+reported `safe_to_delete:true` when the call graph was unresolved (TS/JS/Py without `--precise`) → a false
+green that could delete live code (verdicts now gated on `Resolution==""`); (5) `read-order` in-degree map
+raised from top-2000 to capture all call targets; (6) `since` diff gets a trailing `--`; (7) `review`/`file-
+impact` no longer print "no tests"/"safe" under an unresolved graph; (8) effective `depth` echoed in reports;
+(9) the map box could exceed a narrow pane (dropped the bad `clamp(w-1,14,w)` floor; header/branch lines
+truncated). Plus the review's test-gap suggestions uncovered a real bug: **`working` mode on an unborn branch
+missed staged files** — fixed by merging staged+unstaged diffs (`mergeChangedFiles`). Added ~13 regression
+tests (parser body/quoted/unborn, file-impact no-symbols, context-batch cap, review hotspot/unindexed,
+read-order no-match/leaf-drop, bar sliver, single-loop invariant). `task check` + `task race` green; all 3
+glyph specs still PASS. (2 rejected findings were genuine false positives — the adversarial verify earned its
+keep.)
+
+**batch-context — model a whole component in one round-trip.** `codemap context <s1> <s2> …` (CLI, now
+multi-arg) + **`codemap_context_batch`** (MCP, now 33 tools): fetches the flagship `context` bundle for N
+symbols at once and adds cross-symbol analysis — `combined_blast_radius` and `common_callers` (callers that
+reach ≥2 of the queried symbols → a shared entrypoint/coupling point). Deduped + capped at 25; misses land in
+`not_found`. New `internal/app/context_batch.go` (+`context_batch_test.go`: shared-caller / dedup / unindexed),
+CLI batch branch in context.go, MCP tool + agent instructions, docs. Dogfooded (NewService/Open/Status →
+shared test callers surfaced). Closes the round-trip-reduction gap from the research (gap D).
+
+**file-impact — file-level "what breaks if I touch this file?"** New **`codemap file-impact <file>`** (CLI) +
+**`codemap_file_impact`** (MCP, now 32 tools): aggregates every symbol a file defines into `dependent_files`
+(other files that call into it), `blast_radius`, `covering_tests`, and two verdicts — `safe_to_delete`
+(nothing external references it) and `breaking_change` (an externally-called symbol is untested). The
+file-level peer of `impact` (symbol) and `review` (diff), for move/delete/split refactors. New
+`internal/app/file_impact.go` (+`file_impact_test.go`: depended-on / safe-to-delete / breaking-change /
+unindexed), CLI, MCP + agent instructions, docs (cli.md/mcp.md), glyphrun `specs/file_impact.yml` (stamped,
+PASS). Dogfooded (graph/store.go → 41 dependent files, blast 341).
+
+**studio call-graph neighborhood MAP.** The Graph tab's detail pane gains a toggle (`m`) that redraws the
+centered node as a **map**: a boxed focal node with its callers flowing down into it and its callees flowing
+out — a "you are here" diagram of the local call graph, robust to any pane width (names truncate, box spans
+the pane). New `hubMap()`/`writeMapRefs()` in view.go, `graphMap` toggle + `m` key, help-overlay + footer
+hints, `TestGraphMapToggle`, docs/studio.md. `task race` clean. Directly answers the "add maps" ask.
+The map's branches now **animate in** with a harmonica spring when toggled (generalized the anim driver
+in anim.go to drive both the Metrics reveal and the map reveal off one frame loop; `mapReveal` defaults to
+1.0 so the render tests see the finished map; `TestMapRevealLifecycle`). The **Impact tab** gained a
+blast-radius **depth heatmap**: each node's `[depth]` tag is colored hot→cool (direct caller → distant
+dependent) via `depthHeat()`/`heatLegend()` + heat styles in theme.go, with a legend beside the title
+(`TestImpactDepthHeatmap`, docs/studio.md). Plus an **async loading spinner**: while an op is in flight
+(`busy()` = `loading` or a "…" status) the footer shows a braille spinner driven by the SAME frame loop
+(extended `advanceAnim` + a kick at the KeyPressMsg chokepoint), stopping when the work completes
+(`TestLoadingSpinner`; the two anim-lifecycle tests now clear `loading` to reach steady state). E2E: `specs/studio_visuals.yml` (stamped, PASS) drives studio
+over a real Go call graph and asserts all three graphics surfaces render — the map (`m` → "Neighborhood
+map"), the Metrics "shape" sparkline, and the Impact "heat" legend; glyphrun `FEATURE.md` documents it. Sibling `FEATURES.md` (cairntrace +
+glyphrun) refreshed: `review`/`read-order`/`file-impact` marked SHIPPED, the now-unblocked integrations
+sharpened, and the codemap-side glyph specs noted as the E2E contract.
+
+**Next:** studio.yml glyphrun assertion for the map + metrics sparkline · more harmonica polish (scroll
+easing, tab-underline slide, animate the map drawing in) · refresh cairntrace/glyphrun `FEATURES.md` now that
+`review` shipped. `task check` green.
+
 ## ✅ DONE — Homebrew formula→cask migration (completed at v0.14.0, the first cask release)
 `.goreleaser.yaml` publishes a **cask** (`Casks/codemap.rb`), not a formula (1c165ad). At the v0.14.0
 release the tap was migrated: added `tap_migrations.json` = `{"codemap":"codemap"}` (auto-migrates existing
