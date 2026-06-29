@@ -32,6 +32,9 @@ func runContext(cmd *cobra.Command, args []string) error {
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
+	if len(args) > 1 {
+		return runContextBatch(cmd, svc, cwd, args, depth)
+	}
 	rep, err := svc.Context(cwd, args[0], depth)
 	if err != nil {
 		return err
@@ -104,6 +107,55 @@ func runContext(cmd *cobra.Command, args []string) error {
 		for _, m := range rep.Memories {
 			fmt.Printf("     · %s\n", firstLine(m.Content))
 		}
+	}
+	return nil
+}
+
+// runContextBatch renders the one-call bundle for several symbols plus the callers
+// they share (likely shared entrypoints / coupling). --json carries the full batch.
+func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, depth int) error {
+	rep, err := svc.ContextBatch(cwd, symbols, depth)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	color := term.IsTerminal(os.Stdout.Fd())
+	label := func(s string) string {
+		if color {
+			return ctxLabel.Render(s)
+		}
+		return s
+	}
+	fmt.Printf("%s %d symbols (%s)\n", label("Context batch:"), len(rep.Results), rep.Project)
+	for _, r := range rep.Results {
+		if !r.Found {
+			fmt.Printf("  %s — not found\n", r.Symbol)
+			continue
+		}
+		loc := ""
+		if len(r.Definitions) > 0 {
+			loc = fmt.Sprintf("%s:%d", r.Definitions[0].File, r.Definitions[0].StartLine)
+		}
+		fmt.Printf("  %s  %s  callers %d · callees %d · tests %d · blast %d\n",
+			label(r.Symbol), loc, r.CallersTotal, r.CalleesTotal, r.TestsTotal, r.BlastRadius)
+	}
+	if len(rep.NotFound) > 0 {
+		fmt.Printf("  not found: %s\n", strings.Join(rep.NotFound, ", "))
+	}
+	fmt.Printf("  %s %d (sum; shared dependents double-count)\n", label("combined blast:"), rep.CombinedBlastRadius)
+	if len(rep.CommonCallers) > 0 {
+		names := make([]string, 0, len(rep.CommonCallers))
+		shown, more := capList(rep.CommonCallers, 8)
+		for _, c := range shown {
+			names = append(names, disp(c.FQN, c.Symbol))
+		}
+		line := strings.Join(names, ", ")
+		if more > 0 {
+			line += fmt.Sprintf(" … (+%d)", more)
+		}
+		fmt.Printf("  %s %s\n", label("shared callers:"), line)
 	}
 	return nil
 }

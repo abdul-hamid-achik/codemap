@@ -725,6 +725,13 @@ func TestDocs(t *testing.T) {
 			t.Errorf("full docs should contain %q", want)
 		}
 	}
+	// The guide must teach the agent-facing commands so an agent discovers them —
+	// keep this in sync as commands ship (a stale guide hides capabilities).
+	for _, want := range []string{"codemap_review", "codemap_read_order", "codemap_file_impact", "codemap_risk", "codemap_context_batch"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("agent guide should teach %q so agents discover it", want)
+		}
+	}
 	// a known topic returns just that section.
 	acc := Docs("accuracy")
 	if !strings.Contains(acc, "name-based") || strings.Contains(acc, "## overview") {

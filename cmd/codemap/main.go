@@ -85,6 +85,12 @@ func init() {
 	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	impactCmd.Flags().String("at", "", "resolve the symbol from a position instead of a name: <file>:<line>")
+	reviewCmd.Flags().Int("depth", 3, "max hops for each changed symbol's blast radius")
+	reviewCmd.Flags().String("since", "", "review everything changed since this git ref (committed + uncommitted)")
+	reviewCmd.Flags().Bool("staged", false, "review only staged changes (the git index) instead of the whole working tree")
+	readOrderCmd.Flags().Int("top", 20, "maximum entries to rank")
+	fileImpactCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
+	riskCmd.Flags().Int("depth", 3, "max hops for the fan-in/blast analysis")
 	secretImpactCmd.Flags().Int("depth", 3, "max hops for each key's blast radius")
 	secretImpactCmd.Flags().String("via-vault", "", "fetch the key NAMES from `tvault -p <project> list` (value-free) instead of passing them")
 	secretImpactCmd.Flags().String("prefix", "", "with --via-vault, only keys with this prefix (e.g. STRIPE_)")
@@ -112,7 +118,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, relatedFilesCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, daemonCmd)
 }
 

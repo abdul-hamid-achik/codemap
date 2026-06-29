@@ -102,7 +102,7 @@ func TestMCPServer(t *testing.T) {
 	for _, tool := range lt.Tools {
 		got[tool.Name] = true
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_context", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_file_impact", "codemap_risk", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}

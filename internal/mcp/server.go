@@ -36,10 +36,27 @@ Understand a symbol:
   (everything a change affects), and which tests cover it. One call replaces many file reads.
 - codemap_callers / codemap_callees — who calls a symbol / what it calls.
 - codemap_source — a symbol's source code; codemap_symbols — a file's outline.
+- codemap_context — the one-call bundle for a symbol (def+callers+callees+tests+blast+notes);
+  codemap_context_batch — the same for several symbols at once, plus the callers they share
+  (coupling), so you model a whole component in one round-trip.
 Results carry each symbol's signature and docstring, so you rarely need to open files.
 
-Survey a codebase: codemap_hotspots (hubs), codemap_orphans (dead-code candidates),
-codemap_status (index size), codemap_projects (what's indexed).
+After you edit: codemap_review — diff-scoped impact + test selection. It reads your git diff
+(working tree by default; staged:true, or since:<ref>), finds the changed symbols, and returns
+their union blast radius, the covering_tests to RUN, and which changes are untested or hit a
+hotspot. Run it after making changes to learn what you affected and what to test — one call
+instead of diffing by hand and chaining codemap_impact per symbol.
+
+Before touching a whole file (move/delete/split): codemap_file_impact — who depends on the file,
+its blast radius, covering tests, and the safe_to_delete / breaking_change verdicts.
+
+How careful to be: codemap_risk — a symbol's change-risk as one score + level (low/medium/high) from
+untested coverage, fan-in, cross-package spread, and name ambiguity. Triage which edit is riskiest.
+
+Survey a codebase: codemap_read_order (where to START — entrypoints + hubs ranked into a reading
+guide; run this on first contact with an unfamiliar repo, then drill the top entries with
+codemap_context), codemap_hotspots (hubs), codemap_orphans (dead-code candidates), codemap_status
+(index size), codemap_projects (what's indexed).
 
 Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matches every method
 named Foo — codemap_callers/codemap_impact note when a name is ambiguous and codemap_hotspots flags
@@ -116,9 +133,34 @@ type impactInput struct {
 	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
 }
 
+type reviewInput struct {
+	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Since  string `json:"since,omitempty" jsonschema:"review everything changed since this git ref (committed + uncommitted); omit to review the whole working tree"`
+	Staged bool   `json:"staged,omitempty" jsonschema:"review only staged changes (the git index) instead of the working tree"`
+	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for each changed symbol's blast radius (default 3)"`
+}
+
+type readOrderInput struct {
+	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Query string `json:"query,omitempty" jsonschema:"optional case-insensitive name/path filter to narrow the ranking (e.g. 'http')"`
+	Top   int    `json:"top,omitempty" jsonschema:"maximum entries to rank (default 20)"`
+}
+
 type relatedFilesInput struct {
 	File string `json:"file" jsonschema:"project-relative file path to find related files for"`
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
+type fileImpactInput struct {
+	File  string `json:"file" jsonschema:"project-relative file path to analyze"`
+	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth int    `json:"depth,omitempty" jsonschema:"max hops for the file's blast radius (default 3)"`
+}
+
+type riskInput struct {
+	Symbol string `json:"symbol" jsonschema:"the symbol to score"`
+	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the fan-in/blast analysis (default 3)"`
 }
 
 type symbolAtInput struct {
@@ -158,6 +200,12 @@ type findInput struct {
 type sourceInput struct {
 	Symbol string `json:"symbol" jsonschema:"the symbol whose source code to return"`
 	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
+type contextBatchInput struct {
+	Symbols []string `json:"symbols" jsonschema:"the symbols to fetch context for in one call (deduped; up to 25)"`
+	Path    string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth   int      `json:"depth,omitempty" jsonschema:"max hops for each symbol's blast-radius count (default 3)"`
 }
 
 type contextInput struct {
@@ -248,9 +296,25 @@ func (s *Server) register() {
 		Description: "Impact analysis for a symbol: definition sites, direct callers, the transitive blast radius (everything affected by a change), and which tests cover those paths. The flagship query — one call replaces many file reads.",
 	}, s.handleImpact)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_review",
+		Description: "Diff-scoped impact + regression test selection — the query to run AFTER editing. Maps your git diff (whole working tree by default; staged=true for the index; since=<ref> for everything since a branch point) to the symbols it touches, then returns their union blast_radius, the covering_tests to run (regression test selection), the changed symbols that are untested or are hotspots (many callers), plus stale/resolution honesty signals. Answers 'what did I just affect, and what should I run?' in one call instead of chaining diff parsing + per-symbol codemap_impact. Degrades to a plain changed-file list with a note when the project isn't indexed or isn't a git repo.",
+	}, s.handleReview)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_read_order",
+		Description: "Where to START reading an unfamiliar codebase — a ranked reading guide. Blends call-graph importance (in-degree hubs) with entrypoint heuristics (main(), cmd/ packages, module index files, exported public API) so the symbols that orient you fastest come first, each with a reason and score. Optional 'query' narrows it (name/path substring). Use this on first contact with a repo instead of guessing where to look; pair with codemap_context to then drill the top entries. Resolution is set when there's no call graph (ranking falls back to entrypoint heuristics).",
+	}, s.handleReadOrder)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_related_files",
 		Description: "Files structurally related to a file via the call/test graph: the files of its callers, its callees, and the tests covering its symbols, each with a reason (caller|callee|test) and a confidence. Graph-accurate alternative to import-text heuristics; returns {indexed:false} when the project isn't indexed.",
 	}, s.handleRelatedFiles)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_file_impact",
+		Description: "File-level impact — 'what happens if I change or DELETE this file?' Aggregates every symbol the file defines into: dependent_files (other files that call into it), the blast_radius, the covering_tests, safe_to_delete (true when nothing outside the file references it), and breaking_change (true when an externally-called symbol here is untested). The file-level peer of codemap_impact (a symbol) and codemap_review (a diff) — use it before a file move/delete/split.",
+	}, s.handleFileImpact)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_risk",
+		Description: "Change-risk score for a symbol — 'how careful should I be changing this?' in one number (0..1) + level (low/medium/high). Combines the signals codemap already computes — untested coverage, fan-in (direct callers), how many packages call it (cross-package spread), and name ambiguity — into a saturating score, with the factors that produced it. Use it to decide how much test/review care a change warrants, or to triage which of several edits is riskiest. Returns a note when the call graph is unresolved (TS/JS/Python without --precise).",
+	}, s.handleRisk)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_symbol_at",
 		Description: "Resolve a file:line position to its enclosing symbol (FQN, kind, line range). The entry point for joining external file:line results (search hits, stack traces, diffs) onto the code graph. resolution is exact|enclosing|none.",
@@ -287,6 +351,10 @@ func (s *Server) register() {
 		Name:        "codemap_context",
 		Description: "Everything about a symbol in ONE call: its definition(s) with source, who calls it, what it calls, the tests covering it, the blast-radius size, and any pinned annotations. Prefer this when orienting on an unfamiliar symbol — it replaces separate codemap_source + codemap_callers + codemap_callees + codemap_impact round-trips. The callers/callees/tests lists are capped to keep the bundle small; callers_total/callees_total/tests_total give the true counts — call codemap_callers/codemap_callees/codemap_impact for a complete list when a total exceeds what's shown.",
 	}, s.handleContext)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_context_batch",
+		Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's full context plus cross-symbol analysis: combined_blast_radius and common_callers (callers that reach two or more of the queried symbols — a likely shared entrypoint or coupling point). Deduped and capped at 25; missing symbols land in not_found.",
+	}, s.handleContextBatch)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_projects",
 		Description: "List every project registered with codemap and its index size (nodes, edges, files) — discover what's indexed. Queries target one project at a time (via path/cwd).",
@@ -458,8 +526,43 @@ func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in i
 	return result(rep, err)
 }
 
+func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in reviewInput) (*sdkmcp.CallToolResult, any, error) {
+	mode := "working"
+	if in.Staged {
+		mode = "staged"
+	} else if in.Since != "" {
+		mode = "since"
+	}
+	rep, err := s.svc.Review(cwdOf(in.Path), app.ReviewOpts{Mode: mode, Since: in.Since, Depth: in.Depth})
+	return result(rep, err)
+}
+
+func (s *Server) handleReadOrder(_ context.Context, _ *sdkmcp.CallToolRequest, in readOrderInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.ReadOrder(cwdOf(in.Path), app.ReadOrderOpts{Top: in.Top, Query: in.Query})
+	return result(rep, err)
+}
+
 func (s *Server) handleRelatedFiles(_ context.Context, _ *sdkmcp.CallToolRequest, in relatedFilesInput) (*sdkmcp.CallToolResult, any, error) {
 	rep, err := s.svc.RelatedFiles(cwdOf(in.Path), in.File)
+	return result(rep, err)
+}
+
+func (s *Server) handleFileImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in fileImpactInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.FileImpact(cwdOf(in.Path), in.File, in.Depth)
+	return result(rep, err)
+}
+
+func (s *Server) handleRisk(_ context.Context, _ *sdkmcp.CallToolRequest, in riskInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Risk(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
 }
 
@@ -526,6 +629,14 @@ func (s *Server) handleContext(_ context.Context, _ *sdkmcp.CallToolRequest, in 
 		return r, v, nil
 	}
 	rep, err := s.svc.Context(cwdOf(in.Path), in.Symbol, in.Depth)
+	return result(rep, err)
+}
+
+func (s *Server) handleContextBatch(_ context.Context, _ *sdkmcp.CallToolRequest, in contextBatchInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.ContextBatch(cwdOf(in.Path), in.Symbols, in.Depth)
 	return result(rep, err)
 }
 

@@ -35,11 +35,35 @@ var (
 		Args:  cobra.MaximumNArgs(1), // 0 args when --at <file>:<line> resolves the symbol
 		RunE:  runImpact,
 	}
+	reviewCmd = &cobra.Command{
+		Use:   "review",
+		Short: "Diff-scoped impact + test selection: what your changes affect, and which tests to run",
+		Args:  cobra.NoArgs,
+		RunE:  runReview,
+	}
+	readOrderCmd = &cobra.Command{
+		Use:   "read-order [query]",
+		Short: "Where to start reading: rank entrypoints + load-bearing hubs (optionally filtered by a name/path query)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runReadOrder,
+	}
 	relatedFilesCmd = &cobra.Command{
 		Use:   "related-files <file>",
 		Short: "Files related to a file via the call/test graph (callers, callees, covering tests)",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runRelatedFiles,
+	}
+	fileImpactCmd = &cobra.Command{
+		Use:   "file-impact <file>",
+		Short: "File-level impact: who depends on this file, its blast radius, and whether it's safe to change/delete",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runFileImpact,
+	}
+	riskCmd = &cobra.Command{
+		Use:   "risk <symbol>",
+		Short: "Change-risk score: untested + fan-in + cross-package spread + ambiguity, combined into one number",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRisk,
 	}
 	symbolAtCmd = &cobra.Command{
 		Use:   "symbol-at <file>:<line>",
@@ -101,9 +125,9 @@ var (
 		RunE:  runSource,
 	}
 	contextCmd = &cobra.Command{
-		Use:   "context <symbol>",
-		Short: "Everything about a symbol in one call: definition, callers, callees, tests, notes",
-		Args:  cobra.ExactArgs(1),
+		Use:   "context <symbol> [<symbol>...]",
+		Short: "Everything about a symbol in one call: definition, callers, callees, tests, notes (pass several for a batch + shared callers)",
+		Args:  cobra.MinimumNArgs(1),
 		RunE:  runContext,
 	}
 	projectsCmd = &cobra.Command{
@@ -305,6 +329,206 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runReview renders diff-scoped intelligence: the symbols the working diff (or a
+// --since range, or --staged index) touches, their union blast radius, the tests
+// that cover them, and the changed symbols that are untested or load-bearing. The
+// human view is a scannable summary; --json carries the full bundle for an agent.
+func runReview(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	depth, _ := cmd.Flags().GetInt("depth")
+	since, _ := cmd.Flags().GetString("since")
+	staged, _ := cmd.Flags().GetBool("staged")
+	mode := "working"
+	if staged {
+		mode = "staged"
+	} else if since != "" {
+		mode = "since"
+	}
+	rep, err := app.NewService(sess).Review(cwd, app.ReviewOpts{Mode: mode, Since: since, Depth: depth})
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if !rep.IsRepo {
+		fmt.Println(rep.Note)
+		return nil
+	}
+	scope := rep.Mode
+	if rep.Mode == "since" {
+		scope = "since " + rep.Since
+	}
+	fmt.Printf("Review (%s · %s)\n", rep.Project, scope)
+	if !rep.Indexed {
+		for _, f := range rep.ChangedFiles {
+			fmt.Printf("  %s %s\n", f.Status, f.Path)
+		}
+		if rep.Note != "" {
+			fmt.Println("  ⚠ " + rep.Note)
+		}
+		return nil
+	}
+	if rep.Stale && rep.Staleness != nil {
+		fmt.Printf("  ⚠ index is stale: %d changed, %d new, %d deleted — reindex for accurate impact\n",
+			rep.Staleness.Changed, rep.Staleness.New, rep.Staleness.Deleted)
+	}
+	fmt.Printf("  changed files:   %d\n", len(rep.ChangedFiles))
+	fmt.Printf("  changed symbols: %d\n", len(rep.ChangedSymbols))
+	fmt.Printf("  blast radius:    %d (depth ≤ %d)\n", len(rep.BlastRadius), rep.Depth)
+	fmt.Printf("  covering tests:  %d\n", len(rep.CoveringTests))
+	if rep.Resolution != "" {
+		fmt.Println("  ⚠ " + rep.Resolution)
+	}
+	if rep.Note != "" {
+		fmt.Println("  • " + rep.Note)
+	}
+	if len(rep.ChangedSymbols) > 0 {
+		fmt.Println("  changed symbols:")
+		syms, more := capList(rep.ChangedSymbols, 15)
+		for _, s := range syms {
+			fmt.Printf("     %-36s %s:%d\n", disp(s.FQN, s.Symbol), s.File, s.StartLine)
+		}
+		if more > 0 {
+			fmt.Printf("     … (%d more — use --json)\n", more)
+		}
+	}
+	if len(rep.Untested) > 0 {
+		fmt.Printf("  ⚠ untested changes (%d): %s\n", len(rep.Untested), joinRefNames(rep.Untested, 8))
+	}
+	if len(rep.Hotspots) > 0 {
+		fmt.Printf("  ⚑ hotspots changed (%d): %s\n", len(rep.Hotspots), joinRefNames(rep.Hotspots, 8))
+	}
+	if len(rep.CoveringTests) > 0 {
+		fmt.Println("  tests to run:")
+		tests, more := capList(rep.CoveringTests, impactTestsCap)
+		for _, t := range tests {
+			h := ""
+			if t.Heuristic {
+				h = " (heuristic)"
+			}
+			fmt.Printf("     %-36s %s:%d%s\n", disp(t.FQN, t.Symbol), t.File, t.StartLine, h)
+		}
+		if more > 0 {
+			fmt.Printf("     … (%d more — use --json)\n", more)
+		}
+	} else if len(rep.ChangedSymbols) > 0 && rep.Resolution == "" {
+		// Only assert "no tests" when the call graph was resolved; otherwise the
+		// absence is unverified (the Resolution line above already explains it).
+		fmt.Println("  ⚠ no tests cover these changes")
+	}
+	return nil
+}
+
+// runRisk renders a symbol's change-risk: one score + level, the caller/test
+// counts behind it, and the factors that drove it. --json carries the full report.
+func runRisk(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	depth, _ := cmd.Flags().GetInt("depth")
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.Risk(cwd, args[0], depth)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if !rep.Found {
+		printNoSymbol(rep.Symbol, rep.Project)
+		return nil
+	}
+	icon := map[string]string{"low": "✓", "medium": "•", "high": "⚠"}[rep.Level]
+	fmt.Printf("Risk of %s (%s): %s %s (%.2f)\n", rep.Symbol, rep.Project, icon, strings.ToUpper(rep.Level), rep.Score)
+	fmt.Printf("  %d direct callers · %d covering tests\n", rep.Callers, rep.Tests)
+	if rep.Note != "" {
+		fmt.Println("  ⚠ " + rep.Note)
+	}
+	if len(rep.Factors) == 0 {
+		fmt.Println("  no risk factors — a low-impact, covered change")
+		return nil
+	}
+	fmt.Println("  factors:")
+	for _, f := range rep.Factors {
+		fmt.Printf("     %-14s %s\n", f.Factor, f.Detail)
+	}
+	return nil
+}
+
+// runReadOrder renders the suggested reading order for orienting on a codebase:
+// entrypoints and load-bearing hubs first, each with the reason it ranked. --json
+// carries the full ranked list for an agent harness.
+func runReadOrder(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	top, _ := cmd.Flags().GetInt("top")
+	query := ""
+	if len(args) > 0 {
+		query = args[0]
+	}
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.ReadOrder(cwd, app.ReadOrderOpts{Top: top, Query: query})
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	header := fmt.Sprintf("Read order (%s) — start here", rep.Project)
+	if rep.Query != "" {
+		header += fmt.Sprintf(" · matching %q", rep.Query)
+	}
+	fmt.Println(header)
+	if rep.Resolution != "" {
+		fmt.Println("  ⚠ " + rep.Resolution)
+	}
+	if len(rep.Entries) == 0 {
+		fmt.Println("  (nothing to rank — " + strings.TrimSpace(rep.Note) + ")")
+		return nil
+	}
+	for _, e := range rep.Entries {
+		mark := " "
+		if e.Entrypoint {
+			mark = "▶"
+		}
+		fmt.Printf("  %2d %s %s\n        %s — %s:%d\n", e.Rank, mark, disp(e.FQN, e.Symbol), e.Reason, e.File, e.StartLine)
+	}
+	return nil
+}
+
+// joinRefNames renders up to n symbol names as "a, b, c … (+k)".
+func joinRefNames(refs []app.SymbolRef, n int) string {
+	shown, more := capList(refs, n)
+	names := make([]string, 0, len(shown))
+	for _, s := range shown {
+		names = append(names, disp(s.FQN, s.Symbol))
+	}
+	line := strings.Join(names, ", ")
+	if more > 0 {
+		line += fmt.Sprintf(" … (+%d)", more)
+	}
+	return line
+}
+
 // parseFileLine splits a "path/to/file.go:42" position. The file part may itself
 // contain no colon issues since we split on the LAST colon (Windows-style drive
 // letters aren't a concern for project-relative paths).
@@ -318,6 +542,66 @@ func parseFileLine(s string) (string, int, error) {
 		return "", 0, fmt.Errorf("invalid line number in %q", s)
 	}
 	return s[:i], line, nil
+}
+
+// runFileImpact renders file-level impact: dependent files, blast radius, covering
+// tests, and the safe-to-delete / breaking-change verdicts for a whole file.
+func runFileImpact(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	cwd, _ := os.Getwd()
+	depth, _ := cmd.Flags().GetInt("depth")
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.FileImpact(cwd, args[0], depth)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	fmt.Printf("File impact: %s (%s)\n", rep.File, rep.Project)
+	if !rep.Found {
+		fmt.Println("  " + strings.TrimSpace(rep.Note))
+		return nil
+	}
+	if rep.Stale {
+		fmt.Println("  ⚠ index is stale — reindex (ctrl+r / codemap index) for accurate impact")
+	}
+	fmt.Printf("  symbols defined:  %d\n", rep.Symbols)
+	fmt.Printf("  dependent files:  %d\n", len(rep.DependentFiles))
+	fmt.Printf("  blast radius:     %d (depth ≤ %d)\n", rep.BlastRadius, rep.Depth)
+	fmt.Printf("  covering tests:   %d\n", len(rep.CoveringTests))
+	switch {
+	case rep.Resolution != "":
+		// No call graph → the delete/breaking verdicts are unavailable, not "safe".
+		fmt.Println("  ⚠ verdict unavailable: " + rep.Resolution)
+	case rep.SafeToDelete:
+		fmt.Println("  ✓ safe to delete: nothing outside this file references it")
+	case rep.BreakingChange:
+		fmt.Println("  ⚠ breaking change: externally-called symbols here are untested")
+	default:
+		fmt.Println("  • other files depend on this file — change carefully")
+	}
+	if len(rep.DependentFiles) > 0 {
+		fmt.Println("  depended on by:")
+		files, more := capList(rep.DependentFiles, 12)
+		for _, f := range files {
+			fmt.Printf("     %s\n", f)
+		}
+		if more > 0 {
+			fmt.Printf("     … (%d more — use --json)\n", more)
+		}
+	}
+	if len(rep.UntestedSymbols) > 0 {
+		fmt.Printf("  ⚠ externally-called but untested: %s\n", joinRefNames(rep.UntestedSymbols, 8))
+	}
+	return nil
 }
 
 func runRelatedFiles(cmd *cobra.Command, args []string) error {
