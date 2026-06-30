@@ -215,8 +215,15 @@ func (d *Daemon) Stop() {
 		if d.watcher != nil {
 			_ = d.watcher.Close()
 		}
+		// Hold indexMu so any in-flight onChange / RPC reindex goroutine
+		// (which writes the state file) finishes before we remove it. Without
+		// this, a watcher that fires after d.cancel() returns can race past
+		// our os.Remove and leave the state file on disk, breaking the
+		// "state file should be removed after stop" assertion under -race.
+		d.indexMu.Lock()
 		_ = os.Remove(config.DaemonSocketPath())
 		_ = os.Remove(config.DaemonStatePath())
+		d.indexMu.Unlock()
 		if d.sess != nil {
 			_ = d.sess.Close()
 		}
@@ -236,11 +243,10 @@ func (d *Daemon) onChange(toIndex, toRemove []string) {
 		return
 	}
 	d.indexMu.Lock()
+	defer d.indexMu.Unlock()
 	if _, err := d.ix.IndexFiles(d.ctx, d.pid, d.name, d.root, rels, index.Options{}); err != nil {
-		d.indexMu.Unlock()
 		return
 	}
-	d.indexMu.Unlock()
 	d.mu.Lock()
 	d.info.LastReindexAt = nowRFC3339()
 	d.mu.Unlock()
@@ -303,11 +309,11 @@ func (d *Daemon) handleConn(conn net.Conn) {
 				embed = *r.Embed
 			}
 			d.indexMu.Lock()
+			defer d.indexMu.Unlock()
 			rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: r.Precise, NoLSP: r.NoLSP}, embed)
-			d.indexMu.Unlock()
 			if ierr != nil {
 				_ = enc.Encode(map[string]string{"error": ierr.Error()})
-				continue
+				return
 			}
 			d.mu.Lock()
 			d.info.LastReindexAt = nowRFC3339()
