@@ -19,7 +19,7 @@ export default defineConfig({
   sitemap: { hostname: 'https://codemap.tools' },
   themeConfig: {
     siteTitle: 'codemap',
-    logo: '/logo.svg',
+    logo: { src: '/logo.svg', dark: '/logo-dark.svg' },
     search: { provider: 'local' },
     nav: [
       { text: 'Quick Start', link: '/quick-start' },
