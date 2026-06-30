@@ -80,6 +80,32 @@ embedder or creates an empty vector store in that case.
 | `codemap studio` | Open the interactive [TUI](/studio) |
 | `codemap version` | Print version information |
 
+## Branches & caching
+
+The index is a snapshot of one working tree. Two features keep it aligned with your
+git branch and make reindexing cheap when you return to a tree you've indexed before —
+both best-effort over the sibling [fcheap](https://github.com/abdul-hamid-achik/fcheap)
+stash vault, and both degrade to a normal index when `fcheap` isn't on `$PATH`. See
+[Branches & caching](/branches) for the concepts.
+
+| Command | Description |
+|---|---|
+| `codemap branch-status [path]` | Read-only git state (repo hash, branch, HEAD sha) used to key per-branch index snapshots |
+| `codemap branch-switch [--to <branch>] [--from <branch>] [--root <dir>]` | Switch the code index to a git branch: snapshot the old branch into fcheap, restore/reindex the new one. `--to` defaults to the current git branch; a non-git dir or detached HEAD is a no-op |
+| `codemap branch-switch --install-hook` | Install a git `post-checkout` hook that auto-switches the index on every `git checkout` (idempotent, preserves an existing hook; pins the running binary so it works off-PATH) |
+| `codemap branch-snapshot [--branch <branch>] [--root <dir>]` | Stash the current branch's index into fcheap without switching (defaults to the current git branch) |
+| `codemap cache save` | Stash the current index into the fcheap cache, keyed by a tree hash of all indexed `(path, content_hash)` pairs — two identical working trees share one entry |
+| `codemap cache restore` | Restore the cached index matching the current working tree (skips extraction + embedding entirely); a miss is a no-op |
+| `codemap cache list [--rebuild]` | List cached indexes for this repo (stash IDs, tree hashes, node/vector counts, age). `--rebuild` reconstructs from fcheap if the local pointer file is lost |
+| `codemap cache drop --tree <hash> \| --all` | Drop one cached index by tree hash, or every cached index for this repo |
+
+`codemap index` wraps cache for you behind `--cache` (on by default): it **auto-restores**
+from a matching cache entry before a `--reindex` (skipping the full wipe+extract+embed
+cycle), and **auto-saves** the freshly-built index to fcheap after a successful index.
+With `--precise`, a restore only lands when the cache entry already has precise edges —
+otherwise it falls through to a real reindex so the go/types pass actually runs. Pass
+`--cache=false` to disable both for a run.
+
 ## Background daemon
 
 The daemon watches the working tree and keeps the index fresh automatically —
