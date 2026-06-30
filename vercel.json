@@ -4,5 +4,8 @@
   "installCommand": "bun install",
   "buildCommand": "bun run site:build",
   "outputDirectory": "docs/.vitepress/dist",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/(.*)?", "destination": "/$1.html" }
+  ]
 }

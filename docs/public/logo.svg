@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120" width="480" height="120">
+  <defs>
+    <linearGradient id="cm-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+  <title>codemap</title>
+  <!-- node-graph glyph: 3 dots + 3 edges forming a triangle -->
+  <g transform="translate(20,30)">
+    <line x1="30" y1="5"  x2="5"  y2="55" stroke="url(#cm-grad)" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="30" y1="5"  x2="55" y2="55" stroke="url(#cm-grad)" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="5"  y1="55" x2="55" y2="55" stroke="url(#cm-grad)" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="30" cy="5"  r="7" fill="url(#cm-grad)"/>
+    <circle cx="5"  cy="55" r="7" fill="url(#cm-grad)"/>
+    <circle cx="55" cy="55" r="7" fill="#FFFFFF" stroke="url(#cm-grad)" stroke-width="2.5"/>
+  </g>
+  <!-- wordmark -->
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-weight="700" font-size="56" letter-spacing="-2">
+    <text x="125" y="76" fill="#1E1B4B">codemap</text>
+  </g>
+</svg>

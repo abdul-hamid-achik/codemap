@@ -8,8 +8,18 @@ export default defineConfig({
   lastUpdated: true,
   srcDir: '.',
   base: process.env.VITEPRESS_BASE ?? '/',
+
+  head: [
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+    ['link', { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }],
+    ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' }],
+    ['meta', { name: 'description', content: 'codemap documentation site.' }],
+  ],
+
+  sitemap: { hostname: 'https://codemap.tools' },
   themeConfig: {
     siteTitle: 'codemap',
+    logo: '/logo.svg',
     search: { provider: 'local' },
     nav: [
       { text: 'Quick Start', link: '/quick-start' },
