@@ -143,7 +143,7 @@ func hasDeclarations(src []byte) bool {
 // maps its document symbols to codemap symbols. src is the file content. The
 // 2-arg signature matches extract.Extractor; the abs file:// URI is derived here.
 func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, error) {
-	uri := lsp.URI(filepath.Join(e.root, relPath))
+	uri, _ := lsp.URI(filepath.Join(e.root, relPath))
 	if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 // must already be open in the server (ExtractFile did didOpen); callHierarchy
 // resolves cross-file because the whole project's files were opened first.
 func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
-	uri := lsp.URI(filepath.Join(e.root, relPath))
+	uri, _ := lsp.URI(filepath.Join(e.root, relPath))
 	syms, err := e.client.DocumentSymbols(ctx, uri)
 	if err != nil {
 		return nil, err

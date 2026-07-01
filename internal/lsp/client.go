@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -157,20 +156,18 @@ func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
 	return cl, nil
 }
 
-// URI converts a filesystem path to a file:// URI.
-func URI(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		abs = path
-	}
-	return "file://" + abs
+// URI converts a filesystem path to a percent-encoded file:// URI
+// (P1-02: was bare string concatenation; spaces / non-ASCII characters
+// now round-trip through the language server).
+func URI(path string) (string, error) {
+	return PathToURI(path)
 }
 
 // Initialize performs the initialize/initialized handshake rooted at rootPath.
 func (c *Client) Initialize(ctx context.Context, rootPath string) error {
 	params := map[string]any{
 		"processId": nil,
-		"rootUri":   URI(rootPath),
+		"rootUri":   func() string { u, _ := URI(rootPath); return u }(),
 		"capabilities": map[string]any{
 			"window": map[string]any{"workDoneProgress": true},
 			"textDocument": map[string]any{

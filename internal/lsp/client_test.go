@@ -12,8 +12,20 @@ import (
 )
 
 func TestURI(t *testing.T) {
-	if got := URI("/abs/path"); got != "file:///abs/path" {
+	got, err := URI("/abs/path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "file:///abs/path" {
 		t.Errorf("URI = %q, want file:///abs/path", got)
+	}
+	// Round-trip via PathFromURI.
+	back, err := PathFromURI(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back != "/abs/path" {
+		t.Errorf("PathFromURI(%q) = %q, want /abs/path", got, back)
 	}
 }
 
@@ -133,10 +145,12 @@ func TestGoplsIntegration(t *testing.T) {
 	if err := cl.Initialize(ctx, dir); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
-	if err := cl.DidOpen(URI(file), "go", src); err != nil {
+	uri, _ := URI(file)
+	if err := cl.DidOpen(uri, "go", src); err != nil {
 		t.Fatal(err)
 	}
-	syms, err := cl.DocumentSymbols(ctx, URI(file))
+	uri2, _ := URI(file)
+	syms, err := cl.DocumentSymbols(ctx, uri2)
 	if err != nil {
 		t.Fatalf("documentSymbol: %v", err)
 	}
@@ -175,7 +189,7 @@ func TestGoplsCallHierarchy(t *testing.T) {
 	if err := cl.Initialize(ctx, dir); err != nil {
 		t.Fatal(err)
 	}
-	uri := URI(file)
+	uri, _ := URI(file)
 	if err := cl.DidOpen(uri, "go", src); err != nil {
 		t.Fatal(err)
 	}
