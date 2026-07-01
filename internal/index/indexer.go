@@ -827,17 +827,31 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	if ix.cfg.MaxFileBytes > 0 && len(content) > ix.cfg.MaxFileBytes {
 		res.FilesSkipped++
 		res.Oversized = append(res.Oversized, ft.rel)
-		// Track the hash of this scanned-but-skipped file so staleness doesn't
-		// report it as perpetually "new"; a content change re-picks it up.
+		// P1-01 (B16): clear the file's old nodes + vectors BEFORE
+		// recording the hash, so a previously-indexed file that grew past
+		// the byte cap (or that we already had indexed as a normal file)
+		// doesn't leave ghost symbols in find/callers/orphans. Pre-fix
+		// the SetFileHash ran first and the deletes after, so the
+		// ghost survived indefinitely.
+		_ = ix.graph.DeleteNodesInFile(projectID, ft.rel)
+		if ix.vectors != nil {
+			_, _ = ix.vectors.DeleteByFile(projectName, ft.rel)
+		}
+		// Track the hash so staleness doesn't report it as perpetually "new";
+		// a content change re-picks it up.
 		return false, nil, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
 	}
 	if isGenerated(content) {
-		// Generated code (protoc/sqlc/stringer/…) isn't hand-written source — skip
-		// it so it doesn't pollute find/symbols/orphans. Detected by the canonical
-		// header regardless of filename (the *_gen.go/*.pb.go globs catch the rest).
-		// Record the hash like oversized, so staleness doesn't flag it as "new".
+		// P1-01 (B16): same ghost-node hygiene as the oversized branch
+		// — a file that GAINS a generated header (e.g. was edited to
+		// regenerate) must lose its previously-indexed symbols.
+		_ = ix.graph.DeleteNodesInFile(projectID, ft.rel)
+		if ix.vectors != nil {
+			_, _ = ix.vectors.DeleteByFile(projectName, ft.rel)
+		}
 		res.FilesSkipped++
 		res.Generated = append(res.Generated, ft.rel)
+		// Record the hash like oversized, so staleness doesn't flag it as "new".
 		return false, nil, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
 	}
 
