@@ -23,8 +23,8 @@ type SecretKeyImpact struct {
 	Key           string        `json:"key"`
 	UsedBy        []SecretUsage `json:"used_by"`              // symbols that read the key
 	Unresolved    []SecretUsage `json:"unresolved,omitempty"` // usage sites with no enclosing symbol
-	BlastRadius   int           `json:"blast_radius"`         // transitively-affected symbols (union over UsedBy)
-	CoveringTests int           `json:"covering_tests"`       // tests reaching any reader
+	BlastRadius   int           `json:"blast_radius_count"`   // transitively-affected symbols (union over UsedBy)
+	CoveringTests int           `json:"covering_tests_count"` // tests reaching any reader
 	Untested      bool          `json:"untested"`             // read by code no test reaches
 }
 

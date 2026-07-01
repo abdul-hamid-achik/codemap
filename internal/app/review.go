@@ -43,22 +43,22 @@ type ReviewFile struct {
 // It is the keystone an agent harness queries after editing — "what did I just
 // affect, and what should I run?" — in one call.
 type ReviewReport struct {
-	Project        string           `json:"project"`
-	Mode           string           `json:"mode"`
-	Since          string           `json:"since,omitempty"`
-	Depth          int              `json:"depth"` // effective blast-radius depth (after the <=0 → 3 default)
-	IsRepo         bool             `json:"is_repo"`
-	Indexed        bool             `json:"indexed"`
-	ChangedFiles   []ReviewFile     `json:"changed_files"`
-	ChangedSymbols []SymbolRef      `json:"changed_symbols"`
-	BlastRadius    []ImpactNode     `json:"blast_radius"`
-	CoveringTests  []ImpactNode     `json:"covering_tests"`
-	Untested       []SymbolRef      `json:"untested"`           // changed symbols with no covering test
-	Hotspots       []SymbolRef      `json:"hotspots,omitempty"` // changed symbols with many direct callers
-	Stale          bool             `json:"stale"`
-	Staleness      *index.Staleness `json:"staleness,omitempty"`
-	Resolution     string           `json:"resolution,omitempty"` // set when some changed symbols' call graph is unresolved (TS/JS/Py without --precise)
-	Note           string           `json:"note,omitempty"`
+	Project         string           `json:"project"`
+	Mode            string           `json:"mode"`
+	Since           string           `json:"since,omitempty"`
+	Depth           int              `json:"depth"` // effective blast-radius depth (after the <=0 → 3 default)
+	IsRepo          bool             `json:"is_repo"`
+	Indexed         bool             `json:"indexed"`
+	ChangedFiles    []ReviewFile     `json:"changed_files"`
+	ChangedSymbols  []SymbolRef      `json:"changed_symbols"`
+	BlastRadius     []ImpactNode     `json:"blast_radius"`
+	CoveringTests   []ImpactNode     `json:"covering_tests"`
+	UntestedSymbols []SymbolRef      `json:"untested_symbols"`   // changed symbols with no covering test (P1-19: bare "untested" name was the list here vs a bool elsewhere; renamed for consistency)
+	Hotspots        []SymbolRef      `json:"hotspots,omitempty"` // changed symbols with many direct callers
+	Stale           bool             `json:"stale"`
+	Staleness       *index.Staleness `json:"staleness,omitempty"`
+	Resolution      string           `json:"resolution,omitempty"` // set when some changed symbols' call graph is unresolved (TS/JS/Py without --precise)
+	Note            string           `json:"note,omitempty"`
 }
 
 // Review computes diff-scoped impact + test selection for the working tree. It
@@ -81,7 +81,7 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	rep := &ReviewReport{
 		Project: name, Mode: mode, Since: opts.Since, Depth: opts.Depth,
 		ChangedFiles: []ReviewFile{}, ChangedSymbols: []SymbolRef{},
-		BlastRadius: []ImpactNode{}, CoveringTests: []ImpactNode{}, Untested: []SymbolRef{},
+		BlastRadius: []ImpactNode{}, CoveringTests: []ImpactNode{}, UntestedSymbols: []SymbolRef{},
 	}
 	_, _, indexed, perr := svc.project(cwd)
 	if perr != nil {
@@ -189,7 +189,7 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 			}
 		}
 		if imp.Untested && imp.Resolution == "" {
-			rep.Untested = append(rep.Untested, s)
+			rep.UntestedSymbols = append(rep.UntestedSymbols, s)
 		}
 		if len(imp.DirectCallers) >= reviewHotspotMinCallers {
 			rep.Hotspots = append(rep.Hotspots, s)

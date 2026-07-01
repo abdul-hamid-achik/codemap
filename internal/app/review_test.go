@@ -97,7 +97,7 @@ func TestReviewWorking(t *testing.T) {
 	if len(rep.CoveringTests) == 0 {
 		t.Errorf("expected covering tests for a change to Run, got none")
 	}
-	if hasSymbol(rep.Untested, "Run") {
+	if hasSymbol(rep.UntestedSymbols, "Run") {
 		t.Errorf("Run is covered by TestRun; it must not be reported untested")
 	}
 	// Blast radius should reach Run's caller Other and/or the test.
