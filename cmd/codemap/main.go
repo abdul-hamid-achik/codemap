@@ -81,8 +81,16 @@ func init() {
 	indexCmd.Flags().Bool("cache", true, "save/restore the index to/from the fcheap stash vault (best-effort; auto-restore before --reindex, auto-save after index)")
 	indexCmd.Flags().Bool("no-tips", false, "suppress post-index advisory tips (useful in scripts/CI)")
 	initCmd.Flags().Bool("local", false, "drop a .codemap marker (so a repo-local codemap.yaml is found; index stays central)")
-	callersCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callers (Go)")
-	calleesCmd.Flags().Bool("lsp", false, "use the language server (gopls) for precise callees (Go)")
+	// P1-09: --precise is the primary flag; --lsp is kept as a hidden alias
+	// so existing agent scripts don't break. The capability drives
+	// gopls (Go), typescript-language-server (TS/JS/Vue), or pyright
+	// (Python) per the project's present languages.
+	callersCmd.Flags().Bool("precise", false, "use the language server for precise callers (gopls / typescript-language-server / pyright, per the project's languages)")
+	callersCmd.Flags().Bool("lsp", false, "(alias for --precise; kept for back-compat)")
+	_ = callersCmd.Flags().MarkHidden("lsp")
+	calleesCmd.Flags().Bool("precise", false, "use the language server for precise callees (gopls / typescript-language-server / pyright, per the project's languages)")
+	calleesCmd.Flags().Bool("lsp", false, "(alias for --precise; kept for back-compat)")
+	_ = calleesCmd.Flags().MarkHidden("lsp")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	impactCmd.Flags().String("at", "", "resolve the symbol from a position instead of a name: <file>:<line>")
 	reviewCmd.Flags().Int("depth", 3, "max hops for each changed symbol's blast radius")
@@ -218,19 +226,27 @@ func preciseTips(languages map[string]int, goAvailable bool) []string {
 func preciseEdgeNote(preciseEdges int, languages map[string]int) string {
 	hasGo := languages["go"] > 0
 	hasTS := languages["typescript"] > 0
+	hasJS := languages["javascript"] > 0
+	hasPy := languages["python"] > 0
+	hasLSP := hasTS || hasJS || hasPy || languages["vue"] > 0
+	// P1-09 (B61): pre-fix, only "go" and "typescript" were considered, so a
+	// Python- or JS-only project with --precise was reported as
+	// "go/types" — a confident lie. Now any LSP-backed language flips
+	// hasLSP and we attribute precise edges to callHierarchy.
 	if preciseEdges > 0 {
 		switch {
-		case hasGo && hasTS:
+		case hasGo && hasLSP:
 			return fmt.Sprintf(" (%d precise: go/types + callHierarchy)", preciseEdges)
-		case hasTS:
+		case hasLSP:
 			return fmt.Sprintf(" (%d precise via callHierarchy)", preciseEdges)
 		default:
 			return fmt.Sprintf(" (%d precise via go/types)", preciseEdges)
 		}
 	}
-	if hasTS && !hasGo {
-		// TypeScript has no name-based call edges — --precise is the only source.
-		return " (no call graph yet; run 'codemap index --precise' to resolve TypeScript calls)"
+	if hasLSP && !hasGo {
+		// TS/JS/Python/Vue have no name-based call edges — --precise is
+		// the only source.
+		return " (no call graph yet; run 'codemap index --precise' to resolve LSP-backed calls)"
 	}
 	return " (name-based; run 'codemap index --precise' for exact call edges)"
 }

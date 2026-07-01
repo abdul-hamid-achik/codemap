@@ -186,3 +186,66 @@ func TestIndexEnvelopeShape(t *testing.T) {
 		t.Errorf("Daemon fields not carried through envelope: %+v", e.Daemon)
 	}
 }
+
+// TestPreciseEdgeNoteLSPHonest pins P1-09 (B61/O65/O88): pre-fix
+// `status` printed "(N precise via go/types)" for a Python- or
+// JavaScript-only project indexed with --precise (go/types never
+// ran — those edges come from the language server's callHierarchy).
+// Post-fix the message attributes precise edges to the actually
+// present languages.
+func TestPreciseEdgeNoteLSPHonest(t *testing.T) {
+	cases := []struct {
+		name      string
+		edges     int
+		langs     map[string]int
+		wantMatch string // substring the note must contain
+		wantNot   string // substring the note must NOT contain
+	}{
+		{
+			name:      "Go only",
+			edges:     12,
+			langs:     map[string]int{"go": 100},
+			wantMatch: "go/types",
+			wantNot:   "callHierarchy",
+		},
+		{
+			name:      "TypeScript only",
+			edges:     8,
+			langs:     map[string]int{"typescript": 50},
+			wantMatch: "callHierarchy",
+			wantNot:   "via go/types",
+		},
+		{
+			name:      "Python only",
+			edges:     3,
+			langs:     map[string]int{"python": 20},
+			wantMatch: "callHierarchy",
+			wantNot:   "via go/types",
+		},
+		{
+			name:      "Mixed Go + TS",
+			edges:     20,
+			langs:     map[string]int{"go": 50, "typescript": 30},
+			wantMatch: "go/types",
+			wantNot:   "via callHierarchy", // mixed case shows the combo, not the single-server label
+		},
+		{
+			name:      "No precise edges, Go project",
+			edges:     0,
+			langs:     map[string]int{"go": 100},
+			wantMatch: "name-based",
+			wantNot:   "go/types",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			note := preciseEdgeNote(tc.edges, tc.langs)
+			if !strings.Contains(note, tc.wantMatch) {
+				t.Errorf("preciseEdgeNote(%d, %v) = %q, want to contain %q", tc.edges, tc.langs, note, tc.wantMatch)
+			}
+			if tc.wantNot != "" && strings.Contains(note, tc.wantNot) {
+				t.Errorf("preciseEdgeNote(%d, %v) = %q, must NOT contain %q (P1-09 honesty: never attribute TS/Python edges to go/types)", tc.edges, tc.langs, note, tc.wantNot)
+			}
+		})
+	}
+}
