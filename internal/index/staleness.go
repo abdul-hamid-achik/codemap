@@ -58,23 +58,30 @@ func (ix *Indexer) Staleness(projectID int64, root string, indexedLangs map[stri
 			return nil
 		}
 		name := d.Name()
+		// P1-07: pass the project-relative path (not the bare base name)
+		// to ix.excluded so slash-anchored patterns (e.g. "db/migrations")
+		// match what the indexer's walk skipped. Pre-fix a base name
+		// never matched a slash-anchored pattern, so files under
+		// excluded dirs were counted as "new" forever — perpetual
+		// false drift that erodes the freshness signal.
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
 		if d.IsDir() {
-			if path != root && (ix.excluded(name) || strings.HasPrefix(name, ".")) {
+			if path != root && (ix.excluded(rel) || strings.HasPrefix(name, ".")) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if ix.excluded(name) {
+		if ix.excluded(rel) {
 			return nil
 		}
 		lang := extract.LanguageForPath(path)
 		if lang == "" || !indexedLangs[lang] {
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return nil
-		}
+
 		if !inIndex[rel] {
 			st.New++
 		}
