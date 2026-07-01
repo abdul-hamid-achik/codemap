@@ -89,6 +89,16 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	}
 	rep.Indexed = indexed
 
+	// Defensive validation of agent-supplied `--since` ref BEFORE any exec call —
+	// option-injection guard (P0-03). A leading-dash ref is parsed as a git
+	// option even past `--`; refuse here so we never write an arbitrary file via
+	// --output or similar. Return a graceful Note instead of a hard error so the
+	// harness always gets an actionable answer.
+	if mode == "since" && !git.ValidRef(opts.Since) {
+		rep.Note = fmt.Sprintf("invalid --since ref %q: must be non-empty and must not start with '-'; pass a commit, branch, or tag name", opts.Since)
+		return rep, nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), reviewGitTimeout)
 	defer cancel()
 

@@ -220,3 +220,46 @@ func TestReviewNotARepo(t *testing.T) {
 		t.Errorf("a non-git dir should report IsRepo=false, got %+v", rep)
 	}
 }
+
+// TestReviewSinceRejectsOptionShapedRef pins P0-03 at the service boundary: a
+// `since` value starting with "-" must be refused at validation time with a
+// graceful note, never reaching git's argv parser. The actual blocking at the
+// git/diff.go layer is covered by TestChangedFilesSinceRejectsOptionShapedRef;
+// this test guards the higher-level graceful degradation contract — the
+// service returns a populated report with a Note, NOT an error, so the agent
+// always gets an actionable answer.
+func TestReviewSinceRejectsOptionShapedRef(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "a.go"), []byte("package a\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "init")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	rep, err := NewService(sess).Review(proj, ReviewOpts{Mode: "since", Since: "--output=/tmp/PWNED_for_P0_03"})
+	if err != nil {
+		t.Fatalf("bad --since must not error, got %v", err)
+	}
+	if rep == nil {
+		t.Fatal("Review returned nil report")
+	}
+	if !strings.Contains(rep.Note, "invalid --since ref") {
+		t.Errorf("expected graceful Note explaining invalid ref, got %q", rep.Note)
+	}
+	if _, statErr := os.Stat("/tmp/PWNED_for_P0_03"); statErr == nil {
+		t.Fatal("exploit must not write a file from a bad --since")
+	}
+}

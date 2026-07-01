@@ -123,6 +123,56 @@ func TestChangedFilesSince(t *testing.T) {
 	}
 }
 
+// TestChangedFilesSinceRejectsOptionShapedRef pins P0-03: a `since` value that
+// starts with "-" must never be passed through to git's argv parser. Pre-fix
+// this let an agent that controls `codemap_review --since` invoke `git
+// diff --output=/tmp/PWNED` and write an arbitrary file. The test asserts both
+// that ChangedFiles returns an error AND that no arbitrary file was created.
+func TestChangedFilesSinceRejectsOptionShapedRef(t *testing.T) {
+	dir := initRepo(t)
+	write(t, dir, "a.go", "package a\n")
+	gitCmd(t, dir, "add", "a.go")
+	gitCmd(t, dir, "commit", "-m", "c1")
+
+	output := filepath.Join(t.TempDir(), "PWNED.txt")
+	bogus := "--output=" + output
+	_, err := ChangedFiles(context.Background(), dir, "since", bogus)
+	if err == nil {
+		t.Fatalf("ChangedFiles must reject leading-dash since ref, got nil error")
+	}
+	if _, statErr := os.Stat(output); statErr == nil {
+		t.Fatalf("exploit succeeded: %s was written", output)
+	}
+}
+
+// TestValidRef pins the cheap ValidRef guard the diff/branch/resolver layers
+// rely on. Empty + leading-dash are the only rejection conditions; everything
+// else (commits, branches, tags, refs with slashes, caret/tilde prefixes) is
+// accepted and validated server-side by git via ResolveRef.
+func TestValidRef(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"-", false},
+		{"--", false}, // a bare "--" is a separator/option marker, not a real ref
+		{"--output=/x", false},
+		{"--end-of-options", false}, // itself looks like an option
+		{"HEAD", true},
+		{"HEAD~3", true},
+		{"origin/main", true},
+		{"v1.2.3", true},
+		{"abc1234", true},
+		{"main", true},
+	}
+	for _, tc := range cases {
+		if got := ValidRef(tc.in); got != tc.want {
+			t.Errorf("ValidRef(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestParseUnifiedDiffHunkBodyLooksLikeHeader(t *testing.T) {
 	// With -U0, an added line whose content begins with "++ " is emitted as a body
 	// line "+++ <content>" — it must NOT be mistaken for a new-file header (which

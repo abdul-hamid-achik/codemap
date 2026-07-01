@@ -31,6 +31,15 @@ func vecgrepSearch(ctx context.Context, cfg config.VecgrepConfig, cwd, query str
 	if !cfg.Enabled {
 		return nil
 	}
+	// Option-injection guard (P0-03): a query that starts with "-" is parsed as
+	// a flag by argv-parsing tools even past a `--` separator. The query is
+	// agent-influenced (sibling MCP `codemap_semantic` hands it through), so
+	// refuse it rather than risk invoking vecgrep with attacker-controlled
+	// flags. Vector stores are not security-critical so failing closed here is
+	// the right tradeoff (caller degrades to local semantic search).
+	if query == "" || query[0] == '-' {
+		return nil
+	}
 	bin := cfg.Bin
 	if bin == "" {
 		bin = "vecgrep"
@@ -57,6 +66,11 @@ func vecgrepSearch(ctx context.Context, cfg config.VecgrepConfig, cwd, query str
 // Returns nil — never an error — when vecgrep is disabled/absent or nothing matches.
 func vecgrepMemoryRecall(ctx context.Context, cfg config.VecgrepConfig, cwd, query string, tags []string, topK int) []MemoryNote {
 	if !cfg.Enabled {
+		return nil
+	}
+	// Option-injection guard (P0-03): reject empty or leading-dash queries before
+	// they reach vecgrep. Tag values are already constrained by the caller.
+	if query == "" || query[0] == '-' {
 		return nil
 	}
 	bin := cfg.Bin
