@@ -700,3 +700,83 @@ func TestStats(t *testing.T) {
 		t.Errorf("kinds = %v", st.Kinds)
 	}
 }
+
+// TestSearchSymbolsEscapesLikeMetachars pins P1-05 (B13): pre-fix
+// SearchSymbols fed the raw query into LIKE without ESCAPE, so a
+// query containing `_` or `%` matched wrongly. `find do_work`
+// returned `doXwork` too because the underscore matched any char.
+func TestSearchSymbolsEscapesLikeMetachars(t *testing.T) {
+	s := openStore(t)
+	pid, err := s.UpsertProject("p", t.TempDir(), "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed two symbols: one matches `do_work` literally, one matches
+	// `do_work` with the underscore treated as a wildcard.
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "do_work", FQN: "p.do_work", Kind: KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "b.go", Symbol: "doXwork", FQN: "p.doXwork", Kind: KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SearchSymbols(pid, "do_work", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("LIKE escape regression: SearchSymbols(%q) returned %d results, want 1 (doXwork matched the underscore as a wildcard)", "do_work", len(got))
+	}
+	if got[0].Symbol != "do_work" {
+		t.Errorf("got %q, want do_work", got[0].Symbol)
+	}
+}
+
+// TestSearchSymbolsExactMatchWins ranks results by match quality
+// (P1-05 / B77): an exact-name match must surface first even when
+// many substring matches come before it alphabetically.
+func TestSearchSymbolsExactMatchWins(t *testing.T) {
+	s := openStore(t)
+	pid, _ := s.UpsertProject("p", t.TempDir(), "go")
+	// 50 substring-only matches (aStore, bStore, …) + 1 exact match
+	// at the end alphabetically.
+	for i := 0; i < 50; i++ {
+		letter := string(rune('a' + i%26))
+		_, _ = s.AddNode(&Node{ProjectID: pid, FilePath: "x.go", Symbol: letter + "Store", FQN: "p." + letter + "Store", Kind: KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "h"})
+	}
+	_, _ = s.AddNode(&Node{ProjectID: pid, FilePath: "x.go", Symbol: "Store", FQN: "p.Store", Kind: KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "h"})
+	_, _ = s.AddNode(&Node{ProjectID: pid, FilePath: "x.go", Symbol: "StoreHelper", FQN: "p.StoreHelper", Kind: KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "h"})
+
+	got, err := s.SearchSymbols(pid, "Store", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0].Symbol != "Store" {
+		t.Errorf("SearchSymbols(\"Store\") should rank the exact match first; got top=%q (results=%d)", first(got), len(got))
+	}
+	if len(got) < 2 || got[1].Symbol != "StoreHelper" {
+		t.Errorf("SearchSymbols(\"Store\") should rank prefix matches before substring; got second=%q", nth(got, 1))
+	}
+}
+
+func first(nodes []Node) string {
+	if len(nodes) == 0 {
+		return ""
+	}
+	return nodes[0].Symbol
+}
+func nth(nodes []Node, i int) string {
+	if i >= len(nodes) {
+		return ""
+	}
+	return nodes[i].Symbol
+}
+
+func openStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := Open(filepath.Join(t.TempDir(), "g.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}

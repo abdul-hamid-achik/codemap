@@ -359,17 +359,33 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 	return out, nil
 }
 
-// SearchSymbols returns nodes whose symbol or FQN contains query (case-
-// insensitive substring) — a fast, offline name search. File nodes excluded.
+// SearchSymbols returns nodes whose symbol or FQN contains query, ranked
+// by match quality (exact > prefix > substring) so an exact-name match
+// survives the LIMIT even when many same-prefix symbols exist. P1-05:
+// pre-fix the query was an unescaped `LIKE "%query%"` (B13) with
+// alphabetical ordering (B77), so `do_work` also matched `doXwork`
+// (LIKE wildcards interpreted as `%`/`_`) and `find Store` truncated
+// the exact match off the end of 50 alphabetically-sorted results.
+// File nodes excluded. The query is bound twice — once for the
+// match tier derivation, once for the LIKE patterns — so the escape
+// is consistent on both sides.
 func (s *Store) SearchSymbols(projectID int64, query string, limit int) ([]Node, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	like := "%" + query + "%"
 	q := "SELECT " + nodeColsAs("n") + " FROM nodes n " +
-		"WHERE n.project_id = ? AND n.kind != ? AND (n.symbol LIKE ? OR n.fqn LIKE ?) " +
-		"ORDER BY n.symbol, n.file_path LIMIT ?"
-	return s.queryNodes(q, projectID, KindFile, like, like, limit)
+		"WHERE n.project_id = ? AND n.kind != ? AND (n.symbol LIKE ? ESCAPE '\\' OR n.fqn LIKE ? ESCAPE '\\') " +
+		"ORDER BY " +
+		"CASE " +
+		"  WHEN lower(n.symbol) = lower(?) THEN 0 " +
+		"  WHEN n.symbol LIKE ? ESCAPE '\\' THEN 1 " +
+		"  ELSE 2 " +
+		"END, length(n.symbol), n.symbol, n.file_path " +
+		"LIMIT ?"
+	escaped := likeEscape(query)
+	prefix := escaped + "%"
+	like := "%" + escaped + "%"
+	return s.queryNodes(q, projectID, KindFile, like, like, query, prefix, limit)
 }
 
 // SymbolDefCounts returns, per symbol name, how many definition nodes share it
