@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -436,5 +438,79 @@ func TestMCPPreciseCallers(t *testing.T) {
 	}
 	if txt := textOf(res); !strings.Contains(txt, "Run") {
 		t.Errorf("precise callers of Helper should include Run: %s", txt)
+	}
+}
+
+// TestRegisteredToolsAppearInDocsCommands pins P1-18 (O77/O79): the
+// in-band codemap_docs agent guide is the single source of truth for
+// agents, so a tool that ships without being listed there is invisible
+// to every agent audience. This test walks every registered MCP
+// tool name and asserts each appears in the commands topic of
+// internal/app/docs.go — so a future tool that forgets to add itself
+// fails at lint/test time instead of silently disappearing from the
+// agent guide.
+func TestRegisteredToolsAppearInDocsCommands(t *testing.T) {
+	// Build a registry of all tool names the MCP server registers.
+	registry := map[string]bool{}
+	// Named function so the recursive walk() call below resolves.
+	var walk func(dir string)
+	walk = func(dir string) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			name := e.Name()
+			path := dir + "/" + name
+			if e.IsDir() {
+				walk(path)
+				continue
+			}
+			if !strings.HasSuffix(name, ".go") {
+				continue
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			// Look for sdkmcp.AddTool(... "codemap_<name>", ...)
+			re := regexp.MustCompile(`(?s)sdkmcp\.AddTool\(.*?Name:\s*"codemap_([a-z_]+)"`)
+			for _, m := range re.FindAllStringSubmatch(string(data), -1) {
+				registry[m[1]] = true
+			}
+		}
+	}
+	walk(".")
+	if len(registry) == 0 {
+		t.Fatal("no MCP tools discovered in internal/mcp — is the regex still right?")
+	}
+	// Load the commands topic from docs.go.
+	docsBytes, err := os.ReadFile("../../internal/app/docs.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Slice the docs.go content to the "commands" topic body.
+	docs := string(docsBytes)
+	start := strings.Index(docs, `{"commands", `)
+	if start < 0 {
+		t.Fatal("docs.go has no {\"commands\", ...} topic; the test must be updated")
+	}
+	end := strings.Index(docs[start:], "}\n\n")
+	if end < 0 {
+		t.Fatal("could not find end of commands topic in docs.go")
+	}
+	commandsTopic := docs[start : start+end]
+	// Every registered tool name must appear (with or without its codemap_ prefix).
+	missing := []string{}
+	for tool := range registry {
+		// Tools surface in docs.go as either "codemap_<name>" or as the
+		// bare <name> in the MCP-tools list at the end of the topic.
+		if !strings.Contains(commandsTopic, tool) {
+			missing = append(missing, tool)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		t.Errorf("P1-18: %d MCP tools are registered but missing from the docs.go commands topic: %v. Update internal/app/docs.go's commands topic so the in-band agent guide stays in sync.", len(missing), missing)
 	}
 }
