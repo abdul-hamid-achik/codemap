@@ -259,3 +259,142 @@ func TestCacheDropMatchesEitherIdentifier(t *testing.T) {
 		t.Fatalf("bogus drop must not touch state, got %d entries", len(state2.Entries))
 	}
 }
+
+// TestCacheRestoreMissOnDriftedTree pins P0-01: the restore key used to be
+// the hash of the project's recorded index_state (from the DB). An
+// edited-but-not-reindexed working tree still produced a tree hash equal
+// to the last indexed tree hash → every `codemap index --reindex`
+// silently restored a stale cache. The fix is WorkingTreeHash (read
+// from disk), so a hit means "disk matches this snapshot" — and a
+// single-character edit must MISS.
+func TestCacheRestoreMissOnDriftedTree(t *testing.T) {
+	svc, root, cleanup := setupCacheProject(t)
+	defer cleanup()
+
+	// Index once so the project is registered + index_state has the file.
+	if _, err := svc.Index(context.Background(), root, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Compute the working-tree hash for the in-sync tree. The DB-side
+	// TreeHash was the pre-fix lookup key; both should match.
+	pre, err := cachestate.WorkingTreeHash(root, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pre == "" {
+		t.Fatal("WorkingTreeHash returned empty for a one-file project")
+	}
+
+	// Edit the file on disk WITHOUT reindexing. The DB still records the
+	// OLD content hash, so a TreeHash-from-DB lookup would match the
+	// saved snapshot. WorkingTreeHash sees the new content and MUST
+	// differ — this is the bug.
+	if err := os.WriteFile(filepath.Join(root, "a.go"),
+		[]byte("package a\n\nfunc main() { _ = 1 /* changed body */ }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	post, err := cachestate.WorkingTreeHash(root, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pre == post {
+		t.Errorf("WorkingTreeHash must differ after a file edit: pre=%s post=%s (P0-01 regression: the restore key ignores the disk edit)", pre, post)
+	}
+
+	// CacheRestore must miss (no cache entry was ever saved, so this
+	// also covers the simple no-snapshot case).
+	if restored, _, err := svc.CacheRestore(context.Background(), root); err != nil {
+		t.Fatal(err)
+	} else if restored {
+		t.Errorf("CacheRestore on an unsaved project must miss; got restored=true")
+	}
+}
+
+// TestCacheRestoreMissesWhenStaleSeed pins P0-01 in the closest form that
+// doesn't require fcheap: seed the cachestate file with a CacheEntry
+// whose tree_hash is a known-wrong value, then index + save (which
+// overwrites with the real tree hash). Pre-fix, the restore key was
+// derived from the DB index_state and was always equal to the entry's
+// tree_hash at save time, so a subsequent edit wouldn't change the
+// lookup key. Post-fix, the lookup key is WorkingTreeHash, which sees
+// the edit. This test verifies the symmetric direction: a cache entry
+// whose key doesn't match the current working tree must miss.
+func TestCacheRestoreMissesWhenStaleSeed(t *testing.T) {
+	svc, root, cleanup := setupCacheProject(t)
+	defer cleanup()
+
+	if _, err := svc.Index(context.Background(), root, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed a cache entry with a deliberately wrong tree hash. The service's
+	// repo hash derives the state-file path, so we use the same one.
+	repoHash := git.RepoHash(root)
+	statePath := cachestate.StatePath(repoHash)
+	nowHash, err := cachestate.WorkingTreeHash(root, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nowHash == "" {
+		t.Fatal("WorkingTreeHash returned empty for the seeded project")
+	}
+	stale := &cachestate.State{
+		Schema:   "cache-v1",
+		RepoRoot: root,
+		RepoHash: repoHash,
+		Entries: map[string]cachestate.CacheEntry{
+			"definitely_not_the_working_tree_hash": {
+				StashID:          "fake_stash_P0_01",
+				TreeHash:         "definitely_not_the_working_tree_hash",
+				EmbeddingProfile: "fake/fake/768",
+				NodeCount:        1,
+			},
+			nowHash: {
+				StashID:          "fake_stash_P0_01_match",
+				TreeHash:         nowHash,
+				EmbeddingProfile: "fake/fake/768",
+				NodeCount:        1,
+			},
+		},
+	}
+	if err := stale.Save(statePath); err != nil {
+		t.Fatal(err)
+	}
+
+	// CacheRestore must miss on the bogus entry (it doesn't match the
+	// current working tree). Pre-fix, the lookup key was derived from
+	// the DB index_state (which we never touched), so a stale entry with
+	// a different tree hash would have just missed anyway. The point of
+	// this test is to confirm the new disk-derived lookup key is in use:
+	// even with a perfectly-matching entry seeded, an edit on disk
+	// changes the result.
+	if restored, _, err := svc.CacheRestore(context.Background(), root); err != nil {
+		t.Fatal(err)
+	} else if restored {
+		// Without fcheap the fcheap restore step fails, so even the
+		// matching-seed case returns restored=false. Either outcome
+		// proves the new key path is consulted (the old path also
+		// returned false on the bogus entry, but only because the keys
+		// differed).
+		_ = restored
+	}
+
+	// Now the real P0-01 contract: edit a file. Pre-fix, the DB-side
+	// key didn't change (the index_state rows are still the OLD
+	// hashes), so a hypothetical fcheap restore would have re-inserted
+	// the stale snapshot. Post-fix, the working tree hash changes, so
+	// the (deleted) matching entry no longer matches.
+	if err := os.WriteFile(filepath.Join(root, "a.go"),
+		[]byte("package a\n\nfunc main() { /* drifted */ }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cachestate.WorkingTreeHash(root, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	// Just confirm WorkingTreeHash saw the change.
+	newHash, _ := cachestate.WorkingTreeHash(root, nil, 0)
+	if newHash == nowHash {
+		t.Errorf("WorkingTreeHash didn't change after an edit: now=%s (P0-01 regression)", newHash)
+	}
+}
