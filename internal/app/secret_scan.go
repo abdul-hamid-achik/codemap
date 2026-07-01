@@ -76,10 +76,18 @@ func scanGoLiteral(rel string, data []byte, word *regexp.Regexp) []literalSite {
 // heuristic for languages with no stdlib tokenizer (Python/JS/TS): it drops the
 // worst false-positive class (comment mentions) at near-zero cost. Catches both
 // os.environ["KEY"] (string) and process.env.KEY (property access).
+//
+// P1-15 (B9): stripLineComment is now quote- and block-comment-aware, so a
+// key inside a string after a `//` (e.g. a URL like "https://api.stripe.com")
+// is no longer truncated. inBlock carries across lines so an interior
+// /* ... */ block spanning multiple lines is fully consumed.
 func scanGenericLiteral(rel string, data []byte, word *regexp.Regexp) []literalSite {
 	var out []literalSite
+	inBlock := false
 	for i, raw := range strings.Split(string(data), "\n") {
-		if word.MatchString(stripLineComment(raw)) {
+		stripped, stillInBlock := stripLineComment(raw, inBlock)
+		inBlock = stillInBlock
+		if word.MatchString(stripped) {
 			out = append(out, literalSite{File: rel, Line: i + 1, Confidence: "code"})
 		}
 	}
@@ -87,12 +95,74 @@ func scanGenericLiteral(rel string, data []byte, word *regexp.Regexp) []literalS
 }
 
 // stripLineComment removes a line/block-comment tail (best-effort: // # /*) so a
-// key mentioned only in a comment isn't counted as a usage.
-func stripLineComment(line string) string {
-	for _, marker := range []string{"//", "#", "/*"} {
-		if i := strings.Index(line, marker); i >= 0 {
-			line = line[:i]
+// key mentioned only in a comment isn't counted as a usage. P1-15: was
+// first-occurrence cut with no string-awareness, so a JS/TS line
+// `fetch("https://api.stripe.com", { auth: process.env.STRIPE_KEY })`
+// was truncated at the `//` inside `https://` and the live key was
+// marked orphan. The new version tracks in-string state (", ', `) so
+// only the `//` / `#` / `/*` OUTSIDE strings terminates the line. The
+// inBlock flag carries across lines within a file so interior
+// `/* ... */` lines are skipped entirely. Returns the stripped line
+// and the new inBlock state for the next line.
+func stripLineComment(line string, inBlock bool) (string, bool) {
+	if inBlock {
+		// Entire line is inside an open block comment unless `*/` closes it.
+		if i := strings.Index(line, "*/"); i >= 0 {
+			return stripLineComment(line[i+2:], false)
+		}
+		return "", true
+	}
+	var (
+		inS      byte // 0 when not in a string; otherwise the quote byte
+		esc      bool
+		cut      = -1
+		outBlock bool
+	)
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inS != 0 {
+			if esc {
+				esc = false
+				continue
+			}
+			if c == '\\' {
+				esc = true
+				continue
+			}
+			if c == inS {
+				inS = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			inS = c
+		case '/':
+			if i+1 < len(line) && line[i+1] == '/' {
+				cut = i
+				goto done
+			}
+			if i+1 < len(line) && line[i+1] == '*' {
+				// Block comment: if */ closes on this line, drop the
+				// commented-out chunk and recurse; otherwise cut at /*
+				// and signal inBlock for the next line.
+				if j := strings.Index(line[i+2:], "*/"); j >= 0 {
+					tail := line[i+2+j+2:]
+					rest, _ := stripLineComment(tail, false)
+					return line[:i] + rest, false
+				}
+				cut = i
+				outBlock = true
+				goto done
+			}
+		case '#':
+			cut = i
+			goto done
 		}
 	}
-	return line
+done:
+	if cut >= 0 {
+		return line[:cut], outBlock
+	}
+	return line, false
 }
