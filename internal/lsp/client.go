@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -76,9 +77,10 @@ type CallHierarchyOutgoingCall struct {
 
 // Client is a headless LSP client over one language-server connection.
 type Client struct {
-	conn  *conn
-	cmd   *exec.Cmd
-	ready chan struct{} // signalled when a $/progress "end" arrives
+	conn      *conn
+	cmd       *exec.Cmd
+	ready     chan struct{} // signalled when a $/progress "end" arrives
+	stderrBuf *cappedBuffer // last 8KB of the server's stderr; surfaced on connection-close errors
 }
 
 func newClient(r io.Reader, w io.Writer, closer func() error) *Client {
@@ -133,7 +135,12 @@ func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stderr = io.Discard
+	// P1-03 (O34): capture the last 8KB of stderr into a ring buffer
+	// so a server crash surfaces actionable diagnostics instead of
+	// bare io.EOF. The cap bounds memory for noisy servers; only the
+	// tail is kept (most useful signal).
+	stderrBuf := newCappedBuffer(8 << 10)
+	cmd.Stderr = stderrBuf
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -153,6 +160,7 @@ func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
 	}
 	cl := newClient(stdout, stdin, closer)
 	cl.cmd = cmd
+	cl.stderrBuf = stderrBuf
 	return cl, nil
 }
 
@@ -166,7 +174,7 @@ func URI(path string) (string, error) {
 // Initialize performs the initialize/initialized handshake rooted at rootPath.
 func (c *Client) Initialize(ctx context.Context, rootPath string) error {
 	params := map[string]any{
-		"processId": nil,
+		"processId": os.Getpid(), // P1-03 (B31): real PID so the language server's parent-watchdog can kill orphans on codemap SIGKILL
 		"rootUri":   func() string { u, _ := URI(rootPath); return u }(),
 		"capabilities": map[string]any{
 			"window": map[string]any{"workDoneProgress": true},

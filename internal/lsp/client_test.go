@@ -224,3 +224,38 @@ func TestGoplsCallHierarchy(t *testing.T) {
 		t.Errorf("incoming calls = %v, want Run (which calls Helper)", names)
 	}
 }
+
+// TestCappedBuffer pins P1-03 (O34): the stderr ring keeps the last
+// 8KB (or whatever cap is set) and drops older content. Read the
+// buffered content as a string and assert it.
+func TestCappedBuffer(t *testing.T) {
+	b := newCappedBuffer(8)
+	for i := 0; i < 20; i++ {
+		_, _ = b.Write([]byte("abcdefgh")) // 8 bytes per write
+	}
+	s := b.String()
+	// 20 writes × 8 bytes = 160 bytes; cap is 8 — only the last 8
+	// bytes (one write) survive.
+	if len(s) != 8 {
+		t.Errorf("buffer len = %d, want 8 (cap)", len(s))
+	}
+	if s != "abcdefgh" {
+		t.Errorf("buffer = %q, want abcdefgh (last write)", s)
+	}
+}
+
+// TestCappedBufferSingleWriteExceedingCap covers the edge case where
+// a single Write call exceeds the cap: keep only the tail of p.
+func TestCappedBufferSingleWriteExceedingCap(t *testing.T) {
+	b := newCappedBuffer(4)
+	n, err := b.Write([]byte("abcdefghij")) // 10 bytes, cap 4
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 10 {
+		t.Errorf("Write returned n=%d, want 10 (always full input)", n)
+	}
+	if s := b.String(); s != "ghij" {
+		t.Errorf("buffer = %q, want ghij (last 4 bytes)", s)
+	}
+}
