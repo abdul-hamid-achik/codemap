@@ -104,29 +104,76 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if jsonOut(cmd) {
-		return printJSON(rep)
+
+	// Pin P0-10: side effects (cache auto-save + --watch daemon handoff) run
+	// BEFORE the JSON-or-human output branch, so --json --watch and --json
+	// alone both still save the cache and start the daemon — the prior early
+	// `return printJSON(rep)` skipped them silently.
+	//
+	// Session ownership also moves: the session's veclite writer is closed
+	// BEFORE startDaemonAfterIndex runs, so the daemon's own writer can open
+	// without colliding on the exclusive flock (the deferred sess.Close()
+	// ran only after runIndex returned, breaking `--watch`).
+	envelope := buildIndexEnvelope(rep)
+	if doCache && svc.CacheFcheapAvailable() {
+		if crep := svc.MaybeCacheAfterIndex(context.Background(), cwd); crep != nil {
+			envelope.Cache = crep
+		}
 	}
-	printIndexReport(cmd, rep, precise)
-	if watch, _ := cmd.Flags().GetBool("watch"); watch {
-		return startDaemonAfterIndex(cmd)
+	watch, _ := cmd.Flags().GetBool("watch")
+	if watch {
+		// Release the CLI's exclusive veclite handle so the daemon's writer
+		// can open. Session.Close is idempotent (the deferred Close below
+		// is a safe no-op once fields are nil).
+		_ = sess.Close()
+		if dErr := startDaemonAfterIndex(cmd); dErr != nil {
+			return dErr
+		}
+		envelope.Daemon = &indexDaemonInfo{Started: true, PID: os.Getpid()}
 	}
 
-	// Auto-cache after index: save the freshly-built index to fcheap (best-effort).
-	if doCache && svc.CacheFcheapAvailable() {
-		if crep := svc.MaybeCacheAfterIndex(context.Background(), cwd); crep != nil && crep.Action == "saved" {
-			treeLabel := crep.TreeHash
-			if len(treeLabel) > 12 {
-				treeLabel = treeLabel[:12]
-			}
-			fmt.Printf("  cache: saved to fcheap (stash %s, tree %s)\n", crep.StashID, treeLabel)
+	if jsonOut(cmd) {
+		return printJSON(envelope)
+	}
+	printIndexReport(cmd, rep, precise)
+	if watch {
+		// Watch already handed off above; startDaemonAfterIndex prints its
+		// own banner — nothing more to render here.
+		return nil
+	}
+	if envelope.Cache != nil && envelope.Cache.Action == "saved" {
+		treeLabel := envelope.Cache.TreeHash
+		if len(treeLabel) > 12 {
+			treeLabel = treeLabel[:12]
 		}
+		fmt.Printf("  cache: saved to fcheap (stash %s, tree %s)\n", envelope.Cache.StashID, treeLabel)
 	}
 
 	if noTips, _ := cmd.Flags().GetBool("no-tips"); !noTips {
 		fmt.Println("  tip: run 'codemap daemon start' (or 'codemap index --watch') to keep the index fresh automatically")
 	}
 	return nil
+}
+
+// indexDaemonInfo is the small "daemon started" detail block that the CLI
+// surfaces in --json output (P0-10). Absent when --watch is off or the
+// handoff failed.
+type indexDaemonInfo struct {
+	Started bool `json:"started"`
+	PID     int  `json:"pid,omitempty"`
+}
+
+// indexEnvelope wraps the Service.Index report in a CLI-only JSON envelope
+// that carries the side-effect outcomes (cache + daemon). Empty fields stay
+// nil so the --json shape stays forward-compatible with what an agent parses.
+type indexEnvelope struct {
+	*app.IndexReport
+	Cache  *app.CacheReport `json:"cache,omitempty"`
+	Daemon *indexDaemonInfo `json:"daemon,omitempty"`
+}
+
+func buildIndexEnvelope(rep *app.IndexReport) *indexEnvelope {
+	return &indexEnvelope{IndexReport: rep}
 }
 
 // indexViaVault re-execs `codemap index` inside `tvault run -p <project>` so the
