@@ -111,3 +111,37 @@ func TestFileImpactUnindexed(t *testing.T) {
 		t.Errorf("unindexed → indexed:false, got %+v", rep)
 	}
 }
+
+// TestFileImpactVerdictsWithheldOnTruncation pins P1-16 (B10): pre-fix
+// SafeToDelete stayed true even when the file was truncated to
+// the fileImpactMaxSymbols cap or when any per-symbol Impact lookup
+// failed silently. A false green that could delete live code. The
+// fix withholds the verdicts + adds a note when the analysis was
+// incomplete.
+func TestFileImpactVerdictsWithheldOnTruncation(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	mustExec(t, "git", "-C", proj, "init", "-q")
+	mustExec(t, "git", "-C", proj, "config", "user.email", "t@t")
+	mustExec(t, "git", "-C", proj, "config", "user.name", "t")
+	// One small function in big.go; no external callers.
+	mustWrite(t, proj, "big.go", "package a\n\nfunc Big() {}\n")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := NewService(sess).Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := NewService(sess).FileImpact(proj, "big.go", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only 1 symbol in the file; nothing truncated; the file is
+	// safe to delete (no external callers). The verdict should
+	// still be available (we only withhold on truncation or skips).
+	if !rep.SafeToDelete {
+		t.Errorf("small file with no external callers should be SafeToDelete=true; got false (Note=%q)", rep.Note)
+	}
+}

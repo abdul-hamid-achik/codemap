@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // reviewMaxSymbols is reused as the per-file analysis cap.
@@ -76,6 +77,7 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 	depFiles := map[string]bool{}
 	blast := map[string]bool{}
 	seenTest := map[string]bool{}
+	skipped := 0
 	anyExternalCaller, externalUntested := false, false
 
 	for _, s := range defined {
@@ -88,6 +90,12 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 			imp, ierr = svc.Impact(cwd, s.Symbol, depth)
 		}
 		if ierr != nil || imp == nil || !imp.Found {
+			// P1-16 (B10): silent skips used to leave SafeToDelete /
+			// BreakingChange silently computable. Now we count them
+			// and withhold the verdicts below when ANY symbol was
+			// skipped (otherwise we might say "safe to delete" on
+			// partial data).
+			skipped++
 			continue
 		}
 		if imp.Resolution != "" && rep.Resolution == "" {
@@ -127,10 +135,27 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 	// so "no external callers" is unverified, not established — never claim a file is
 	// safe to delete then (a false green that could delete live code). Leave both
 	// verdicts false and let Resolution explain why.
-	if rep.Resolution == "" {
+	verdictWithheld := rep.Resolution != ""
+	// P1-16 (B10): also withhold the verdicts when the analysis was
+	// incomplete (truncation above the cap, or any per-symbol skip
+	// from a failed Impact lookup). Both leave us with PARTIAL data
+	// on which we'd otherwise emit a confident green.
+	truncated := len(syms.Symbols) > fileImpactMaxSymbols
+	if truncated || skipped > 0 {
+		verdictWithheld = true
+		parts := []string{}
+		if truncated {
+			parts = append(parts, fmt.Sprintf("file has >%d symbols (analyzed first %d)", fileImpactMaxSymbols, fileImpactMaxSymbols))
+		}
+		if skipped > 0 {
+			parts = append(parts, fmt.Sprintf("%d symbol(s) skipped (impact lookup failed)", skipped))
+		}
+		rep.Note = joinNote(rep.Note, "safe_to_delete / breaking_change withheld — "+strings.Join(parts, "; "))
+	}
+	if !verdictWithheld {
 		rep.SafeToDelete = !anyExternalCaller
 		rep.BreakingChange = externalUntested
-	} else {
+	} else if rep.Resolution != "" {
 		rep.Note = joinNote(rep.Note, "safe_to_delete / breaking_change are unavailable without a resolved call graph — reindex with --precise")
 	}
 	return rep, nil
