@@ -89,11 +89,16 @@ func DefaultConfig() *Config {
 			EmbedBatchSize:     64,
 			EmbedConcurrency:   4,
 			ExtractConcurrency: 4,
+			// P1-11 (B66): bare names like "env" matched any segment at any depth,
+			// silently excluding Go subpackages like go/build or internal/env.
+			// Anchor the build-output dirs with a trailing slash so they only
+			// match a same-level dir; keep node_modules/vendor/etc as any-depth.
 			Exclude: []string{
-				".git", "node_modules", "vendor", "dist", "build",
-				"dist-*", "build-*", "coverage", // build-output variants (dist-chrome, build-web) + test coverage — minified/generated code, not source
-				".next", ".nuxt", "target", "__pycache__",
-				"venv", "env", "site-packages", // Python virtualenvs / installed deps
+				".git", "node_modules", "vendor",
+				"dist/", "build/", "target/", "coverage/",
+				"dist-*", "build-*",
+				".next", ".nuxt", "__pycache__",
+				"venv/", "env/", "site-packages/",
 				"*.min.js", "*.gen.go", "*_gen.go", "*.pb.go", "*_pb.go", "*.lock",
 			},
 		},
