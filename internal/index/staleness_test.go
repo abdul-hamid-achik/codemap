@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -103,5 +104,54 @@ func TestStalenessIgnoresUnindexedLanguages(t *testing.T) {
 	st, _ := ix.Staleness(pid, dir, map[string]bool{"go": true})
 	if st.New != 0 {
 		t.Errorf("new file of an unindexed language should not be drift, got %+v", st)
+	}
+}
+
+// TestStalenessRespectsSlashAnchoredExclude pins P1-07 (B19): pre-fix
+// staleness.WalkDir passed the bare base name to ix.excluded, so a
+// slash-anchored pattern (e.g. "db/migrations") never matched and
+// the contained file was reported as "new" forever. The fix is to
+// pass the project-relative path so the same patterns that the
+// indexer walked past also skip staleness.
+func TestStalenessRespectsSlashAnchoredExclude(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	g, _ := newStores(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/fix\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package fix\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "db/migrations"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "db/migrations/0001_init.go"),
+		[]byte("package migrations\n\nfunc Up() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject("fix", dir, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig().Index
+	cfg.Exclude = append(cfg.Exclude, "db/migrations")
+	ix := New(g, nil, fakeEmbedder{dims: 4}, cfg)
+	if _, err := ix.IndexProject(context.Background(), pid, "fix", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// Manually remove the index_state row for db/migrations/0001_init.go
+	// so staleness sees it as a "candidate for new". Pre-fix this would
+	// be counted as New=1 forever; post-fix the slash-anchored exclude
+	// matches at the staleness walk too.
+	_, _ = g.DB().Exec("DELETE FROM index_state WHERE project_id=? AND file_path='db/migrations/0001_init.go'", pid)
+	st, err := ix.Staleness(pid, dir, map[string]bool{"go": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.New != 0 {
+		t.Errorf("P1-07 regression: db/migrations/* must be excluded from staleness.New (slash-anchored exclude should match the project-relative path); got New=%d", st.New)
 	}
 }
