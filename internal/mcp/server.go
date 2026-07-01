@@ -415,7 +415,27 @@ func (s *Server) handleInit(_ context.Context, _ *sdkmcp.CallToolRequest, in pat
 }
 
 func (s *Server) handleIndex(ctx context.Context, _ *sdkmcp.CallToolRequest, in indexInput) (*sdkmcp.CallToolResult, any, error) {
-	rep, err := s.svc.Index(ctx, cwdOf(in.Path), index.Options{Reindex: in.Reindex, Precise: in.Precise}, !in.NoEmbed)
+	root := cwdOf(in.Path)
+	// Pin P0-08: same daemon-delegation guard as the CLI. If a daemon is
+	// serving THIS project, delegate to it (avoids the veclite lock collision).
+	// If a daemon is serving a DIFFERENT project, refuse with an actionable
+	// message — better than opening a colliding writer or silently indexing the
+	// wrong tree.
+	if info := daemon.QueryStatus(); info != nil {
+		if ok, reason := daemon.DelegationAllowed(root, info); ok {
+			rep, err := daemon.Reindex(daemon.ReindexOpts{Reindex: in.Reindex, Precise: in.Precise, NoLSP: false, Embed: !in.NoEmbed})
+			if err != nil {
+				return result(nil, err)
+			}
+			return result(rep, nil)
+		} else {
+			return &sdkmcp.CallToolResult{
+				Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: reason}},
+				IsError: true,
+			}, nil, nil
+		}
+	}
+	rep, err := s.svc.Index(ctx, root, index.Options{Reindex: in.Reindex, Precise: in.Precise}, !in.NoEmbed)
 	return result(rep, err)
 }
 
