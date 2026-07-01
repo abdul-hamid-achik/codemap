@@ -76,7 +76,9 @@ for the full lists.`},
 
 MCP tools mirror these as codemap_<name> (init, index, status, projects, semantic,
 find, callers, callees, impact, review, read_order, file_impact, risk, path, symbols,
-source, context, context_batch, hotspots, orphans, annotate, annotations).
+source, context, context_batch, hotspots, orphans, annotate, annotations,
+related_files, symbol_at, branch_status, branch_switch, cache_save,
+cache_restore, cache_list, cache_drop, doctor, unannotate).
 codemap_context bundles a symbol's definition+callers+callees+tests in one call;
 codemap_review is the post-edit query (diff → impact + tests to run);
 codemap_read_order ranks where to start; codemap_risk scores how careful to be.
