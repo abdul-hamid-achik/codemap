@@ -160,3 +160,29 @@ func TestIndexNoTipsFlagRegistered(t *testing.T) {
 		t.Fatal("--no-tips flag not registered on index command")
 	}
 }
+
+// TestIndexEnvelopeShape pins P0-10's JSON shape: the --json output now wraps
+// the IndexReport with optional {cache, daemon} blocks so an agent can see
+// auto-cache and --watch handoff outcomes (previously silently skipped under
+// --json). Empty fields stay absent (omitempty) for forward compatibility.
+func TestIndexEnvelopeShape(t *testing.T) {
+	rep := &app.IndexReport{Project: "x", Root: "/tmp/x", Nodes: 1, Edges: 1}
+	e := buildIndexEnvelope(rep)
+	if e.IndexReport != rep {
+		t.Fatalf("envelope must embed IndexReport")
+	}
+	if e.Cache != nil {
+		t.Errorf("Cache must default to nil, got %+v", e.Cache)
+	}
+	if e.Daemon != nil {
+		t.Errorf("Daemon must default to nil, got %+v", e.Daemon)
+	}
+	e.Cache = &app.CacheReport{Action: "saved", StashID: "st", TreeHash: "th"}
+	e.Daemon = &indexDaemonInfo{Started: true, PID: 42}
+	if e.Cache.Action != "saved" || e.Cache.StashID != "st" || e.Cache.TreeHash != "th" {
+		t.Errorf("Cache fields not carried through envelope: %+v", e.Cache)
+	}
+	if !e.Daemon.Started || e.Daemon.PID != 42 {
+		t.Errorf("Daemon fields not carried through envelope: %+v", e.Daemon)
+	}
+}
