@@ -1110,6 +1110,28 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, projectID int64,
 		delete(posTo, k) // ambiguous (same-line decls) — drop, don't mis-route
 	}
 
+	// Pin P0-05: collect the LSP-language source node ids so we can delete any
+	// PRIOR ProvPrecise call edges for them. The LSP languages have no
+	// name-based call edges to supersede (they live entirely in --precise), but
+	// without this delete-first every --precise run still doubled the
+	// precise-edge count via the same bare-INSERT path the Go pass uses.
+	var lspSourceIDs []int64
+	for _, n := range ni.nodes {
+		if _, isLSP := resolvers[n.Language]; !isLSP {
+			continue
+		}
+		if n.Kind == graph.KindFile {
+			continue
+		}
+		lspSourceIDs = append(lspSourceIDs, n.ID)
+	}
+	if len(lspSourceIDs) > 0 {
+		if dErr := ix.graph.DeleteCallEdgesBySource(lspSourceIDs, graph.ProvPrecise); dErr != nil {
+			res.PreciseNote = "LSP precise supersede (delete prior) failed: " + dErr.Error()
+			return
+		}
+	}
+
 	upgraded := 0
 	for lang, cr := range resolvers {
 		for file := range filesByLang[lang] {
@@ -1188,7 +1210,13 @@ func (ix *Indexer) resolvePreciseEdgesWith(ctx context.Context, projectID int64,
 	// of weight) is what prevents the in-package WeightLSP=1.0 name edges from
 	// surviving and double-counting against the precise 1.0 edges.
 	if err := ix.graph.DeleteCallEdgesBySource(cleanSources, graph.ProvName); err != nil {
-		res.PreciseNote = "precise supersede (delete) failed: " + err.Error()
+		res.PreciseNote = "precise supersede (delete name) failed: " + err.Error()
+		return
+	}
+	// Pin P0-05: delete prior ProvPrecise edges too. The edges table has no
+	// UNIQUE constraint, so a second --precise run would double-insert.
+	if err := ix.graph.DeleteCallEdgesBySource(cleanSources, graph.ProvPrecise); err != nil {
+		res.PreciseNote = "precise supersede (delete prior precise) failed: " + err.Error()
 		return
 	}
 
