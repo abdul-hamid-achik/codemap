@@ -297,6 +297,14 @@ func (d *Daemon) handleConn(conn net.Conn) {
 			// back (instead of opening a second write handle that would
 			// collide with the daemon's exclusive veclite lock). Embed defaults
 			// to the daemon's mode; an explicit embed field overrides it.
+			//
+			// Pin P0-07: the lock MUST be scoped to the reindex body, not the
+			// connection — pre-fix `defer d.indexMu.Unlock()` ran at end of
+			// handleConn (function return), so a second reindex on the same
+			// connection self-deadlocked AND onChange and Stop both blocked
+			// forever. Wrap in an IIFE so release happens at the case boundary,
+			// and encode the response OUTSIDE the lock so a slow socket doesn't
+			// stall the next reindex.
 			var r struct {
 				Reindex bool  `json:"reindex"`
 				Precise bool  `json:"precise"`
@@ -308,18 +316,31 @@ func (d *Daemon) handleConn(conn net.Conn) {
 			if r.Embed != nil {
 				embed = *r.Embed
 			}
-			d.indexMu.Lock()
-			defer d.indexMu.Unlock()
-			rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: r.Precise, NoLSP: r.NoLSP}, embed)
-			if ierr != nil {
-				_ = enc.Encode(map[string]string{"error": ierr.Error()})
+			type reindexResult struct {
+				rep       *app.IndexReport
+				err       error
+				reindexed bool
+			}
+			res := func() reindexResult {
+				d.indexMu.Lock()
+				defer d.indexMu.Unlock()
+				rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: r.Precise, NoLSP: r.NoLSP}, embed)
+				if ierr != nil {
+					return reindexResult{err: ierr}
+				}
+				d.mu.Lock()
+				d.info.LastReindexAt = nowRFC3339()
+				d.mu.Unlock()
+				return reindexResult{rep: rep, reindexed: true}
+			}()
+			if res.err != nil {
+				_ = enc.Encode(map[string]string{"error": res.err.Error()})
 				return
 			}
-			d.mu.Lock()
-			d.info.LastReindexAt = nowRFC3339()
-			d.mu.Unlock()
-			_ = d.writeState()
-			_ = enc.Encode(rep)
+			if res.reindexed {
+				_ = d.writeState()
+			}
+			_ = enc.Encode(res.rep)
 		case "daemon.shutdown":
 			_ = enc.Encode(map[string]string{"status": "shutting down"})
 			go d.Stop()

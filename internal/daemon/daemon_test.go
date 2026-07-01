@@ -145,6 +145,56 @@ func TestReindexRPCSynchronous(t *testing.T) {
 	}
 }
 
+// TestReindexRPCSameConnectionMultipleRequests pins P0-07: the daemon's
+// handleConn previously used `defer d.indexMu.Unlock()`, which is scoped to
+// the FUNCTION, not the case — so a second `daemon.reindex` request on the
+// SAME connection self-deadlocked on the second Lock(), and the
+// watcher's onChange/Stop() (which both acquire indexMu) blocked forever.
+// The fix wraps the locked work in an IIFE so release happens at the case
+// boundary. This test sends two reindexes back-to-back over one connection
+// and asserts both return in well under the deadlock timeout.
+func TestReindexRPCSameConnectionMultipleRequests(t *testing.T) {
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	root := t.TempDir()
+	mustWrite(t, root, "go.mod", "module example.com/m\n\ngo 1.25\n")
+	mustWrite(t, root, "a.go", "package m\n\nfunc Alpha() {}\n")
+
+	d, err := Start(context.Background(), root, Config{NoEmbed: true, Debounce: 80 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c, err := net.DialTimeout("unix", config.DaemonSocketPath(), time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	send := func(label string) string {
+		t.Helper()
+		if _, err := c.Write([]byte(`{"method":"daemon.reindex","reindex":true,"no_lsp":true}` + "\n")); err != nil {
+			t.Fatalf("%s write: %v", label, err)
+		}
+		sc := bufio.NewScanner(c)
+		if !sc.Scan() {
+			t.Fatalf("%s: no response from daemon (likely deadlocked on the second reindex — pre-fix)", label)
+		}
+		return sc.Text()
+	}
+
+	resp1 := send("first")
+	if !strings.Contains(resp1, `"project"`) {
+		t.Errorf("first reindex did not return an IndexReport: %s", resp1)
+	}
+	resp2 := send("second")
+	if !strings.Contains(resp2, `"project"`) {
+		t.Errorf("second reindex did not return an IndexReport (P0-07 deadlock): %s", resp2)
+	}
+}
+
 // TestReindexRPCErrorEnvelope verifies the daemon returns a JSON error envelope
 // (not a bare hang/disconnect) when a reindex fails, so the client can surface a
 // useful message. We force a failure by shutting the daemon mid-handle isn't
