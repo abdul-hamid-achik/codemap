@@ -398,8 +398,8 @@ func runReview(cmd *cobra.Command, args []string) error {
 			fmt.Printf("     … (%d more — use --json)\n", more)
 		}
 	}
-	if len(rep.Untested) > 0 {
-		fmt.Printf("  ⚠ untested changes (%d): %s\n", len(rep.Untested), joinRefNames(rep.Untested, 8))
+	if len(rep.UntestedSymbols) > 0 {
+		fmt.Printf("  ⚠ untested changes (%d): %s\n", len(rep.UntestedSymbols), joinRefNames(rep.UntestedSymbols, 8))
 	}
 	if len(rep.Hotspots) > 0 {
 		fmt.Printf("  ⚑ hotspots changed (%d): %s\n", len(rep.Hotspots), joinRefNames(rep.Hotspots, 8))

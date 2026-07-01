@@ -27,7 +27,7 @@ type RiskReport struct {
 	Score   float64      `json:"score"` // 0..1, probabilistic-OR of the factor severities
 	Level   string       `json:"level"` // low | medium | high
 	Callers int          `json:"callers"`
-	Tests   int          `json:"covering_tests"`
+	Tests   int          `json:"covering_tests_count"`
 	Factors []RiskFactor `json:"factors"`
 	Note    string       `json:"note,omitempty"`
 }

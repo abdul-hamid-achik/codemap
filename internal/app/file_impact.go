@@ -21,8 +21,8 @@ type FileImpactReport struct {
 	Indexed         bool         `json:"indexed"`
 	Found           bool         `json:"found"` // the file has indexed symbols
 	Symbols         int          `json:"symbols"`
-	DependentFiles  []string     `json:"dependent_files"` // other files whose code calls into this one
-	BlastRadius     int          `json:"blast_radius"`    // transitively-affected symbols outside this file
+	DependentFiles  []string     `json:"dependent_files"`    // other files whose code calls into this one
+	BlastRadius     int          `json:"blast_radius_count"` // transitively-affected symbols outside this file (P1-19: bare name was the int count in some reports; now always _count, with the list under blast_radius if needed)
 	CoveringTests   []ImpactNode `json:"covering_tests"`
 	UntestedSymbols []SymbolRef  `json:"untested_symbols"` // externally-called symbols with no covering test
 	SafeToDelete    bool         `json:"safe_to_delete"`   // nothing outside the file references it
