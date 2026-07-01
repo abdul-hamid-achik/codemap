@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -557,7 +558,20 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		if res.Languages["go"] > 0 {
 			ix.resolvePreciseEdgesFromIndex(ctx, projectID, root, res, ni)
 		}
-		ix.resolveLSPCallEdgesWith(ctx, projectID, root, res, ni)
+		// Pin P0-06: wrap the LSP precise pass in a transaction so a partial
+		// failure (server died mid-call, DB error, etc.) never leaves a
+		// half-written set of precise edges. Roll back on any error.
+		lsptx, lspErr := ix.graph.BeginTx(ctx)
+		if lspErr != nil {
+			return res, lspErr
+		}
+		if err := ix.resolveLSPCallEdgesWith(ctx, lsptx, projectID, root, res, ni); err != nil {
+			_ = lsptx.Rollback()
+			return res, err
+		}
+		if err := lsptx.Commit(); err != nil {
+			return res, err
+		}
 		res.PreciseMs = int(time.Since(preciseStart).Milliseconds())
 	}
 
@@ -603,6 +617,46 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	res := &Result{}
 	var pending []extract.Reference
 	var embedAcc []embedItem
+
+	// Pin P0-04: expand the changed set with every file that currently has
+	// edges TARGETING nodes in a changed file. Pre-fix the FK-cascaded
+	// inbound edges (from unchanged files into a changed file) were never
+	// rebuilt on incremental reindex, so callers-of-edited-symbols returned
+	// a confidently-empty answer. The expansion below re-extracts those
+	// source files so their outbound refs end up in `pending` and the
+	// resolve pass rebuilds the now-dangling inbound edges.
+	if len(rels) > 0 {
+		var inbound []string
+		for _, rel := range rels {
+			extra, err := ix.graph.SourceFilesTargeting(projectID, rel)
+			if err != nil {
+				return res, err
+			}
+			inbound = append(inbound, extra...)
+		}
+		// Dedupe + skip files already in rels (the changed set itself).
+		original := len(rels)
+		seen := make(map[string]bool, len(rels))
+		for _, r := range rels {
+			seen[r] = true
+		}
+		for _, r := range inbound {
+			if !seen[r] {
+				seen[r] = true
+				rels = append(rels, r)
+			}
+		}
+		// Force re-extraction of the inbound-expanded files: their content
+		// didn't change, so the hash short-circuit inside indexFile would
+		// skip them, and we need their fresh refs to re-resolve the inbound
+		// edges. Delete the cached hash so indexFile re-extracts.
+		for i := original; i < len(rels); i++ {
+			if err := ix.graph.DeleteFileHash(projectID, rels[i]); err != nil {
+				return res, err
+			}
+		}
+	}
+
 	for _, rel := range rels {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -1070,7 +1124,7 @@ type precisePos struct {
 // no name-based call extraction for these languages to supersede). Best-effort:
 // errors skip a file, never abort. The servers are still alive (closed by the
 // resolveLSPCallEdgesWith is the shared resolver that takes a pre-built nodeIndex.
-func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex) {
+func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, projectID int64, root string, res *Result, ni *nodeIndex) error {
 	resolvers := map[string]extract.CallResolver{} // language -> resolver
 	for lang, e := range ix.extractors {
 		if cr, ok := e.(extract.CallResolver); ok {
@@ -1078,7 +1132,7 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, projectID int64,
 		}
 	}
 	if len(resolvers) == 0 {
-		return
+		return nil
 	}
 	// Rebuild posTo/fqnTo from the shared nodeIndex, scoped to LSP-language nodes.
 	fqnTo := make(map[string]int64, len(ni.nodes))
@@ -1110,6 +1164,28 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, projectID int64,
 		delete(posTo, k) // ambiguous (same-line decls) — drop, don't mis-route
 	}
 
+	// Pin P0-05: collect the LSP-language source node ids so we can delete any
+	// PRIOR ProvPrecise call edges for them. The LSP languages have no
+	// name-based call edges to supersede (they live entirely in --precise), but
+	// without this delete-first every --precise run still doubled the
+	// precise-edge count via the same bare-INSERT path the Go pass uses.
+	var lspSourceIDs []int64
+	for _, n := range ni.nodes {
+		if _, isLSP := resolvers[n.Language]; !isLSP {
+			continue
+		}
+		if n.Kind == graph.KindFile {
+			continue
+		}
+		lspSourceIDs = append(lspSourceIDs, n.ID)
+	}
+	if len(lspSourceIDs) > 0 {
+		if dErr := graph.DeleteCallEdgesBySourceTx(tx, lspSourceIDs, graph.ProvPrecise); dErr != nil {
+			res.PreciseNote = "LSP precise supersede (delete prior) failed: " + dErr.Error()
+			return dErr
+		}
+	}
+
 	upgraded := 0
 	for lang, cr := range resolvers {
 		for file := range filesByLang[lang] {
@@ -1129,14 +1205,15 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, projectID int64,
 				if !ok || to == from {
 					continue
 				}
-				if _, aErr := ix.graph.AddEdgeProv(from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); aErr != nil {
-					return
+				if _, aErr := graph.AddEdgeProvTx(tx, from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); aErr != nil {
+					return aErr
 				}
 				upgraded++
 			}
 		}
 	}
 	res.PreciseUpgraded += upgraded
+	return nil
 }
 
 // resolvePreciseEdges runs the go/types pass and supersedes name-based call edges
@@ -1188,7 +1265,13 @@ func (ix *Indexer) resolvePreciseEdgesWith(ctx context.Context, projectID int64,
 	// of weight) is what prevents the in-package WeightLSP=1.0 name edges from
 	// surviving and double-counting against the precise 1.0 edges.
 	if err := ix.graph.DeleteCallEdgesBySource(cleanSources, graph.ProvName); err != nil {
-		res.PreciseNote = "precise supersede (delete) failed: " + err.Error()
+		res.PreciseNote = "precise supersede (delete name) failed: " + err.Error()
+		return
+	}
+	// Pin P0-05: delete prior ProvPrecise edges too. The edges table has no
+	// UNIQUE constraint, so a second --precise run would double-insert.
+	if err := ix.graph.DeleteCallEdgesBySource(cleanSources, graph.ProvPrecise); err != nil {
+		res.PreciseNote = "precise supersede (delete prior precise) failed: " + err.Error()
 		return
 	}
 

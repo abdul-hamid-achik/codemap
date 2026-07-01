@@ -539,6 +539,66 @@ func (s *Store) DeleteCallEdgesBySource(sourceIDs []int64, provenance string) er
 	return nil
 }
 
+// SourceFilesTargeting returns the distinct set of files whose outbound
+// (`calls` or other) edges currently target nodes IN the given file. Used
+// by the incremental indexer to expand a changed-file set with the files
+// that own the now-stale inbound edges, so a single-file edit doesn't
+// leave its caller graph confidently empty (P0-04: incremental used to
+// drop the FK-cascaded inbound edges of every changed file and never
+// rebuild them).
+func (s *Store) SourceFilesTargeting(projectID int64, relFile string) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT n2.file_path FROM edges
+		JOIN nodes n1 ON edges.target_id = n1.id
+		JOIN nodes n2 ON edges.source_id = n2.id
+		WHERE n1.project_id = ? AND n1.file_path = ?
+		  AND edges.source_id != edges.target_id
+	`, projectID, relFile)
+	if err != nil {
+		return nil, fmt.Errorf("source files targeting: %w", err)
+	}
+	defer rows.Close()
+	var files []string
+	for rows.Next() {
+		var f string
+		if err := rows.Scan(&f); err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, rows.Err()
+}
+
+// DeleteCallEdgesBySourceTx is the transaction-scoped sibling of
+// DeleteCallEdgesBySource, used by edge-resolution passes that need an
+// all-or-nothing delete+insert cycle (P0-06). Same chunking rules.
+func DeleteCallEdgesBySourceTx(tx *sql.Tx, sourceIDs []int64, provenance string) error {
+	if len(sourceIDs) == 0 {
+		return nil
+	}
+	const chunk = 500
+	for start := 0; start < len(sourceIDs); start += chunk {
+		end := start + chunk
+		if end > len(sourceIDs) {
+			end = len(sourceIDs)
+		}
+		batch := sourceIDs[start:end]
+		ph := make([]string, len(batch))
+		args := make([]any, 0, len(batch)+1)
+		for i, id := range batch {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		args = append(args, provenance)
+		q := "DELETE FROM edges WHERE source_id IN (" + strings.Join(ph, ",") +
+			") AND edge_type = '" + EdgeCalls + "' AND provenance = ?"
+		if _, err := tx.Exec(q, args...); err != nil {
+			return fmt.Errorf("delete call edges by source tx: %w", err)
+		}
+	}
+	return nil
+}
+
 // ---- index state ----
 
 // SetFileHash records the indexed hash for a file (incremental reindex).

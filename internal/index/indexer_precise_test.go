@@ -245,3 +245,66 @@ func TestPreciseDegradesGracefully(t *testing.T) {
 		t.Errorf("name-based Helper in-degree = %d, want 1 (kept after degrade)", got)
 	}
 }
+
+// TestPreciseIdempotent pins P0-05: a second --precise run (without --reindex
+// of the project) must NOT double the precise-edge count. Pre-fix the
+// `resolvePreciseEdgesWith` and `resolveLSPCallEdgesWith` passes only deleted
+// `ProvName` edges before re-inserting their `ProvPrecise` ones, so a second
+// --precise left the prior ProvPrecise edges in place AND inserted fresh
+// copies. The fix is a second `DeleteCallEdgesBySource(..., ProvPrecise)`
+// before the insert loop in both passes.
+func TestPreciseIdempotent(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/fix\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fix.go"), []byte(preciseFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, _ := newStores(t)
+	pid, err := g.UpsertProject("fix", dir, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+
+	// First --precise run.
+	if _, err := ix.IndexProject(context.Background(), pid, "fix", dir, Options{Reindex: true, Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, _ := g.FindNodesBySymbol(pid, "Run")
+	var t1 int64 = -1
+	for _, n := range nodes {
+		if n.FQN == "fix.T1.Run" {
+			t1 = n.ID
+		}
+	}
+	var firstPrecise int
+	if err := g.DB().QueryRow(
+		"SELECT COUNT(*) FROM edges WHERE target_id=? AND edge_type='calls' AND provenance='precise'", t1,
+	).Scan(&firstPrecise); err != nil {
+		t.Fatal(err)
+	}
+	if firstPrecise == 0 {
+		t.Fatal("first precise run produced no precise edges — fix the fixture before asserting stability")
+	}
+
+	// Second --precise run (same files, no --reindex of the project — just
+	// re-runs the resolve pass to test the delete-first contract). Edge
+	// count must be IDENTICAL, not doubled/tripled.
+	if _, err := ix.IndexProject(context.Background(), pid, "fix", dir, Options{Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	var secondPrecise int
+	if err := g.DB().QueryRow(
+		"SELECT COUNT(*) FROM edges WHERE target_id=? AND edge_type='calls' AND provenance='precise'", t1,
+	).Scan(&secondPrecise); err != nil {
+		t.Fatal(err)
+	}
+	if secondPrecise != firstPrecise {
+		t.Errorf("P0-05 regression: precise-edge count after 2nd --precise = %d, want %d (delete-first missing)", secondPrecise, firstPrecise)
+	}
+}
