@@ -176,3 +176,57 @@ func TestThrottleBatchEmbedConcurrent(t *testing.T) {
 		t.Errorf("inner embedded %d texts, want 5 (singleflight dedup of concurrent identical batches)", inner.embedded)
 	}
 }
+
+// TestThrottleLoserHasNoNilVectors pins P0-09: when two goroutines submit
+// *identical* batches concurrently, singleflight keeps them in one group — but
+// each caller's `out` slice is its own allocation, so only the winner's slice
+// gets populated inside the closure; the loser's slice stays nil (pre-fix the
+// loser just returned those nils and silently poisoned semantic search). The
+// new refill loop must backfill every nil from the warmed cache.
+func TestThrottleLoserHasNoNilVectors(t *testing.T) {
+	inner := &countingProvider{dims: 4}
+	tp := NewThrottled(inner, ThrottleConfig{MaxInFlight: 4})
+	ctx := context.Background()
+
+	texts := []string{"alpha", "bravo", "charlie", "delta", "echo"}
+
+	var wg sync.WaitGroup
+	var res1, res2 [][]float32
+	var err1, err2 error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		res1, err1 = tp.Embed(ctx, texts)
+	}()
+	go func() {
+		defer wg.Done()
+		res2, err2 = tp.Embed(ctx, texts)
+	}()
+	wg.Wait()
+
+	if err1 != nil {
+		t.Fatalf("goroutine 1: %v", err1)
+	}
+	if err2 != nil {
+		t.Fatalf("goroutine 2: %v", err2)
+	}
+
+	checkNonNil := func(label string, got [][]float32) {
+		t.Helper()
+		if len(got) != len(texts) {
+			t.Fatalf("%s: want %d vectors, got %d", label, len(texts), len(got))
+		}
+		for i, v := range got {
+			if v == nil {
+				t.Errorf("%s: nil vector at index %d (%q) — pre-fix this poisoned the embedding", label, i, texts[i])
+			}
+		}
+	}
+	checkNonNil("1", res1)
+	checkNonNil("2", res2)
+	// Also confirm the winner-loser relationship: inner saw exactly len(texts)
+	// embedded (not 2*len), proving singleflight grouped them.
+	if inner.embedded != len(texts) {
+		t.Errorf("inner embedded %d, want %d (singleflight should group identical batches)", inner.embedded, len(texts))
+	}
+}
