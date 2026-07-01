@@ -217,11 +217,15 @@ func (svc *Service) CacheList(ctx context.Context, cwd string, rebuild bool) (*C
 	return rep, nil
 }
 
-// CacheDrop removes a cached index from fcheap and the local pointer file. If
-// treeHash is empty and all is true, drops ALL cached indexes for the repo. If
+// CacheDrop removes cached indexes from fcheap and the local pointer file. The id
+// argument matches by either tree hash or stash id (so the MCP surface, which
+// exposes stash_id, and the CLI surface, which exposes --tree, both work). When
+// all is true, the id is ignored and every entry for the repo is dropped. If
 // fcheap drop fails, the pointer entry is still removed (the stash may already
-// be gone). Returns the number of stashes dropped.
-func (svc *Service) CacheDrop(ctx context.Context, cwd, treeHash string, all bool) (dropped int, err error) {
+// be gone). Returns the number of stashes dropped; dropped==0 with err==nil on
+// "no match", which is a normal fallthrough (callers can distinguish by comparing
+// the input id to entries in CacheList).
+func (svc *Service) CacheDrop(ctx context.Context, cwd, id string, all bool) (dropped int, err error) {
 	root, _, err := svc.resolveProject(cwd)
 	if err != nil {
 		return 0, err
@@ -234,13 +238,18 @@ func (svc *Service) CacheDrop(ctx context.Context, cwd, treeHash string, all boo
 	}
 
 	var toDrop []cachestate.CacheEntry
-	if all {
+	switch {
+	case all:
 		for _, e := range cs.Entries {
 			toDrop = append(toDrop, e)
 		}
-	} else if treeHash != "" {
-		if e, ok := cs.Entries[treeHash]; ok {
-			toDrop = append(toDrop, e)
+	case id != "":
+		// Match either identifier — the MCP surface passes the stash_id (what an
+		// agent reads out of codemap_cache_list), the CLI passes the tree hash.
+		for _, e := range cs.Entries {
+			if e.TreeHash == id || e.StashID == id {
+				toDrop = append(toDrop, e)
+			}
 		}
 	}
 

@@ -81,7 +81,7 @@ directory) and return JSON.
 | `codemap_cache_save` | Save the current index (graph + vectors) to the fcheap stash vault, keyed by a tree hash — two identical working trees share one entry |
 | `codemap_cache_restore` | Restore a matching fcheap cache entry (same tree hash + embedding profile), skipping extraction + embedding entirely; a miss is a no-op |
 | `codemap_cache_list` | List cached indexes for a project (stash IDs, tree hashes, dates) |
-| `codemap_cache_drop` | Drop a cached index by `stash_id`, or all cached indexes for the project |
+| `codemap_cache_drop` | Drop a cached index by `stash_id` or `tree_hash` (from `codemap_cache_list`), or all cached indexes for the project |
 
 The two an agent reaches for first: **`codemap_context`** bundles everything about a symbol
 (definition, callers, callees, covering tests, blast radius) in **one call** instead of four, and

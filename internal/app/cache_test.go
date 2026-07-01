@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/cachestate"
+	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/abdul-hamid-achik/codemap/internal/snapshot"
 )
@@ -184,5 +185,77 @@ func TestCacheStatePathNonEmpty(t *testing.T) {
 	statePath := cachestate.StatePath("testrepo123")
 	if statePath == "" {
 		t.Fatal("StatePath returned empty")
+	}
+}
+
+// TestCacheDropMatchesEitherIdentifier pins P0-02: codemap_cache_drop must
+// accept either the stash_id an agent gets from codemap_cache_list OR the
+// tree_hash. The prior implementation only matched the tree_hash and silently
+// no-op'd on a stash_id. Seeds a cachestate entry directly so the test doesn't
+// depend on fcheap.
+func TestCacheDropMatchesEitherIdentifier(t *testing.T) {
+	svc, root, cleanup := setupCacheProject(t)
+	defer cleanup()
+
+	if _, err := svc.Index(context.Background(), root, index.Options{}, false); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+
+	rh := git.RepoHash(root)
+	csPath := cachestate.StatePath(rh)
+	entry := cachestate.CacheEntry{
+		StashID:          "fake_stash_for_P0_02",
+		TreeHash:         "fake_tree_for_P0_02",
+		EmbeddingProfile: "fake/fake/768",
+		NodeCount:        1,
+	}
+	seed := func() {
+		state := &cachestate.State{
+			Schema:   "cache-v1",
+			RepoRoot: root,
+			RepoHash: rh,
+			Entries:  map[string]cachestate.CacheEntry{entry.TreeHash: entry},
+		}
+		if err := state.Save(csPath); err != nil {
+			t.Fatalf("seed cachestate.Save: %v", err)
+		}
+	}
+	seed()
+
+	// 1. drop by stash_id (the MCP surface; this was the silent no-op bug).
+	dropped, err := svc.CacheDrop(context.Background(), root, entry.StashID, false)
+	if err != nil {
+		t.Fatalf("drop by stash_id: %v", err)
+	}
+	if dropped != 1 {
+		t.Fatalf("drop by stash_id: want dropped=1, got %d", dropped)
+	}
+
+	// 2. drop by tree_hash (the CLI --tree surface; still must work).
+	seed()
+	dropped, err = svc.CacheDrop(context.Background(), root, entry.TreeHash, false)
+	if err != nil {
+		t.Fatalf("drop by tree_hash: %v", err)
+	}
+	if dropped != 1 {
+		t.Fatalf("drop by tree_hash: want dropped=1, got %d", dropped)
+	}
+
+	// 3. drop by an id that doesn't match anything — silent no match, no error,
+	//    pointer file is unchanged (callers can distinguish via dropped==0).
+	seed()
+	dropped, err = svc.CacheDrop(context.Background(), root, "no_such_id_at_all", false)
+	if err != nil {
+		t.Fatalf("drop by bogus id: %v", err)
+	}
+	if dropped != 0 {
+		t.Fatalf("drop by bogus: want dropped=0, got %d", dropped)
+	}
+	state2, err := cachestate.Load(csPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(state2.Entries) != 1 {
+		t.Fatalf("bogus drop must not touch state, got %d entries", len(state2.Entries))
 	}
 }
