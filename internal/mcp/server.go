@@ -261,7 +261,9 @@ type cacheListInput struct {
 }
 
 type cacheDropInput struct {
-	StashID string `json:"stash_id" jsonschema:"fcheap stash ID to remove from the cache vault"`
+	// StashID is the stash id or tree hash to drop (both are accepted so agents
+	// can pass what they got from codemap_cache_list). Required unless All=true.
+	StashID string `json:"stash_id,omitempty" jsonschema:"stash id OR tree hash from codemap_cache_list; required unless all=true"`
 	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	All     bool   `json:"all,omitempty" jsonschema:"drop ALL cached indexes for this project (not just one)"`
 }
@@ -482,8 +484,21 @@ func (s *Server) handleCacheList(ctx context.Context, _ *sdkmcp.CallToolRequest,
 }
 
 func (s *Server) handleCacheDrop(ctx context.Context, _ *sdkmcp.CallToolRequest, in cacheDropInput) (*sdkmcp.CallToolResult, any, error) {
+	if in.StashID == "" && !in.All {
+		return errResult("specify a stash_id/tree_hash or all:true (tip: codemap_cache_list returns the identifier to drop)"), nil, nil
+	}
 	dropped, err := s.svc.CacheDrop(ctx, cwdOf(in.Path), in.StashID, in.All)
-	return result(map[string]any{"dropped": dropped}, err)
+	if err != nil {
+		return result(nil, err)
+	}
+	out := map[string]any{"dropped": dropped}
+	if !in.All && dropped == 0 {
+		out["matched"] = false
+		out["note"] = "no cache entry matches the given identifier (use codemap_cache_list to find the right stash_id or tree_hash)"
+	} else {
+		out["matched"] = true
+	}
+	return result(out, nil)
 }
 
 func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, in semanticInput) (*sdkmcp.CallToolResult, any, error) {
