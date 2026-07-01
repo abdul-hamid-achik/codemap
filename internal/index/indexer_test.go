@@ -608,3 +608,81 @@ func main() { _ = cmd }
 		t.Errorf("a function value must not create call-graph callers, got %+v", callers)
 	}
 }
+
+// TestIndexFilesRebuildsInboundEdges pins P0-04: when a file changes, the
+// incremental IndexFiles path used to drop (via the edges FK CASCADE) every
+// inbound call edge from unchanged files into the changed file, and never
+// rebuild them — so callers-of-edited-symbols returned a confidently-empty
+// answer. The fix expands the changed set with every file that has edges
+// targeting nodes in a changed file (SourceFilesTargeting), so the
+// re-extraction of those source files refreshes their outbound refs.
+func TestIndexFilesRebuildsInboundEdges(t *testing.T) {
+	g, v := newStores(t)
+	dir := setupProject(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+
+	// Full index first — establishes a.go:Helper/Run and b.go:Other + the
+	// Other→Run name-based edge.
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: Other has Run as a callee in the name-based graph.
+	var hasRunEdge bool
+	otherCallees, err := g.Callees(pid, "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasRunEdge = false
+	for _, n := range otherCallees {
+		if n.Symbol == "Run" {
+			hasRunEdge = true
+		}
+	}
+	if !hasRunEdge {
+		t.Fatalf("baseline: Other should have Run as a callee, got %+v", otherCallees)
+	}
+
+	// Edit a.go (where Helper+Run live) — change Run's body slightly. This
+	// hash-marks a.go as changed, which (pre-fix) dropped every inbound
+	// edge into a.go's nodes via the FK cascade on the DELETE.
+	writeFile(t, dir, "a.go", "package app\n\n// Helper does work.\nfunc Helper() {}\n\nfunc Run() {\n\tHelper()\n\t_ = 1 // changed body\n}\n")
+	if _, err := ix.IndexFiles(context.Background(), pid, "app", dir, []string{"a.go"}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Post-fix: the expansion found b.go (Other targets Run) and re-extracted
+	// it, so Other→Run is present again. Pre-fix: it'd be gone.
+	otherCallees, err = g.Callees(pid, "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasRunEdge = false
+	for _, n := range otherCallees {
+		if n.Symbol == "Run" {
+			hasRunEdge = true
+		}
+	}
+	// Direct query as a sanity check (Callees filters by source.symbol; we
+	// can also enumerate every edge in the project to confirm at least one
+	// source points at Run).
+	var edgeCount int
+	if err := g.DB().QueryRow("SELECT COUNT(*) FROM edges WHERE edge_type='calls'").Scan(&edgeCount); err != nil {
+		t.Fatal(err)
+	}
+	if !hasRunEdge {
+		// Diagnostic: show all nodes named Run and every calls edge.
+		nodes, _ := g.FindNodesBySymbol(pid, "Run")
+		var srcSym, srcFile, tgtSym, tgtFile string
+		rows, _ := g.DB().Query("SELECT src.symbol, src.file_path, tgt.symbol, tgt.file_path FROM edges e JOIN nodes src ON e.source_id=src.id JOIN nodes tgt ON e.target_id=tgt.id WHERE e.edge_type='calls'")
+		var edges []string
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() {
+				_ = rows.Scan(&srcSym, &srcFile, &tgtSym, &tgtFile)
+				edges = append(edges, fmt.Sprintf("%s/%s -> %s/%s", srcFile, srcSym, tgtFile, tgtSym))
+			}
+		}
+		t.Errorf("P0-04 regression: after editing a.go, Other's callees should still include Run; got %+v (Run nodes=%+v, edges=%v, total edge count=%d)", otherCallees, nodes, edges, edgeCount)
+	}
+}
