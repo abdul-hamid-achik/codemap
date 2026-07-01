@@ -54,7 +54,10 @@ func HeadSHA(ctx context.Context, dir string) (string, error) {
 // post-checkout hook snapshots the branch it just left while HEAD is already on the
 // new one.
 func BranchSHA(ctx context.Context, dir, branch string) (string, error) {
-	return run(ctx, dir, "rev-parse", branch)
+	if !ValidRef(branch) {
+		return "", ErrInvalidRef
+	}
+	return run(ctx, dir, "rev-parse", EndOfOptions, branch)
 }
 
 // IsAncestor reports whether ancestorSHA is an ancestor of (or equal to) ref — so

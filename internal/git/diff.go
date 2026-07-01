@@ -56,9 +56,16 @@ func ChangedFiles(ctx context.Context, dir, mode, since string) ([]ChangedFile, 
 	case "staged":
 		diffArgs = []string{"diff", "-U0", "--no-color", "--cached"}
 	case "since":
+		// `since` is an agent-supplied ref — option-injection guard:
+		// reject empty + leading-dash refs (git parses them as options even past
+		// `--`), and insert EndOfOptions before the ref so the guard is enforced
+		// server-side even if a future caller forgets the cheap check.
 		// Trailing `--` separates the revision from pathspecs so a value can't be
-		// reinterpreted as a path; codemap_branch_switch already validates the ref.
-		diffArgs = []string{"diff", "-U0", "--no-color", since, "--"}
+		// reinterpreted as a path.
+		if !ValidRef(since) {
+			return nil, ErrInvalidRef
+		}
+		diffArgs = []string{"diff", "-U0", "--no-color", EndOfOptions, since, "--"}
 	default: // "working"
 		// Diff against HEAD so both staged and unstaged tracked edits show. On an
 		// unborn branch (no HEAD) there's nothing to diff against, so merge the index
