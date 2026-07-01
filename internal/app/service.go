@@ -1572,21 +1572,34 @@ type HotspotsReport struct {
 	Hotspots []HotspotRef `json:"hotspots"`
 }
 
-// OrphansReport is returned by Orphans.
+// OrphansReport is returned by Orphans. Resolution carries the same
+// call-graph-unavailable signal as ImpactReport/ContextReport (B71), so
+// an agent never sees "every function is dead" on a TS/JS/Python project
+// without --precise (where the lack of call edges is a *lack of data*,
+// not a positive signal that the code is unreachable).
 type OrphansReport struct {
-	Project string      `json:"project"`
-	Orphans []SymbolRef `json:"orphans"`
+	Project    string      `json:"project"`
+	Orphans    []SymbolRef `json:"orphans"`
+	Resolution string      `json:"resolution,omitempty"` // P1-08: "none" when no call graph is available; "name" otherwise
+	Note       string      `json:"note,omitempty"`       // P1-08: shown when the orphan list is unreliable (no call graph yet)
 }
 
-// PathReport is returned by Path.
+// PathReport is returned by Path. Resolution is the same call-graph-
+// unavailable signal as ImpactReport (B71): when the project has no
+// call graph (TS/JS/Python without --precise), Path assertions like
+// "no call path" are not "these two are not connected" — they are
+// "we don't know whether they're connected" and must be flagged as
+// such so the agent doesn't act on a confidently-empty answer.
 type PathReport struct {
 	From        string             `json:"from"`
 	To          string             `json:"to"`
 	Project     string             `json:"project"`
 	Found       bool               `json:"found"`
-	Note        string             `json:"note,omitempty"` // set when an endpoint isn't a symbol in the project
+	Resolution  string             `json:"resolution,omitempty"` // P1-08: "none" when no call graph is available
+	Note        string             `json:"note,omitempty"`       // set when an endpoint isn't a symbol in the project
 	Path        []SymbolRef        `json:"path"`
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes pinned to this from→to path
+	Stale       bool               `json:"stale,omitempty"`       // P1-08 (O92): index drifted from disk; reindex before trusting the path
 }
 
 // project resolves cwd to a registered project id. found is false (no error)
@@ -1921,7 +1934,16 @@ func (svc *Service) Orphans(cwd string, limit int) (*OrphansReport, error) {
 	if !found {
 		return rep, nil
 	}
+	// P1-08 (B71): tag with the call-graph-unavailable signal so an agent
+	// never sees a confident "everything is dead" on a project that
+	// has no call graph (TS/JS/Python without --precise).
 	g, _ := svc.s.Graph()
+	if g != nil {
+		rep.Resolution, _ = svc.callGraphUnavailable(g, pid, nil)
+		if rep.Resolution != "" {
+			rep.Note = "orphan list is unreliable — run 'codemap index --precise' to resolve the call graph, then re-check"
+		}
+	}
 	nodes, err := g.Orphans(pid, limit)
 	if err != nil {
 		return nil, err
@@ -1934,11 +1956,20 @@ func (svc *Service) Orphans(cwd string, limit int) (*OrphansReport, error) {
 
 // Path returns the shortest call path between two symbols.
 func (svc *Service) Path(cwd, from, to string) (*PathReport, error) {
+	// P1-08 (B71): the Path guard runs early so the Resolution/Note are
+	// always populated, even when one endpoint is missing or no path
+	// exists. (The full path-finding logic lives below.)
 	pid, name, found, err := svc.project(cwd)
 	if err != nil {
 		return nil, err
 	}
 	rep := &PathReport{From: from, To: to, Project: name, Path: []SymbolRef{}}
+	if g, _ := svc.s.Graph(); g != nil {
+		rep.Resolution, _ = svc.callGraphUnavailable(g, pid, nil)
+		if st, _ := svc.Staleness(cwd); st != nil && st.Any() {
+			rep.Stale = true
+		}
+	}
 	if !found {
 		return rep, nil
 	}
