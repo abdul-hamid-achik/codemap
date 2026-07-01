@@ -47,6 +47,11 @@ type Info struct {
 	StartedAt     string `json:"started_at"`
 	LastReindexAt string `json:"last_reindex_at,omitempty"`
 	Watching      bool   `json:"watching"`
+	// MissingServers is a language → binary map of LSP-backed languages
+	// the project contains whose language server isn't on PATH or failed
+	// to spawn, so the daemon watches Go only. Empty when every present
+	// language-server language is wired (P0-11).
+	MissingServers map[string]string `json:"missing_servers,omitempty"`
 }
 
 // Daemon is a running background indexer for one project.
@@ -152,6 +157,23 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 		}
 	}
 	d.ix = index.New(g, vec, emb, sess.Config.Index)
+
+	// Pin P0-11: pre-fix the daemon's indexer was built with only gosrc
+	// registered, so onChange's IndexFiles path silently skipped any
+	// TS/JS/Python/Vue edit (`ext, ok := ix.extractors[lang]; if !ok {
+	// continue }`). The daemon claimed watching:true while the index
+	// for non-Go languages drifted until a manual --reindex. Spawn the
+	// appropriate language-server extractors for the languages the
+	// project actually contains, so IndexFiles routes those edits
+	// through the same path the one-shot index used. Missing/failed
+	// servers land in d.info.MissingServers for status reporting.
+	if missing, lspErr := d.ix.RegisterLSPForProject(ctx, d.root); lspErr != nil {
+		// Non-fatal: best-effort LSP registration. Fall back to Go-only
+		// watching rather than aborting startup.
+		fmt.Fprintf(os.Stderr, "codemap daemon: LSP registration error: %v\n", lspErr)
+	} else {
+		d.info.MissingServers = missing
+	}
 
 	w, err := index.NewWatcher(d.root, index.WatchConfig{
 		Debounce: cfg.Debounce,
