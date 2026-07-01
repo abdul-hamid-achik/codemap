@@ -40,7 +40,16 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	// here would collide with the daemon's exclusive veclite lock (the
 	// "database file is locked by PID ..." error). Delegating keeps the same
 	// output and forwards reindex/precise/no-lsp/no-embed flags.
+	//
+	// Pin P0-08: the daemon's socket is global per data dir, not per-project,
+	// so without a project-identity check here we'd silently reindex the
+	// daemon's own project instead of the user's cwd. Refuse to delegate
+	// when cwd is not inside the daemon's project root.
 	if info := daemon.QueryStatus(); info != nil {
+		cwd, _ := os.Getwd()
+		if ok, reason := daemon.DelegationAllowed(cwd, info); !ok {
+			return fmt.Errorf("%s", reason)
+		}
 		return indexViaDaemon(cmd, info)
 	}
 	sess, err := openSession(cmd)
