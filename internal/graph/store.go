@@ -382,7 +382,13 @@ func (s *Store) GetNode(id int64) (*Node, error) {
 }
 
 // FindNodesBySymbol returns nodes whose symbol matches exactly within a project.
+// P1-04: a blank symbol would match every file node (stored with Symbol="");
+// guard with `symbol != ” AND symbol IS NOT NULL` so a blank input never
+// produces a file-node flood, even if a caller forgot the service-level check.
 func (s *Store) FindNodesBySymbol(projectID int64, symbol string) ([]Node, error) {
+	if symbol == "" {
+		return nil, nil
+	}
 	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND symbol=? ORDER BY file_path, start_line", projectID, symbol)
 }
 
