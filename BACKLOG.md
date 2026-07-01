@@ -24,6 +24,23 @@ radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
+## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
+All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see
+`~/notes/projects/codemap/backlog/` for the per-plan files). Highlights:
+`codemap_cache_drop` accepts both stash_id and tree_hash; git ref validation blocks
+`--since=--output=/path` (live-reproed before the fix — wrote `/tmp/PWNED` via `git diff
+--output`); daemon `indexMu` is scoped to the reindex case (no more self-deadlock on a
+second request on the same connection); the daemon refuses cross-project delegation
+with an actionable hint; the throttle singleflight loser never returns nil vectors;
+`index --watch` closes the session before the daemon handoff (no more veclite lock
+collision); `index --precise` is now idempotent (no more doubling precise-edge counts);
+incremental reindex rebuilds inbound call edges (no more confidently-empty callers after
+an edit); `index --reindex` no longer silently restores a stale cache (the restore key
+is now derived from the disk, not the index_state rows); the daemon watcher registers
+LSP extractors on startup so TS/JS/Python/Vue edits are no longer silently dropped.
+13 commits, 3 tags (v0.20.1, v0.20.2, v0.21.0). `task check` clean. Detailed per-P0 notes in
+the vault under `sprint-2026-07-01.md`.
+
 ## ✅ v0.19.0 — agent-harness intelligence (released 2026-06-29)
 Five new one-call agent commands (CLI + MCP twin, **34 tools**): `review` (diff-scoped impact + regression
 test selection), `read-order` (entrypoint/hub ranking), `file-impact` (file dependents + blast + safe-to-delete
