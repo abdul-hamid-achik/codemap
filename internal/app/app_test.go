@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
@@ -1861,4 +1862,65 @@ func TestStatusUnregistered(t *testing.T) {
 	if st.Registered {
 		t.Error("fresh dir should not be registered")
 	}
+}
+
+// TestImpactBlankSymbolRejected pins P1-04: pre-fix Impact("") returned
+// Found:true with every file as a "location" (a confidently-wrong
+// answer for the agent audience). The fix: the service seam rejects
+// blank symbols up front with a clear Note and Found:false.
+func TestImpactBlankSymbolRejected(t *testing.T) {
+	isolate(t)
+	svc := NewService(noopSess(t))
+	for _, in := range []string{"", " ", "\t", "   \n"} {
+		rep, err := svc.Impact(t.TempDir(), in, 3)
+		if err != nil {
+			t.Errorf("Impact(%q) errored: %v", in, err)
+			continue
+		}
+		if rep.Found {
+			t.Errorf("Impact(%q) must return Found:false for a blank symbol (P1-04 regression — pre-fix it matched every file node)", in)
+		}
+		if rep.Note == "" {
+			t.Errorf("Impact(%q) must include a Note explaining the rejection", in)
+		}
+	}
+}
+
+// TestCallersCalleesBlankSymbolRejected covers the same P1-04 contract
+// on the two RelationReport-shaped read queries.
+func TestCallersCalleesBlankSymbolRejected(t *testing.T) {
+	isolate(t)
+	svc := NewService(noopSess(t))
+	for name, fn := range map[string]func(string, string) (*RelationReport, error){
+		"Callers": svc.Callers,
+		"Callees": svc.Callees,
+	} {
+		for _, in := range []string{"", "  "} {
+			rep, err := fn(t.TempDir(), in)
+			if err != nil {
+				t.Errorf("%s(%q) errored: %v", name, in, err)
+				continue
+			}
+			if rep.Found {
+				t.Errorf("%s(%q) must return Found:false for a blank symbol (P1-04 regression)", name, in)
+			}
+		}
+	}
+}
+
+// noopSess returns a Session with the bare minimum for service calls
+// that reject before they reach the graph layer. It deliberately
+// doesn't open a database — the validators must short-circuit.
+func noopSess(t *testing.T) *Session {
+	t.Helper()
+	// Open a temp-home so cfg.New() doesn't fail, but never call Open()
+	// on the database (the path that needs it never runs in this test).
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	cfg := *config.DefaultConfig()
+	return &Session{Config: &cfg}
 }

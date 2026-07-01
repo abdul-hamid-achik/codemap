@@ -529,6 +529,9 @@ func (svc *Service) AllAnnotations(cwd string) (*AnnotationsReport, error) {
 
 // NodeAnnotations lists annotations attached to a symbol.
 func (svc *Service) NodeAnnotations(cwd, symbol string) (*AnnotationsReport, error) {
+	if !validSymbol(symbol) {
+		return nil, fmt.Errorf("symbol name is required (a blank symbol matches every file node)")
+	}
 	return svc.annotations(cwd, graph.AnnotationNode, symbol)
 }
 
@@ -685,7 +688,20 @@ type SemanticReport struct {
 }
 
 // Callers returns the functions/methods that call symbol.
+// validSymbol reports whether s is a non-blank symbol identifier. P1-04:
+// the service seam must reject blank symbols before any graph query — a
+// blank input was matching every file node (which are stored with
+// Symbol=""), giving a confidently-wrong "Found:true" for every file.
+// Read queries return a graceful Found:false + note; write queries
+// return an error so the agent sees a real problem.
+func validSymbol(s string) bool {
+	return strings.TrimSpace(s) != ""
+}
+
 func (svc *Service) Callers(cwd, symbol string) (*RelationReport, error) {
+	if !validSymbol(symbol) {
+		return &RelationReport{Found: false, Resolution: "none", Note: "supply a non-empty symbol name (a blank symbol would match every file node)"}, nil
+	}
 	rep, err := svc.relation(cwd, symbol, (*graph.Store).Callers)
 	if err != nil {
 		return nil, err
@@ -695,6 +711,9 @@ func (svc *Service) Callers(cwd, symbol string) (*RelationReport, error) {
 
 // Callees returns the functions/methods that symbol calls.
 func (svc *Service) Callees(cwd, symbol string) (*RelationReport, error) {
+	if !validSymbol(symbol) {
+		return &RelationReport{Found: false, Resolution: "none", Note: "supply a non-empty symbol name (a blank symbol would match every file node)"}, nil
+	}
 	rep, err := svc.relation(cwd, symbol, (*graph.Store).Callees)
 	if err != nil {
 		return nil, err
@@ -1180,6 +1199,12 @@ type ImpactReport struct {
 // callers, the transitive blast radius (up to depth hops), and which of those
 // are tests (coverage). depth <= 0 defaults to 3.
 func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error) {
+	// P1-04: reject blank symbols up front. A blank input would match
+	// every file node (stored with Symbol="") and report Found:true
+	// with every file as a location — a confidently-wrong answer.
+	if !validSymbol(symbol) {
+		return &ImpactReport{Found: false, Note: "supply a non-empty symbol name (a blank symbol would match every file node)"}, nil
+	}
 	if depth <= 0 {
 		depth = 3
 	}
