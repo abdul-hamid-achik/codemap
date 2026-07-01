@@ -117,7 +117,7 @@ func (t *ThrottledProvider) embed(ctx context.Context, texts []string, lim *rate
 	// concurrent embed calls with the exact same set of misses share one batch.
 	// Rate-limit at the batch level (one token per batch, not per text).
 	batchKey := batchHash(order)
-	result, err, _ := t.group.Do(batchKey, func() (any, error) {
+	_, err, _ := t.group.Do(batchKey, func() (any, error) {
 		// Re-check cache inside singleflight — another batch may have filled some.
 		var missOrder []string
 		var missTexts []string
@@ -167,11 +167,26 @@ func (t *ThrottledProvider) embed(ctx context.Context, texts []string, lim *rate
 	if err != nil {
 		return nil, err
 	}
-	// The singleflight result is the same `out` slice (shared across concurrent
-	// callers with the same batchKey). For callers whose misses were filled by
-	// another batch, the out slice is already populated. For the winner, it
-	// populated out. Either way, out is correct.
-	_ = result.([][]float32)
+	// Pin P0-09: the singleflight WINNER populated its own `out` slice and
+	// cached every miss — but the LOSER's slice is a separate allocation, so
+	// any text the winner filled (via either inner.Embed or post-batch
+	// putCache) is still nil for the loser. Refill every still-nil entry from
+	// the cache the winner just warmed; this is cheap (single map lookup per
+	// miss) and is the only way the loser gets correct vectors for shared
+	// hashes. If a hash somehow never made it into the cache (should never
+	// happen), refuse to return it — nil vectors silently poison semantic
+	// search downstream, so failing closed is the right tradeoff.
+	for i := range out {
+		if out[i] != nil {
+			continue
+		}
+		h := hashText(texts[i])
+		if v, ok := t.getCache(h); ok {
+			out[i] = v
+			continue
+		}
+		return nil, fmt.Errorf("throttle: vector missing for hash %s (text %d of %d); cannot return nil vector to caller", h, i, len(texts))
+	}
 	return out, nil
 }
 
