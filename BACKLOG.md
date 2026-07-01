@@ -569,8 +569,9 @@ _v0.14.0 shipped 2026-06-25._
 > IndexProject. The Go path is byte-for-byte untouched; queries are backend-blind (generic
 > extract.Symbol/Reference) so callers/impact/hotspots/path/semantic work with ZERO query changes. Pure-Go
 > (spawned subprocess, like gopls; no tree-sitter/CGO). Honest scoping: TS/JS+Python are call-graph-capable;
-> Docker/HTML/CSS/Vue are STRUCTURE-ONLY (Pass-2b, never built — see Deferred). **Vue via Volar = dead end**
-> for the generic documentSymbol/callHierarchy driver (#133); realistic path is parsing the SFC `<script>`.
+> Docker/HTML/CSS are STRUCTURE-ONLY (Pass-2b, never built — see Deferred). **Vue via Volar = dead end**
+> for the generic documentSymbol/callHierarchy driver (#133); shipped instead via `vuesrc` parsing the
+> SFC `<script>` block into the TS pipeline (see the Deferred section — Vue / SFC support, now SHIPPED).
 
 ## 🎯 Epic — precise call resolution (go/types) — **SHIPPED** (v0.5.0)
 > Design record. Name-based over-matching is eliminated by resolving calls with pure-Go `go/types`. Opt-in
@@ -586,10 +587,12 @@ _v0.14.0 shipped 2026-06-25._
 - **tree-sitter backend** (TD1/R2) — needs CGO, breaks the `CGO_ENABLED=0` pure-Go release model; stays
   behind the `treesitter` build tag, out of release binaries. Target for **0.2** (round out language
   coverage + large-repo speed), ideally via a pure-Go WASM (wazero + tree-sitter.wasm) path, never default
-  CGO. Q-CGO (below) still open.
-- **Vue / SFC support** — Volar dead-end (#133); realistic path is parsing the SFC `<script>` into the TS
-  pipeline (couples to the deferred markup/tree-sitter layer). `.vue`/`.html`/`.css` mapped only to report "planned".
-- **Structure-only markup layer (Pass-2b)** — Docker/HTML/CSS/Vue as reference/import edges by path; sequenced last, unbuilt.
+- **Vue / SFC support** — **SHIPPED** (see `internal/extract/vuesrc`). `<script>`/`<script setup>`
+  block content is routed to the same `typescript-language-server` delegate that indexes plain `.ts`/`.js`
+  files (a vue-only project spawns the server itself); symbol lines are mapped back onto the original `.vue`
+  file. Template/style blocks and `--precise` call edges for Vue are not yet supported (follow-up). `.html`/`.css`
+  remain recognized-but-unindexed (planned).
+- **Structure-only markup layer (Pass-2b)** — Docker/HTML/CSS as reference/import edges by path; sequenced last, unbuilt (Vue SFC script-block indexing shipped separately — see above).
 - **Named vector spaces** (TD2) — docstring/signature/comment spaces (veclite supports them) → 0.2+. One space today.
 - **Domain-entity / LogicLens nodes** (TD3) — needs LLM enrichment at index time → Phase 5.
 - **Daemon mode** — lazy-open DB (TD5) is the v1 multi-process answer; a shared daemon was not built.

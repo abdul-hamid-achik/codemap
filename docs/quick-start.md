@@ -16,8 +16,11 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 
 > Indexes **Go** (full graph), **TypeScript + JavaScript** (one `typescript-language-server`), and
 > **Python** (`pyright-langserver`) — structure + semantic search always, plus a precise call graph
-> under `--precise` when the relevant server is installed (`--no-lsp` to skip). Other languages are
-> recognized and reported as skipped (more in progress).
+> under `--precise` when the relevant server is installed (`--no-lsp` to skip). **Vue SFCs** (`.vue`)
+> are indexed too: each `<script>`/`<script setup>` block is routed to the same
+> `typescript-language-server` (so `codemap_symbols`/`codemap_find`/`codemap_source` see the real
+> declarations, with lines mapped back onto the `.vue` file). Other languages are recognized and
+> reported as skipped (HTML/CSS support is planned).
 
 ## Index a project
 

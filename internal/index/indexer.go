@@ -31,6 +31,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/extract/gosrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/typesrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/vuesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
@@ -135,7 +136,11 @@ type Indexer struct {
 // is the post-walk unsupported map: recognized languages with no extractor yet).
 // A language whose server isn't on PATH, or fails to spawn, is recorded in
 // res.MissingServers and skipped — never fatal. Returns true if it registered at
-// least one extractor (so the caller re-walks to route those files).
+// least one extractor (so the caller re-walks to route those files). Vue (.vue
+// SFCs) is handled separately by registerVue below: its files aren't served by
+// any DefaultServers spec directly — a vuesrc.Extractor delegates their
+// <script>/<script setup> block content to the TypeScript/JavaScript extractor
+// this loop registers.
 func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[string]int, res *Result) bool {
 	registered := false
 	for _, spec := range lspsrc.DefaultServers {
@@ -172,7 +177,98 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 		}
 		registered = true
 	}
+	if present["vue"] > 0 && ix.registerVue(ctx, root, res) {
+		registered = true
+	}
 	return registered
+}
+
+// registerVue wires a vuesrc extractor for "vue" — it delegates script-block
+// parsing to the TypeScript/JavaScript extractor(s) the loop above registered.
+// A project with .vue files but no plain .ts/.js files never triggers the
+// typescript-language-server spec above (present["typescript"] and
+// present["javascript"] are both 0 in that case), so this spawns it here if
+// needed, purely to serve Vue's <script>/<script setup> blocks. If only one of
+// typescript/javascript ended up registered (e.g. real .js files present but no
+// real .ts files), the other is bound on the SAME server connection too — a
+// .vue file's script blocks can use either lang regardless of what plain files
+// happen to exist in the project, and binding is cheap (one more languageId on
+// an already-running process). Never fatal: a missing/failed server is
+// recorded in res.MissingServers["vue"] and .vue files stay in Unsupported,
+// same as any other missing-server language.
+func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result) bool {
+	ts := ix.extractors["typescript"]
+	js := ix.extractors["javascript"]
+
+	if ts == nil && js == nil {
+		spec := tsServerSpec()
+		if spec.Cmd == "" {
+			noteMissingServer(res, "vue", "typescript-language-server")
+			return false
+		}
+		if _, err := exec.LookPath(spec.Cmd); err != nil {
+			noteMissingServer(res, "vue", spec.Cmd)
+			return false
+		}
+		owner, err := lspsrc.New(ctx, spec.Langs[0].Lang, spec.Langs[0].LangID, root, spec.Cmd, spec.Args...)
+		if err != nil {
+			noteMissingServer(res, "vue", spec.Cmd)
+			return false
+		}
+		ix.Register(owner)
+		ix.closers = append(ix.closers, owner)
+		for _, lb := range spec.Langs[1:] {
+			ix.Register(owner.Bind(lb.Lang, lb.LangID))
+		}
+		ts = ix.extractors["typescript"]
+		js = ix.extractors["javascript"]
+	} else {
+		if ts == nil {
+			if b := bindOther(js, "typescript", "typescript"); b != nil {
+				ts = b
+				ix.Register(ts)
+			}
+		}
+		if js == nil {
+			if b := bindOther(ts, "javascript", "javascript"); b != nil {
+				js = b
+				ix.Register(js)
+			}
+		}
+	}
+
+	if ts == nil && js == nil {
+		noteMissingServer(res, "vue", "typescript-language-server")
+		return false
+	}
+	ix.Register(vuesrc.New(ts, js))
+	return true
+}
+
+// bindOther binds an additional codemap language onto the SAME language-server
+// connection e already uses, via lspsrc.Extractor.Bind. Returns nil if e isn't
+// an *lspsrc.Extractor (defensive — every current registration of "typescript"/
+// "javascript" is, but this degrades gracefully rather than panicking if that
+// ever changes).
+func bindOther(e extract.Extractor, lang, langID string) extract.Extractor {
+	if le, ok := e.(*lspsrc.Extractor); ok {
+		return le.Bind(lang, langID)
+	}
+	return nil
+}
+
+// tsServerSpec returns the lspsrc.DefaultServers entry that serves
+// "typescript" (the typescript-language-server spec), or the zero value if
+// none is configured (Cmd == "" — callers treat that as "no server").
+func tsServerSpec() lspsrc.ServerSpec {
+	for _, s := range lspsrc.DefaultServers {
+		for _, lb := range s.Langs {
+			if lb.Lang == "typescript" {
+				return s
+			}
+		}
+	}
+	return lspsrc.ServerSpec{}
 }
 
 // pruneDeleted removes nodes, vectors, and index state for files that were

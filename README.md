@@ -19,10 +19,11 @@ instead of dozens of file reads.
   (name-based by default, exact via `go/types` with `--precise`) and **defines** edges (file → symbol).
   Test coverage is derived by walking the call graph to test nodes. Stored in pure-Go SQLite,
   queryable offline. Indexes **Go** (stdlib `go/parser`, full call graph), **TypeScript + JavaScript**
-  (one `typescript-language-server`, calls resolving *across* the `.ts`↔`.js` boundary), and **Python**
-  (`pyright-langserver`) — the LSP-backed languages give symbols + structure always, plus a **precise
-  call graph** under `--precise`, so `callers`/`impact`/`hotspots`/`path` work for them too.
-  Structure-only markup (Vue/HTML/CSS/Docker) is next. Semantic search is
+  (one `typescript-language-server`, calls resolving *across* the `.ts`↔`.js` boundary), **Python**
+  (`pyright-langserver`), and **Vue SFCs** (`.vue` — `<script>`/`<script setup>` blocks routed to the
+  same `typescript-language-server`, symbol lines mapped back onto the original `.vue` file) — the
+  LSP-backed languages give symbols + structure always, plus a **precise call graph** under
+  `--precise`, so `callers`/`impact`/`hotspots`/`path` work for them too. Semantic search is
   language-agnostic.
 - **Semantic search** — every node's source is embedded (Ollama `nomic-embed-text`, 768-dim)
   into [veclite](https://github.com/abdul-hamid-achik/veclite); vector + BM25 hybrid search.
@@ -112,13 +113,16 @@ brew install abdul-hamid-achik/tap/codemap
 
 | Language | How | Extensions | Call graph |
 |---|---|---|---|
-| **Go** | built-in `go/parser` (+ `go/types` for `--precise`) | `.go` | name-based by default; exact with `--precise` |
 | **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` | `--precise` only |
 | **Python** | `pyright-langserver` | `.py` | `--precise` only |
+| **Vue SFC** | `typescript-language-server` via `vuesrc` — `<script>`/`<script setup>` block content is extracted and routed to the TS/JS delegate; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
+
+> Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is delegated to the same `typescript-language-server` connection that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns the server itself to serve the script blocks.
 
 The language servers auto-enable when installed — run [`codemap doctor`](docs/cli.md) to see which are
-detected, or `--no-lsp` to skip. Structure-only markup (Vue/HTML/CSS) is planned; other recognized
-languages are reported as skipped. Semantic search is language-agnostic.
+detected, or `--no-lsp` to skip. HTML/CSS remain recognized-but-unindexed (planned); Vue SFCs
+  are now indexed (see above). Other recognized languages are reported as skipped.
+  Semantic search is language-agnostic.
 
 ### From source
 
