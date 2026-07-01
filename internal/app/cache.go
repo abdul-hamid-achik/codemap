@@ -113,7 +113,15 @@ func (svc *Service) CacheRestore(ctx context.Context, cwd string) (restored bool
 		return false, "", nil // not indexed yet — nothing to restore into
 	}
 
-	treeHash, err := cachestate.TreeHash(g, p.ID)
+	// Pin P0-01: the cache key is the working tree's hash (read from disk),
+	// not the index_state's hash (read from DB). Pre-fix, TreeHash-from-DB
+	// was computed from the last index's recorded hashes, so a working tree
+	// edited after the last index still produced a tree hash equal to the
+	// last indexed tree hash → every --reindex silently restored a stale
+	// cache. WorkingTreeHash walks the disk and uses the same SHA-256
+	// per-file hashes the indexer would compute on the same walk, so a
+	// hit means "disk matches this snapshot" — not "DB matches itself".
+	treeHash, err := cachestate.WorkingTreeHash(root, svc.s.Config.Index.Exclude, svc.s.Config.Index.MaxFileBytes)
 	if err != nil {
 		return false, "", err
 	}

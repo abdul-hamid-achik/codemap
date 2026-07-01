@@ -9,9 +9,11 @@ package cachestate
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -168,4 +170,120 @@ func tagValue(tags []string, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// WorkingTreeHash walks the disk rooted at root and produces a hash of sorted
+// (relpath, content_sha256) pairs. The output is byte-identical to TreeHash
+// when the working tree is in sync with the last index, so cache hits still
+// work; when the tree has drifted, the hash differs and the cache is correctly
+// missed (P0-01: the old TreeHash-from-DB key always matched the DB, so a stale
+// cache could be restored even after the user had edited the working tree).
+//
+// exclude + maxFileBytes mirror the indexer's walk so the on-disk file set
+// matches what an index pass would have seen. We re-implement the glob
+// matcher here (small, no shared dep) — keep in sync with internal/index.
+func WorkingTreeHash(root string, exclude []string, maxFileBytes int) (string, error) {
+	type entry struct {
+		FilePath string
+		FileHash string
+	}
+	entries := make([]entry, 0, 64)
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			rel = path
+		}
+		if d.IsDir() {
+			if path != root && (strings.HasPrefix(name, ".") || matchExcludeDisk(exclude, rel)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if matchExcludeDisk(exclude, rel) {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if maxFileBytes > 0 && info.Size() > int64(maxFileBytes) {
+			return nil
+		}
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return nil
+		}
+		sum := sha256.Sum256(data)
+		entries = append(entries, entry{
+			FilePath: filepath.ToSlash(rel),
+			FileHash: hex.EncodeToString(sum[:]),
+		})
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].FilePath < entries[j].FilePath })
+	h := sha1.New()
+	for _, e := range entries {
+		h.Write([]byte(e.FilePath))
+		h.Write([]byte{0})
+		h.Write([]byte(e.FileHash))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// matchExcludeDisk is a minimal copy of internal/index.matchExclude (kept in
+// sync by hand) — glob match for a slash-normalized relative path against a
+// list of patterns, supporting the no-slash / **/ / anchored forms the
+// indexer uses.
+func matchExcludeDisk(patterns []string, rel string) bool {
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+	if rel == "" {
+		return false
+	}
+	segs := strings.Split(rel, "/")
+	for _, pat := range patterns {
+		pat = strings.Trim(filepath.ToSlash(pat), "/")
+		if pat == "" {
+			continue
+		}
+		if !strings.ContainsRune(pat, '/') {
+			for _, s := range segs {
+				if ok, _ := filepath.Match(pat, s); ok {
+					return true
+				}
+			}
+			continue
+		}
+		anyDepth := strings.HasPrefix(pat, "**/")
+		parts := strings.Split(strings.TrimPrefix(pat, "**/"), "/")
+		last := 0
+		if anyDepth {
+			last = len(segs) - 1
+		}
+		for i := 0; i <= last && i < len(segs); i++ {
+			if segPrefixMatchDisk(parts, segs[i:]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func segPrefixMatchDisk(parts, segs []string) bool {
+	if len(parts) > len(segs) {
+		return false
+	}
+	for i, p := range parts {
+		if ok, _ := filepath.Match(p, segs[i]); !ok {
+			return false
+		}
+	}
+	return true
 }
