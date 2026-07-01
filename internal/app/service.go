@@ -966,7 +966,7 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 	if err := cl.Initialize(ctx, root); err != nil {
 		return nil, nil, project, err
 	}
-	uri := lsp.URI(absFile)
+	uri, _ := lsp.URI(absFile)
 	if err := cl.DidOpen(uri, langID, string(src)); err != nil {
 		return nil, nil, project, err
 	}
@@ -1054,7 +1054,14 @@ func symbolBase(name string) string {
 }
 
 func uriToRel(uri, root string) string {
-	p := strings.TrimPrefix(uri, "file://")
+	// P1-02: pre-fix did TrimPrefix(uri, "file://") which dropped
+	// percent-encoded chars in the language server's response URI;
+	// a path with a space never matched the project root. PathFromURI
+	// decodes before filepath.Rel.
+	p, err := lsp.PathFromURI(uri)
+	if err != nil || p == "" {
+		return strings.TrimPrefix(uri, "file://")
+	}
 	if rel, err := filepath.Rel(root, p); err == nil {
 		return rel
 	}
