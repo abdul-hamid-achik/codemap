@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -684,5 +685,40 @@ func TestIndexFilesRebuildsInboundEdges(t *testing.T) {
 			}
 		}
 		t.Errorf("P0-04 regression: after editing a.go, Other's callees should still include Run; got %+v (Run nodes=%+v, edges=%v, total edge count=%d)", otherCallees, nodes, edges, edgeCount)
+	}
+}
+
+// TestIndexerRegisterLSPForProject pins P0-11 at the indexer layer (the
+// daemon's pre-fix bug was "watcher only re-indexes Go", which traces
+// down to index.New only registering gosrc). The fix is a public
+// RegisterLSPForProject that the daemon calls on startup. We assert it
+// populates the extractors map for the languages present in the project.
+//
+// Gated on the relevant language server being on PATH; otherwise skip.
+func TestIndexerRegisterLSPForProject(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not installed")
+	}
+	g, v := newStores(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.ts"), []byte("export const a = 1;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+	// Pre-fix: the indexer had no typescript extractor registered.
+	if _, ok := ix.extractors["typescript"]; ok {
+		t.Skip("unexpected: typescript already registered (test fixture stale?)")
+	}
+	missing, err := ix.RegisterLSPForProject(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// After the call, typescript + vue extractors are wired.
+	if _, ok := ix.extractors["typescript"]; !ok {
+		t.Errorf("RegisterLSPForProject did not register a typescript extractor: missing=%+v", missing)
+	}
+	// A .ts-only project with the TS server on PATH has no missing servers.
+	if len(missing) != 0 {
+		t.Errorf("expected no missing servers, got %+v", missing)
 	}
 }

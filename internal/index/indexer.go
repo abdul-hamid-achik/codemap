@@ -1379,3 +1379,72 @@ func isGenerated(src []byte) bool {
 	}
 	return false
 }
+
+// RegisterLSPForProject is the public entry point for spawning and registering
+// language-server-backed extractors for the languages the project at root
+// actually contains. The daemon calls this on startup so its IndexFiles path
+// (which only routes to registered extractors) covers TS/JS/Python/Vue, not
+// just Go (P0-11: pre-fix the daemon watched Go only, so any non-Go edit
+// silently went stale while info.Watching stayed true). Returns a
+// MissingServers map for languages whose server isn't on PATH or fails to
+// spawn, so the daemon can surface "watching Go only; install
+// typescript-language-server for TS" in its status.
+//
+// The actual loop body is the same code registerLSP runs inside
+// IndexProject, lifted into a public method so the daemon (which builds
+// its own indexer and never calls IndexProject after the first index) can
+// reuse it.
+func (ix *Indexer) RegisterLSPForProject(ctx context.Context, root string) (map[string]string, error) {
+	res := &Result{}
+	if !ix.detectPresentLanguagesForLSP(root, res) {
+		return res.MissingServers, nil
+	}
+	ix.registerLSP(ctx, root, res.Unsupported, res)
+	return res.MissingServers, nil
+}
+
+// detectPresentLanguagesForLSP does a single WalkDir to learn which
+// language-server languages the project contains, matching the indexer's
+// walk semantics so the daemon's view of "present languages" matches
+// what an index pass would have seen. Extracted from registerLSP so the
+// loop body is testable in isolation.
+func (ix *Indexer) detectPresentLanguagesForLSP(root string, res *Result) bool {
+	found := false
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			rel = path
+		}
+		if ix.excluded(rel) {
+			return nil
+		}
+		lang := extract.LanguageForPath(path)
+		if lang == "" {
+			return nil
+		}
+		if res.Unsupported == nil {
+			res.Unsupported = map[string]int{}
+		}
+		res.Unsupported[lang]++
+		// A recognized language that has an LSP server backing it counts
+		// as "present" — even if no extractor is wired yet, registerLSP
+		// will pick it up.
+		for _, spec := range lspsrc.DefaultServers {
+			for _, lb := range spec.Langs {
+				if lb.Lang == lang {
+					found = true
+					return nil
+				}
+			}
+		}
+		// vue is a separate case in registerLSP.
+		if lang == "vue" {
+			found = true
+		}
+		return nil
+	})
+	return found
+}
