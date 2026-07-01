@@ -1,6 +1,10 @@
 package index
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/abdul-hamid-achik/codemap/internal/config"
+)
 
 // TestMatchExclude pins the exclude glob semantics: bare names match any path
 // segment at any depth, slash patterns anchor at the project root, and a "**/"
@@ -37,7 +41,7 @@ func TestMatchExclude(t *testing.T) {
 	}
 }
 
-// TestExcludeExtraIsAdditive verifies cfg.ExcludeExtra is appended to cfg.Exclude
+// TestExcludeExtraIsAdditive verifies cfg.Index.ExcludeExtra is appended to cfg.Index.Exclude
 // rather than replacing it — the whole point of the field.
 func TestExcludeExtraIsAdditive(t *testing.T) {
 	ix := &Indexer{exclude: append(append([]string{}, "node_modules"), "migrations")}
@@ -49,5 +53,47 @@ func TestExcludeExtraIsAdditive(t *testing.T) {
 	}
 	if ix.excluded("src/app.go") {
 		t.Error("unrelated path should not be excluded")
+	}
+}
+
+// TestExcludeAnchoredDefaults pins P1-11 (B66): pre-fix the default
+// excludes included bare names "env", "build", "target" that matched
+// ANY path segment at ANY depth, so a Go repo\'s "go/build/" or
+// "internal/env/" subpackage was silently excluded. The fix anchors
+// them with a trailing slash, scoping to same-level dirs only.
+func TestExcludeAnchoredDefaults(t *testing.T) {
+	cfg := config.DefaultConfig()
+	for _, want := range []string{"dist/", "build/", "target/", "coverage/", "env/", "venv/"} {
+		found := false
+		for _, pat := range cfg.Index.Exclude {
+			if pat == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("DefaultConfig.Exclude must contain root-anchored %q (P1-11: bare name silently excluded Go subpackages)", want)
+		}
+	}
+	// Sanity: the truly any-depth excludes are still there.
+	for _, want := range []string{"node_modules", "vendor", "__pycache__", "site-packages/"} {
+		found := false
+		for _, pat := range cfg.Index.Exclude {
+			if pat == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("DefaultConfig.Exclude must still contain any-depth %q", want)
+		}
+	}
+	// And the bare-name footguns are GONE.
+	for _, banned := range []string{"env", "build", "target", "dist", "coverage"} {
+		for _, pat := range cfg.Index.Exclude {
+			if pat == banned {
+				t.Errorf("P1-11 regression: DefaultConfig.Exclude must not contain bare %q (matches any-segment-any-depth; silently dropped Go subpackages)", banned)
+			}
+		}
 	}
 }
