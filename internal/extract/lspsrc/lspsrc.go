@@ -154,7 +154,7 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 	res := &extract.FileResult{Path: relPath, Language: e.lang}
 	lines := strings.Split(string(src), "\n")
 	for _, s := range syms {
-		appendSymbols(res, lines, e.lang, "", false, s)
+		appendSymbols(res, lines, e.lang, "", false, relPath, s)
 	}
 	return res, nil
 }
@@ -227,7 +227,7 @@ func (e *Extractor) Close() error {
 // appendSymbols recursively maps an LSP DocumentSymbol (and its children) into
 // extract.Symbols. parentFQN builds a dotted fully-qualified name from nesting
 // (e.g. ClassName.method), which is how class-based languages scope members.
-func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN string, insideCallable bool, s lsp.DocumentSymbol) {
+func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN string, insideCallable bool, relPath string, s lsp.DocumentSymbol) {
 	kind := mapKind(s)
 	// Some servers (notably pyright) report a function's parameters and locals as
 	// nested Variable symbols — skip those so the graph isn't cluttered with param
@@ -243,6 +243,12 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 	// dead-code candidates. Don't index them; still recurse so a genuinely-named
 	// nested declaration is kept, parented to the real enclosing scope (not the
 	// synthesized junk name).
+	// P2-03 (O29): mark test-file functions/methods as KindTest.
+	if kind == extract.KindFunction || kind == extract.KindMethod {
+		if isTestFilePath(relPath) {
+			kind = extract.KindTest
+		}
+	}
 	anon := isAnonymousCallable(s.Name)
 	if anon {
 		kind = ""
@@ -264,6 +270,7 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 			StartLine: s.Range.Start.Line + 1, // LSP is 0-based; codemap 1-based
 			EndLine:   s.Range.End.Line + 1,
 			Signature: signature(s),
+			Docstring: extractDocstring(lines, s.Range.Start.Line, lang),
 			Source:    lineSlice(lines, s.Range.Start.Line, s.Range.End.Line),
 		})
 	}
@@ -271,7 +278,7 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 	// mark children inside-callable so nested Variable symbols are dropped (above).
 	childInside := insideCallable || anon || kind == extract.KindFunction || kind == extract.KindMethod
 	for _, child := range s.Children {
-		appendSymbols(res, lines, lang, fqn, childInside, child)
+		appendSymbols(res, lines, lang, fqn, childInside, relPath, child)
 	}
 }
 
@@ -334,4 +341,68 @@ func lineSlice(lines []string, start, end int) string {
 		return ""
 	}
 	return strings.Join(lines[start:end+1], "\n")
+}
+
+// isTestFilePath reports whether a project-relative path is a test file
+// for LSP-backed languages. P2-03 (O29): mirrors gosrc's _test.go check
+// but for TS/JS/Python conventions.
+func isTestFilePath(relPath string) bool {
+	base := strings.ToLower(filepath.Base(relPath))
+	if strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") {
+		return true
+	}
+	if strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py") {
+		return true
+	}
+	if strings.HasSuffix(base, "_test.py") {
+		return true
+	}
+	return false
+}
+
+// extractDocstring scans the source lines above a symbol's start line for
+// a JSDoc block or // comments (TS/JS/Vue), or takes the first string
+// literal inside the range (Python docstring). P2-03 (O28).
+func extractDocstring(lines []string, startLine int, lang string) string {
+	if startLine < 0 || startLine >= len(lines) {
+		return ""
+	}
+	if lang == "python" {
+		for i := startLine + 1; i < len(lines) && i <= startLine+5; i++ {
+			line := strings.TrimSpace(lines[i])
+			if strings.HasPrefix(line, "\"\"\"") || strings.HasPrefix(line, "'''") {
+				if strings.HasSuffix(line, "\"\"\"") && len(line) > 6 {
+					return strings.Trim(line, "\"'")
+				}
+				var parts []string
+				parts = append(parts, strings.TrimPrefix(strings.TrimPrefix(line, "\"\"\""), "'''"))
+				for j := i + 1; j < len(lines); j++ {
+					next := strings.TrimSpace(lines[j])
+					parts = append(parts, next)
+					if strings.HasSuffix(next, "\"\"\"") || strings.HasSuffix(next, "'''") {
+						break
+					}
+				}
+				return strings.Join(parts, " ")
+			}
+		}
+		return ""
+	}
+	// TS/JS/Vue: scan upward for JSDoc or // comments.
+	var comments []string
+	for i := startLine - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			break
+		}
+		if strings.HasPrefix(line, "//") {
+			comments = append([]string{strings.TrimPrefix(line, "//")}, comments...)
+			continue
+		}
+		break
+	}
+	if len(comments) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(comments, " "))
 }

@@ -53,7 +53,7 @@ func TestAppendSymbolsNesting(t *testing.T) {
 			{Name: "bar", Kind: lsp.SymbolMethod, Range: lsp.Range{Start: lsp.Position{Line: 1}, End: lsp.Position{Line: 1}}},
 		},
 	}
-	appendSymbols(res, lines, "typescript", "", false, sym)
+	appendSymbols(res, lines, "typescript", "", false, "a.ts", sym)
 
 	if len(res.Symbols) != 2 {
 		t.Fatalf("symbols = %d, want 2", len(res.Symbols))
@@ -112,7 +112,7 @@ func TestAppendSymbolsSkipsAnonymousCallbacks(t *testing.T) {
 		at("<function>", lsp.SymbolFunction, 6),
 	}
 	for _, s := range roots {
-		appendSymbols(res, nil, "typescript", "", false, s)
+		appendSymbols(res, nil, "typescript", "", false, "a.ts", s)
 	}
 	got := map[string]bool{}
 	for _, s := range res.Symbols {
@@ -150,8 +150,8 @@ func TestAppendSymbolsSkipsParams(t *testing.T) {
 		Name: "CONFIG", Kind: lsp.SymbolVariable,
 		Range: lsp.Range{Start: lsp.Position{Line: 2}, End: lsp.Position{Line: 2}},
 	}
-	appendSymbols(res, lines, "python", "", false, fn)
-	appendSymbols(res, lines, "python", "", false, modVar)
+	appendSymbols(res, lines, "python", "", false, "a.py", fn)
+	appendSymbols(res, lines, "python", "", false, "a.py", modVar)
 
 	by := map[string]string{}
 	for _, s := range res.Symbols {
