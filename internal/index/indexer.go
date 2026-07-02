@@ -1257,6 +1257,8 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 					continue
 				}
 				if _, aErr := graph.AddEdgeProvTx(tx, from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); aErr != nil {
+					res.PreciseNote = "LSP precise edge insert failed: " + aErr.Error()
+					res.PreciseUpgraded += upgraded
 					return aErr
 				}
 				upgraded++
@@ -1284,6 +1286,9 @@ func (ix *Indexer) resolvePreciseEdgesFromIndex(ctx context.Context, projectID i
 	if pr == nil || !pr.Available {
 		res.PreciseNote = "precise unavailable: project is not a buildable Go module; kept name-based edges"
 		return
+	}
+	if pr.ErrorPkgs > 0 {
+		res.PreciseNote = fmt.Sprintf("precise skipped for %d package(s) with type errors; kept name-based edges for those packages", pr.ErrorPkgs)
 	}
 	ix.resolvePreciseEdgesWith(ctx, projectID, root, res, ni, pr)
 }
