@@ -94,6 +94,9 @@ func runAnnotations(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if jsonOut(cmd) {
+			return printJSON(map[string]any{"removed": ok, "id": rm})
+		}
 		if ok {
 			fmt.Printf("removed annotation #%d\n", rm)
 		} else {

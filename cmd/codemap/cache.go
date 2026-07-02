@@ -42,6 +42,9 @@ var cacheSaveCmd = &cobra.Command{
 			return err
 		}
 		if stashID == "" {
+			if jsonOut(cmd) {
+				return printJSON(map[string]string{"stash_id": "", "note": "nothing to cache (project not indexed or not a git repo)"})
+			}
 			fmt.Println("nothing to cache (project not indexed or not a git repo)")
 			return nil
 		}

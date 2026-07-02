@@ -92,6 +92,9 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	resp, err := daemonRequest("daemon.status")
 	if err != nil {
+		if jsonOut(cmd) {
+			return printJSON(map[string]any{"running": false, "error": err.Error()})
+		}
 		fmt.Println("codemap daemon: not running")
 		return nil
 	}
@@ -103,10 +106,16 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runDaemonStop(_ *cobra.Command, _ []string) error {
+func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	if _, err := daemonRequest("daemon.shutdown"); err != nil {
+		if jsonOut(cmd) {
+			return printJSON(map[string]any{"running": false, "stopped": false, "error": err.Error()})
+		}
 		fmt.Println("codemap daemon: not running")
 		return nil
+	}
+	if jsonOut(cmd) {
+		return printJSON(map[string]bool{"running": false, "stopped": true})
 	}
 	fmt.Println("codemap daemon: stopping")
 	return nil
