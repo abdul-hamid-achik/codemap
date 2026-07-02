@@ -356,6 +356,11 @@ type fileTask struct {
 	rel  string
 	lang string
 	ext  extract.Extractor
+	// importIndex is the project-wide package→file map built once in
+	// IndexProject; it's nil for IndexFiles callers (the incremental
+	// watcher path doesn't re-resolve imports — the file→file graph
+	// from the prior full index is preserved as-is).
+	importIndex *importIndex
 }
 
 // embedItem is one node awaiting a semantic vector: its graph node id, the text
@@ -443,6 +448,16 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	var mu sync.Mutex   // guards res, embedAcc, pending across parallel Go workers
 	total := len(files) // == res.FilesScanned; the bar's denominator
 	var fileDone int64  // atomic counter for OnFile progress reporting
+	// P2-04 (O30): build the project-wide import index once after the
+	// LSP re-walk and before the Go/LSP split, so every indexFile call
+	// (both the parallel Go workers and the sequential LSP pass) shares
+	// the same goFiles / relFiles maps. Pure data — no DB access, no
+	// mutation after construction — so it's safe to share across the
+	// errgroup without coordination.
+	impIdx := newImportIndex(root, files)
+	for i := range files {
+		files[i].importIndex = impIdx
+	}
 
 	// Split into Go files (parallel) and LSP files (sequential).
 	var goFiles, lspFiles []fileTask
@@ -538,6 +553,20 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		res.ExtractMs = 1 // sub-millisecond; show in breakdown not nothing
 	}
 
+	// P2-04 (O30): write the file→file EdgeImports edges in a final
+	// pass. Doing it inside indexFile races with the target file's
+	// own indexFile call — a concurrent DeleteNodesInFileTx (the
+	// first step of every indexFile) cascades to delete the
+	// imports edge that the previous worker just wrote, because
+	// the file node it points to gets removed. The final pass runs
+	// after all workers join, so every file node is settled.
+	// Re-extraction is intentional: cheap, no graph writes, and it
+	// keeps the worker pipeline simple (workers stay oblivious to
+	// import resolution).
+	if err := ix.writeAllImportEdges(ctx, projectID, files, impIdx); err != nil {
+		return res, err
+	}
+
 	// Build the shared project-wide node index once and reuse it across all
 	// edge-resolution passes (resolveEdges, resolvePreciseEdges,
 	// resolveLSPCallEdges). On a --precise index all three run, and previously each
@@ -553,9 +582,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		return res, err
 	}
 
-	// Pass 3 (opt-in): exact call edges. For Go, the go/types pass replaces
-	// name-based edges (only run when the project has Go). For LSP-backed languages
-	// (TypeScript), callHierarchy adds precise call edges where there were none.
+	// Pass 3 (opt-in): exact call edges.
 	if opts.Precise {
 		preciseStart = time.Now()
 		if res.Languages["go"] > 0 {
@@ -948,6 +975,14 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 			})
 		}
 	}
+	// P2-04 (O30): the import edge write is deferred to a final pass
+	// (writeAllImportEdges) after all file nodes exist. Writing inside
+	// indexFile races with the target file's own indexFile call — a
+	// concurrent DeleteNodesInFileTx (the first step of every
+	// indexFile) cascades to delete the imports edge that the previous
+	// worker just wrote, because the file node it points to gets
+	// removed. The final pass runs after all workers join, so every
+	// file node is settled and the edge survives.
 
 	if err := graph.SetFileHashTx(tx, projectID, ft.rel, hash); err != nil {
 		return false, nil, nil, err

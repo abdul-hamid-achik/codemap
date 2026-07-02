@@ -1,6 +1,6 @@
-// Package graph is codemap's structural code graph: a pure-Go SQLite store of
-// code nodes (files, functions, types, …) and the edges between them (calls,
-// imports, implements, …), plus traversal queries over that graph.
+// Package graph is codemap's structural code graph: a pure-Go SQLite store
+// of code nodes (files, functions, types, …) and the edges between them
+// (calls, imports, references, …), plus traversal queries over the graph.
 package graph
 
 import (
@@ -799,6 +799,16 @@ func (s *Store) CountEdgesByProvenance(projectID int64, provenance string) (int,
 	err := s.db.QueryRow(
 		"SELECT COUNT(*) FROM edges e JOIN nodes n ON e.source_id=n.id WHERE n.project_id=? AND e.provenance=?",
 		projectID, provenance).Scan(&n)
+	return n, err
+}
+
+// CountEdgesByType counts the project's edges of a given type (e.g.
+// "imports") — used by import-graph coverage / parity tests (P2-04).
+func (s *Store) CountEdgesByType(projectID int64, edgeType string) (int, error) {
+	var n int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM edges e JOIN nodes n ON e.source_id=n.id WHERE n.project_id=? AND e.edge_type=?",
+		projectID, edgeType).Scan(&n)
 	return n, err
 }
 
