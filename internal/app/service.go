@@ -360,7 +360,7 @@ func (svc *Service) hasPreciseEdges(g *graph.Store, pid int64) bool {
 // callers/callees/blast/tests on a name-based index means "unresolved", not "none".
 func noNameBasedCallLang(lang string) bool {
 	switch lang {
-	case "typescript", "javascript", "python":
+	case "typescript", "javascript", "python", "vue":
 		return true
 	}
 	return false
