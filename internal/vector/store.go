@@ -85,12 +85,9 @@ func Open(path string, profile embed.EmbeddingProfile) (*Store, error) {
 	return open(path, profile, false)
 }
 
-// OpenReadOnly opens the vector store in read-only mode with a shared flock,
-// allowing multiple readers while a writer holds the exclusive lock. The
-// collection must already exist (ensureCollection will not create it).
-func OpenReadOnly(path string, profile embed.EmbeddingProfile) (*Store, error) {
-	return open(path, profile, true)
-}
+// (OpenReadOnly was removed: VectorsReadOnly in the session layer is the
+// only read-only entry point now, via OpenFromDB. Pre-fix the package
+// exposed two paths and callers always picked VectorsReadOnly.)
 
 func open(path string, profile embed.EmbeddingProfile, readOnly bool) (*Store, error) {
 	opts := []veclite.Option{}

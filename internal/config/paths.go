@@ -75,10 +75,16 @@ func CacheDir() string {
 	return filepath.Join(xdgDir("XDG_CACHE_HOME", ".cache"), appName)
 }
 
-// ConfigFile is the path to the global config file.
+// ConfigFile is the path to the global config file. P3-01 (O74): the
+// pre-fix version didn't honor the explicit `CODEMAP_CONFIG` override
+// (or the project's repo-local one) — a `codemap config show/path`
+// command today can point the user at the wrong file.
 func ConfigFile() string {
 	if v := os.Getenv(EnvConfig); v != "" {
 		return v
+	}
+	if v := os.Getenv(EnvConfigDir); v != "" {
+		return filepath.Join(v, "config.yaml")
 	}
 	return filepath.Join(ConfigDir(), "config.yaml")
 }

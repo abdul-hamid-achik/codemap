@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -246,7 +247,7 @@ func TestFindProjectRoot(t *testing.T) {
 
 func TestFindProjectRootNone(t *testing.T) {
 	_, err := FindProjectRoot(t.TempDir())
-	if !IsNoProject(err) {
+	if !errors.Is(err, ErrNoProject) {
 		t.Errorf("err = %v, want ErrNoProject", err)
 	}
 }

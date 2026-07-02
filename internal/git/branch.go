@@ -85,12 +85,8 @@ func IsAncestor(ctx context.Context, dir, ancestorSHA, ref string) (bool, error)
 	return false, err
 }
 
-// IsDetached reports whether HEAD points directly at a commit rather than a branch
-// (no symbolic ref). Call only within a known git repository.
-func IsDetached(ctx context.Context, dir string) (bool, error) {
-	_, err := run(ctx, dir, "symbolic-ref", "--short", "-q", "HEAD")
-	return err != nil, nil
-}
+// (IsDetached was removed: Status.Detached carries the same signal and is
+// returned by Inspect; no external caller used the helper. P3-01.)
 
 // Status is a read-only snapshot of a directory's git state, used to key and
 // describe per-branch index snapshots.

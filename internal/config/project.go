@@ -43,8 +43,8 @@ func FindProjectRoot(start string) (string, error) {
 	}
 }
 
-// IsNoProject reports whether err indicates no project was found.
-func IsNoProject(err error) bool { return errors.Is(err, ErrNoProject) }
+// (IsNoProject was removed: callers (and the one test) check the
+// sentinel with errors.Is(ErrNoProject) directly. P3-01.)
 
 // DeriveProjectName returns a stable, human-readable project name for dir.
 func DeriveProjectName(dir string) string {
