@@ -30,6 +30,22 @@ var (
 	errNotIndexed = errors.New("not indexed")
 )
 
+// targetDir returns the project directory the command should operate on:
+// the --path / -C flag value when set, otherwise os.Getwd(). P2-05:
+// every command uses this instead of a bare os.Getwd() so the CLI can
+// target a project the way MCP tools do (uniform 'path' param).
+func targetDir(cmd *cobra.Command) string {
+	if p, _ := cmd.PersistentFlags().GetString("path"); p != "" {
+		return p
+	}
+	d, _ := os.Getwd()
+	return d
+}
+
+func init() {
+	rootCmd.PersistentFlags().StringP("path", "C", "", "project directory (defaults to cwd; like MCP's uniform 'path' param)")
+}
+
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		// P2-06: map not-found / not-indexed to exit 2 so scripts
@@ -51,6 +67,12 @@ var rootCmd = &cobra.Command{
 	// block — that's noise for a human and pollutes stderr for an agent parsing the
 	// error. cobra still prints the "Error: …" line; `--help` is there when wanted.
 	SilenceUsage: true,
+	// P2-05: global --path / -C flag so every command can target a project
+	// directory the way MCP tools do (uniform 'path' param). Falls back to
+	// os.Getwd() when absent, so backward compat is exact.
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Resolve --path once; targetDir() reads it.
+	},
 	Long: `codemap combines a structural code graph (LSP + parsers) with semantic
 vector search (veclite) and exposes both as a unified query layer.
 
