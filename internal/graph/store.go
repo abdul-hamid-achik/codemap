@@ -437,15 +437,23 @@ func (s *Store) FindNodesBySymbol(projectID int64, symbol string) ([]Node, error
 // an exact fqn match, then an fqn suffix (".<name>"), and returns the bare symbol +
 // true only when every match agrees on one bare symbol (so an ambiguous suffix never
 // silently picks one). Lets a user copy a name straight out of hotspots into impact.
-func (s *Store) ResolveQualifiedName(projectID int64, name string) (string, bool) {
+// O22: signature now returns (string, bool, error). The previous
+// (string, bool) shape silently swallowed query errors as
+// "not found" — which a caller reading the result as
+// "user typed a wrong name" can't tell apart from "the graph
+// store is broken". The only caller (internal/app) is updated
+// alongside; the error is actionable, so a graph-store error
+// surfaces to the user rather than masquerading as an honest
+// no-match.
+func (s *Store) ResolveQualifiedName(projectID int64, name string) (string, bool, error) {
 	nodes, err := s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND fqn=? ORDER BY file_path, start_line", projectID, name)
 	if err != nil {
-		return "", false
+		return "", false, err
 	}
 	if len(nodes) == 0 {
 		nodes, err = s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND fqn LIKE ? ESCAPE '\\' ORDER BY file_path, start_line", projectID, "%."+likeEscape(name))
 		if err != nil {
-			return "", false
+			return "", false, err
 		}
 	}
 	bare := ""
@@ -454,10 +462,10 @@ func (s *Store) ResolveQualifiedName(projectID int64, name string) (string, bool
 		case bare == "":
 			bare = n.Symbol
 		case n.Symbol != bare:
-			return "", false // suffix matched different bare symbols — ambiguous, don't guess
+			return "", false, nil // suffix matched different bare symbols — ambiguous, don't guess
 		}
 	}
-	return bare, bare != ""
+	return bare, bare != "", nil
 }
 
 // likeEscape escapes the SQL LIKE metacharacters so a symbol/fqn fragment is matched

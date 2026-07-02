@@ -118,7 +118,7 @@ func canonicalSymbol(g *graph.Store, projectID int64, input string) string {
 	if defs, err := g.FindNodesBySymbol(projectID, input); err == nil && len(defs) > 0 {
 		return input // literally indexed under this dotted name
 	}
-	if bare, ok := g.ResolveQualifiedName(projectID, input); ok {
+	if bare, ok, _ := g.ResolveQualifiedName(projectID, input); ok {
 		return bare
 	}
 	return input

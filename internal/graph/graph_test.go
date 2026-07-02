@@ -113,7 +113,7 @@ func TestResolveQualifiedName(t *testing.T) {
 		{"NoSuch.Thing", "", false},                 // no match → caller keeps the input
 	}
 	for _, c := range cases {
-		got, ok := s.ResolveQualifiedName(pid, c.in)
+		got, ok, _ := s.ResolveQualifiedName(pid, c.in)
 		if ok != c.ok || got != c.want {
 			t.Errorf("ResolveQualifiedName(%q) = (%q,%v), want (%q,%v)", c.in, got, ok, c.want, c.ok)
 		}
