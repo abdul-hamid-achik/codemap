@@ -3,7 +3,7 @@ package graph
 // schemaVersion is bumped whenever schemaSQL changes in a way that requires a
 // migration. The current version is stored in SQLite's PRAGMA user_version.
 // v2 adds the annotations table. v3 adds the edges.provenance column.
-const schemaVersion = 3
+const schemaVersion = 4 // P1-13 (O18): composite indexes
 
 // Edge provenance: how an edge's target was resolved. Name-based fan-out (the
 // fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
@@ -83,6 +83,11 @@ CREATE INDEX IF NOT EXISTS idx_nodes_file    ON nodes(project_id, file_path);
 CREATE INDEX IF NOT EXISTS idx_nodes_fqn     ON nodes(fqn);
 CREATE INDEX IF NOT EXISTS idx_nodes_symbol  ON nodes(symbol);
 CREATE INDEX IF NOT EXISTS idx_nodes_kind    ON nodes(kind);
+-- P1-13 (O18): composite indexes for the hot lookups (every query pairs
+-- project_id with symbol or fqn). The single-column indexes above are
+-- kept for backward compat; the composites are the ones the planner picks.
+CREATE INDEX IF NOT EXISTS idx_nodes_proj_sym ON nodes(project_id, symbol);
+CREATE INDEX IF NOT EXISTS idx_nodes_proj_fqn ON nodes(project_id, fqn);
 
 CREATE TABLE IF NOT EXISTS edges (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
