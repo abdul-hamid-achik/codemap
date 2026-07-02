@@ -1924,3 +1924,23 @@ func noopSess(t *testing.T) *Session {
 	cfg := *config.DefaultConfig()
 	return &Session{Config: &cfg}
 }
+
+// TestVueCallGraphHonesty pins P1-06 (B2): Vue SFC symbols are stored
+// with Language="vue", but noNameBasedCallLang didn't list "vue" — so
+// Vue symbols got a confidently-empty callers/impact (untested:true,
+// no resolution note). Adding "vue" to noNameBasedCallLang makes the
+// absence honest: callers/impact on a Vue symbol without --precise
+// carry a resolution note instead of a false "none".
+func TestVueCallGraphHonesty(t *testing.T) {
+	if !noNameBasedCallLang("vue") {
+		t.Error("noNameBasedCallLang must return true for 'vue' (P1-06: Vue has no name-based call edges)")
+	}
+	// TS and Python should still be there.
+	if !noNameBasedCallLang("typescript") || !noNameBasedCallLang("python") {
+		t.Error("noNameBasedCallLang must still return true for typescript and python")
+	}
+	// Go should still be false (has name-based call edges).
+	if noNameBasedCallLang("go") {
+		t.Error("noNameBasedCallLang must return false for 'go' (has name-based call edges)")
+	}
+}
