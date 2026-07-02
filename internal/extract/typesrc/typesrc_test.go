@@ -149,3 +149,32 @@ func TestResolveDegradesOnNonModule(t *testing.T) {
 		t.Errorf("a non-module dir should yield no precise edges, got %+v", res.Edges)
 	}
 }
+
+// TestResolveCountsTypeErrorPackages verifies that a module with one type-error
+// package is still Available but reports ErrorPkgs=1 so the indexer can surface
+// an honest note instead of claiming precise resolution failed globally.
+func TestResolveCountsTypeErrorPackages(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/broken\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package broken\n\nfunc Good() { Bad() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("package broken\n\nfunc Bad() { var x int = \"not an int\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Resolve(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !res.Available {
+		t.Error("Resolve should still be Available when some packages have type errors")
+	}
+	if res.ErrorPkgs != 1 {
+		t.Errorf("ErrorPkgs = %d, want 1", res.ErrorPkgs)
+	}
+}

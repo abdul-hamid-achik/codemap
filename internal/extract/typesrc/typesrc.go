@@ -52,6 +52,7 @@ type Result struct {
 	Available  bool
 	Edges      []PreciseEdge
 	CleanFiles map[string]bool // root-relative caller files whose package type-checked cleanly
+	ErrorPkgs  int             // packages with type errors (skipped; their name edges kept)
 }
 
 // Resolve type-checks the module rooted at root and returns precise call edges for
@@ -93,8 +94,12 @@ func Resolve(ctx context.Context, root string) (*Result, error) {
 	// once — process each real file exactly once to avoid double-counting edges.
 	seen := map[string]bool{}
 	for _, p := range pkgs {
-		if len(p.Errors) > 0 || p.TypesInfo == nil {
+		if len(p.Errors) > 0 {
+			res.ErrorPkgs++
 			continue // not cleanly type-checked — keep its name edges
+		}
+		if p.TypesInfo == nil {
+			continue
 		}
 		pkgName := p.Name
 		for _, file := range p.Syntax {
