@@ -20,7 +20,7 @@ func QueryStatus() *Info {
 	if err != nil {
 		return nil
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if _, err := c.Write([]byte("{\"method\":\"daemon.status\"}\n")); err != nil {
 		return nil
 	}
@@ -75,7 +75,7 @@ func Reindex(opts ReindexOpts) (*app.IndexReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("daemon not running: %w", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	fields := map[string]any{
 		"method":  "daemon.reindex",
 		"reindex": opts.Reindex,

@@ -160,7 +160,7 @@ func runRelation(cmd *cobra.Command, symbol string, callers bool) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -220,7 +220,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)
@@ -314,7 +314,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
 	since, _ := cmd.Flags().GetString("since")
@@ -408,7 +408,7 @@ func runRisk(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)
@@ -451,7 +451,7 @@ func runReadOrder(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
 	query := ""
@@ -527,7 +527,7 @@ func runFileImpact(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)
@@ -585,7 +585,7 @@ func runRelatedFiles(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	svc := app.NewService(sess)
 	rep, err := svc.RelatedFiles(cwd, args[0])
@@ -615,7 +615,7 @@ func runSymbolAt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
@@ -669,7 +669,7 @@ func runSecretImpact(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
 	keys := append([]string{}, args...)
@@ -723,7 +723,7 @@ func runRequiredKeys(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
 	keys, _ := cmd.Flags().GetStringSlice("keys")
@@ -761,7 +761,7 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
@@ -797,7 +797,7 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
@@ -840,7 +840,7 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
@@ -863,7 +863,7 @@ func runPath(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -902,7 +902,7 @@ func runFind(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
@@ -933,7 +933,7 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -963,7 +963,7 @@ func runSource(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
@@ -999,7 +999,7 @@ func runProjects(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	rep, err := app.NewService(sess).Projects()
 	if err != nil {
 		return err

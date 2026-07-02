@@ -90,7 +90,7 @@ func goModulePath(root string) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	buf := make([]byte, 4096)
 	n, err := readFull(f, buf)
 	if err != nil && err != errUnexpectedEOF && err != errEOF {

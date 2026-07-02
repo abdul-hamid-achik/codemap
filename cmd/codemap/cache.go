@@ -35,7 +35,7 @@ var cacheSaveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer sess.Close()
+		defer func() { _ = sess.Close() }()
 		svc := app.NewService(sess)
 		stashID, treeHash, err := svc.CacheSave(context.Background(), getCwd())
 		if err != nil {
@@ -64,7 +64,7 @@ var cacheRestoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer sess.Close()
+		defer func() { _ = sess.Close() }()
 		svc := app.NewService(sess)
 		restored, stashID, err := svc.CacheRestore(context.Background(), getCwd())
 		if err != nil {
@@ -90,7 +90,7 @@ var cacheListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer sess.Close()
+		defer func() { _ = sess.Close() }()
 		svc := app.NewService(sess)
 		rebuild, _ := cmd.Flags().GetBool("rebuild")
 		rep, err := svc.CacheList(context.Background(), getCwd(), rebuild)
@@ -127,7 +127,7 @@ var cacheDropCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer sess.Close()
+		defer func() { _ = sess.Close() }()
 		svc := app.NewService(sess)
 		treeHash, _ := cmd.Flags().GetString("tree")
 		all, _ := cmd.Flags().GetBool("all")

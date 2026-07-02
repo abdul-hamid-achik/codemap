@@ -85,7 +85,7 @@ func (s *State) Save(path string) error {
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
 	if _, err := tmp.Write(append(b, '\n')); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // best-effort cleanup of the temp file we're about to delete
 		return err
 	}
 	if err := tmp.Close(); err != nil {

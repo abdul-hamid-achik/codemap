@@ -412,7 +412,7 @@ func writeJSONL(path string, items []any) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)
 	for _, it := range items {
@@ -431,7 +431,7 @@ func readJSONL(path string, out any) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	// out must be a non-nil pointer to a slice; decode line by line via reflection-
 	// free generic handling by the callers' concrete types.
 	switch v := out.(type) {

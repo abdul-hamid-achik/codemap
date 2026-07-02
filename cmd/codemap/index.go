@@ -51,7 +51,7 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err

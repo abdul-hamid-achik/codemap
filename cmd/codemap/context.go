@@ -27,7 +27,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)

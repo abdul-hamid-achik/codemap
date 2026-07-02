@@ -54,7 +54,7 @@ func runBranchSwitch(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	svc := app.NewService(sess)
 	to, _ := cmd.Flags().GetString("to")
 	from, _ := cmd.Flags().GetString("from")
@@ -87,7 +87,7 @@ func runBranchSnapshot(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	svc := app.NewService(sess)
 	branch, _ := cmd.Flags().GetString("branch")
 	if branch == "" {
@@ -121,7 +121,7 @@ func runBranchStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	st, err := app.NewService(sess).BranchStatus(cmd.Context(), dir)
 	if err != nil {
 		return err

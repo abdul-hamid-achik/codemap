@@ -335,7 +335,7 @@ func (d *Daemon) serve() {
 }
 
 func (d *Daemon) handleConn(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	sc := bufio.NewScanner(conn)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	enc := json.NewEncoder(conn)

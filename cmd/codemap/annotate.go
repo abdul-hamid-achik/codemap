@@ -30,7 +30,7 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	source, _ := cmd.Flags().GetString("source")
 	note, _ := cmd.Flags().GetString("note")
@@ -85,7 +85,7 @@ func runAnnotations(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	svc := app.NewService(sess)
 

@@ -337,7 +337,7 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 	if err != nil {
 		return nil, nil, project, err
 	}
-	defer cl.Close()
+	defer func() { _ = cl.Close() }()
 	if err := cl.Initialize(ctx, root); err != nil {
 		return nil, nil, project, err
 	}

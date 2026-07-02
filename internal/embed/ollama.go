@@ -86,7 +86,7 @@ func (o *OllamaProvider) Embed(ctx context.Context, texts []string) ([][]float32
 	if err != nil {
 		return nil, fmt.Errorf("ollama embed request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -124,7 +124,7 @@ func (o *OllamaProvider) Available(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ollama not reachable at %s: %w", o.BaseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ollama /api/tags: status %d", resp.StatusCode)
 	}

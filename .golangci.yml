@@ -8,15 +8,9 @@ linters:
   settings:
     errcheck:
       exclude-functions:
+        - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
-        - fmt.Fprint
-        - (io.Closer).Close
-        - (*os.File).Close
-        - (*database/sql.DB).Close
-        - (io.Writer).Write
-        - (*database/sql.Row).Scan
-        - (*encoding/json.Encoder).Encode
     staticcheck:
       checks:
         - "all"
@@ -28,4 +22,4 @@ linters:
     rules:
       - linters:
           - errcheck
-        source: "defer.*\\.Close\\(\\)"
+        path: _test\.go$

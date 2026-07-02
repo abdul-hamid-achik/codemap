@@ -225,7 +225,7 @@ func (s *Store) columnExists(table, col string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		// table_info columns: cid, name, type, notnull, dflt_value, pk
 		var cid int
@@ -332,7 +332,7 @@ func (s *Store) ListProjects() ([]Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Project
 	for rows.Next() {
 		var p Project
@@ -516,7 +516,7 @@ func (s *Store) queryNodes(query string, args ...any) ([]Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Node
 	for rows.Next() {
 		n, err := scanNode(rows)
@@ -610,7 +610,7 @@ func (s *Store) SourceFilesTargeting(projectID int64, relFile string) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("source files targeting: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var files []string
 	for rows.Next() {
 		var f string
@@ -687,7 +687,7 @@ func (s *Store) IndexedFiles(projectID int64) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var files []string
 	for rows.Next() {
 		var f string
@@ -834,7 +834,7 @@ func (s *Store) countBy(column, where string, args []any, dst map[string]int) er
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var k string
 		var c int

@@ -66,7 +66,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -89,7 +89,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -166,7 +166,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	rep := app.NewService(sess).Doctor(context.Background())
 	if jsonOut(cmd) {
 		return printJSON(rep)
@@ -194,7 +194,7 @@ func runStudio(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	cwd, _ := os.Getwd()
 	if len(args) > 0 {
 		cwd = args[0]
@@ -207,7 +207,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return mcpserver.NewServer(sess).Run(ctx)

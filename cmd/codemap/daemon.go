@@ -135,7 +135,7 @@ func daemonRequest(method string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if _, err := fmt.Fprintf(c, "{\"method\":%q}\n", method); err != nil {
 		return "", err
 	}

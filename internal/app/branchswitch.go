@@ -286,7 +286,7 @@ func InstallPostCheckoutHook(ctx context.Context, root, codemapBin string) (stri
 			return "", err
 		}
 		if _, werr := f.WriteString("\n" + block); werr != nil {
-			f.Close()
+			_ = f.Close() // best-effort cleanup of the hook file we're about to error out on
 			return "", werr
 		}
 		if err := f.Close(); err != nil {

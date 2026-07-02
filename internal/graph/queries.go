@@ -25,7 +25,7 @@ func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []int64
 	for rows.Next() {
 		var id int64
@@ -94,7 +94,7 @@ func (s *Store) scanAnnotations(query string, args ...any) ([]Annotation, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Annotation
 	for rows.Next() {
 		var a Annotation
@@ -121,7 +121,7 @@ func (s *Store) SymbolInfoIndex(projectID int64) (map[string]SymInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[string]SymInfo)
 	for rows.Next() {
 		var fqn, sig, doc string
@@ -338,7 +338,7 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type row struct {
 		id    int64
 		indeg int
@@ -407,7 +407,7 @@ func (s *Store) SymbolDefCounts(projectID int64) (map[string]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	m := map[string]int{}
 	for rows.Next() {
 		var sym string
@@ -582,7 +582,7 @@ func (s *Store) ProjectEdges(projectID int64) ([]Edge, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Edge
 	for rows.Next() {
 		var e Edge
@@ -607,7 +607,7 @@ func (s *Store) ProjectIndexState(projectID int64) ([]IndexEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []IndexEntry
 	for rows.Next() {
 		var e IndexEntry
