@@ -51,6 +51,14 @@ func (e Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult,
 			case token.TYPE:
 				for _, spec := range d.Specs {
 					if ts, ok := spec.(*ast.TypeSpec); ok {
+						// P2-04 (O27): for an interface type, also
+						// emit one KindMethod per method spec so
+						// the precise pass can bind an
+						// interface-method call to the spec node.
+						// Without this, the call falls through
+						// the position join (no concrete decl
+						// for the method) and is dropped.
+						res.Symbols = append(res.Symbols, interfaceMethodSymbols(fset, src, pkg, d, ts)...)
 						res.Symbols = append(res.Symbols, typeSymbol(fset, src, pkg, d, ts))
 					}
 				}
@@ -114,6 +122,51 @@ func typeSymbol(fset *token.FileSet, src []byte, pkg string, gd *ast.GenDecl, ts
 		Docstring: doc,
 		Source:    source,
 	}
+}
+
+// interfaceMethodSymbols returns one KindMethod symbol per method spec
+// in an InterfaceType declaration (e.g. `type Reader interface { Read(p
+// []byte) (int, error) }`). The per-method node is what typesrc's
+// precise pass binds an interface-method call to: the `types.Selection`
+// on a call through the interface points at the spec (no body), and
+// without a node at the spec's line the position join misses and the
+// call is dropped as skipped. FQN shape `pkg.Iface.Method` matches
+// the `funcFQN` layout typesrc emits for the static-dispatch target,
+// so a `Selection.Obj().Origin()` resolution lands on this node.
+// Returns nil for non-interface types (no overhead for struct/alias
+// declarations).
+func interfaceMethodSymbols(fset *token.FileSet, src []byte, pkg string, gd *ast.GenDecl, ts *ast.TypeSpec) []extract.Symbol {
+	iface, ok := ts.Type.(*ast.InterfaceType)
+	if !ok || iface.Methods == nil {
+		return nil
+	}
+	typeName := ts.Name.Name
+	var out []extract.Symbol
+	for _, m := range iface.Methods.List {
+		if _, isFn := m.Type.(*ast.FuncType); !isFn {
+			continue
+		}
+		if len(m.Names) == 0 {
+			continue
+		}
+		name := m.Names[0].Name
+		start := fset.Position(m.Pos())
+		end := fset.Position(m.End())
+		specSrc := sliceSrc(src, start.Offset, end.Offset)
+		out = append(out, extract.Symbol{
+			Name:      name,
+			FQN:       pkg + "." + typeName + "." + name,
+			Kind:      extract.KindMethod,
+			Language:  "go",
+			StartLine: start.Line,
+			EndLine:   end.Line,
+			Signature: firstLine(specSrc),
+			Docstring: strings.TrimSpace(m.Doc.Text()),
+			Source:    specSrc,
+		})
+	}
+	_ = gd
+	return out
 }
 
 // valueSymbols extracts package-level var/const declarations as KindVariable

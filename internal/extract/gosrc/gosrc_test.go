@@ -226,6 +226,85 @@ func helper() {}
 	}
 }
 
+// TestExtractInterfaceMethods pins P2-04 (O27): an interface type
+// declaration emits one KindMethod symbol per method spec, with
+// FQN `pkg.Iface.Method` and the spec's own line range. Without
+// these, typesrc's precise pass can't bind a call through the
+// interface (no concrete decl exists for an interface method) and
+// the call is dropped as skipped — understating the blast radius
+// of any change to an interface method. Each method spec
+// carries a doc comment, so the embedded spec source is
+// docstring-anchored just like a regular method body.
+func TestExtractInterfaceMethods(t *testing.T) {
+	const src = `package io
+
+// Reader is the standard input contract.
+type Reader interface {
+	// Read populates p with bytes.
+	Read(p []byte) (n int, err error)
+
+	// Close releases the resource.
+	Close() error
+}
+
+// Non-interface types should NOT emit method symbols via the
+// interface path (their method comes from funcSymbol on the
+// FuncDecl).
+type Greeter struct{}
+
+func (Greeter) Hello() string { return "" }
+`
+	res, err := New().ExtractFile("iface.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The interface type itself is still a single KindType node
+	// (the type declaration as a whole).
+	if r := findSym(res.Symbols, "Reader"); r == nil || r.Kind != extract.KindType {
+		t.Errorf("Reader kind = %q, want type", r.Kind)
+	}
+
+	// Each method spec becomes its own KindMethod with the spec
+	// line range — that's the position typesrc emits for the
+	// static-dispatch target.
+	for _, want := range []struct{ name, fqn, sig string }{
+		{"Read", "io.Reader.Read", "Read(p []byte) (n int, err error)"},
+		{"Close", "io.Reader.Close", "Close() error"},
+	} {
+		m := findSym(res.Symbols, want.name)
+		if m == nil {
+			t.Errorf("missing interface method %q", want.name)
+			continue
+		}
+		if m.Kind != extract.KindMethod {
+			t.Errorf("%s kind = %q, want method (per-method node, not body)", want.name, m.Kind)
+		}
+		if m.FQN != want.fqn {
+			t.Errorf("%s FQN = %q, want %q", want.name, m.FQN, want.fqn)
+		}
+		if !strings.Contains(m.Signature, want.sig) {
+			t.Errorf("%s signature = %q, want it to contain %q", want.name, m.Signature, want.sig)
+		}
+		if m.StartLine <= 0 || m.EndLine < m.StartLine {
+			t.Errorf("%s invalid line range %d-%d", want.name, m.StartLine, m.EndLine)
+		}
+	}
+
+	// Doc comment on the spec must travel with the per-method
+	// node (used by the embedder downstream).
+	read := findSym(res.Symbols, "Read")
+	if read != nil && !strings.Contains(read.Docstring, "populates p with bytes") {
+		t.Errorf("Read doc = %q, want it to contain the spec doc", read.Docstring)
+	}
+
+	// Greeter.Hello is a regular method (its node comes from
+	// funcSymbol on the FuncDecl, not from interfaceMethodSymbols).
+	if h := findSym(res.Symbols, "Hello"); h == nil || h.FQN != "io.Greeter.Hello" {
+		t.Errorf("Hello (struct method) missing or FQN wrong: %+v", h)
+	}
+}
+
 func TestExtractSyntaxError(t *testing.T) {
 	if _, err := New().ExtractFile("bad.go", []byte("package x\nfunc (")); err == nil {
 		t.Error("expected parse error for invalid Go")
