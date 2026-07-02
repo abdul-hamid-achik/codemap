@@ -170,9 +170,21 @@ type symbolAtInput struct {
 }
 
 type secretImpactInput struct {
-	Keys  []string `json:"keys" jsonschema:"secret key NAMES to analyze (e.g. STRIPE_KEY) — names only, never values"`
-	Path  string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth int      `json:"depth,omitempty" jsonschema:"max hops for each key's blast radius (default 3)"`
+	Keys     []string `json:"keys" jsonschema:"secret key NAMES to analyze (e.g. STRIPE_KEY) — names only, never values"`
+	Path     string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth    int      `json:"depth,omitempty" jsonschema:"max hops for each key's blast radius (default 3)"`
+	ViaVault string   `json:"via_vault,omitempty" jsonschema:"optional: tinyvault project name to also list keys from its inventory"`
+	Prefix   string   `json:"prefix,omitempty" jsonschema:"optional: only count keys with this prefix (e.g. STRIPE_)"`
+}
+
+// P2-01: codemap_required_keys — the MCP twin of the CLI 'required-keys'
+// command. Returns the minimal set of secret key NAMES an entrypoint's
+// transitive call tree actually reads, for tinyvault least-privilege sealing.
+type requiredKeysInput struct {
+	Entrypoint string   `json:"entrypoint" jsonschema:"the entrypoint symbol (function/method) to scope from"`
+	Keys       []string `json:"keys,omitempty" jsonschema:"candidate key NAMES to check (if omitted, all indexed keys are tested)"`
+	Depth      int      `json:"depth,omitempty" jsonschema:"max hops for the forward call-graph closure (default 5)"`
+	Path       string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
 type limitInput struct {
@@ -325,6 +337,10 @@ func (s *Server) register() {
 		Name:        "codemap_secret_impact",
 		Description: "Code blast radius of rotating secret keys: for each key NAME, the symbols that read it (os.Getenv/os.environ/process.env), the transitive callers affected, and the covering tests (untested=true is a loud warning). Operates on key NAMES only — never reads, requests, or returns secret values. Pairs with tinyvault's value-free key inventory. blast radius is name-based unless the index is precise (precise:false note); reindex --precise for exact figures.",
 	}, s.handleSecretImpact)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_required_keys",
+		Description: "Return the minimal set of secret key NAMES an entrypoint's transitive call tree actually reads — for tinyvault least-privilege sealing (seal/inject only these). Value-free: only key names and positions, never secret values.",
+	}, s.handleRequiredKeys)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_hotspots",
 		Description: "List the most-referenced symbols (hubs) in a project.",
@@ -732,6 +748,18 @@ func (s *Server) handleDoctor(ctx context.Context, _ *sdkmcp.CallToolRequest, _ 
 }
 
 // ---- helpers ----
+
+func (s *Server) handleRequiredKeys(_ context.Context, _ *sdkmcp.CallToolRequest, in requiredKeysInput) (*sdkmcp.CallToolResult, any, error) {
+	if in.Entrypoint == "" {
+		return errResult("specify an entrypoint symbol (the function/method to scope from)"), nil, nil
+	}
+	depth := in.Depth
+	if depth <= 0 {
+		depth = 5
+	}
+	rep, err := s.svc.RequiredKeys(cwdOf(in.Path), in.Entrypoint, in.Keys, depth)
+	return result(rep, err)
+}
 
 // notIndexed short-circuits a query handler when the project at path hasn't been
 // indexed yet: it returns a structured {indexed:false,…} result so an agent gets a
