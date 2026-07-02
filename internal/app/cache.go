@@ -197,12 +197,18 @@ func (svc *Service) CacheList(ctx context.Context, cwd string, rebuild bool) (*C
 	}
 	repoHash := git.RepoHash(root)
 	statePath := cachestate.StatePath(repoHash)
-
 	var cs *cachestate.State
 	if rebuild {
 		cs, err = cachestate.Rebuild(ctx, repoHash)
 		if err != nil {
 			return nil, err
+		}
+		// P1-17 (B56): the rebuilt state is the new source of truth
+		// (the local pointer file is the thing we just lost) — write
+		// it back so a later `cache list` (no --rebuild) reads the
+		// recovered entries instead of a stale (or missing) file.
+		if cerr := cs.Save(statePath); cerr != nil {
+			return nil, cerr
 		}
 	} else {
 		cs, err = cachestate.Load(statePath)

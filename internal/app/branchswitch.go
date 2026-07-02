@@ -73,7 +73,14 @@ func (svc *Service) BranchSnapshot(ctx context.Context, root, branch string) err
 	if err != nil {
 		return err
 	}
-	tags := []string{"codemap-index", "repo:" + st.RepoHash, "branch:" + git.SanitizeBranch(branch)}
+	// P1-17 (B49): also tag with the RAW branch name so `branchstate.Rebuild`
+	// (which lists stashes by repo and only sees tags, not the snapshot
+	// directory's contents) can rebuild a repo's branch→stash pointer file
+	// from fcheap alone. The sanitized tag is a filesystem-safe segment;
+	// the raw tag carries the original "feature/x" / "release-1.0" so a
+	// rebuilt map can be looked up by the same name a fresh
+	// BranchSnapshot recorded.
+	tags := []string{"codemap-index", "repo:" + st.RepoHash, "branch:" + git.SanitizeBranch(branch), "branchname:" + branch}
 	stashID, err := snapshot.FcheapSave(ctx, tmp, "codemap", name+"@"+branch, tags, sha)
 	if err != nil {
 		return err
@@ -139,7 +146,16 @@ func (svc *Service) BranchSwitch(ctx context.Context, root, from, to string) err
 	if err != nil {
 		return err
 	}
-
+	// P1-17 (O127): when the local pointer file is empty (lost or never
+	// built), rebuild it from fcheap so a later BranchSwitch can find a
+	// snapshot to restore. Only fires on a truly empty state — a missing
+	// entry for `to` is a normal miss that the rebuild also fixes.
+	if len(bs.Branches) == 0 && snapshot.FcheapAvailable() {
+		if rebuilt, rerr := branchstate.Rebuild(ctx, st.RepoHash); rerr == nil && len(rebuilt.Branches) > 0 {
+			bs = rebuilt
+			_ = bs.Save(statePath)
+		}
+	}
 	restored := false
 	entry, ok := bs.Lookup(to)
 	if ok && entry.StashID != "" && profileCompatible(entry.EmbeddingProfile, curProfile) {
@@ -198,9 +214,17 @@ func (svc *Service) restoreSnapshot(ctx context.Context, g *graph.Store, pid int
 	if rerr != nil || !verified {
 		return false, nil // dangling/corrupt stash — reindex instead
 	}
+	// P1-17 (B51): pre-fix the snapshot's VectorCount gated whether we
+	// passed the vector store to Import — a snapshot taken on a branch
+	// with zero embeddings left the previous branch's stale vectors
+	// attached to the wiped node ids (the project might still have
+	// vectors from the snapshot we're leaving). Import handles an absent
+	// `vectors.jsonl` as empty (clears stale); pass vec whenever the
+	// PROJECT currently has any embeddings so the previous branch's
+	// vectors don't survive a structure-only restore.
 	var vec *vector.Store
-	if entry.VectorCount > 0 {
-		if v, verr := svc.s.Vectors(); verr == nil {
+	if v, verr := svc.s.Vectors(); verr == nil {
+		if n, _ := svc.embeddedCount(name); n > 0 {
 			vec = v
 		}
 	}
@@ -276,14 +300,16 @@ func InstallPostCheckoutHook(ctx context.Context, root, codemapBin string) (stri
 // hookBlock is the guarded shell snippet appended to post-checkout. post-checkout
 // receives $1=prev-HEAD $2=new-HEAD $3=flag (1 for a branch checkout, 0 for a file
 // checkout), so it only fires on branch switches and never blocks the checkout.
+//
+// P1-17 (B52): pre-fix the block baked the install-time repo root in,
+// so a `git worktree` checkout ran the branch-switch in the MAIN
+// repo, not the linked worktree (the worktree has its own index to
+// keep in sync). Resolve the root at HOOK RUNTIME so every checkout
+// — main repo or any linked worktree — targets its own working tree.
 func hookBlock(codemapBin, repoRoot string) string {
+	_ = repoRoot
 	return hookMarker + "\n" +
 		`if [ "$3" = "1" ]; then` + "\n" +
-		"  " + codemapBin + ` branch-switch --to "$(git rev-parse --abbrev-ref HEAD)" --root ` + shellQuote(repoRoot) + " >/dev/null 2>&1 || true\n" +
+		"  " + codemapBin + ` branch-switch --to "$(git rev-parse --abbrev-ref HEAD)" --root "$(git rev-parse --show-toplevel)" >/dev/null 2>&1 || true` + "\n" +
 		"fi\n"
-}
-
-// shellQuote single-quotes s for safe embedding in the POSIX-sh hook.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

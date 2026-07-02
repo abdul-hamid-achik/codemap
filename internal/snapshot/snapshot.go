@@ -202,6 +202,13 @@ func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, pr
 			if !ok {
 				continue // an embedding for a node not in this slice — skip
 			}
+			// P1-17 (B55): zero the volatile identity fields so the
+			// serialized vector dedups on CONTENT across exports. NodeID
+			// is per-restore (re-mapped by Import); Project is
+			// re-stamped at import time. Both break fcheap's
+			// byte-identical content dedup otherwise.
+			vr.Meta.NodeID = 0
+			vr.Meta.Project = ""
 			svecs = append(svecs, snapVector{Pos: pos, Vector: vr.Vector, Content: vr.Content, Meta: vr.Meta})
 		}
 		sort.SliceStable(svecs, func(i, j int) bool { return svecs[i].Pos < svecs[j].Pos })
@@ -233,6 +240,15 @@ func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, pr
 // profiles are treated as compatible. When vec != nil, the project's embeddings
 // are replaced with the snapshot's (re-inserted with remapped node ids — no
 // re-embedding).
+//
+// P1-17 (B50/O62/O100): every jsonl file is read+validated against the
+// manifest's counts BEFORE WipeProject so a truncated/missing file is a
+// no-op (the import fails and the project is left untouched). Pre-fix the
+// wipe ran first — a truncated nodes.jsonl left a wiped, empty project
+// that the fallback reindex silently re-built, hiding the corruption.
+// On a post-commit error the wipe is re-applied (with index_state cleared
+// via WipeProject) so the fallback reindex sees a cold project instead
+// of a half-restored one.
 func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wantProfile string) (*Manifest, error) {
 	var m Manifest
 	if err := readJSON(filepath.Join(dir, fileManifest), &m); err != nil {
@@ -245,10 +261,45 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 		return nil, fmt.Errorf("snapshot embedding profile %q != current %q — refusing to mix models", m.EmbeddingProfile, wantProfile)
 	}
 
+	// Pre-validate every jsonl against the manifest. An absent optional file
+	// (vectors) is fine — readJSONL returns no error on os.ErrNotExist and
+	// leaves the slice nil/empty, which the manifest count check then catches.
 	var snodes []snapNode
 	if err := readJSONL(filepath.Join(dir, fileNodes), &snodes); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read nodes.jsonl: %w", err)
 	}
+	var sedges []snapEdge
+	if err := readJSONL(filepath.Join(dir, fileEdges), &sedges); err != nil {
+		return nil, fmt.Errorf("read edges.jsonl: %w", err)
+	}
+	var idxState []graph.IndexEntry
+	if err := readJSONL(filepath.Join(dir, fileIndexState), &idxState); err != nil {
+		return nil, fmt.Errorf("read index_state.jsonl: %w", err)
+	}
+	var sanns []snapAnnotation
+	if err := readJSONL(filepath.Join(dir, fileAnnotations), &sanns); err != nil {
+		return nil, fmt.Errorf("read annotations.jsonl: %w", err)
+	}
+	var svecs []snapVector
+	if err := readJSONL(filepath.Join(dir, fileVectors), &svecs); err != nil {
+		return nil, fmt.Errorf("read vectors.jsonl: %w", err)
+	}
+	if len(snodes) != m.Nodes {
+		return nil, fmt.Errorf("snapshot corrupt: nodes.jsonl has %d rows, manifest says %d", len(snodes), m.Nodes)
+	}
+	if len(sedges) != m.Edges {
+		return nil, fmt.Errorf("snapshot corrupt: edges.jsonl has %d rows, manifest says %d", len(sedges), m.Edges)
+	}
+	if len(idxState) != m.IndexState {
+		return nil, fmt.Errorf("snapshot corrupt: index_state.jsonl has %d rows, manifest says %d", len(idxState), m.IndexState)
+	}
+	if len(sanns) != m.Annotations {
+		return nil, fmt.Errorf("snapshot corrupt: annotations.jsonl has %d rows, manifest says %d", len(sanns), m.Annotations)
+	}
+	if len(svecs) != m.Vectors {
+		return nil, fmt.Errorf("snapshot corrupt: vectors.jsonl has %d rows, manifest says %d", len(svecs), m.Vectors)
+	}
+
 	if err := g.WipeProject(projectID); err != nil {
 		return nil, err
 	}
@@ -277,10 +328,6 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 		newID[i] = id
 	}
 
-	var sedges []snapEdge
-	if err := readJSONL(filepath.Join(dir, fileEdges), &sedges); err != nil {
-		return nil, err
-	}
 	for _, e := range sedges {
 		if e.Source < 0 || e.Source >= len(newID) || e.Target < 0 || e.Target >= len(newID) {
 			return nil, fmt.Errorf("snapshot edge references node index out of range")
@@ -290,11 +337,7 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 		}
 	}
 
-	var idx []graph.IndexEntry
-	if err := readJSONL(filepath.Join(dir, fileIndexState), &idx); err != nil {
-		return nil, err
-	}
-	for _, e := range idx {
+	for _, e := range idxState {
 		if err := graph.SetFileHashTx(tx, projectID, e.FilePath, e.FileHash); err != nil {
 			return nil, err
 		}
@@ -303,12 +346,12 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 		return nil, err
 	}
 
-	var sanns []snapAnnotation
-	if err := readJSONL(filepath.Join(dir, fileAnnotations), &sanns); err != nil {
-		return nil, err
-	}
 	existing, err := g.AllAnnotations(projectID)
 	if err != nil {
+		// P1-17 (B50): a post-commit error must leave a COLD project so
+		// the fallback reindex sees an empty graph. Re-apply WipeProject
+		// (the caller is told the import failed and will reindex).
+		_ = g.WipeProject(projectID)
 		return nil, err
 	}
 	have := make(map[string]bool, len(existing))
@@ -320,30 +363,38 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 			continue // already present — merge, don't duplicate or blow away
 		}
 		if _, err := g.AddAnnotation(projectID, graph.Annotation{Kind: a.Kind, Target: a.Target, Source: a.Source, Note: a.Note, Data: a.Data}); err != nil {
+			_ = g.WipeProject(projectID)
 			return nil, err
 		}
 	}
 
 	if vec != nil {
-		var svecs []snapVector
-		if err := readJSONL(filepath.Join(dir, fileVectors), &svecs); err != nil {
-			return nil, err
-		}
 		if _, err := vec.DeleteByProject(project); err != nil { // clear stale vectors before restore
+			_ = g.WipeProject(projectID)
 			return nil, err
 		}
 		for _, sv := range svecs {
 			if sv.Pos < 0 || sv.Pos >= len(newID) {
+				_ = g.WipeProject(projectID)
 				return nil, fmt.Errorf("snapshot vector references node index out of range")
 			}
 			meta := sv.Meta
+			// P1-17 (B55): zero the volatile identity fields so the
+			// serialized vector dedups on CONTENT across restorers.
+			// meta.NodeID is re-assigned to the freshly-inserted node
+			// id (the one the restored graph will see), and meta.Project
+			// is re-stamped from the importing project; both are
+			// otherwise volatile (per-restore) and break fcheap's
+			// byte-identical content dedup.
 			meta.NodeID = newID[sv.Pos] // remap to the new node id
 			meta.Project = project
 			if _, err := vec.Insert(sv.Vector, sv.Content, meta); err != nil {
+				_ = g.WipeProject(projectID)
 				return nil, err
 			}
 		}
 		if err := vec.Sync(); err != nil {
+			_ = g.WipeProject(projectID)
 			return nil, err
 		}
 	}

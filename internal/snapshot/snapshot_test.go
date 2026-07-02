@@ -92,13 +92,110 @@ func TestRoundTrip(t *testing.T) {
 	if _, err := Import(g, nil, pid, "app", dir, "other:model:4:cosine"); err == nil {
 		t.Errorf("import with a mismatched embedding profile should be refused")
 	}
-
 	// Re-import is idempotent for annotations (merge, not duplicate).
 	if _, err := Import(g, nil, pid, "app", dir, profile); err != nil {
 		t.Fatal(err)
 	}
 	if anns, _ := g.AllAnnotations(pid); len(anns) != 1 {
 		t.Errorf("re-import duplicated annotations: %+v", anns)
+	}
+}
+
+// TestImportRejectsTruncatedJsonl pins P1-17 (O62/O100): a snapshot whose
+// jsonl rows disagree with its manifest counts must fail BEFORE the project
+// is wiped, so the caller can reindex from scratch instead of inheriting a
+// silently-corrupted index. Pre-fix the wipe ran first and the re-insert
+// loop happened to read fewer rows than the manifest claimed — Import
+// returned success and the project ended up half-restored.
+func TestImportRejectsTruncatedJsonl(t *testing.T) {
+	g, err := graph.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	pid, err := g.UpsertProject("app", "/x", "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileID, _ := g.AddNode(&graph.Node{ProjectID: pid, FilePath: "a.go", Kind: graph.KindFile, Language: "go", StartLine: 1, EndLine: 9, SourceHash: "h"})
+	helperID, _ := g.AddNode(&graph.Node{ProjectID: pid, FilePath: "a.go", Symbol: "Helper", FQN: "app.Helper", Kind: "function", Language: "go", StartLine: 3, EndLine: 3})
+	runID, _ := g.AddNode(&graph.Node{ProjectID: pid, FilePath: "a.go", Symbol: "Run", FQN: "app.Run", Kind: "function", Language: "go", StartLine: 5, EndLine: 7})
+	_, _ = g.AddEdge(fileID, helperID, graph.EdgeDefines, 1.0)
+	_, _ = g.AddEdgeProv(runID, helperID, graph.EdgeCalls, 1.0, graph.ProvName)
+	_ = g.SetFileHash(pid, "a.go", "h")
+
+	dir := t.TempDir()
+	if _, err := Export(g, nil, pid, "app", dir, profile, "abc123"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Truncate nodes.jsonl by one row so the jsonl count disagrees with
+	// the manifest. The Import must fail WITHOUT wiping the project.
+	nodesPath := filepath.Join(dir, fileNodes)
+	b, _ := os.ReadFile(nodesPath)
+	if len(b) == 0 {
+		t.Fatal("nodes.jsonl unexpectedly empty")
+	}
+	// Drop the last non-empty newline so we keep the file-node + Helper
+	// rows but lose the Run row → 2 rows vs manifest's 3.
+	cut := len(b) - 2 // drop trailing newline + something
+	for cut > 0 && b[cut-1] != '\n' {
+		cut--
+	}
+	if err := os.WriteFile(nodesPath, b[:cut], 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Import(g, nil, pid, "app", dir, profile); err == nil {
+		t.Fatal("Import of a truncated snapshot must fail")
+	}
+	// The wipe MUST NOT have run — the project still has its three nodes.
+	st, _ := g.Stats(pid)
+	if st.Nodes != 3 {
+		t.Errorf("truncated import wiped the project (nodes=%d, want 3) — pre-fix bug (O62/O100)", st.Nodes)
+	}
+}
+
+// TestExportVectorMetaZeroed pins P1-17 (B55): the same logical vector set
+// exported from two indexer runs (which assign different NodeIDs to the
+// same symbol) must serialize to byte-identical vectors.jsonl, so fcheap
+// can content-dedup. Pre-fix the volatile Meta.NodeID/Meta.Project broke
+// the dedup promise.
+func TestExportVectorMetaZeroed(t *testing.T) {
+	g1, _ := graph.Open(filepath.Join(t.TempDir(), "g1.db"))
+	defer g1.Close()
+	v1, _ := vector.Open(":memory:", embed.EmbeddingProfile{Provider: "fake", Model: "fake", Dimensions: 4, Distance: "cosine"})
+	defer v1.Close()
+	pid1, _ := g1.UpsertProject("app", "/x", "go")
+	// Single Helper node + one vector in run 1.
+	hID1, _ := g1.AddNode(&graph.Node{ProjectID: pid1, FilePath: "a.go", Symbol: "Helper", FQN: "app.Helper", Kind: "function", Language: "go", StartLine: 3, EndLine: 3})
+	_ = g1.SetFileHash(pid1, "a.go", "h")
+	_, _ = v1.Insert([]float32{1, 0, 0, 0}, "Helper body", vector.NodeMeta{NodeID: hID1, Project: "app", File: "a.go", Symbol: "Helper", FQN: "app.Helper", Kind: "function", Language: "go", StartLine: 3, EndLine: 3})
+	_ = v1.Sync()
+	dir1 := t.TempDir()
+	if _, err := Export(g1, v1, pid1, "app", dir1, profile, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	vecs1, _ := os.ReadFile(filepath.Join(dir1, fileVectors))
+
+	// Second run: same logical data, different node id (fresh DB / autoinc).
+	g2, _ := graph.Open(filepath.Join(t.TempDir(), "g2.db"))
+	defer g2.Close()
+	v2, _ := vector.Open(":memory:", embed.EmbeddingProfile{Provider: "fake", Model: "fake", Dimensions: 4, Distance: "cosine"})
+	defer v2.Close()
+	pid2, _ := g2.UpsertProject("app", "/x", "go")
+	hID2, _ := g2.AddNode(&graph.Node{ProjectID: pid2, FilePath: "a.go", Symbol: "Helper", FQN: "app.Helper", Kind: "function", Language: "go", StartLine: 3, EndLine: 3})
+	_ = g2.SetFileHash(pid2, "a.go", "h")
+	_, _ = v2.Insert([]float32{1, 0, 0, 0}, "Helper body", vector.NodeMeta{NodeID: hID2, Project: "app", File: "a.go", Symbol: "Helper", FQN: "app.Helper", Kind: "function", Language: "go", StartLine: 3, EndLine: 3})
+	_ = v2.Sync()
+	dir2 := t.TempDir()
+	if _, err := Export(g2, v2, pid2, "app", dir2, profile, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	vecs2, _ := os.ReadFile(filepath.Join(dir2, fileVectors))
+
+	if string(vecs1) != string(vecs2) {
+		t.Errorf("Export vectors.jsonl depends on volatile NodeID/Project (B55) — breaks fcheap dedup:\n%s\nvs\n%s", vecs1, vecs2)
 	}
 }
 

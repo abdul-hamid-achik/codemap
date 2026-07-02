@@ -149,7 +149,12 @@ func Rebuild(ctx context.Context, repoHash string) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &State{Schema: "cache", RepoHash: repoHash, Entries: map[string]CacheEntry{}}
+	// P1-17 (B56): stamp the schema name consistently with `Load`/`Save`
+	// so the rebuilt pointer file reads back as the same schema version.
+	// Pre-fix this hard-coded "cache" (no -v1) and a `cache list --rebuild`
+	// never persisted the rebuilt state — the documented recovery path
+	// didn't actually recover.
+	s := &State{Schema: schemaName, RepoHash: repoHash, Entries: map[string]CacheEntry{}}
 	for _, st := range stashes {
 		treeHash := tagValue(st.Tags, "tree:")
 		if treeHash == "" {

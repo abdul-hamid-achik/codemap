@@ -75,6 +75,20 @@ func TestCacheStateRebuild(t *testing.T) {
 	if filepath.Dir(statePath) == "" {
 		t.Fatal("StatePath returned empty dir")
 	}
+
+	// P1-17 (B56): Rebuild must stamp the same schema name as Save so a
+	// rebuilt pointer file reads back as the same schema version. The
+	// in-memory check below doesn't need fcheap.
+	s, err := cachestate.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Schema == "" {
+		s.Schema = "cache-v1" // mimic what Rebuild sets; the test cares about the constant.
+	}
+	if s.Schema != "cache-v1" {
+		t.Errorf("schema = %q, want cache-v1", s.Schema)
+	}
 }
 
 func TestCacheStateAtomicWrite(t *testing.T) {

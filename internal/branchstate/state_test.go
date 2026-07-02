@@ -86,7 +86,7 @@ func TestRebuildFromFcheap(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "snapshot.json"), []byte(`{"schema_version":1}`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		tags := []string{"codemap-index", "repo:" + repoHash, "branch:" + branch}
+		tags := []string{"codemap-index", "repo:" + repoHash, "branch:" + branch, "branchname:" + branch}
 		if _, err := snapshot.FcheapSave(ctx, dir, "codemap", "r@"+branch, tags, "sha-"+branch); err != nil {
 			t.Fatal(err)
 		}

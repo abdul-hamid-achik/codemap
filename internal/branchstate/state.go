@@ -114,9 +114,11 @@ func (s *State) Record(branch string, e BranchEntry) {
 
 // Rebuild reconstructs a repo's branch→snapshot map from fcheap (the durable
 // store), so a lost or stale pointer file is recoverable. It lists the codemap
-// index stashes for the repo and reads each one's branch:<name> tag, keeping the
-// newest stash per branch. base_sha and counts aren't in fcheap's list output, so
-// those stay empty on a rebuild (a later snapshot fills them in).
+// index stashes for the repo and reads each one's `branchname:<raw>` tag
+// (preferred — the original branch name as the user typed it) or falls back to
+// the sanitized `branch:<seg>` tag, keeping the newest stash per branch.
+// base_sha and counts aren't in fcheap's list output, so those stay empty on a
+// rebuild (a later snapshot fills them in).
 func Rebuild(ctx context.Context, repoHash string) (*State, error) {
 	stashes, err := snapshot.FcheapList(ctx, []string{"codemap-index", "repo:" + repoHash})
 	if err != nil {
@@ -124,7 +126,18 @@ func Rebuild(ctx context.Context, repoHash string) (*State, error) {
 	}
 	s := &State{Schema: schemaVersion, RepoHash: repoHash, Branches: map[string]BranchEntry{}}
 	for _, st := range stashes {
-		branch := tagValue(st.Tags, "branch:")
+		// P1-17 (B49): prefer the raw `branchname:` tag so the rebuilt
+		// map's keys match the names a fresh BranchSnapshot would record.
+		// A snapshot written before this fix only carries the sanitized
+		// `branch:` tag, so fall back to that — and prefix `san:` on it
+		// to avoid a "feature/x" key colliding with a later raw
+		// "feature/x" (impossible today, but it keeps the model sound).
+		branch := tagValue(st.Tags, "branchname:")
+		if branch == "" {
+			if seg := tagValue(st.Tags, "branch:"); seg != "" {
+				branch = "san:" + seg
+			}
+		}
 		if branch == "" {
 			continue
 		}

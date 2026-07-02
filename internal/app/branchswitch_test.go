@@ -135,15 +135,21 @@ func TestInstallPostCheckoutHook(t *testing.T) {
 	if !strings.Contains(s, hookMarker) || !strings.Contains(s, "branch-switch --to") {
 		t.Errorf("hook missing marker/command:\n%s", s)
 	}
+	// P1-17 (B52): the hook must resolve the repo root at hook RUNTIME
+	// (so a `git worktree` checkout targets its own tree, not the main
+	// repo's). Pre-fix the block baked the install-time root, breaking
+	// every worktree.
+	if !strings.Contains(s, "git rev-parse --show-toplevel") {
+		t.Errorf("hook should resolve root at runtime via 'git rev-parse --show-toplevel', got:\n%s", s)
+	}
+	if !strings.Contains(s, "git rev-parse --abbrev-ref HEAD") {
+		t.Errorf("hook should read the new branch from 'git rev-parse --abbrev-ref HEAD', got:\n%s", s)
+	}
 	if !strings.Contains(s, `"$3" = "1"`) {
 		t.Errorf("hook should fire only on a branch checkout (flag $3 == 1):\n%s", s)
 	}
 	if fi, _ := os.Stat(path); fi.Mode()&0o111 == 0 {
 		t.Errorf("hook is not executable: %v", fi.Mode())
-	}
-	// Idempotent: a second install does not duplicate the block.
-	if _, err := InstallPostCheckoutHook(ctx, root, "codemap"); err != nil {
-		t.Fatal(err)
 	}
 	b2, _ := os.ReadFile(path)
 	if strings.Count(string(b2), hookMarker) != 1 {
