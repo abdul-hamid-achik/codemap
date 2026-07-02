@@ -1,3 +1,5 @@
+/* Copyright © 2026 abdul hamid <abdulachik@icloud.com> */
+
 package main
 
 import (
