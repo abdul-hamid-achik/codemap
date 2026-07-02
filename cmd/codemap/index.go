@@ -83,11 +83,7 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 			if jsonOut(cmd) {
 				return printJSON(crep)
 			}
-			treeLabel := crep.TreeHash
-			if len(treeLabel) > 12 {
-				treeLabel = treeLabel[:12]
-			}
-			fmt.Printf("index restored from fcheap cache: stash %s (tree %s)\n", crep.StashID, treeLabel)
+			fmt.Printf("index restored from fcheap cache: stash %s (tree %s)\n", crep.StashID, shortHash(crep.TreeHash, 12))
 			return nil
 		}
 	}
@@ -142,11 +138,7 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	if envelope.Cache != nil && envelope.Cache.Action == "saved" {
-		treeLabel := envelope.Cache.TreeHash
-		if len(treeLabel) > 12 {
-			treeLabel = treeLabel[:12]
-		}
-		fmt.Printf("  cache: saved to fcheap (stash %s, tree %s)\n", envelope.Cache.StashID, treeLabel)
+		fmt.Printf("  cache: saved to fcheap (stash %s, tree %s)\n", envelope.Cache.StashID, shortHash(envelope.Cache.TreeHash, 12))
 	}
 
 	if noTips, _ := cmd.Flags().GetBool("no-tips"); !noTips {

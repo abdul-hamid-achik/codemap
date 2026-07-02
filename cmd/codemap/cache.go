@@ -48,7 +48,7 @@ var cacheSaveCmd = &cobra.Command{
 		if jsonOut(cmd) {
 			return printJSON(map[string]string{"stash_id": stashID, "tree_hash": treeHash})
 		}
-		fmt.Printf("cached index saved: stash %s (tree %s)\n", stashID, treeHash[:12])
+		fmt.Printf("cached index saved: stash %s (tree %s)\n", stashID, shortHash(treeHash, 12))
 		return nil
 	},
 }
@@ -110,7 +110,7 @@ var cacheListCmd = &cobra.Command{
 				}
 			}
 			fmt.Printf("  stash %s  tree %s  %d nodes  %d vectors  %s%s\n",
-				e.StashID, e.TreeHash[:12], e.NodeCount, e.VectorCount, e.EmbeddingProfile, age)
+				e.StashID, shortHash(e.TreeHash, 12), e.NodeCount, e.VectorCount, e.EmbeddingProfile, age)
 		}
 		return nil
 	},

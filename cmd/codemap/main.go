@@ -186,6 +186,16 @@ func truncStr(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+// shortHash returns the first n runes of s, or the full string if shorter.
+// Use it for any hash that may be empty or malformed and must never panic.
+func shortHash(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
 // disp prefers the fully-qualified name so same-named symbols are distinguishable.
 func disp(fqn, symbol string) string {
 	if fqn != "" {
