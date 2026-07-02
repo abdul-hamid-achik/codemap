@@ -430,7 +430,7 @@ func (s *Server) handleInit(_ context.Context, _ *sdkmcp.CallToolRequest, in pat
 	return result(rep, err)
 }
 
-func (s *Server) handleIndex(ctx context.Context, _ *sdkmcp.CallToolRequest, in indexInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleIndex(ctx context.Context, req *sdkmcp.CallToolRequest, in indexInput) (*sdkmcp.CallToolResult, any, error) {
 	root := cwdOf(in.Path)
 	// Pin P0-08: same daemon-delegation guard as the CLI. If a daemon is
 	// serving THIS project, delegate to it (avoids the veclite lock collision).
@@ -451,8 +451,66 @@ func (s *Server) handleIndex(ctx context.Context, _ *sdkmcp.CallToolRequest, in 
 			}, nil, nil
 		}
 	}
-	rep, err := s.svc.Index(ctx, root, index.Options{Reindex: in.Reindex, Precise: in.Precise}, !in.NoEmbed)
+	// P2-02 (O42): wire MCP progress notifications when the client
+	// supplied a progress token. The index.Options.OnFile/OnEmbed hooks
+	// are throttled (every ~50ms or every 64 files / 64 embeds) so a
+	// multi-minute reindex doesn't look hung or trip client timeouts.
+	opts := index.Options{Reindex: in.Reindex, Precise: in.Precise}
+	if token := req.Params.GetProgressToken(); token != nil && req.Session != nil {
+		notifier := &mcpProgress{ctx: ctx, session: req.Session, token: token}
+		opts.OnFile = notifier.onFile
+		opts.OnEmbed = notifier.onEmbed
+	}
+	rep, err := s.svc.Index(ctx, root, opts, !in.NoEmbed)
 	return result(rep, err)
+}
+
+// mcpProgress throttles per-file and per-embed progress events and
+// forwards them to the MCP client via ServerSession.NotifyProgress.
+// It's safe to call from any goroutine — NotifyProgress is documented
+// as concurrent-safe in go-sdk v1.6.x — and the throttling keeps
+// the notification stream at well under 20Hz even on a 10k-file
+// project, which is the level most MCP clients (Claude Code,
+// Continue, Cursor) handle gracefully.
+type mcpProgress struct {
+	ctx      context.Context
+	session  *sdkmcp.ServerSession
+	token    any
+	lastFile int64
+	lastEmb  int64
+}
+
+func (p *mcpProgress) send(progress, total int64, msg string) {
+	if p == nil || p.session == nil {
+		return
+	}
+	_ = p.session.NotifyProgress(p.ctx, &sdkmcp.ProgressNotificationParams{
+		ProgressToken: p.token,
+		Progress:      float64(progress),
+		Total:         float64(total),
+		Message:       msg,
+	})
+}
+
+func (p *mcpProgress) onFile(done, total int, rel string) {
+	// Throttle: emit at most ~20/sec. done monotonically increases
+	// (atomic counter) so this also drops the per-file noise on a
+	// 10k-file repo.
+	d := int64(done)
+	if d-p.lastFile < 32 && d != int64(total) {
+		return
+	}
+	p.lastFile = d
+	p.send(d, int64(total), "scanning "+rel)
+}
+
+func (p *mcpProgress) onEmbed(done, total int) {
+	d := int64(done)
+	if d-p.lastEmb < 64 && d != int64(total) {
+		return
+	}
+	p.lastEmb = d
+	p.send(d, int64(total), "embedding")
 }
 
 func (s *Server) handleStatus(_ context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {

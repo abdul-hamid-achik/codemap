@@ -514,3 +514,98 @@ func TestRegisteredToolsAppearInDocsCommands(t *testing.T) {
 		t.Errorf("P1-18: %d MCP tools are registered but missing from the docs.go commands topic: %v. Update internal/app/docs.go's commands topic so the in-band agent guide stays in sync.", len(missing), missing)
 	}
 }
+
+// TestMCPIndexProgressNotifications pins P2-02 (O42): when the client
+// supplies a progress token, codemap_index must report per-file
+// and per-embed progress to the client via ServerSession.NotifyProgress
+// so a multi-minute reindex doesn't look hung. The handler is
+// called from the indexer's parallel Go workers, so the notification
+// path must be goroutine-safe and throttled (not 60Hz on a 10k-file
+// repo). The test asserts (a) ≥1 progress notification arrives and
+// (b) the final tool result is the same shape as without a token.
+func TestMCPIndexProgressNotifications(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+
+	// Build a client whose ProgressNotificationHandler records every
+	// notification that arrives. Synchronized via a channel so the
+	// tool call (which blocks until the reindex completes) sees every
+	// notification that landed before the final result returned.
+	progressCh := make(chan *sdkmcp.ProgressNotificationParams, 64)
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, &sdkmcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *sdkmcp.ProgressNotificationClientRequest) {
+			// non-blocking send: skip the notification if the
+			// channel is full rather than stall the handler
+			// (which the SDK invokes under a session lock).
+			select {
+			case progressCh <- req.Params:
+			default:
+			}
+		},
+	})
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+
+	// Build a Meta map with a progress token — the SDK reads it
+	// from CallToolParams.Meta on the wire.
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_index",
+		Meta: sdkmcp.Meta{"progressToken": "p2-02-test"},
+		Arguments: map[string]any{
+			"path":     proj,
+			"no_embed": true, // structure-only — no Ollama round-trips in the test env
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("index tool error: %s", textOf(res))
+	}
+	if txt := textOf(res); !strings.Contains(txt, `"nodes":`) {
+		t.Errorf("index result should carry a node count: %s", txt)
+	}
+	close(progressCh)
+	var got *sdkmcp.ProgressNotificationParams
+	for n := range progressCh {
+		if got == nil {
+			got = n
+		}
+	}
+	if got == nil {
+		t.Fatal("P2-02 (O42): codemap_index produced no progress notifications when the client supplied a progress token — a multi-minute reindex will look hung")
+	}
+	if got.ProgressToken != "p2-02-test" {
+		t.Errorf("progress notification token = %v, want p2-02-test", got.ProgressToken)
+	}
+	if got.Message == "" {
+		t.Errorf("progress notification should carry a human-readable message")
+	}
+}
