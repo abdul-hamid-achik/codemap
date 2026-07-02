@@ -5,6 +5,7 @@
   "buildCommand": "bun run site:build",
   "outputDirectory": "docs/.vitepress/dist",
   "cleanUrls": true,
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- docs/ package.json bun.lock vercel.json",
   "rewrites": [
     { "source": "/(.*)?", "destination": "/$1.html" }
   ]
