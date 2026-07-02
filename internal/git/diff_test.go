@@ -114,6 +114,7 @@ func TestChangedFilesSince(t *testing.T) {
 	write(t, dir, "a.go", "package a\n\nfunc Added() {}\n")
 	gitCmd(t, dir, "add", "a.go")
 	gitCmd(t, dir, "commit", "-m", "c2")
+	write(t, dir, "untracked.go", "package a\n")
 
 	files, err := ChangedFiles(ctx, dir, "since", base)
 	if err != nil {
@@ -121,6 +122,9 @@ func TestChangedFilesSince(t *testing.T) {
 	}
 	if findFile(files, "a.go") == nil {
 		t.Errorf("a.go changed since base %s should be reported, got %+v", base, files)
+	}
+	if u := findFile(files, "untracked.go"); u == nil || u.Status != "?" {
+		t.Errorf("untracked.go should be reported with status '?' in since mode, got %+v", u)
 	}
 }
 

@@ -90,7 +90,7 @@ func ChangedFiles(ctx context.Context, dir, mode, since string) ([]ChangedFile, 
 	}
 	files := mergeChangedFiles(parseUnifiedDiff(out))
 
-	if mode == "working" {
+	if mode == "working" || mode == "since" {
 		files = appendUntracked(ctx, dir, files)
 	}
 	return files, nil
