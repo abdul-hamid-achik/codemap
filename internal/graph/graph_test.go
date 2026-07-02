@@ -37,19 +37,20 @@ func TestUpsertProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id2, err := s.UpsertProject("demo", "/tmp/demo2", "go")
+	// P1-10: same name + SAME path = normal upsert (id stays the same).
+	id2, err := s.UpsertProject("demo", "/tmp/demo", "go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if id1 != id2 {
-		t.Errorf("upsert created a new row: %d vs %d", id1, id2)
+		t.Errorf("same-name same-path upsert created a new row: %d vs %d", id1, id2)
 	}
 	p, err := s.GetProjectByName("demo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Path != "/tmp/demo2" {
-		t.Errorf("path = %q, want updated /tmp/demo2", p.Path)
+	if p.Path != "/tmp/demo" {
+		t.Errorf("path = %q, want /tmp/demo", p.Path)
 	}
 	projs, err := s.ListProjects()
 	if err != nil {
@@ -779,4 +780,46 @@ func openStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// TestUpsertProjectNameCollision pins P1-10 (B65): two projects with
+// the same basename but different paths silently clobbered each other
+// pre-fix (UpsertProject's ON CONFLICT(name) rebinds the path). Post-fix
+// the second project gets a disambiguated name (name + short path hash)
+// so both are independently queryable.
+func TestUpsertProjectNameCollision(t *testing.T) {
+	s := openTest(t)
+	id1, err := s.UpsertProject("app", "/work/app", "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, err := s.UpsertProject("app", "/personal/app", "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id1 == id2 {
+		t.Fatalf("two same-basename projects must get distinct IDs; both = %d", id1)
+	}
+	// The first project is still queryable by name "app".
+	p1, err := s.GetProjectByName("app")
+	if err != nil {
+		t.Fatalf("first project should still be queryable as 'app': %v", err)
+	}
+	if p1.Path != "/work/app" {
+		t.Errorf("first project path = %q, want /work/app (must not be clobbered)", p1.Path)
+	}
+	// The second project has a disambiguated name (app + hash suffix).
+	projects, _ := s.ListProjects()
+	found := false
+	for _, p := range projects {
+		if p.Path == "/personal/app" {
+			found = true
+			if p.Name == "app" {
+				t.Errorf("second project name should be disambiguated, not 'app'")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("second project (/personal/app) should be in the registry")
+	}
 }
