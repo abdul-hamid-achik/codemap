@@ -302,3 +302,59 @@ func TestSiblingProjectIndexed(t *testing.T) {
 		t.Error("empty name must not match")
 	}
 }
+
+// TestConfigValidateProvider pins P1-12 (B68): the embedding provider
+// field was advertised as openai/cohere/voyage but never implemented —
+// now an unsupported provider is a hard error.
+func TestConfigValidateProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Embedding.Provider = "openai"
+	if err := cfg.Validate(); err == nil {
+		t.Error("Validate should reject unsupported provider 'openai'")
+	}
+	cfg.Embedding.Provider = "ollama"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate should accept 'ollama': %v", err)
+	}
+}
+
+// TestConfigValidateDistance pins P1-12 (O72): invalid distance values
+// are rejected.
+func TestConfigValidateDistance(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Embedding.Distance = "manhattan"
+	if err := cfg.Validate(); err == nil {
+		t.Error("Validate should reject unsupported distance 'manhattan'")
+	}
+	cfg.Embedding.Distance = "cosine"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate should accept 'cosine': %v", err)
+	}
+}
+
+// TestConfigProjectFirstMatchWins pins P1-12 (B67): pre-fix Load merged
+// ALL matching project config markers (codemap.yaml + codemap.yml +
+// .config/codemap.yaml) with last-wins, inverting the documented
+// precedence. Now the first match wins.
+func TestConfigProjectFirstMatchWins(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	// Create a project with two config files; codemap.yaml should win.
+	root := t.TempDir()
+	_ = os.WriteFile(filepath.Join(root, "codemap.yaml"), []byte("embedding:\n  model: from-yaml\n"), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, ".config"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, ".config", "codemap.yaml"), []byte("embedding:\n  model: from-dotconfig\n"), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, ".codemap"), 0o755) // marker so FindProjectRoot finds root
+	t.Chdir(root)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Embedding.Model != "from-yaml" {
+		t.Errorf("first-match-wins: model = %q, want from-yaml (codemap.yaml at root)", cfg.Embedding.Model)
+	}
+}

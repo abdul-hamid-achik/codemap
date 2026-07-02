@@ -127,11 +127,19 @@ func Load(explicitPath string) (*Config, error) {
 		return nil, err
 	}
 
-	// 2. project config file (walk up from cwd)
+	// 2. project config file (walk up from cwd). P1-12 (B67): pre-fix
+	// merged ALL matching markers (codemap.yaml + codemap.yml +
+	// .config/codemap.yaml), with the LAST one winning — inverted
+	// from the documented precedence (codemap.yaml at root is highest).
+	// Now we stop at the first match so the documented order holds.
 	if root, err := FindProjectRoot(""); err == nil {
 		for _, name := range []string{"codemap.yaml", "codemap.yml", filepath.Join(".config", "codemap.yaml")} {
-			if err := mergeFileIfExists(cfg, filepath.Join(root, name)); err != nil {
-				return nil, err
+			path := filepath.Join(root, name)
+			if _, statErr := os.Stat(path); statErr == nil {
+				if err := mergeFile(cfg, path); err != nil {
+					return nil, err
+				}
+				break // first match wins
 			}
 		}
 	}
@@ -149,7 +157,38 @@ func Load(explicitPath string) (*Config, error) {
 	// 4. environment overrides (highest precedence)
 	applyEnv(cfg)
 
+	// P1-12 (B68/O72): validate the resolved config so silent bad
+	// values (unsupported provider, invalid distance, zero dims)
+	// surface as a clear error instead of silently degrading.
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// Validate checks the resolved config for internal consistency. P1-12
+// (B68/O72): the embedding provider field was advertised as
+// openai/cohere/voyage but never implemented — now an unsupported
+// provider is a hard error so the user knows to fix it, not wonder
+// why embeddings silently fell back to ollama.
+func (c *Config) Validate() error {
+	switch c.Embedding.Provider {
+	case "ollama", "":
+		// supported (default)
+	default:
+		return fmt.Errorf("embedding provider %q is not implemented; only \"ollama\" is supported; set it to \"ollama\" or remove the provider field", c.Embedding.Provider)
+	}
+	switch c.Embedding.Distance {
+	case "cosine", "dot", "euclidean", "":
+		// supported
+	default:
+		return fmt.Errorf("embedding distance %q is not a valid value; use cosine, dot, or euclidean", c.Embedding.Distance)
+	}
+	if c.Embedding.Dimensions < 0 {
+		return fmt.Errorf("embedding dimensions must be >= 0 (0 = auto-detect from the model)")
+	}
+	return nil
 }
 
 // mergeFile reads a YAML file and overlays its keys onto cfg. Keys absent from
