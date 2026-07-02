@@ -1053,7 +1053,6 @@ type nodeIndex struct {
 	nodes []graph.Node
 	fqnTo map[string]int64
 	symTo map[string][]int64
-	posTo map[precisePos]int64
 	dirOf map[int64]string
 }
 
@@ -1068,7 +1067,6 @@ func (ix *Indexer) buildNodeIndex(projectID int64) (*nodeIndex, error) {
 		nodes: nodes,
 		fqnTo: make(map[string]int64, len(nodes)),
 		symTo: make(map[string][]int64, len(nodes)),
-		posTo: make(map[precisePos]int64, len(nodes)),
 		dirOf: make(map[int64]string, len(nodes)),
 	}
 	for _, n := range nodes {
@@ -1085,14 +1083,6 @@ func (ix *Indexer) buildNodeIndex(projectID int64) (*nodeIndex, error) {
 			ni.symTo[n.Symbol] = append(ni.symTo[n.Symbol], n.ID)
 		}
 		ni.dirOf[n.ID] = filepath.Dir(n.FilePath)
-		// position map (used by precise passes); collisions are resolved per-pass
-		key := precisePos{n.FilePath, n.StartLine}
-		if _, dup := ni.posTo[key]; dup {
-			// mark ambiguous by zeroing — precise passes handle this themselves
-			ni.posTo[key] = 0
-		} else {
-			ni.posTo[key] = n.ID
-		}
 	}
 	return ni, nil
 }
