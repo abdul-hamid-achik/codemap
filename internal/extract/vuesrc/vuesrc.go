@@ -36,7 +36,10 @@ var _ extract.Extractor = (*Extractor)(nil)
 // scan is enough for the common case; a script-like string deep inside
 // <template> markup (e.g. a literal code sample) could false-positive — a known,
 // documented limitation rather than a full HTML/SFC parse.
-var scriptBlockRe = regexp.MustCompile(`(?is)<script([^>]*)>(.*?)</script\s*>`)
+//
+// The attribute capture is quote-aware so Vue 3.3+ `generic="T extends Record<string, unknown>"
+// does not terminate early at the `>` inside the attribute value.
+var scriptBlockRe = regexp.MustCompile(`(?is)<script((?:[^>"']|"[^"]*"|'[^']*')*)>(.*?)</script\s*>`)
 
 var (
 	setupAttrRe = regexp.MustCompile(`(?i)(^|\s)setup(\s|=|$)`)

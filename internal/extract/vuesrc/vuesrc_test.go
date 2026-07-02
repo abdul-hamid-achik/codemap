@@ -111,6 +111,35 @@ func TestParseScriptBlocksDefaultLangJS(t *testing.T) {
 	}
 }
 
+// TestParseScriptBlocksGenericAttribute covers Vue 3.3+ <script setup generic="...">
+// where the attribute value itself contains a `>`. The parser must not terminate the
+// opening tag at that inner `>` and must capture the full script content.
+func TestParseScriptBlocksGenericAttribute(t *testing.T) {
+	src := `<template><div>x</div></template>
+<script setup lang="ts" generic="T extends Record<string, unknown>">
+const x = 1
+function handler(v: T) { return v }
+</script>
+`
+	blocks := parseScriptBlocks([]byte(src))
+	if len(blocks) != 1 {
+		t.Fatalf("blocks = %d, want 1", len(blocks))
+	}
+	if !blocks[0].setup {
+		t.Error("expected setup=true")
+	}
+	if blocks[0].lang != "ts" {
+		t.Errorf("lang = %q, want ts", blocks[0].lang)
+	}
+	body := string(blocks[0].content)
+	if !strings.Contains(body, "const x = 1") || !strings.Contains(body, "function handler") {
+		t.Errorf("content missing expected script text: %q", body)
+	}
+	if strings.Contains(body, "unknown>") {
+		t.Errorf("content leaked the trailing `>` of the generic attribute: %q", body)
+	}
+}
+
 // stubExtractor is a fake extract.Extractor that returns a canned FileResult
 // and records the relPath/content it was called with, so ExtractFile's
 // delegation + line-shift logic can be tested without a real language server.
