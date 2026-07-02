@@ -5,7 +5,9 @@ package graph
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -254,9 +256,22 @@ func (s *Store) prepareStatements() error {
 // ---- projects ----
 
 // UpsertProject inserts or updates a project by name and returns its id.
+// P1-10 (B65): if a project with the same name but a DIFFERENT path already
+// exists (e.g. ~/work/app and ~/personal/app both derive "app"), disambiguate
+// the new project's name by appending a short hash of its path so the two
+// don't silently clobber each other. The common single-project case is
+// unaffected (same name + same path = normal upsert).
 func (s *Store) UpsertProject(name, path, language string) (int64, error) {
 	ts := now()
-	_, err := s.db.Exec(`
+	// Check for a name collision with a different path.
+	var existingPath string
+	err := s.db.QueryRow("SELECT path FROM projects WHERE name=?", name).Scan(&existingPath)
+	if err == nil && existingPath != "" && existingPath != path {
+		// Collision: append a short path hash to disambiguate.
+		h := sha256.Sum256([]byte(path))
+		name = name + "-" + hex.EncodeToString(h[:])[:8]
+	}
+	_, err = s.db.Exec(`
 		INSERT INTO projects(name, path, language, created_at, updated_at)
 		VALUES(?,?,?,?,?)
 		ON CONFLICT(name) DO UPDATE SET
