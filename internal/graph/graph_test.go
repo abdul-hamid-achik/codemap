@@ -2,7 +2,9 @@ package graph
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -275,6 +277,46 @@ func TestMigrateV2ToV3AddsProvenance(t *testing.T) {
 	// Idempotent: re-migrate is a no-op.
 	if err := s.migrate(); err != nil {
 		t.Errorf("re-migrate after upgrade: %v", err)
+	}
+}
+
+// TestMigrateRejectsNewerSchema pins O19: when the on-disk schema
+// is NEWER than this build of codemap supports, Open must refuse
+// to run (return an actionable error). Pre-fix migrate() treated
+// `v >= schemaVersion` as "nothing to do" and silently accepted a
+// newer schema — which then corrupted the graph the moment codemap
+// applied a down-migration the on-disk tables didn't have. The
+// error names both versions so the operator can upgrade codemap
+// (or roll the schema back) without losing data.
+func TestMigrateRejectsNewerSchema(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "future.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stamp a user_version that's ahead of what this build supports.
+	future := schemaVersion + 1
+	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", future)); err != nil {
+		t.Fatalf("stamp future version: %v", err)
+	}
+	_ = s.Close()
+
+	_, err = Open(path)
+	if err == nil {
+		t.Fatal("expected error opening a newer-schema graph, got nil")
+	}
+	// The error must name BOTH the on-disk and the supported
+	// versions so the agent (or a human) can act on it.
+	msg := err.Error()
+	if !strings.Contains(msg, fmt.Sprintf("v%d", future)) {
+		t.Errorf("error must name the on-disk schema version: %q", msg)
+	}
+	if !strings.Contains(msg, fmt.Sprintf("v%d", schemaVersion)) {
+		t.Errorf("error must name the supported schema version: %q", msg)
+	}
+	if !strings.Contains(msg, "upgrade codemap") {
+		t.Errorf("error must suggest the remediation: %q", msg)
 	}
 }
 

@@ -158,7 +158,16 @@ func (s *Store) migrate() error {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if v >= schemaVersion {
+	if v > schemaVersion {
+		// O19: a NEWER schema is the *user's* bug, not ours — refuse
+		// to run against it (silent accept would corrupt the graph
+		// the moment we apply a down-migration the on-disk tables
+		// don't have). The actionable error names the versions
+		// so an agent (or a human) can `brew upgrade codemap` and
+		// retry without losing data.
+		return fmt.Errorf("graph db schema v%d is newer than this codemap (supports v%d); upgrade codemap", v, schemaVersion)
+	}
+	if v == schemaVersion {
 		return nil
 	}
 	if _, err := s.db.Exec(schemaSQL); err != nil {
