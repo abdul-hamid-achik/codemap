@@ -99,8 +99,8 @@ func TestIndexIncrementalTiming(t *testing.T) {
 	if res.FilesIndexed != 0 {
 		t.Errorf("FilesIndexed = %d, want 0 (no changes)", res.FilesIndexed)
 	}
-	if res.FilesSkipped != 2 {
-		t.Errorf("FilesSkipped = %d, want 2", res.FilesSkipped)
+	if res.FilesUnchanged != 2 {
+		t.Errorf("FilesUnchanged = %d, want 2", res.FilesSkipped)
 	}
 }
 
@@ -380,7 +380,7 @@ func TestParallelExtractionOnErrorContinues(t *testing.T) {
 		t.Errorf("FilesIndexed = %d, want 0 (all errored)", res.FilesIndexed)
 	}
 	if res.FilesSkipped != 5 {
-		t.Errorf("FilesSkipped = %d, want 5", res.FilesSkipped)
+		t.Errorf("FilesSkipped = %d, want 5 (all errored)", res.FilesSkipped)
 	}
 	if len(res.Errors) != 5 {
 		t.Errorf("Errors = %d, want 5", len(res.Errors))

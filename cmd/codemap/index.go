@@ -309,8 +309,18 @@ func indexFilesSummary(rep *app.IndexReport) string {
 	for _, n := range rep.Unsupported {
 		unsupported += n
 	}
-	line := fmt.Sprintf("  files: %d scanned, %d indexed, %d skipped",
-		rep.FilesScanned+unsupported, rep.FilesIndexed, rep.FilesSkipped+unsupported)
+	// P2-07 (O108): render "N up-to-date" for unchanged files so a
+	// clean incremental index doesn't read as failure ("112 skipped").
+	// Reserve "skipped" for genuine skips (oversized/generated/errors).
+	unchanged := rep.FilesUnchanged
+	skipped := rep.FilesSkipped + unsupported
+	line := fmt.Sprintf("  files: %d scanned, %d indexed", rep.FilesScanned+unsupported, rep.FilesIndexed)
+	if unchanged > 0 {
+		line += fmt.Sprintf(", %d up-to-date", unchanged)
+	}
+	if skipped > 0 {
+		line += fmt.Sprintf(", %d skipped", skipped)
+	}
 	if rep.FilesDeleted > 0 {
 		line += fmt.Sprintf(", %d removed", rep.FilesDeleted)
 	}

@@ -349,8 +349,8 @@ func TestIndexIncremental(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.FilesIndexed != 0 || res.FilesSkipped != 2 {
-		t.Errorf("re-run: indexed=%d skipped=%d, want 0/2", res.FilesIndexed, res.FilesSkipped)
+	if res.FilesIndexed != 0 || res.FilesUnchanged != 2 {
+		t.Errorf("re-run: indexed=%d unchanged=%d, want 0/2", res.FilesIndexed, res.FilesUnchanged)
 	}
 	if res.Nodes != 5 {
 		t.Errorf("re-run nodes = %d, want stable 5", res.Nodes)
@@ -362,8 +362,8 @@ func TestIndexIncremental(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.FilesIndexed != 1 || res.FilesSkipped != 1 {
-		t.Errorf("after edit: indexed=%d skipped=%d, want 1/1", res.FilesIndexed, res.FilesSkipped)
+	if res.FilesIndexed != 1 || res.FilesUnchanged != 1 {
+		t.Errorf("after edit: indexed=%d unchanged=%d, want 1/1", res.FilesIndexed, res.FilesUnchanged)
 	}
 	if res.Nodes != 6 {
 		t.Errorf("after edit nodes = %d, want 6 (added Extra)", res.Nodes)

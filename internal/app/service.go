@@ -39,15 +39,16 @@ type InitReport struct {
 
 // IndexReport is returned by Index.
 type IndexReport struct {
-	Project      string   `json:"project"`
-	Root         string   `json:"root"`
-	Embedded     bool     `json:"embedded"`
-	Warning      string   `json:"warning,omitempty"`
-	FilesScanned int      `json:"files_scanned"`
-	FilesIndexed int      `json:"files_indexed"`
-	FilesSkipped int      `json:"files_skipped"`
-	FilesDeleted int      `json:"files_deleted,omitempty"`
-	Oversized    []string `json:"oversized,omitempty"`
+	Project        string   `json:"project"`
+	Root           string   `json:"root"`
+	Embedded       bool     `json:"embedded"`
+	Warning        string   `json:"warning,omitempty"`
+	FilesScanned   int      `json:"files_scanned"`
+	FilesIndexed   int      `json:"files_indexed"`
+	FilesSkipped   int      `json:"files_skipped"`
+	FilesUnchanged int      `json:"files_unchanged"` // P2-07 (O108): hash-matched, not a skip
+	FilesDeleted   int      `json:"files_deleted,omitempty"`
+	Oversized      []string `json:"oversized,omitempty"`
 	// Unsupported maps a recognized source language with no available extractor
 	// (e.g. its language server isn't installed) to the count of such files. They
 	// were scanned but couldn't be indexed — the Warning explains how to enable them.
@@ -179,6 +180,7 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.FilesScanned = res.FilesScanned
 	rep.FilesIndexed = res.FilesIndexed
 	rep.FilesSkipped = res.FilesSkipped
+	rep.FilesUnchanged = res.FilesUnchanged
 	rep.FilesDeleted = res.FilesDeleted
 	rep.Oversized = res.Oversized
 	rep.Unsupported = res.Unsupported

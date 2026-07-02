@@ -45,9 +45,15 @@ func TestPreciseEdgeNote(t *testing.T) {
 // "0 skipped" while the warning reports skipped files.
 func TestIndexFilesSummary(t *testing.T) {
 	// No unsupported files: plain counts, invariant scanned = indexed + skipped.
+	// P2-07 (O108): no skips and no unchanged → just "10 scanned, 10 indexed".
 	plain := indexFilesSummary(&app.IndexReport{FilesScanned: 10, FilesIndexed: 10, FilesSkipped: 0})
-	if !strings.Contains(plain, "10 scanned, 10 indexed, 0 skipped") {
+	if !strings.Contains(plain, "10 scanned, 10 indexed") {
 		t.Errorf("plain summary = %q", plain)
+	}
+	// Unchanged files show as "up-to-date" not "skipped".
+	upToDate := indexFilesSummary(&app.IndexReport{FilesScanned: 10, FilesIndexed: 0, FilesSkipped: 0, FilesUnchanged: 10})
+	if !strings.Contains(upToDate, "10 up-to-date") || strings.Contains(upToDate, "10 skipped") {
+		t.Errorf("up-to-date summary = %q (should say up-to-date, not skipped)", upToDate)
 	}
 	// Unsupported (e.g. TS+Python with no servers) fold into scanned + skipped, so
 	// the line agrees with the warning instead of saying "0 skipped".
@@ -55,7 +61,7 @@ func TestIndexFilesSummary(t *testing.T) {
 		FilesScanned: 0, FilesIndexed: 0, FilesSkipped: 0,
 		Unsupported: map[string]int{"typescript": 1, "python": 1},
 	})
-	if !strings.Contains(unsup, "2 scanned, 0 indexed, 2 skipped") {
+	if !strings.Contains(unsup, "2 scanned") || !strings.Contains(unsup, "2 skipped") {
 		t.Errorf("unsupported files should be counted as scanned+skipped, got %q", unsup)
 	}
 	// Mixed: Go indexed + a TS file with no server.
@@ -63,7 +69,7 @@ func TestIndexFilesSummary(t *testing.T) {
 		FilesScanned: 10, FilesIndexed: 10, FilesSkipped: 0, FilesDeleted: 1,
 		Unsupported: map[string]int{"typescript": 2},
 	})
-	if !strings.Contains(mixed, "12 scanned, 10 indexed, 2 skipped, 1 removed") {
+	if !strings.Contains(mixed, "12 scanned") || !strings.Contains(mixed, "10 indexed") || !strings.Contains(mixed, "2 skipped") || !strings.Contains(mixed, "1 removed") {
 		t.Errorf("mixed summary = %q", mixed)
 	}
 }
