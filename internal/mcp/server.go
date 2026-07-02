@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -269,7 +268,8 @@ type cacheInput struct {
 }
 
 type cacheListInput struct {
-	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Rebuild bool   `json:"rebuild,omitempty" jsonschema:"reconstruct the list from fcheap (use if the local pointer file is lost)"`
 }
 
 type cacheDropInput struct {
@@ -544,7 +544,7 @@ func (s *Server) handleBranchSwitch(ctx context.Context, _ *sdkmcp.CallToolReque
 		}
 	}
 	if to == "" {
-		return result(nil, fmt.Errorf("no target branch (detached HEAD or not a git repository) — pass 'to'"))
+		return result(map[string]any{"switched": false, "note": "no target branch (detached HEAD or not a git repository) — pass 'to' explicitly"}, nil)
 	}
 	if err := s.svc.BranchSwitch(ctx, root, in.From, to); err != nil {
 		return result(nil, err)
@@ -573,7 +573,7 @@ func (s *Server) handleCacheRestore(ctx context.Context, _ *sdkmcp.CallToolReque
 }
 
 func (s *Server) handleCacheList(ctx context.Context, _ *sdkmcp.CallToolRequest, in cacheListInput) (*sdkmcp.CallToolResult, any, error) {
-	rep, err := s.svc.CacheList(ctx, cwdOf(in.Path), false)
+	rep, err := s.svc.CacheList(ctx, cwdOf(in.Path), in.Rebuild)
 	return result(rep, err)
 }
 
