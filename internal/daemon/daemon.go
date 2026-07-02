@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -47,6 +48,11 @@ type Info struct {
 	StartedAt     string `json:"started_at"`
 	LastReindexAt string `json:"last_reindex_at,omitempty"`
 	Watching      bool   `json:"watching"`
+	// LastError is the most recent unexpected error from the watcher or an
+	// incremental index (B46). It is cleared by a successful reindex and
+	// surfaced via daemon.status so failures are no longer silent while
+	// the daemon still claims watching:true.
+	LastError string `json:"last_error,omitempty"`
 	// MissingServers is a language → binary map of LSP-backed languages
 	// the project contains whose language server isn't on PATH or failed
 	// to spawn, so the daemon watches Go only. Empty when every present
@@ -69,7 +75,8 @@ type Daemon struct {
 	listener net.Listener
 
 	mu       sync.Mutex
-	indexMu  sync.Mutex // serializes index runs (watcher vs RPC reindex)
+	indexMu  sync.Mutex     // serializes index runs (watcher vs RPC reindex)
+	cacheWG  sync.WaitGroup // tracks MaybeCacheAfterIndex goroutines (B44)
 	info     Info
 	idle     *time.Timer
 	stopOnce sync.Once
@@ -214,7 +221,19 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	if cfg.IdleTimeout > 0 {
 		d.idle = time.AfterFunc(cfg.IdleTimeout, d.Stop)
 	}
-	go func() { _ = w.Run(ctx) }()
+	// B46: capture watcher exit so an unexpected death flips info.Watching
+	// to false and records last_error; pre-fix the goroutine discarded the
+	// error and status kept reporting watching:true after the watcher
+	// already exited.
+	go func() {
+		if err := w.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			d.mu.Lock()
+			d.info.Watching = false
+			d.info.LastError = "watcher died: " + err.Error()
+			d.mu.Unlock()
+			_ = d.writeState()
+		}
+	}()
 	go d.serve()
 	go func() { <-ctx.Done(); d.Stop() }() // parent cancel → clean shutdown
 	return d, nil
@@ -237,6 +256,12 @@ func (d *Daemon) Stop() {
 		if d.watcher != nil {
 			_ = d.watcher.Close()
 		}
+		// B44: wait for any in-flight MaybeCacheAfterIndex goroutine spawned
+		// by onChange to finish BEFORE we close the session — that goroutine
+		// reaches back into sess, so closing here would race the cache write.
+		// cacheWG is added/done'd inside onChange, so this is bounded by the
+		// current watcher batch and never grows unbounded.
+		d.cacheWG.Wait()
 		// Hold indexMu so any in-flight onChange / RPC reindex goroutine
 		// (which writes the state file) finishes before we remove it. Without
 		// this, a watcher that fires after d.cancel() returns can race past
@@ -264,21 +289,34 @@ func (d *Daemon) onChange(toIndex, toRemove []string) {
 	if len(rels) == 0 {
 		return
 	}
-	d.indexMu.Lock()
-	defer d.indexMu.Unlock()
-	if _, err := d.ix.IndexFiles(d.ctx, d.pid, d.name, d.root, rels, index.Options{}); err != nil {
-		return
-	}
-	d.mu.Lock()
-	d.info.LastReindexAt = nowRFC3339()
-	d.mu.Unlock()
-	_ = d.writeState()
+	d.withIndexMu(func() {
+		if _, err := d.ix.IndexFiles(d.ctx, d.pid, d.name, d.root, rels, index.Options{}); err != nil {
+			// B46: surface per-sync index errors via info.LastError so callers
+			// (status, log scrapers) can see them; pre-fix the error was
+			// silently swallowed while watching:true stayed asserted.
+			d.mu.Lock()
+			d.info.LastError = "index: " + err.Error()
+			d.mu.Unlock()
+			_ = d.writeState()
+			return
+		}
+		d.mu.Lock()
+		d.info.LastReindexAt = nowRFC3339()
+		d.mu.Unlock()
+		_ = d.writeState()
 
-	// Best-effort cache after significant syncs (avoid caching on every single
-	// file save — only when a batch of changes lands).
-	if len(rels) >= minCacheSyncFiles && snapshot.FcheapAvailable() {
-		go func() { _ = d.svc.MaybeCacheAfterIndex(d.ctx, d.root) }()
-	}
+		// Best-effort cache after significant syncs (avoid caching on every single
+		// file save — only when a batch of changes lands).
+		if len(rels) >= minCacheSyncFiles && snapshot.FcheapAvailable() {
+			// B44: track this goroutine with cacheWG so Stop can wait for it
+			// before closing the session it reaches back into.
+			d.cacheWG.Add(1)
+			go func() {
+				defer d.cacheWG.Done()
+				_ = d.svc.MaybeCacheAfterIndex(d.ctx, d.root)
+			}()
+		}
+	})
 }
 
 // minCacheSyncFiles is the minimum number of changed+removed files in a single
@@ -343,9 +381,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 				err       error
 				reindexed bool
 			}
-			res := func() reindexResult {
-				d.indexMu.Lock()
-				defer d.indexMu.Unlock()
+			res := d.runWithIndexMu(func() any {
 				rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: r.Precise, NoLSP: r.NoLSP}, embed)
 				if ierr != nil {
 					return reindexResult{err: ierr}
@@ -354,7 +390,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 				d.info.LastReindexAt = nowRFC3339()
 				d.mu.Unlock()
 				return reindexResult{rep: rep, reindexed: true}
-			}()
+			}).(reindexResult)
 			if res.err != nil {
 				_ = enc.Encode(map[string]string{"error": res.err.Error()})
 				return
@@ -391,6 +427,38 @@ func (d *Daemon) resetIdle() {
 	if d.idle != nil && d.cfg.IdleTimeout > 0 {
 		d.idle.Reset(d.cfg.IdleTimeout)
 	}
+}
+
+// withIndexMu serializes a unit of work against the indexer (B45). It pauses
+// the idle-shutdown timer while work is in flight and restarts it on release,
+// so a long reindex can never be cancelled by the timer firing mid-work.
+// It also enforces the same watch-vs-reindex serialization indexMu already
+// guarantees (see onChange / handleConn).
+func (d *Daemon) withIndexMu(fn func()) {
+	if d.idle != nil {
+		d.idle.Stop()
+	}
+	d.indexMu.Lock()
+	defer func() {
+		d.indexMu.Unlock()
+		d.resetIdle()
+	}()
+	fn()
+}
+
+// runWithIndexMu runs fn under indexMu with the idle timer paused, and
+// returns its result. It's the value-returning sibling of withIndexMu, used
+// by handleConn's daemon.reindex case (B45).
+func (d *Daemon) runWithIndexMu(fn func() any) any {
+	if d.idle != nil {
+		d.idle.Stop()
+	}
+	d.indexMu.Lock()
+	defer func() {
+		d.indexMu.Unlock()
+		d.resetIdle()
+	}()
+	return fn()
 }
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
