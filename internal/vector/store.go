@@ -6,6 +6,8 @@ package vector
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/veclite"
@@ -120,6 +122,19 @@ func (s *Store) ensureCollection(want embed.EmbeddingProfile) error {
 			if err := embed.CheckCompatible(have, want); err != nil {
 				return err
 			}
+		} else {
+			// O57: no stored profile means the guard is effectively disabled.
+			// Cross-check the live collection dimension and, when writable,
+			// self-heal by stamping the current profile so future opens are guarded.
+			if want.Dimensions > 0 && coll.Dimension() != want.Dimensions {
+				return fmt.Errorf("vector collection dimension %d does not match requested dimensions %d", coll.Dimension(), want.Dimensions)
+			}
+			// Self-heal by stamping the current profile so future opens are guarded.
+			// On a read-only DB, setStoredProfile will return veclite.ErrReadOnly;
+			// that is expected and not fatal for the guard check.
+			if err := s.setStoredProfile(want); err != nil && !errors.Is(err, veclite.ErrReadOnly) {
+				return err
+			}
 		}
 		return nil
 	}
@@ -182,31 +197,13 @@ func (s *Store) Insert(vector []float32, content string, meta NodeMeta) (uint64,
 // DeleteByFile removes all embeddings for a file in a project (used on
 // incremental reindex). Returns the number of records deleted.
 func (s *Store) DeleteByFile(project, file string) (int, error) {
-	recs, err := s.coll.Find(veclite.And(veclite.Equal(keyProject, project), veclite.Equal(keyFile, file)))
-	if err != nil {
-		return 0, err
-	}
-	for _, r := range recs {
-		if err := s.coll.Delete(r.ID); err != nil {
-			return 0, err
-		}
-	}
-	return len(recs), nil
+	return s.coll.DeleteWhere(veclite.And(veclite.Equal(keyProject, project), veclite.Equal(keyFile, file)))
 }
 
 // DeleteByProject removes all embeddings for a project (used by a full
 // reindex). Returns the number of records deleted.
 func (s *Store) DeleteByProject(project string) (int, error) {
-	recs, err := s.coll.Find(veclite.Equal(keyProject, project))
-	if err != nil {
-		return 0, err
-	}
-	for _, r := range recs {
-		if err := s.coll.Delete(r.ID); err != nil {
-			return 0, err
-		}
-	}
-	return len(recs), nil
+	return s.coll.DeleteWhere(veclite.Equal(keyProject, project))
 }
 
 // VecRecord is one stored embedding with everything needed to re-insert it
