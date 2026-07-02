@@ -135,6 +135,15 @@ func closeStmt(stmt *sql.Stmt) {
 // DB exposes the underlying *sql.DB for advanced queries (e.g. traversal).
 func (s *Store) DB() *sql.DB { return s.db }
 
+// OptimizeStats runs ANALYZE so the query planner has fresh index
+// statistics. Call after a full or large incremental index so subsequent
+// queries benefit from the new stats. P1-13 (O114): without ANALYZE,
+// Callers/Callees do a full edge-table scan (340x slower on 100k nodes).
+func (s *Store) OptimizeStats() error {
+	_, err := s.db.Exec("ANALYZE")
+	return err
+}
+
 // BeginTx starts a transaction on the graph database. Use the Tx-aware
 // functions (AddNodeTx, AddEdgeProvTx, SetFileHashTx, DeleteNodesInFileTx,
 // UpdateNodeVecIDTx, AddAnnotationTx) to batch writes inside one BEGIN/COMMIT,
@@ -169,6 +178,12 @@ func (s *Store) migrate() error {
 	}
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
 		return fmt.Errorf("set schema version: %w", err)
+	}
+	// P1-13 (O114): ANALYZE so the query planner has stats for the
+	// indexes. Without this, Callers/Callees do a full edge-table
+	// scan (410ms vs 1.2ms after ANALYZE — 340× on a 100k-node graph).
+	if _, err := s.db.Exec("ANALYZE"); err != nil {
+		return fmt.Errorf("analyze: %w", err)
 	}
 	return nil
 }

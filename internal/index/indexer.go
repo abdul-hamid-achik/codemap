@@ -601,6 +601,10 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 	res.Nodes = st.Nodes
 	res.Edges = st.Edges
+	// P1-13 (O114): refresh query-planner stats after an index so
+	// subsequent Callers/Callees/Impact queries benefit from the
+	// new index statistics (340× speedup on a 100k-node graph).
+	_ = ix.graph.OptimizeStats()
 	res.TotalMs = int(time.Since(indexStart).Milliseconds())
 	if res.TotalMs == 0 {
 		res.TotalMs = 1 // sub-millisecond; show "<1ms" not nothing
@@ -718,6 +722,8 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			return res, err
 		}
 	}
+	// P1-13 (O114): refresh query-planner stats after incremental too.
+	_ = ix.graph.OptimizeStats()
 	return res, nil
 }
 
