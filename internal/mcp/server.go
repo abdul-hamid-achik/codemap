@@ -439,7 +439,10 @@ func (s *Server) handleIndex(ctx context.Context, req *sdkmcp.CallToolRequest, i
 	// wrong tree.
 	if info := daemon.QueryStatus(); info != nil {
 		if ok, reason := daemon.DelegationAllowed(root, info); ok {
-			rep, err := daemon.Reindex(daemon.ReindexOpts{Reindex: in.Reindex, Precise: in.Precise, NoLSP: false, Embed: !in.NoEmbed})
+			dopts := daemon.ReindexOpts{Reindex: in.Reindex, Precise: in.Precise, NoLSP: false}
+			embed := !in.NoEmbed
+			dopts.Embed = &embed
+			rep, err := daemon.Reindex(dopts)
 			if err != nil {
 				return result(nil, err)
 			}

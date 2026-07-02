@@ -276,9 +276,12 @@ func indexViaDaemon(cmd *cobra.Command, info *daemon.Info) error {
 	precise, _ := cmd.Flags().GetBool("precise")
 	noLSP, _ := cmd.Flags().GetBool("no-lsp")
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
-	rep, err := daemon.Reindex(daemon.ReindexOpts{
-		Reindex: reindex, Precise: precise, NoLSP: noLSP, Embed: !noEmbed,
-	})
+	opts := daemon.ReindexOpts{Reindex: reindex, Precise: precise, NoLSP: noLSP}
+	if cmd.Flags().Changed("no-embed") {
+		v := !noEmbed
+		opts.Embed = &v
+	}
+	rep, err := daemon.Reindex(opts)
 	if err != nil {
 		return fmt.Errorf("delegate to daemon (pid %d): %w\n  stop it with 'codemap daemon stop', then re-run", info.PID, err)
 	}

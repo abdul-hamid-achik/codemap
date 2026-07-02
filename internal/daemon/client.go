@@ -54,10 +54,10 @@ func AttachStatus(rep *app.StatusReport) StatusWithDaemon {
 
 // ReindexOpts carries the index flags forwarded to a running daemon.
 type ReindexOpts struct {
-	Reindex bool // --reindex: wipe + rebuild
-	Precise bool // --precise: exact call edges
-	NoLSP   bool // --no-lsp: skip language-server extraction
-	Embed   bool // --no-embed inverts this: false = structure only
+	Reindex bool  // --reindex: wipe + rebuild
+	Precise bool  // --precise: exact call edges
+	NoLSP   bool  // --no-lsp: skip language-server extraction
+	Embed   *bool // --no-embed inverts this: false = structure only; nil = default to daemon mode
 }
 
 // reindexReadTimeout caps how long the CLI waits for a daemon reindex. A full
@@ -76,11 +76,21 @@ func Reindex(opts ReindexOpts) (*app.IndexReport, error) {
 		return nil, fmt.Errorf("daemon not running: %w", err)
 	}
 	defer c.Close()
-	body := fmt.Sprintf(
-		`{"method":"daemon.reindex","reindex":%t,"precise":%t,"no_lsp":%t,"embed":%t}`+"\n",
-		opts.Reindex, opts.Precise, opts.NoLSP, opts.Embed,
-	)
-	if _, err := c.Write([]byte(body)); err != nil {
+	fields := map[string]any{
+		"method":  "daemon.reindex",
+		"reindex": opts.Reindex,
+		"precise": opts.Precise,
+		"no_lsp":  opts.NoLSP,
+	}
+	if opts.Embed != nil {
+		fields["embed"] = *opts.Embed
+	}
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return nil, fmt.Errorf("marshal reindex request: %w", err)
+	}
+	body = append(body, '\n')
+	if _, err := c.Write(body); err != nil {
 		return nil, fmt.Errorf("send reindex: %w", err)
 	}
 	_ = c.SetReadDeadline(time.Now().Add(reindexReadTimeout))

@@ -15,6 +15,8 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 )
 
+// boolPtr is a test helper so ReindexOpts{Embed: boolPtr(false)} reads cleanly.
+func boolPtr(b bool) *bool { return &b }
 func eventually(d time.Duration, cond func() bool) bool {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
@@ -118,7 +120,7 @@ func TestReindexRPCSynchronous(t *testing.T) {
 	// Add a file after start so the reindex has something new to pick up.
 	mustWrite(t, root, "g.go", "package m\n\nfunc Gamma() {}\n")
 
-	rep, err := Reindex(ReindexOpts{Embed: false})
+	rep, err := Reindex(ReindexOpts{Embed: boolPtr(false)})
 	if err != nil {
 		t.Fatalf("Reindex: %v", err)
 	}
@@ -203,7 +205,7 @@ func TestReindexRPCSameConnectionMultipleRequests(t *testing.T) {
 func TestReindexRPCClientNoDaemon(t *testing.T) {
 	t.Setenv("CODEMAP_DATA", shortTempDir(t))
 	t.Setenv("CODEMAP_CONFIG", "")
-	if _, err := Reindex(ReindexOpts{Embed: false}); err == nil {
+	if _, err := Reindex(ReindexOpts{Embed: boolPtr(false)}); err == nil {
 		t.Fatal("Reindex with no daemon should error")
 	}
 	// Sanity: app.IndexReport is the decoded type the client returns.
