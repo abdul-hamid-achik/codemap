@@ -111,7 +111,6 @@ func init() {
 
 	// Persistent flags shared by all commands.
 	rootCmd.PersistentFlags().StringP("config", "c", "", "path to config file")
-	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().Bool("json", false, "emit machine-readable JSON (for agents)")
 
 	indexCmd.Flags().Bool("reindex", false, "wipe and rebuild the whole project index")

@@ -145,6 +145,17 @@ var (
 )
 
 func runCallers(cmd *cobra.Command, args []string) error {
+	return runRelation(cmd, args[0], true)
+}
+
+func runCallees(cmd *cobra.Command, args []string) error {
+	return runRelation(cmd, args[0], false)
+}
+
+// runRelation implements callers/callees. The only differences are the service
+// method and the human label; --json, --lsp, and the not-found/annotation flow
+// are identical.
+func runRelation(cmd *cobra.Command, symbol string, callers bool) error {
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
@@ -157,10 +168,18 @@ func runCallers(cmd *cobra.Command, args []string) error {
 	}
 	useLSP, _ := cmd.Flags().GetBool("lsp")
 	var rep *app.RelationReport
-	if useLSP {
-		rep, err = svc.PreciseCallers(cmd.Context(), cwd, args[0])
+	if callers {
+		if useLSP {
+			rep, err = svc.PreciseCallers(cmd.Context(), cwd, symbol)
+		} else {
+			rep, err = svc.Callers(cwd, symbol)
+		}
 	} else {
-		rep, err = svc.Callers(cwd, args[0])
+		if useLSP {
+			rep, err = svc.PreciseCallees(cmd.Context(), cwd, symbol)
+		} else {
+			rep, err = svc.Callees(cwd, symbol)
+		}
 	}
 	if err != nil {
 		return err
@@ -172,7 +191,7 @@ func runCallers(cmd *cobra.Command, args []string) error {
 		printNoSymbol(rep.Symbol, rep.Project)
 		return nil
 	}
-	label := fmt.Sprintf("Callers of %s", rep.Symbol)
+	label := fmt.Sprintf("%s of %s", map[bool]string{true: "Callers", false: "Callees"}[callers], rep.Symbol)
 	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
 		label += " (precise, via gopls)"
 	}
@@ -194,49 +213,6 @@ func runCallers(cmd *cobra.Command, args []string) error {
 func printNoSymbol(symbol, project string) {
 	fmt.Printf("no symbol named %q in project %s\n", symbol, project)
 	fmt.Printf("  try: codemap find %s   (search symbols by name/substring)\n", symbol)
-}
-
-func runCallees(cmd *cobra.Command, args []string) error {
-	sess, err := openSession(cmd)
-	if err != nil {
-		return err
-	}
-	defer sess.Close()
-	cwd, _ := os.Getwd()
-	svc := app.NewService(sess)
-	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
-		return err
-	}
-	useLSP, _ := cmd.Flags().GetBool("lsp")
-	var rep *app.RelationReport
-	if useLSP {
-		rep, err = svc.PreciseCallees(cmd.Context(), cwd, args[0])
-	} else {
-		rep, err = svc.Callees(cwd, args[0])
-	}
-	if err != nil {
-		return err
-	}
-	if jsonOut(cmd) {
-		return printJSON(rep)
-	}
-	if !rep.Found {
-		printNoSymbol(rep.Symbol, rep.Project)
-		return nil
-	}
-	label := fmt.Sprintf("Callees of %s", rep.Symbol)
-	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
-		label += " (precise, via gopls)"
-	}
-	renderRefsCapped(label, rep.Results, relationsDisplayCap)
-	if rep.Note != "" {
-		fmt.Println("⚠ " + rep.Note)
-	}
-	if rep.Resolution != "" {
-		fmt.Println("⚠ " + rep.Resolution)
-	}
-	renderAnnotations(rep.Annotations)
-	return nil
 }
 
 func runImpact(cmd *cobra.Command, args []string) error {

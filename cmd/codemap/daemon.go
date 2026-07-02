@@ -54,6 +54,13 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		root = args[0]
 	}
+	return startDaemonForeground(cmd, root)
+}
+
+// startDaemonForeground starts the daemon in the current process and blocks
+// until it exits. Shared by `codemap daemon start` and `codemap index --watch`
+// so the config flag application and foreground lifecycle can't drift.
+func startDaemonForeground(cmd *cobra.Command, root string) error {
 	cfgPath, _ := cmd.Flags().GetString("config")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -76,7 +83,7 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("codemap daemon started (pid %d), watching %s\n  socket: %s\n  stop with: codemap daemon stop  (or Ctrl-C)\n",
+	fmt.Printf("\ncodemap daemon started (pid %d), watching %s\n  socket: %s\n  stop with: codemap daemon stop  (or Ctrl-C)\n",
 		os.Getpid(), root, config.DaemonSocketPath())
 
 	// Clean shutdown on Ctrl-C / SIGTERM.

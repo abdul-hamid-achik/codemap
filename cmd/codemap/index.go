@@ -7,15 +7,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
-	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/daemon"
-	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/spf13/cobra"
 )
@@ -346,36 +341,5 @@ func startDaemonAfterIndex(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	cfgPath, _ := cmd.Flags().GetString("config")
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		return err
-	}
-	applyConfigFlags(cmd, cfg)
-	noEmbed, _ := cmd.Flags().GetBool("no-embed")
-	dc := cfg.Daemon
-	d, err := daemon.Start(cmd.Context(), root, daemon.Config{
-		Debounce:    time.Duration(dc.DebounceMS) * time.Millisecond,
-		IdleTimeout: time.Duration(dc.IdleTimeoutMin) * time.Minute,
-		Throttle: embed.ThrottleConfig{
-			RPS:         dc.EmbedRPS,
-			MaxInFlight: dc.EmbedMaxInFlight,
-			CacheSize:   dc.EmbedCacheSize,
-		},
-		NoEmbed:   noEmbed,
-		Overrides: func(c *config.Config) { applyConfigFlags(cmd, c) },
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("\ncodemap daemon started (pid %d), watching %s\n  stop with: codemap daemon stop  (or Ctrl-C)\n",
-		os.Getpid(), root)
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	go func() { <-sig; d.Stop() }()
-
-	d.Wait()
-	fmt.Println("codemap daemon stopped")
-	return nil
+	return startDaemonForeground(cmd, root)
 }
