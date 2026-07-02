@@ -76,12 +76,12 @@ func CacheDir() string {
 }
 
 // ConfigFile is the path to the global config file. P3-01 (O74): the
-// pre-fix version didn't honor the explicit `CODEMAP_CONFIG` override
-// (or the project's repo-local one) — a `codemap config show/path`
-// command today can point the user at the wrong file.
+// pre-fix version didn't expand a leading "~" in the explicit
+// CODEMAP_CONFIG override, so a `codemap config path` could report a
+// literal "~/..." string instead of the real file.
 func ConfigFile() string {
 	if v := os.Getenv(EnvConfig); v != "" {
-		return v
+		return ExpandPath(v)
 	}
 	if v := os.Getenv(EnvConfigDir); v != "" {
 		return filepath.Join(v, "config.yaml")

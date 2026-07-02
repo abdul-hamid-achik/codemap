@@ -115,6 +115,16 @@ func TestEnvOverridePaths(t *testing.T) {
 	}
 }
 
+func TestConfigFileExpandsTilde(t *testing.T) {
+	clearEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(EnvConfig, "~/custom/codemap.yaml")
+	if got := ConfigFile(); got != filepath.Join(home, "custom", "codemap.yaml") {
+		t.Errorf("ConfigFile = %q, want expanded path", got)
+	}
+}
+
 func TestExpandPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
