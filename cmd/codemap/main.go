@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -17,8 +18,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// P2-06 exit-code contract:
+//
+//	0 = answered (results, possibly empty-but-resolved like "no callers")
+//	1 = operational error (bad flag, git failure, DB error)
+//	2 = not found / not indexed (a valid query with no answer)
+//
+// Scripts/agents can distinguish "answered" from "dead end" without parsing output.
+var (
+	errNotFound   = errors.New("not found")
+	errNotIndexed = errors.New("not indexed")
+)
+
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		// P2-06: map not-found / not-indexed to exit 2 so scripts
+		// can distinguish a dead-end from an operational failure
+		// (exit 1) or a successful answer (exit 0). Empty-but-
+		// resolved (a real leaf with no callers) is still exit 0.
+		if errors.Is(err, errNotFound) || errors.Is(err, errNotIndexed) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
