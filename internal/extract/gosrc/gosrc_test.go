@@ -305,6 +305,35 @@ func (Greeter) Hello() string { return "" }
 	}
 }
 
+// TestIsTestFuncNameStdlibRule verifies the stdlib naming rule: prefixes
+// Test/Benchmark/Fuzz/Example mark a function as a test *only* when the
+// following rune is not lowercase. This avoids labelling helper-ish names
+// like Testify, Benchmarkable, or Fuzzer as KindTest in _test.go files.
+func TestIsTestFuncNameStdlibRule(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"Test", true},
+		{"TestFoo", true},
+		{"Test_ok", true},
+		{"Testify", false}, // the regression from the deep review
+		{"Benchmark", true},
+		{"BenchmarkFoo", true},
+		{"Benchmarkable", false},
+		{"Example", true},
+		{"Example_ok", true},
+		{"Fuzz", true},
+		{"FuzzFoo", true},
+		{"Fuzzer", false},
+	}
+	for _, c := range cases {
+		if got := isTestFuncName(c.name); got != c.want {
+			t.Errorf("isTestFuncName(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestExtractSyntaxError(t *testing.T) {
 	if _, err := New().ExtractFile("bad.go", []byte("package x\nfunc (")); err == nil {
 		t.Error("expected parse error for invalid Go")

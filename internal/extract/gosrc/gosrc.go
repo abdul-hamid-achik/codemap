@@ -10,6 +10,8 @@ import (
 	"go/printer"
 	"go/token"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 )
@@ -416,8 +418,18 @@ func calleeName(fun ast.Expr) string {
 
 func isTestFuncName(name string) bool {
 	for _, p := range []string{"Test", "Benchmark", "Fuzz", "Example"} {
-		if strings.HasPrefix(name, p) {
+		if name == p {
 			return true
+		}
+		if strings.HasPrefix(name, p) {
+			if len(name) > len(p) {
+				// The stdlib rule: the next rune must not be lowercase.
+				// e.g. Testify → false, Test_ok → true.
+				r, _ := utf8.DecodeRuneInString(name[len(p):])
+				if r != utf8.RuneError && !unicode.IsLower(r) {
+					return true
+				}
+			}
 		}
 	}
 	return false
