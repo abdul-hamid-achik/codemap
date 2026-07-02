@@ -700,6 +700,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = "" // P1-14 (B35): clear "…" so busy() stops
 			return m, nil
 		}
 		m.status = msg.st
@@ -728,8 +729,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphLoaded = true
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = "" // P1-14 (B35)
 			return m, nil
 		}
+		m.errMsg = "" // P1-14 (B39): clear sticky error
 		m.graphHubs = msg.hubs
 		m.graphSel = 0
 		m.metricsSel = 0
@@ -750,6 +753,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sourceMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = "" // P1-14 (B35)
 			return m, nil
 		}
 		m.errMsg = ""
@@ -765,8 +769,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case graphDetailMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = "" // P1-14 (B35)
 			return m, nil
 		}
+		m.errMsg = "" // P1-14 (B39): clear sticky error
 		m.graphSym = msg.symbol
 		m.graphCallers = msg.callers
 		m.graphCallees = msg.callees
@@ -778,6 +784,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case preciseDetailMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = "" // P1-14 (B35)
 			return m, nil
 		}
 		m.errMsg = ""
@@ -792,6 +799,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case indexedMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = ""     // P1-14 (B35)
+			m.graphLoaded = true // P1-14 (B35): restore — error doesn't mean no graph
 			return m, nil
 		}
 		m.errMsg = ""
@@ -813,6 +822,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case semanticMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = "" // P1-14 (B35)
 			m.searchHits = nil
 			return m, nil
 		}
@@ -827,6 +837,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case impactMsg:
 		if msg.err != nil {
 			m.errMsg = msg.err.Error()
+			m.statusMsg = "" // P1-14 (B35)
 			m.impactRep = nil
 			return m, nil
 		}
@@ -899,6 +910,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// search hit / blast node / hub's call neighborhood, not just the hubs.
 		return m.openInGraph()
 	case "ctrl+r":
+		// P1-14 (B38): ignore ctrl+r while a reindex is already in flight —
+		// a second concurrent reindex write pass would corrupt the graph.
+		if m.statusMsg == "indexing…" {
+			return m, nil
+		}
 		// Reindex in place (structure-only) and refresh — works on any tab.
 		m.statusMsg = "indexing…"
 		m.graphLoaded = false
