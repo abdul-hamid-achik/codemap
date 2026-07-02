@@ -243,6 +243,15 @@ func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {
 // included). Cycle-safe. Answers "what does this entrypoint's call tree touch" —
 // the basis for least-privilege analysis (which secret keys a code path needs).
 func (s *Store) CalleeClosure(projectID int64, symbol string, maxDepth int) (map[int64]bool, error) {
+	// O21: same default as BlastRadius (3). Without this, maxDepth=0
+	// in a caller means "0 hops", which silently returns just the
+	// start nodes and produces a misleading "this function is its
+	// own closure" answer — the caller (a `secret_impact` or
+	// risk call) is then giving a confident wrong answer. The
+	// 3-hop default matches BlastRadius, the most-cited caller.
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
 	starts, err := s.startNodeIDs(projectID, symbol)
 	if err != nil {
 		return nil, err

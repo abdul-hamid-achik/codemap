@@ -48,6 +48,47 @@ func TestCalleeClosureCycle(t *testing.T) {
 	}
 }
 
+// TestCalleeClosureDefaultsMaxDepth pins P3-04 (O21): a caller
+// passing maxDepth=0 (or a negative) must NOT silently get the
+// "0-hop closure" — which is just the start nodes, and produces
+// a confident-wrong answer for any agent that reads the result
+// as "the blast radius of this function." Without the default,
+// SecretImpact and risk calls would report a tiny reachable set
+// instead of the truth. The default matches BlastRadius (3 hops).
+func TestCalleeClosureDefaultsMaxDepth(t *testing.T) {
+	s := openStore(t)
+	pid, _ := s.UpsertProject("defaults", t.TempDir(), "go")
+	// Chain A→B→C→D (4 nodes, 3 edges). The test reaches
+	// "B" and "C" via startNodeIDs(symbol="...") — a single
+	// start each. With maxDepth=0/negative, the default
+	// (3) must walk all 3 hops and reach all 4 nodes.
+	type node struct {
+		sym, file string
+	}
+	for _, n := range []node{{"A", "a.go"}, {"B", "b.go"}, {"C", "c.go"}, {"D", "d.go"}} {
+		_, _ = s.AddNode(&Node{ProjectID: pid, FilePath: n.file, Symbol: n.sym, FQN: "defaults." + n.sym, Kind: KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "h"})
+	}
+	for _, def := range []struct{ from, to string }{
+		{"A", "B"}, {"B", "C"}, {"C", "D"},
+	} {
+		var fromID, toID int64
+		_ = s.db.QueryRow("SELECT id FROM nodes WHERE project_id=? AND symbol=?", pid, def.from).Scan(&fromID)
+		_ = s.db.QueryRow("SELECT id FROM nodes WHERE project_id=? AND symbol=?", pid, def.to).Scan(&toID)
+		if _, err := s.AddEdge(fromID, toID, EdgeCalls, 1.0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, maxDepth := range []int{0, -1, -100} {
+		got, err := s.CalleeClosure(pid, "A", maxDepth)
+		if err != nil {
+			t.Fatalf("CalleeClosure(A, maxDepth=%d): %v", maxDepth, err)
+		}
+		if len(got) != 4 {
+			t.Errorf("CalleeClosure(A, maxDepth=%d) reached %d nodes, want 4 (A, B, C, D — the 0/negative default must NOT be 0 hops; pin P3-04 O21)", maxDepth, len(got))
+		}
+	}
+}
+
 // TestPathCycle pins P1-21 (O99): Path must not hang on a cyclic
 // graph. A→B→A, ask for A→B — should return [A, B] (or just [B]
 // for the partial-path heuristic; either way it must terminate and
