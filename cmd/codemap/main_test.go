@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -271,4 +272,31 @@ func TestExitCodeContract(t *testing.T) {
 	if errors.Is(generic, errNotFound) {
 		t.Error("generic error must not match errNotFound")
 	}
+}
+
+// TestGlobalPathFlag pins P2-05: the CLI now has a global --path / -C
+// flag so every command can target a project directory the way MCP
+// tools do (uniform 'path' param). targetDir resolves the flag or
+// falls back to os.Getwd().
+func TestGlobalPathFlag(t *testing.T) {
+	// The flag is registered on rootCmd.
+	f := rootCmd.PersistentFlags().Lookup("path")
+	if f == nil {
+		t.Fatal("rootCmd must have a persistent --path flag")
+	}
+	if f.Shorthand != "C" {
+		t.Errorf("--path shorthand = %q, want C", f.Shorthand)
+	}
+	// targetDir falls back to cwd when --path is unset.
+	_ = rootCmd.PersistentFlags().Set("path", "")
+	cwd, _ := os.Getwd()
+	if got := targetDir(rootCmd); got != cwd {
+		t.Errorf("targetDir with no --path = %q, want cwd %q", got, cwd)
+	}
+	// targetDir returns the flag value when set.
+	_ = rootCmd.PersistentFlags().Set("path", "/tmp/some/project")
+	if got := targetDir(rootCmd); got != "/tmp/some/project" {
+		t.Errorf("targetDir with --path=/tmp/some/project = %q, want /tmp/some/project", got)
+	}
+	_ = rootCmd.PersistentFlags().Set("path", "") // reset
 }
