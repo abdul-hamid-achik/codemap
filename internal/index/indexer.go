@@ -71,13 +71,14 @@ type FileError struct {
 
 // Result summarizes an index run.
 type Result struct {
-	FilesScanned int         `json:"files_scanned"`
-	FilesIndexed int         `json:"files_indexed"`           // new or changed
-	FilesSkipped int         `json:"files_skipped"`           // unchanged, too large (see Oversized), or errored (see Errors)
-	FilesDeleted int         `json:"files_deleted,omitempty"` // pruned: indexed before, now gone from disk
-	Nodes        int         `json:"nodes"`
-	Edges        int         `json:"edges"`
-	Errors       []FileError `json:"errors,omitempty"`
+	FilesScanned   int         `json:"files_scanned"`
+	FilesIndexed   int         `json:"files_indexed"`           // new or changed
+	FilesSkipped   int         `json:"files_skipped"`           // oversized, generated, or errored (see Oversized/Errors) — NOT unchanged (those are FilesUnchanged)
+	FilesUnchanged int         `json:"files_unchanged"`         // P2-07 (O108): hash-matched files that were skipped because they're up-to-date (not a failure)
+	FilesDeleted   int         `json:"files_deleted,omitempty"` // pruned: indexed before, now gone from disk
+	Nodes          int         `json:"nodes"`
+	Edges          int         `json:"edges"`
+	Errors         []FileError `json:"errors,omitempty"`
 	// Phase timing (wall-clock milliseconds). Extract covers Pass 1 (walk + parse +
 	// graph writes); Embed covers Pass 4 (Ollama + vector inserts); Precise covers
 	// the opt-in go/types + LSP callHierarchy passes. Total is the end-to-end wall
@@ -466,7 +467,8 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		changed, refs, toEmbed, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
 		if err != nil {
 			res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
-			res.FilesSkipped++
+			// P2-07 (O108): unchanged LSP files are up-to-date too.
+			res.FilesUnchanged++
 			continue
 		}
 		if changed {
@@ -508,6 +510,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 			// Merge localRes into the shared res.
 			res.FilesIndexed += localRes.FilesIndexed
 			res.FilesSkipped += localRes.FilesSkipped
+			res.FilesUnchanged += localRes.FilesUnchanged
 			res.Oversized = append(res.Oversized, localRes.Oversized...)
 			res.Generated = append(res.Generated, localRes.Generated...)
 			if len(localRes.Errors) > 0 {
@@ -861,7 +864,10 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 			return false, nil, nil, err
 		}
 		if prev == hash {
-			res.FilesSkipped++
+			// P2-07 (O108): unchanged files are "up-to-date", not "skipped".
+			// Pre-fix this read as failure ("112 skipped") on a clean
+			// incremental index where nothing changed.
+			res.FilesUnchanged++
 			return false, nil, nil, nil
 		}
 	}
