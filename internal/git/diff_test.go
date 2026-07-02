@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -270,5 +271,32 @@ index 4444444..0000000
 	}
 	if g := findFile(files, "gone.go"); g == nil || g.Status != "D" || len(g.Hunks) != 0 {
 		t.Errorf("gone.go = %+v, want status D, no hunks", g)
+	}
+}
+
+// TestGitRunSurfacesStderr pins P3-03 (O61/O107): pre-fix git.run
+// returned an opaque "exit status 128" on any git failure, discarding
+// git's actual stderr message. Post-fix the error includes git's
+// stderr text so the user/agent knows what went wrong (missing ref,
+// no repo, etc.).
+func TestGitRunSurfacesStderr(t *testing.T) {
+	dir := initRepo(t)
+	write(t, dir, "a.go", "package a\n")
+	gitCmd(t, dir, "add", "a.go")
+	gitCmd(t, dir, "commit", "-m", "c1")
+
+	// Ask git for a non-existent ref — git returns exit 128 with a
+	// stderr message like "unknown revision or path not in the
+	// working tree". Pre-fix we'd get "exit status 128"; post-fix
+	// we get the actual stderr text.
+	_, err := run(context.Background(), dir, "rev-parse", "--verify", "nonexistent_ref_xyz")
+	if err == nil {
+		t.Fatal("expected an error for a nonexistent ref")
+	}
+	// The error should NOT be the bare "exit status 128" — it should
+	// contain git's actual stderr (which includes the ref name or
+	// a "unknown revision" message).
+	if strings.Contains(err.Error(), "exit status 128") && !strings.Contains(err.Error(), "rev-parse") {
+		t.Errorf("P3-03 regression: error is opaque %q, should contain git's stderr text", err.Error())
 	}
 }

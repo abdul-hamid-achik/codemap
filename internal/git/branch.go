@@ -9,6 +9,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -17,10 +18,17 @@ import (
 
 // run executes `git -C dir <args...>` and returns trimmed stdout. The context
 // bounds a hung git (e.g. an index.lock contention) so it can't freeze a caller.
+// P3-03 (O61/O107): on error, unwrap the ExitError and surface git's actual
+// stderr instead of an opaque "exit status 128" — every caller (ChangedFiles,
+// HooksDir, RepoRoot, BranchSHA) inherits the better message.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
 	full := append([]string{"-C", dir}, args...)
 	out, err := exec.CommandContext(ctx, "git", full...).Output()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(string(exitErr.Stderr)))
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
