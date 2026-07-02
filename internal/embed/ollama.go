@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,14 @@ type OllamaProvider struct {
 	Dims     int
 	Distance string
 	Client   *http.Client
+	// dimsOnce guards the lazy-write of Dims from the first Embed
+	// response. Pre-fix the write was a plain int store, which
+	// -race flagged when two parallel indexer workers called Embed
+	// concurrently with Dims=0 — both inferred the same value but
+	// the unsynchronized write raced. sync.Once is enough: every
+	// successful response carries the same per-model dimensionality,
+	// so the value never needs to converge from multiple writers.
+	dimsOnce sync.Once
 }
 
 // NewOllama returns an Ollama provider. dims may be 0 to infer from the first
@@ -94,8 +103,13 @@ func (o *OllamaProvider) Embed(ctx context.Context, texts []string) ([][]float32
 	if len(er.Embeddings) != len(texts) {
 		return nil, fmt.Errorf("ollama returned %d embeddings for %d inputs", len(er.Embeddings), len(texts))
 	}
-	if o.Dims == 0 && len(er.Embeddings[0]) > 0 {
-		o.Dims = len(er.Embeddings[0])
+	// B47: lazy-write of Dims is now guarded by sync.Once so
+	// parallel indexer workers calling Embed with Dims=0 don't
+	// race the int store. Pre-fix this was a plain `o.Dims = ...`
+	// which -race flagged.
+	if o.Dims == 0 && len(er.Embeddings) > 0 && len(er.Embeddings[0]) > 0 {
+		dim := len(er.Embeddings[0])
+		o.dimsOnce.Do(func() { o.Dims = dim })
 	}
 	return er.Embeddings, nil
 }
