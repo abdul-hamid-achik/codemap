@@ -640,12 +640,16 @@ func runSymbolAt(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer sess.Close()
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
 	cwd, _ := os.Getwd()
 	file, line, err := parseFileLine(args[0])
 	if err != nil {
 		return err
 	}
-	rep, err := app.NewService(sess).SymbolAt(cwd, file, line)
+	rep, err := svc.SymbolAt(cwd, file, line)
 	if err != nil {
 		return err
 	}
@@ -984,8 +988,12 @@ func runSource(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer sess.Close()
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
 	cwd, _ := os.Getwd()
-	rep, err := app.NewService(sess).Source(cwd, args[0])
+	rep, err := svc.Source(cwd, args[0])
 	if err != nil {
 		return err
 	}
