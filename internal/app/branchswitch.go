@@ -154,6 +154,21 @@ func (svc *Service) BranchSwitch(ctx context.Context, root, from, to string) err
 			if err != nil {
 				return err
 			}
+			// P1-17 (B8): after a successful restore, check whether the
+			// snapshot's BaseSHA is behind HEAD. If it is, the restored
+			// index is stale — run an incremental catch-up so the graph
+			// reflects the current working tree, not the snapshot's branch
+			// point. Pre-fix this silently rolled the index backwards.
+			if restored && entry.BaseSHA != "" {
+				if headSHA, herr := git.HeadSHA(ctx, root); herr == nil && headSHA != entry.BaseSHA {
+					if anc, aerr := git.IsAncestor(ctx, root, entry.BaseSHA, headSHA); aerr == nil && anc {
+						// BaseSHA is an ancestor of HEAD → snapshot is behind.
+						// Catch up with an incremental index.
+						embN, _ := svc.embeddedCount(name)
+						_, _ = svc.Index(ctx, root, index.Options{}, embN > 0)
+					}
+				}
+			}
 		}
 	}
 

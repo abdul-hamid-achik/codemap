@@ -127,7 +127,7 @@ func Inspect(ctx context.Context, dir string) (Status, error) {
 }
 
 // branchUnsafe matches characters that can't appear in a filesystem path segment.
-var branchUnsafe = regexp.MustCompile(`[/\\:\s]+`)
+var branchUnsafe = regexp.MustCompile(`[/\\:\s,]+`) // P1-17 (B57): comma corrupts fcheap tag list
 
 // SanitizeBranch turns a branch name into a stable, collision-free path segment:
 // unsafe characters (/, \, :, whitespace) collapse to "-", leading dots are
