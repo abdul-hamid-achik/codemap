@@ -97,6 +97,9 @@ func Reindex(opts ReindexOpts) (*app.IndexReport, error) {
 	sc := bufio.NewScanner(c)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	if !sc.Scan() {
+		if err := sc.Err(); err != nil {
+			return nil, fmt.Errorf("daemon reindex read failed: %w", err)
+		}
 		return nil, fmt.Errorf("daemon closed connection without a response")
 	}
 	var rep app.IndexReport

@@ -93,7 +93,15 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 		return rep, nil
 	}
 
-	vecs, err := svc.s.Embedder().Embed(ctx, []string{query})
+	emb := svc.s.Embedder()
+	vecs, err := func() ([][]float32, error) {
+		if qe, ok := emb.(interface {
+			QueryEmbed(context.Context, []string) ([][]float32, error)
+		}); ok {
+			return qe.QueryEmbed(ctx, []string{query})
+		}
+		return emb.Embed(ctx, []string{query})
+	}()
 	if err != nil {
 		return nil, err
 	}
