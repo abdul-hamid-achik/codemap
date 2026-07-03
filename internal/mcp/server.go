@@ -679,6 +679,9 @@ func (s *Server) handleRisk(_ context.Context, _ *sdkmcp.CallToolRequest, in ris
 }
 
 func (s *Server) handleSymbolAt(_ context.Context, _ *sdkmcp.CallToolRequest, in symbolAtInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
 	rep, err := s.svc.SymbolAt(cwdOf(in.Path), in.File, in.Line)
 	return result(rep, err)
 }

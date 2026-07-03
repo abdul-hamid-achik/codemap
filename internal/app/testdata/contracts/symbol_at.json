@@ -6,5 +6,6 @@
   "kind": "function",
   "start_line": 40,
   "end_line": 55,
-  "resolution": "enclosing"
+  "resolution": "enclosing",
+  "indexed": true
 }

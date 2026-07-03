@@ -92,13 +92,32 @@ func TestSymbolAt(t *testing.T) {
 	if rep.Resolution != "exact" {
 		t.Errorf("a.go:3 is Run's def line → resolution=exact, got %q", rep.Resolution)
 	}
+	if !rep.Indexed {
+		t.Errorf("indexed project must report indexed=true, got %+v", rep)
+	}
 	// A line with no symbol → resolution none, no error.
 	none, err := svc.SymbolAt(proj, "a.go", 999)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if none.Resolution != "none" || none.Symbol != "" {
-		t.Errorf("a.go:999 → resolution=none, got %+v", none)
+	if none.Resolution != "none" || none.Symbol != "" || !none.Indexed {
+		t.Errorf("a.go:999 → resolution=none and indexed=true, got %+v", none)
+	}
+}
+
+func TestSymbolAtUnindexedProject(t *testing.T) {
+	isolate(t)
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	rep, err := NewService(sess).SymbolAt(t.TempDir(), "main.go", 1)
+	if err != nil {
+		t.Fatalf("unindexed project must not error: %v", err)
+	}
+	if rep.Indexed || rep.Resolution != "none" {
+		t.Errorf("unindexed → {indexed:false, resolution:none}, got %+v", rep)
 	}
 }
 

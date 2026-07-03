@@ -180,6 +180,9 @@ type SymbolAtReport struct {
 	StartLine  int    `json:"start_line,omitempty"`
 	EndLine    int    `json:"end_line,omitempty"`
 	Resolution string `json:"resolution"`
+	// Indexed is false when the project has not been indexed yet, so
+	// Resolution="none" is a "run codemap index" signal, not a real miss.
+	Indexed bool `json:"indexed"`
 }
 
 // SymbolAt resolves a file:line to the enclosing symbol node — the entry point
@@ -194,9 +197,10 @@ func (svc *Service) SymbolAt(cwd, file string, line int) (*SymbolAtReport, error
 	if err != nil {
 		return nil, err
 	}
-	rep := &SymbolAtReport{File: file, Line: line, Resolution: "none"}
+	rep := &SymbolAtReport{File: file, Line: line, Resolution: "none", Indexed: true}
 	p, err := g.GetProjectByName(name)
 	if errors.Is(err, graph.ErrNotFound) {
+		rep.Indexed = false
 		return rep, nil
 	}
 	if err != nil {
