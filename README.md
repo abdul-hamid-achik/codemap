@@ -146,28 +146,34 @@ codemap init                       # registers the current directory
 codemap index                      # extract graph + embed nodes (incremental)
 codemap index --no-embed           # structure only (no Ollama needed)
 codemap index --precise            # exact call edges (Go via go/types; TS/JS/Python via callHierarchy)
+codemap index --watch              # index once, then hand off to the background daemon
 # Indexes your code, not your dependencies: node_modules, venv, vendor, dist, build,
 # __pycache__, .git (and any dotdir) are skipped by default — configurable via `exclude`.
 
-# 2. Orient on a symbol — everything in one call (definition, callers, callees, tests)
+# 2. Check the environment and inspect config
+codemap doctor
+codemap config show
+
+# 3. Orient on a symbol — everything in one call (definition, callers, callees, tests)
 codemap context authenticateUser   # the one-call overview (agents: codemap_context)
 
-# 3. Navigate the call graph
+# 4. Navigate the call graph
 codemap callers authenticateUser   # who calls it (fast, name-based)
 codemap callers authenticateUser --lsp   # exact callers via gopls (Go)
 codemap callees authenticateUser   # what it calls
 codemap path     Handler Login     # shortest call path between two symbols
 
-# 4. Analyze impact and structure
+# 5. Analyze impact and structure
 codemap impact   authenticateUser --depth 3   # callers + blast radius + tests
 codemap hotspots --top 20          # most-referenced symbols (hubs)
 codemap orphans                    # functions with no callers (dead-code candidates)
+codemap review                     # diff-scoped impact + tests to run
 codemap status                     # stats + warns if the index is stale vs your files
 
-# 5. Search by meaning (needs an embedded index)
+# 6. Search by meaning (needs an embedded index)
 codemap semantic "jwt validation middleware" --top 10
 
-# 6. Explore visually
+# 7. Explore visually
 codemap studio
 ```
 
@@ -209,23 +215,27 @@ complete set.
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `init` / `index` / `status` | register, index (incremental; `--reindex`, `--no-embed`, `--no-lsp`, `--precise`), show stats |
-| `doctor` | check the environment — toolchains, language servers, embeddings — with install hints |
-| `projects` | list all registered projects and their index sizes |
-| `callers` / `callees` / `path` | call-graph navigation (`--lsp` on callers/callees for exact gopls results) |
-| `symbols` | list a file's symbols (structured alternative to reading it) |
-| `find` | find symbols by name (offline) |
-| `source` | print a symbol's source code (the body behind its signature) |
-| `context` | **one call, everything about a symbol**: definition, callers, callees, covering tests, blast radius, notes |
-| `docs` | print the agent guide to codemap (`docs [topic]`) |
-| `annotate` / `annotations` | pin / list notes + external data on a symbol or call path |
-| `impact` | blast radius + test coverage for a symbol (`--depth`) |
-| `hotspots` / `orphans` | hubs / dead-code candidates (`--top`) |
-| `semantic` (alias `search`) | meaning-based search (`--top`) |
-| `serve` | run the MCP server (stdio) |
-| `studio` | open the interactive TUI |
+| Group | Command | What it does |
+|---|---|---|
+| Project | `init` / `index` / `status` | register, index (`--reindex`, `--no-embed`, `--no-lsp`, `--precise`), show stats + freshness |
+| Project | `doctor` | check the environment — toolchains, language servers, embeddings — with install hints |
+| Project | `projects` | list all registered projects and their index sizes |
+| Project | `config path` / `config show` | resolved config file path and values (`--json`) |
+| Navigate | `callers` / `callees` / `path` | call-graph navigation (`--lsp` for exact gopls results) |
+| Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
+| Navigate | `source` | print a symbol's source code |
+| Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, tests, blast radius |
+| Navigate | `read-order` | ranked reading list for an unfamiliar repo |
+| Analyze | `impact` / `file-impact` / `review` | blast radius + tests for a symbol, file, or diff |
+| Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
+| Analyze | `risk` | 0..1 change-risk score with factors |
+| Analyze | `secret-impact` / `required-keys` | key-rotation blast radius and least-privilege key sets |
+| Search | `semantic` (alias `search`) / `find` | meaning-based search, and offline name search |
+| Cache | `cache save` / `restore` / `list` / `drop` | fcheap content-addressed index snapshots |
+| Branch | `branch-status` / `branch-switch` / `branch-snapshot` | per-branch index snapshots via fcheap |
+| Daemon | `daemon start` / `status` / `stop` | background watcher that keeps the index fresh |
+| Knowledge | `annotate` / `annotations` | pin / list notes and external data on symbols/paths |
+| Surfaces | `serve` / `studio` | MCP server (stdio) and interactive TUI |
 
 All query commands accept `--json`.
 

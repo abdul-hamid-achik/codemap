@@ -15,6 +15,14 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`) |
 | `codemap annotations [<sym> \| <from> <to>]` | List annotations (all/node/path); `--rm <id>` to remove |
 
+## Configuration introspection
+
+| Command | Description |
+|---|---|
+| `codemap config path` | Show the resolved config file path (honours `CODEMAP_CONFIG`, `~`, and XDG defaults) |
+| `codemap config show` | Print the resolved config as YAML (or `--json` for machine-readable) |
+| `codemap config show --json` | Same values as `show`, as structured JSON for agents |
+
 ## Navigation
 
 | Command | Description |
@@ -25,7 +33,7 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap callees <symbol> --lsp` | **Precise** callees via gopls (Go) |
 | `codemap path <from> <to>` | Shortest call path between two symbols |
 | `codemap symbols <file>` | Outline a file's symbols with their signatures (a structured alternative to reading it) |
-| `codemap symbol-at <file>:<line>` | Resolve a file:line position to its enclosing symbol (FQN, kind, range) — the entry point for joining external `file:line` results (search hits, stack traces, diffs) onto the graph. Also `codemap impact --at <file>:<line>` |
+| `codemap symbol-at <file>:<line>` | Resolve a file:line position to its enclosing symbol (FQN, kind, range). The `indexed` field in `--json` distinguishes an unindexed project (`indexed:false`) from a real miss (`indexed:true`, `resolution:none`), so agents know to call `codemap index` instead of treating a cold repo as "no symbol". Also `codemap impact --at <file>:<line>` |
 | `codemap related-files <file>` | Files related to a file via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence |
 | `codemap source <symbol>` | Print a symbol's source code (the body behind its signature) |
 | `codemap context <symbol> [<symbol>...] [--depth N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, covering tests, blast-radius size, and pinned annotations. Replaces separate `source`/`callers`/`callees`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling) — the `codemap_context_batch` MCP tool, for building a component's mental model in one round-trip |

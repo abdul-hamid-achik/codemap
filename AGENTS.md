@@ -193,17 +193,8 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (20): `init, index, status, doctor, semantic,
-  callers, callees, impact, hotspots, orphans, path, symbols, find, source, context, projects, docs,
-  annotate, annotations, unannotate`. Each takes an optional `path` (project dir, defaults to cwd) and returns
-  JSON; callers/callees take `precise` (gopls); `source` returns a symbol's body; `context` bundles a
-  symbol's definition+callers+callees+covering tests+blast radius (with `blast_depth`) in one call;
-  `projects` lists the registry; `docs` returns the agent guide (`internal/app/docs.go`);
-  `annotate`/`annotations` pin/list notes + opaque data on a symbol or `from→to` path (graph
-  `annotations` table, schema v2, survives reindex). (Planned: `references`, `dependencies`, `semantic_callers`.)
-- CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`/`--precise`), `status`, `callers`,
-  `callees`, `path`, `impact` (`--depth`), `hotspots`/`orphans` (`--top`), `semantic`
-  (`--top`), `serve`, `studio` — all query commands accept `--json`.
+- Tool names are `codemap_`-prefixed. Current set (26+): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `impact`, `file_impact`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise` (gopls); `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
+- CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`), `status`, `config path/show`, `callers`, `callees`, `path`, `impact` (`--depth`), `file_impact`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read_order`, `symbol_at`, `cache`, `branch_*`, `daemon`, `serve`, `studio` — all query commands accept `--json`.
 - **Accuracy model** (be honest with users): the graph is name-based by default — intra-package
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`
