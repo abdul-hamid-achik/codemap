@@ -398,3 +398,79 @@ func TestCacheRestoreMissesWhenStaleSeed(t *testing.T) {
 		t.Errorf("WorkingTreeHash didn't change after an edit: now=%s (P0-01 regression)", newHash)
 	}
 }
+
+// TestCacheSaveRestoreDropHitPath is the fcheap-gated positive round-trip
+// (P1-21 O96/O14): index → CacheSave → CacheRestore HITS on an unchanged tree
+// → edit → CacheRestore MISSES (P0-01) → CacheDrop removes the entry. It only
+// runs when the real fcheap binary is on PATH, and isolates every fcheap call
+// behind a per-test stash dir so it never touches the user's real vault.
+func TestCacheSaveRestoreDropHitPath(t *testing.T) {
+	if _, err := exec.LookPath("fcheap"); err != nil {
+		t.Skip("fcheap not installed")
+	}
+	snapshot.FcheapStashDir = t.TempDir()
+	t.Cleanup(func() { snapshot.FcheapStashDir = "" })
+
+	svc, root, cleanup := setupCacheProject(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	if _, err := svc.Index(ctx, root, index.Options{}, false); err != nil {
+		t.Fatalf("Index: %v", err)
+	}
+
+	// 1. CacheSave: fcheap is present, so this must produce a real stash id
+	//    and record a pointer entry keyed by the working-tree hash.
+	stashID, treeHash, err := svc.CacheSave(ctx, root)
+	if err != nil {
+		t.Fatalf("CacheSave: %v", err)
+	}
+	if stashID == "" {
+		t.Fatal("CacheSave returned empty stash id with fcheap present")
+	}
+	if treeHash == "" {
+		t.Fatal("CacheSave returned empty tree hash")
+	}
+
+	// 2. CacheRestore on the UNCHANGED tree must HIT (restored=true). This is
+	//    the path that was previously untested end-to-end against real fcheap.
+	restored, restoredID, err := svc.CacheRestore(ctx, root)
+	if err != nil {
+		t.Fatalf("CacheRestore: %v", err)
+	}
+	if !restored {
+		t.Fatal("CacheRestore should hit on an unchanged tree with fcheap present")
+	}
+	if restoredID != stashID {
+		t.Errorf("restored stash id = %q, want %q", restoredID, stashID)
+	}
+
+	// 3. Edit a file on disk WITHOUT reindexing → the working-tree hash drifts
+	//    → CacheRestore must MISS (P0-01: the lookup key is disk-derived).
+	writeGoFile(t, filepath.Join(root, "a.go"),
+		"package a\n\nfunc main() { _ = 1 /* cache miss after edit */ }\n")
+	restored, _, err = svc.CacheRestore(ctx, root)
+	if err != nil {
+		t.Fatalf("CacheRestore after edit: %v", err)
+	}
+	if restored {
+		t.Error("CacheRestore should miss after a working-tree edit (P0-01)")
+	}
+
+	// 4. CacheDrop by the stash id removes the entry (drops==1). After this,
+	//    CacheList has no entries for the repo.
+	dropped, err := svc.CacheDrop(ctx, root, stashID, false)
+	if err != nil {
+		t.Fatalf("CacheDrop: %v", err)
+	}
+	if dropped != 1 {
+		t.Errorf("CacheDrop want 1, got %d", dropped)
+	}
+	rep, err := svc.CacheList(ctx, root, false)
+	if err != nil {
+		t.Fatalf("CacheList after drop: %v", err)
+	}
+	if len(rep.Entries) != 0 {
+		t.Errorf("CacheList after drop want 0 entries, got %d", len(rep.Entries))
+	}
+}

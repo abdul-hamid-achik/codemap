@@ -24,13 +24,17 @@ func FcheapAvailable() bool {
 	return err == nil
 }
 
-// StashInfo is one stash as reported by `fcheap list --json`.
+// StashInfo is one stash as reported by `fcheap list --json`. Custom carries the
+// stash's `manifest.Custom` map (fcheap v0.27.0+): `source` (the --source base-sha),
+// and any `branch`/`embedding_profile` the saver wrote, so a pointer-file rebuild
+// can read provenance straight from `list --json` with no per-stash `info` call.
 type StashInfo struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Tool      string   `json:"tool"`
-	Tags      []string `json:"tags"`
-	CreatedAt string   `json:"created_at"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Tool      string            `json:"tool"`
+	Tags      []string          `json:"tags"`
+	CreatedAt string            `json:"created_at"`
+	Custom    map[string]string `json:"custom,omitempty"`
 }
 
 // fcheapRun executes fcheap with the given args (+ the optional --stash-dir) and
@@ -58,10 +62,17 @@ func fcheapRun(ctx context.Context, args ...string) ([]byte, error) {
 // vault and returns the new stash id. sourceSHA is the git commit the snapshot was
 // taken at (provenance). The secret scan is skipped — the directory is derived
 // index data, not user files.
+//
+// Each tag is emitted as its own `--tag` flag (fcheap v0.27.0 made `--tag` a
+// repeatable StringSliceVar that splits on commas, so a comma-joined value like
+// `codemap-index,repo:abc,branchname:feature,x` would be shattered into spurious
+// tags — a branch name containing a comma silently corrupted the filter, B57).
+// Tag values are percent-escaped for `,` and `%` first, so a raw branch name such
+// as `feature,x` round-trips intact through `branchname:feature%2Cx`.
 func FcheapSave(ctx context.Context, dir, tool, name string, tags []string, sourceSHA string) (string, error) {
 	args := []string{"save", dir, "--tool", tool, "--name", name, "--no-scan", "--json"}
-	if len(tags) > 0 {
-		args = append(args, "--tag", strings.Join(tags, ","))
+	for _, t := range tags {
+		args = append(args, "--tag", escapeTag(t))
 	}
 	if sourceSHA != "" {
 		args = append(args, "--source", sourceSHA)
@@ -102,12 +113,16 @@ func FcheapRestore(ctx context.Context, stashID, toDir string) (verified bool, e
 	return r.Verified, nil
 }
 
-// FcheapList returns stashes matching ALL of tags. fcheap filters by a single tag
-// server-side; any extra tags are AND-matched client-side. Empty tags lists all.
+// FcheapList returns stashes matching ALL of tags. fcheap v0.27.0's `--tag` is a
+// repeatable StringSliceVar with AND semantics, so every tag is passed as its own
+// `--tag` flag and the server does the AND filter (the prior client-side
+// `hasAllTags` fallback is no longer needed). Empty tags lists all. Tag values are
+// percent-escaped before sending and unescaped on the returned stashes so callers
+// see the raw values (e.g. `branchname:feature,x`) they handed to FcheapSave.
 func FcheapList(ctx context.Context, tags []string) ([]StashInfo, error) {
 	args := []string{"list", "--json"}
-	if len(tags) > 0 {
-		args = append(args, "--tag", tags[0])
+	for _, t := range tags {
+		args = append(args, "--tag", escapeTag(t))
 	}
 	out, err := fcheapRun(ctx, args...)
 	if err != nil {
@@ -117,29 +132,32 @@ func FcheapList(ctx context.Context, tags []string) ([]StashInfo, error) {
 	if err := json.Unmarshal(out, &all); err != nil {
 		return nil, fmt.Errorf("parse fcheap list output: %w", err)
 	}
-	if len(tags) <= 1 {
-		return all, nil
-	}
-	var matched []StashInfo
-	for _, s := range all {
-		if hasAllTags(s.Tags, tags[1:]) {
-			matched = append(matched, s)
+	for i := range all {
+		for j, t := range all[i].Tags {
+			all[i].Tags[j] = unescapeTag(t)
 		}
 	}
-	return matched, nil
+	return all, nil
 }
 
-func hasAllTags(have, want []string) bool {
-	set := make(map[string]bool, len(have))
-	for _, t := range have {
-		set[t] = true
-	}
-	for _, w := range want {
-		if !set[w] {
-			return false
-		}
-	}
-	return true
+// escapeTag percent-encodes `,` and `%` so fcheap's comma-splitting StringSliceVar
+// cannot shatter a single tag value. Branch names (and any other tag value) may
+// contain commas; without escaping, `--tag "branchname:feature,x"` is split into
+// `branchname:feature` and a spurious `x` tag (B57). The encoding is the minimal
+// subset of URL-query escaping needed: `%` -> `%25`, then `,` -> `%2C`. It is a
+// no-op for the hex/safe tags codemap already uses (`codemap-cache`, `repo:<hex>`,
+// `tree:<hex>`, `branch:<sanitized>`), so existing non-comma stashes are unchanged.
+func escapeTag(v string) string {
+	v = strings.ReplaceAll(v, "%", "%25")
+	return strings.ReplaceAll(v, ",", "%2C")
+}
+
+// unescapeTag reverses escapeTag. `%2C` -> `,` is applied before `%25` -> `%` so
+// the two encodings (disjoint as substrings) cannot recombine; the round trip is
+// exact for any input including literal `%2C`/`%25` sequences.
+func unescapeTag(v string) string {
+	v = strings.ReplaceAll(v, "%2C", ",")
+	return strings.ReplaceAll(v, "%25", "%")
 }
 
 // FcheapDrop permanently deletes a stash from fcheap's vault. Requires force=true

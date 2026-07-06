@@ -117,8 +117,12 @@ func (s *State) Record(branch string, e BranchEntry) {
 // index stashes for the repo and reads each one's `branchname:<raw>` tag
 // (preferred — the original branch name as the user typed it) or falls back to
 // the sanitized `branch:<seg>` tag, keeping the newest stash per branch.
-// base_sha and counts aren't in fcheap's list output, so those stay empty on a
-// rebuild (a later snapshot fills them in).
+//
+// fcheap v0.27.0+ surfaces `manifest.Custom` in `list --json`, so the rebuild
+// also recovers `BaseSHA` (from `custom.source`, i.e. the `--source` FcheapSave
+// was called with) and `EmbeddingProfile` (from `custom.embedding_profile` when
+// the saver wrote one) — no per-stash `info` round-trip. Node/vector counts stay
+// empty on a rebuild (they aren't in `list --json`); a later snapshot fills them.
 func Rebuild(ctx context.Context, repoHash string) (*State, error) {
 	stashes, err := snapshot.FcheapList(ctx, []string{"codemap-index", "repo:" + repoHash})
 	if err != nil {
@@ -144,7 +148,12 @@ func Rebuild(ctx context.Context, repoHash string) (*State, error) {
 		if prev, ok := s.Branches[branch]; ok && prev.LastSwitchedAt >= st.CreatedAt {
 			continue // keep the newer stash for this branch
 		}
-		s.Branches[branch] = BranchEntry{StashID: st.ID, LastSwitchedAt: st.CreatedAt}
+		s.Branches[branch] = BranchEntry{
+			StashID:          st.ID,
+			BaseSHA:          st.Custom["source"],
+			EmbeddingProfile: st.Custom["embedding_profile"],
+			LastSwitchedAt:   st.CreatedAt,
+		}
 	}
 	return s, nil
 }

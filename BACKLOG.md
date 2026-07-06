@@ -486,12 +486,15 @@ _v0.14.0 shipped 2026-06-25._
     a `vec *vector.Store` param (nil = graph-only); Import clears + re-inserts vectors with the new node ids.
     `TestVectorRoundTrip` (restored vector points at the new node id + is searchable); task check green.
     **BD.2 complete.**
-- [x] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper over the real fcheap CLI (verified v0.24.1):
-  `FcheapSave(dir,tool,name,tags,sourceSHA)→stashID` (`save … --no-scan --json`, parse `.id`),
-  `FcheapRestore(id,toDir)→verified` (`restore … --json`, check `.status=="restored"` + `.verified`),
-  `FcheapList(tags)→[]StashInfo` (`list --json` + single server-side `--tag`, extra tags AND-matched
-  client-side). `FcheapBinary`/`FcheapStashDir` overridable. `TestFcheapRoundTrip` (real save→list→restore,
-  gated on `fcheap` on PATH); task check green.
+- [x] **BD.3** `internal/snapshot/fcheap.go` — exec wrapper over the real fcheap CLI (re-verified v0.27.0;
+  originally v0.24.1): `FcheapSave(dir,tool,name,tags,sourceSHA)→stashID` (`save … --no-scan --json`, parse
+  `.id`; one `--tag` per tag, percent-escaped so a comma in a tag value can't shatter the filter — B57),
+  `FcheapRestore(id,toDir)→verified` (`restore … --json`, check `.status=="restored"` + `.verified`; treat
+  `verified=false` as a miss), `FcheapList(tags)→[]StashInfo` (`list --json`, repeatable `--tag` AND on the
+  server, tags unescaped on return; `StashInfo.Custom` carries `manifest.Custom` so rebuilds read
+  `source`/`branch`/`embedding_profile` with no per-stash `info`). `FcheapBinary`/`FcheapStashDir` overridable.
+  `TestFcheapRoundTrip` + `TestFcheapCommaInTagValue` (B57) (real save→list→restore, gated on `fcheap` on
+  PATH); task check green.
 - [x] **BD.4** `internal/branchstate/state.go` — per-project pointer file at `DataDir()/branches/<repoHash>.json`
   (`StatePath`): `State{repo_root/hash, project, default/active_branch, branches:{<b>:{stash_id, base_sha,
   embedding_profile, node/vector_count, last_switched_at}}}`. `Load` (missing→empty), `Save` (atomic

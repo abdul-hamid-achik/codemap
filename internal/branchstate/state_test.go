@@ -81,7 +81,11 @@ func TestRebuildFromFcheap(t *testing.T) {
 	ctx := context.Background()
 	repoHash := "rebuild123"
 
-	for _, branch := range []string{"main", "feature/y"} {
+	// "feature,y" exercises a slash (sanitized away); "bug,w" exercises a
+	// comma in the RAW branch name — the B57 regression. FcheapSave escapes
+	// the comma so the `branchname:bug,w` tag survives fcheap's comma-splitting
+	// StringSliceVar, and Rebuild recovers the exact raw key `bug,w`.
+	for _, branch := range []string{"main", "feature/y", "bug,w"} {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "snapshot.json"), []byte(`{"schema_version":1}`), 0o644); err != nil {
 			t.Fatal(err)
@@ -101,5 +105,12 @@ func TestRebuildFromFcheap(t *testing.T) {
 	}
 	if e, ok := s.Lookup("feature/y"); !ok || e.StashID == "" {
 		t.Errorf("rebuild missing 'feature/y' with a stash id, got %+v", s.Branches)
+	}
+	// B57: the comma-branch must rebuild under its exact raw name, and the
+	// base-sha must be recovered from fcheap's `custom.source` (v0.27.0).
+	if e, ok := s.Lookup("bug,w"); !ok || e.StashID == "" {
+		t.Errorf("rebuild missing comma-branch 'bug,w' (B57), got %+v", s.Branches)
+	} else if e.BaseSHA != "sha-bug,w" {
+		t.Errorf("comma-branch BaseSHA = %q, want sha-bug,w (from custom.source)", e.BaseSHA)
 	}
 }
