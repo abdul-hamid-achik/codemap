@@ -140,7 +140,7 @@ for its own MCP package.)
 ```
 task                 # list tasks
 task doctor          # check go, ollama (+ nomic-embed-text), task, glyph, golangci-lint
-task setup           # deps + tools + docs deps
+task setup           # deps + tools (docs deps: task site:deps)
 task build           # build → ./bin/codemap (ldflags inject version)
 task test            # go test ./...
 task race            # CGO_ENABLED=1 go test -race ./...
@@ -150,7 +150,7 @@ task check           # fmt + lint + test  (aliases: ci, verify)
 task flows           # glyph run specs/*.yml  (E2E; local only — not run in CI)
 task site:dev        # VitePress dev server (Bun)
 task site:build      # VitePress build
-task ship            # check + site:build + race + build + flows
+task ship            # check + race + build + flows
 task install         # go install ./cmd/codemap
 ```
 
