@@ -24,8 +24,9 @@ to a path inside the repo if you want a repo-local index too.
 6. `~/.codemap/config.yaml` (legacy, if present)
 7. Built-in defaults
 
-Every config-file setting is reachable all three ways — config file, env var, and flag — with the
-flag winning when explicitly set.
+Most config-file settings are reachable all three ways — config file, env var, and flag —
+with the flag winning when explicitly set. Two knobs are an exception: `daemon.embed_cache_size`
+is file + flag only (no env var), and `index.extract_concurrency` is file + env only (no flag).
 
 ## Environment variables
 
@@ -45,6 +46,7 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_EXCLUDE_EXTRA` | `index.exclude_extra` (comma-separated; appended) |
 | `CODEMAP_EMBED_BATCH_SIZE` | `index.embed_batch_size` |
 | `CODEMAP_EMBED_CONCURRENCY` | `index.embed_concurrency` |
+| `CODEMAP_EXTRACT_CONCURRENCY` | `index.extract_concurrency` (parallel Go extraction workers; no flag) |
 | `CODEMAP_EMBED_MAX_CHARS` | `index.embed_max_chars` |
 | `CODEMAP_VECGREP_ENABLED` | `vecgrep.enabled` |
 | `CODEMAP_VECGREP_BIN` | `vecgrep.bin` |
@@ -97,6 +99,7 @@ index:
     - "**/testdata"
   embed_batch_size: 64    # node texts per embedder request
   embed_concurrency: 4    # concurrent embedder requests (big win for network providers)
+  extract_concurrency: 4 # parallel Go extraction workers (default 4; 1 = sequential)
   embed_max_chars: 0      # cap per-node embed text (0 = no cap); lower = faster, less body recall
 daemon:                   # background indexer (codemap daemon)
   debounce_ms: 500        # coalesce a burst of edits into one reindex

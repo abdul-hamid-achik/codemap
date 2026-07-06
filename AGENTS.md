@@ -2,7 +2,8 @@
 
 Instructions for AI agents (and humans) working on the **codemap** codebase. This is the
 canonical source-of-truth doc; `CLAUDE.md` defers to it. `README.md` is the public-facing
-intro. `SPEC.md` is the original design rationale. `BACKLOG.md` tracks live work.
+intro. The design rationale (architecture, why-it-is-what-it-is) lives in the Obsidian
+vault at `~/notes/projects/codemap/design-rationale.md`. `BACKLOG.md` tracks live work.
 
 ## Project Overview
 
@@ -37,65 +38,98 @@ Key features:
 
 ```
 codemap/
-├── cmd/codemap/main.go        # single entrypoint, all cobra commands (vecgrep style)
+├── cmd/codemap/              # cobra CLI, split per-command (vecgrep style): main.go +
+│                            #   annotate/branch/cache/config/daemon/index/init_status/query.
+│                            #   Each RunE handler is THIN → opens a session → calls internal/app.
+│                            #   Files carry the header `/* Copyright © 2026 abdul hamid <abdulachik@icloud.com> */`.
 ├── internal/
-│   ├── app/                   # shared service layer; CLI + MCP + TUI all call this
-│   │   ├── service.go         #   business logic (index, query, impact …)
-│   │   └── session.go         #   open/close store + veclite + provider (lazy)
-│   ├── config/                # XDG-style hierarchical config (see "Config")
+│   ├── app/                 # shared service layer; CLI + MCP + TUI all call this
+│   │   ├── service_core.go        #   Service + Session wiring, common helpers
+│   │   ├── service_init.go        #   init / index / status / doctor
+│   │   ├── service_query.go       #   callers / callees / path / symbols / find / source
+│   │   ├── service_relations.go   #   precise callers/callees (callHierarchy / go/types)
+│   │   ├── service_impact.go      #   impact / blast radius / hotspots / orphans / read-order
+│   │   ├── service_context.go     #   context (the one-call bundle) + context_batch
+│   │   ├── service_semantic.go    #   semantic search (veclite hybrid) + find fallback
+│   │   ├── service_annotations.go #   annotate / annotations / unannotate (knowledge layer)
+│   │   ├── session.go             #   open/close store + veclite + provider (lazy)
+│   │   ├── review.go              #   diff-scoped impact (git diff → symbols → blast + tests)
+│   │   ├── file_impact.go         #   file-level dependents + safe_to_delete / breaking_change
+│   │   ├── risk.go                #   0..1 change-risk score
+│   │   ├── readorder.go           #   entrypoint + hub ranking
+│   │   ├── secret_impact.go       #   secret-key rotation blast radius (names only)
+│   │   ├── branchswitch.go        #   branch-aware index switching
+│   │   ├── cache.go               #   fcheap content-addressed index cache
+│   │   ├── doctor.go              #   environment + daemon health checks
+│   │   ├── docs.go                #   the in-band agent guide (codemap docs / codemap_docs)
+│   │   └── vecgrep_client.go      #   vecgrep semantic-fallback + memory recall
+│   ├── graph/                # SQLite graph store (pure Go, modernc.org/sqlite)
+│   │   ├── store.go          #   Open/Close, CRUD for nodes/edges/projects, stats
+│   │   ├── schema.go         #   SQL schema + migrations (PRAGMA user_version); edges.provenance
+│   │   └── queries.go        #   callers/callees, blast radius, hotspots/orphans/path
+│   ├── extract/              # code structure extraction (pluggable backends)
+│   │   ├── extractor.go      #   Extractor interface + Symbol/Reference/FileResult
+│   │   ├── gosrc/            #   stdlib go/parser backend (pure Go, default for Go)
+│   │   ├── typesrc/          #   in-process go/types pass (Go --precise; exact call edges)
+│   │   ├── lspsrc/           #   LSP-backed extractor (documentSymbol → symbols; callHierarchy)
+│   │   └── vuesrc/           #   Vue SFC (.vue) → routes <script> blocks to the TS server
+│   ├── lsp/                  # headless LSP client (no deps; Content-Length JSON-RPC)
+│   │   ├── jsonrpc.go        #   framed conn: read loop, Call/Notify, 30s default timeout
+│   │   └── client.go         #   Spawn/Initialize/DidOpen/DocumentSymbols/References/callHierarchy
+│   ├── embed/                # embedding providers
+│   │   ├── provider.go       #   Provider interface + EmbeddingProfile guard
+│   │   └── ollama.go         #   POST /api/embed (net/http + json, no SDK)
+│   ├── vector/store.go       # veclite wrapper: collection + profile guard + hybrid
+│   ├── index/                # walk → extract → embed → store; incremental + resolve edges
+│   │   ├── indexer.go        #   main pipeline; resolveLSPCallEdges / resolveGoCallEdges
+│   │   ├── staleness.go      #   hash-based drift detection (status/agent trust)
+│   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
+│   │   └── import_index.go   #   fcheap cache restore (skip extract+embed)
+│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (35 tools)
+│   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
+│   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search)
+│   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
+│   │   ├── theme.go          #   lipgloss v2 styles
+│   │   ├── anim.go           #   harmonica spring frame loop (bars + map reveal + spinner)
+│   │   ├── highlight.go      #   chroma v2 syntax highlighting for the source overlay
+│   │   └── run.go            #   tea.NewProgram entry
+│   ├── daemon/               # background watcher: fsnotify, throttle, control socket, delegation
+│   ├── git/                  # branch / ref / diff helpers (review + branch-switch)
+│   ├── snapshot/             # fcheap-backed index snapshot/restore
+│   ├── branchstate/          # per-branch snapshot pointer store
+│   ├── cachestate/           # content-addressed cache pointer store
+│   ├── config/               # XDG-style hierarchical config (see "Config")
 │   │   ├── config.go          #   types + DefaultConfig + Load + env overrides
 │   │   ├── paths.go           #   XDG dirs + ~/.codemap fallback + ExpandPath
 │   │   └── project.go         #   FindProjectRoot + DeriveProjectName
-│   ├── graph/                 # SQLite graph store (pure Go, modernc.org/sqlite)
-│   │   ├── store.go           #   Open/Close, CRUD for nodes/edges/projects, stats
-│   │   ├── schema.go          #   SQL schema + migrations (PRAGMA user_version)
-│   │   └── queries.go         #   callers/callees, blast radius, hotspots/orphans/path
-│   ├── extract/               # code structure extraction (pluggable backends)
-│   │   ├── extractor.go       #   Extractor interface + Symbol/Reference/FileResult
-│   │   ├── gosrc/             #   stdlib go/parser backend (pure Go, default for Go)
-│   │   └── lspsrc/            #   LSP-backed extractor (DocumentSymbols → symbols)
-│   ├── lsp/                   # headless LSP client (no deps; Content-Length JSON-RPC)
-│   │   ├── jsonrpc.go         #   framed conn: read loop, Call/Notify, handler
-│   │   └── client.go          #   Spawn/Initialize/DidOpen/DocumentSymbols/References
-│   ├── embed/                 # embedding providers
-│   │   ├── provider.go        #   Provider interface + EmbeddingProfile guard
-│   │   └── ollama.go          #   POST /api/embed (net/http + json, no SDK)
-│   ├── vector/store.go        # veclite wrapper: collection + profile guard + hybrid
-│   ├── index/indexer.go       # walk → extract → embed → store; incremental + resolve edges
-│   ├── mcp/server.go          # stdio MCP server — THIN pass-through to internal/app
-│   ├── tui/                   # studio TUI (Charm v2): model/update/view/run/theme
-│   │   ├── model.go           #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search)
-│   │   ├── view.go            #   full-screen layout, call-graph explorer, bar charts
-│   │   ├── theme.go           #   lipgloss v2 styles
-│   │   └── run.go             #   tea.NewProgram entry
 │   └── version/version.go     # Version/Commit/Date (ldflags-injected)
 │
-│   # planned: extract/treesitter (CGO, build-tagged), extract/scip, search/* fusion
+│   # planned: extract/treesitter (CGO, build-tagged), extract/scip
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
-├── specs/                     # glyphrun E2E specs (*.yml): version/help/index_status/query
-│                              #   (graphs) · context (one-call bundle) · annotations (knowledge
-│                              #   layer) · staleness (drift) · incremental (reindex updates) ·
-│                              #   config (repo-local codemap.yaml) · index_progress (TTY bar) · mcp_serve
-│                              #   (stdio JSON-RPC) · studio (gopls) · semantic (vectors+Ollama)
-│                              #   · precise/typescript/javascript/python · jsx (<Component/> call edges)
-│                              #   · polyglot (Go+TS+Py one repo)
+├── specs/                     # glyphrun E2E specs (*.yml, 34): version/help/index_status/query/context/
+│                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
+│                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
+│                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/
+│                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/
+│                              #   ts_impact_note/studio_visuals/index_via_daemon
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
-└── README.md AGENTS.md CLAUDE.md BACKLOG.md SPEC.md LICENSE
+└── README.md AGENTS.md CLAUDE.md BACKLOG.md LICENSE
 ```
 
 **Package boundaries are part of the contract.** The dependency direction is one-way:
-`cmd → app → {graph, search, index, extract, embed, config}`. The `tui`, `mcp`, and CLI
-RunE handlers are all *thin* and call `internal/app`. Never put business logic in `mcp` or
-`tui`. (Same rule glyphrun documents for its own MCP package.)
+`cmd → app → {graph, vector, index, extract, embed, lsp, config, daemon, git, snapshot,
+branchstate, cachestate}`. The `tui`, `mcp`, and CLI RunE handlers are all *thin* and call
+`internal/app`. Never put business logic in `mcp` or `tui`. (Same rule glyphrun documents
+for its own MCP package.)
 
 ## Documentation Discipline (read this)
 
 - `docs/` is a **deployed VitePress site** for product documentation **only**. Single
   hosting path: **Vercel** — no GitHub Pages.
 - Repo root carries exactly these markdown files: `README.md`, `AGENTS.md`, `CLAUDE.md`,
-  `BACKLOG.md`, `SPEC.md`. **Do not** create scratch / handoff / TODO / design `.md` files
-  anywhere in the repo.
+  `BACKLOG.md`. **Do not** create scratch / handoff / TODO / design `.md` files
+  anywhere in the repo. (Design rationale lives in the vault: `design-rationale.md`.)
 - Working notes, handoffs, investigations, and design exploration go to the **Obsidian
   vault** at `~/notes/projects/codemap/` (use the `obsidian-cli` skill), not the repo.
 - `BACKLOG.md` is the one exception to "no working-notes in repo": it is the explicit,
@@ -131,7 +165,7 @@ task install         # go install ./cmd/codemap
 
 ## Architecture Notes
 
-### Extraction (Go + TypeScript + JavaScript + Python)
+### Extraction (Go + TypeScript + JavaScript + Python + Vue SFC)
 - **`gosrc` (`go/parser`) is always registered** (Go: full call graph; `--precise` adds exact edges
   via `go/types`). **`lspsrc` (the LSP backend) is now wired in**: `IndexProject` runs a present-aware
   `registerLSP` that, for each `lspsrc.DefaultServers` spec, spawns its server **once** if any of the
@@ -143,6 +177,14 @@ task install         # go install ./cmd/codemap
   `callHierarchy` under `--precise`, resolved in `Indexer.resolveLSPCallEdges`. `appendSymbols` drops
   Variable symbols nested inside a callable (pyright reports params/locals as variables). A Go-only repo
   never spawns a server; `defer ix.Close()` reaps any that were.
+- **Vue SFC (`.vue`)** is indexed by `internal/extract/vuesrc`: a `.vue` file's
+  `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript,
+  unmarked/`lang="js"` to JavaScript) is delegated to the **same**
+  `typescript-language-server` connection that indexes plain `.ts`/`.js`, with
+  symbol lines mapped back onto the original `.vue` file. Template/style blocks
+  are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns
+  the server itself to serve the script blocks. Symbols + `defines` edges only —
+  no `--precise` call graph for Vue yet.
 - Languages present but missing their server are recorded in `Result.MissingServers` and surfaced
   as an actionable "install X" message; genuinely-unsupported languages are still `Result.Unsupported`
   ("skipped, planned"). `--no-lsp` disables the LSP backend.
@@ -164,9 +206,12 @@ task install         # go install ./cmd/codemap
   it must NOT leak into the MCP transport (which is newline-delimited).**
 
 ### Storage
-- Graph: `modernc.org/sqlite` (pure Go), WAL mode, batch inserts. Tables: `nodes`, `edges`,
-  `projects`, `index_state` (see SPEC.md "Storage Schema").
-- Vectors: `github.com/abdul-hamid-achik/veclite` (≥ v0.17.0). One collection (`codemap`),
+- Graph: `modernc.org/sqlite` (pure Go), WAL mode, transaction-batched writes,
+  `synchronous=NORMAL`, `SetMaxOpenConns(1)`. Tables: `nodes`, `edges`,
+  `projects`, `index_state`. The `edges.provenance` column records whether a
+  call edge is name-based or precise, so `--precise` can replace name-based
+  edges idempotently (see `design-rationale.md` "Storage" in the vault).
+- Vectors: `github.com/abdul-hamid-achik/veclite` (≥ v0.22.0). One collection (`codemap`),
   one vector space in v0.1. Put **filterable** fields (`project`, `path`, `lang`, `kind`,
   `node_id`) in the veclite **Payload**; put the **searchable** source text in **Content**
   (or a `WithTextIndex` field) so BM25/`HybridSearch` works. `Result{Record, Score}`.
@@ -193,8 +238,8 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (26+): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `impact`, `file_impact`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise` (gopls); `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
-- CLI mirrors these: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`), `status`, `config path/show`, `callers`, `callees`, `path`, `impact` (`--depth`), `file_impact`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read_order`, `symbol_at`, `cache`, `branch_*`, `daemon`, `serve`, `studio` — all query commands accept `--json`.
+- Tool names are `codemap_`-prefixed. Current set (35): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `impact`, `file_impact`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise` (gopls); `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
+- CLI mirrors these 1:1: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--lsp`), `path`, `impact` (`--depth`), `file-impact`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read-order`, `symbols`, `symbol-at`, `find`, `source`, `context` (multi-arg → batch), `related-files`, `annotate`/`annotations`, `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `daemon start`/`status`/`stop`, `docs`, `serve`, `studio` — all query commands accept `--json`.
 - **Accuracy model** (be honest with users): the graph is name-based by default — intra-package
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`
@@ -214,13 +259,18 @@ task install         # go install ./cmd/codemap
   reindexing.
 
 ### Config precedence (highest → lowest)
-1. Env vars `CODEMAP_*` (e.g. `CODEMAP_CONFIG`, `CODEMAP_DATA`, `CODEMAP_EMBEDDING_MODEL`,
-   `CODEMAP_OLLAMA_URL`).
-2. Project-root `codemap.yaml` / `codemap.yml`.
-3. Project `.config/codemap.yaml` (XDG-style, in-repo).
-4. Global `$XDG_CONFIG_HOME/codemap/config.yaml` (fallback `~/.config/codemap/config.yaml`).
-5. `~/.codemap/config.yaml` (legacy/ecosystem fallback, only if it exists).
-6. Built-in `DefaultConfig()`.
+1. CLI flags (per-setting override flags — win when explicitly set; see `docs/configuration.md`).
+2. Environment variables `CODEMAP_*` (e.g. `CODEMAP_CONFIG`, `CODEMAP_DATA`, `CODEMAP_EMBEDDING_MODEL`,
+   `CODEMAP_OLLAMA_URL`, `CODEMAP_EXCLUDE_EXTRA`, `CODEMAP_DAEMON_*`).
+3. Project-root `codemap.yaml` / `codemap.yml`.
+4. Project `.config/codemap.yaml` (XDG-style, in-repo).
+5. Global `$XDG_CONFIG_HOME/codemap/config.yaml` (fallback `~/.config/codemap/config.yaml`).
+6. `~/.codemap/config.yaml` (legacy/ecosystem fallback, only if it exists).
+7. Built-in `DefaultConfig()`.
+
+Most config-file settings are reachable all three ways — file, env, flag — with the flag
+winning when set (two exceptions: `daemon.embed_cache_size` is file+flag only, `index.extract_concurrency`
+is file+env only; see `docs/configuration.md`).
 
 Data (graph DB, veclite, project registry) lives in `$XDG_DATA_HOME/codemap/`
 (fallback `~/.local/share/codemap/`); cache in `$XDG_CACHE_HOME/codemap/`. If `~/.codemap/`
@@ -230,23 +280,27 @@ ecosystem; `gopkg.in/yaml.v3`).
 
 ## Common Tasks for Agents
 
-**Add a CLI command:** add the cobra command var + `init()` registration + `runX` handler in
-`cmd/codemap/main.go`; the handler opens a session and calls `internal/app`. Support
-`--json` for machine output.
+**Add a CLI command:** the CLI is split per-command under `cmd/codemap/` (main.go plus
+annotate/branch/cache/config/daemon/index/init_status/query). Add the cobra command var +
+`init()` registration + a `runX` handler in the matching file (or a new one); the handler
+opens a session and calls `internal/app`. Support `--json` for machine output.
 
 **Add an MCP tool:** define a typed input struct (json + jsonschema tags) in
 `internal/mcp/server.go`, register with `mcp.AddTool`, and have the handler delegate to
 `internal/app`. Keep it thin. Update the tool list in README/docs.
 
 **Add a graph query:** implement traversal in `internal/graph/queries.go` (BFS with a
-visited set — **always detect cycles**), expose via `internal/search`, then surface in CLI +
-MCP + TUI.
+visited set — **always detect cycles**), expose it through `internal/app` (a `service_*.go`
+method), then surface in CLI + MCP + TUI.
 
 **Data-model change:** edit `internal/graph/schema.go` with a migration; bump the schema
 version; never break an existing index without a rebuild path.
 
-**Add a studio tab/widget:** add a `tab_*.go` in `internal/tui`, wire it into the tab bar in
-`model.go`/`update.go`. Use Charm **v2** (`charm.land/...`) and ntcharts **v2** for charts.
+**Add a studio tab/widget:** add the view code in `internal/tui/view.go` and the
+state/keys in `model.go` (there is no `update.go` — model.go holds the update logic; no
+`tab_*.go` convention). Use Charm **v2** (`charm.land/...`). For charts use the hand-rolled
+ASCII bars + the harmonica spring frame loop in `anim.go` — **not** ntcharts (its go.mod
+`replace`s bubbletea to a fork that fights stock `charm.land/bubbletea/v2`; see CLAUDE.md).
 
 ## Code Style
 

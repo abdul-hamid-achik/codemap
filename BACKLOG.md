@@ -1,9 +1,9 @@
 # codemap — Backlog
 
-> Forward-looking status + priorities for codemap. **Design source of truth: `AGENTS.md` / `SPEC.md`.**
+> Forward-looking status + priorities for codemap. **Design source of truth: `AGENTS.md`** (design rationale: `~/notes/projects/codemap/design-rationale.md`).
 > Full per-iteration build-loop history (every `#NNN` / `COMMIT+PUSH`, v0.1→v0.9.1) is archived
 > verbatim in the Obsidian vault: `~/notes/projects/codemap/iteration-log/2026-06-24-backlog-full-archive.md`
-> (repo root `.md` is limited to README/AGENTS/CLAUDE/BACKLOG/SPEC, so the history lives in the vault).
+> (repo root `.md` is limited to README/AGENTS/CLAUDE/BACKLOG, so the history lives in the vault).
 > **Going forward:** append iteration narrative to the vault, keep this file to durable status + priorities.
 
 ## Status legend
@@ -630,7 +630,7 @@ _v0.14.0 shipped 2026-06-25._
 ## Tech decisions (reversible — flag if you disagree)
 - [x] **TD1. v0.1 extraction = pure-Go (LSP + stdlib `go/parser`), `CGO_ENABLED=0`.** tree-sitter needs CGO
   (breaks clean cross-compile) → OPTIONAL backend behind the `treesitter` build tag, out of release binaries,
-  targeted for 0.2. ⚠️ **Biggest deviation from SPEC's dual-backend MVP.**
+  targeted for 0.2. ⚠️ **Biggest deviation from the original design rationale's dual-backend MVP** (see vault `design-rationale.md`).
 - [x] **TD2. One vector space in v0.1** (code text). Named spaces (docstring/signature) → 0.2+ (veclite ≥0.17).
 - [x] **TD3. No domain-entity/LogicLens nodes in v0.1** (needs LLM enrichment) → Phase 5.
 - [x] **TD4. Registry = `$XDG_DATA_HOME/codemap/projects/`** (+ `~/.codemap` fallback), `init --local` escape hatch. Separate from vecgrep's.

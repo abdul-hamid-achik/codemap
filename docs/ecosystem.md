@@ -98,6 +98,6 @@ codemap required-keys Checkout --via-vault payments | xargs -I{} tvault seal --k
 ```
 
 **`codemap index --via-vault <project>`** runs indexing inside `tvault run -p <project>` so the language
-servers (gopls/pyright/tsserver) inherit the project's private-registry creds (`GOPRIVATE`/`NPM_TOKEN`/…)
+servers (gopls/pyright/typescript-language-server) inherit the project's private-registry creds (`GOPRIVATE`/`NPM_TOKEN`/…)
 when resolving private dependencies during the precise pass. codemap only ever invokes `tvault run`/`list` —
 never `tvault get` — so secret values are unreachable. Degrades to a normal index when `tvault` is absent.

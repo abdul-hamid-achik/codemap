@@ -68,10 +68,10 @@ Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`4` or `tab`; navigate with `
   1 Graph   2 Metrics   3 Impact   4 Search
  Hubs (164)                           │ lspsrc.Extractor.Close
     57  lspsrc.Extractor.Close        │  Called by (57)
-    56  app.Session.Close             │   ▸ main.runInit    cmd/codemap/main.go:186
-    56  graph.Store.Close             │     main.runIndex   cmd/codemap/main.go:209
+    56  app.Session.Close             │   ▸ main.runInit   cmd/codemap/init_status.go:64
+    56  graph.Store.Close             │     main.runIndex  cmd/codemap/index.go:24
     26  app.NewService                │  Calls (9)
-    19  app.Open                      │     app.Session.Close  internal/app/session.go:80
+    19  app.Open                      │     app.Session.Close  internal/app/session.go:126
      ▼ 159 more                       │  ⟩ func runInit(cmd *cobra.Command, ...) error
  ↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit · ? help
 ```
@@ -113,6 +113,7 @@ brew install abdul-hamid-achik/tap/codemap
 
 | Language | How | Extensions | Call graph |
 |---|---|---|---|
+| **Go** | stdlib `go/parser` (pure Go, always) · `--precise` adds exact edges via in-process `go/types` | `.go` | name-based by default; exact via `--precise` |
 | **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` | `--precise` only |
 | **Python** | `pyright-langserver` | `.py` | `--precise` only |
 | **Vue SFC** | `typescript-language-server` via `vuesrc` — `<script>`/`<script setup>` block content is extracted and routed to the TS/JS delegate; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
@@ -186,29 +187,43 @@ The flagship `impact` answers *what breaks if I change this, and what do I run t
 $ codemap impact BlastRadius --depth 2
 Impact of BlastRadius (codemap)
   defined:        internal/graph/queries.go:140
-  direct callers: 3
-  blast radius:   11 (depth ≤ 2)
-  tests covering: 6
+  direct callers: 4
+  blast radius:   22 (depth ≤ 2)
+  tests covering: 11
   covering tests (run these):
-     graph.TestBlastRadius                internal/graph/graph_test.go:305
-     graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:347
-     app.TestQueryResultsCarrySignature   internal/app/app_test.go:175
-     app.TestImpactSurfacesAnnotations    internal/app/app_test.go:343
-     app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1250
-     app.TestServiceImpact                internal/app/app_test.go:1427
+     graph.TestBlastRadius                internal/graph/graph_test.go:377
+     graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:419
+     app.TestQueryResultsCarrySignature   internal/app/app_test.go:226
+     app.TestImpactSurfacesAnnotations    internal/app/app_test.go:394
+     app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1309
+     app.TestServiceImpact                internal/app/app_test.go:1486
+     app.TestImpactHeuristicTestCoverage  internal/app/app_test.go:1693
+     app.TestImpactBlankSymbolRejected    internal/app/app_test.go:1871
+     app.TestSecretImpact                 internal/app/secret_impact_test.go:79
+     app.TestSecretImpactOrphanKey        internal/app/secret_impact_test.go:100
+     … (1 more — use --json for all)
   affected (blast radius):
-     [1] app.Service.Impact                   internal/app/service.go:983
-   ✓ [1] graph.TestBlastRadius                internal/graph/graph_test.go:305
-   ✓ [1] graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:347
-     [2] main.runImpact                       cmd/codemap/main.go:572
-   ✓ [2] app.TestQueryResultsCarrySignature   internal/app/app_test.go:175
-   ✓ [2] app.TestImpactSurfacesAnnotations    internal/app/app_test.go:343
-   ✓ [2] app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1250
-   ✓ [2] app.TestServiceImpact                internal/app/app_test.go:1427
-     [2] app.Service.Context                  internal/app/service.go:1322
-     [2] mcp.Server.handleImpact              internal/mcp/server.go:320
-     [2] tui.Model.impactCmd                  internal/tui/model.go:522
-```
+     [1] app.Service.SecretImpact             internal/app/secret_impact.go:50
+     [1] app.Service.Impact                   internal/app/service_impact.go:49
+   ✓ [1] graph.TestBlastRadius                internal/graph/graph_test.go:377
+   ✓ [1] graph.TestBlastRadiusCycleSafe       internal/graph/graph_test.go:419
+     [2] main.runImpact                       cmd/codemap/query.go:218
+     [2] main.runSecretImpact                 cmd/codemap/query.go:667
+   ✓ [2] app.TestQueryResultsCarrySignature   internal/app/app_test.go:226
+   ✓ [2] app.TestImpactSurfacesAnnotations    internal/app/app_test.go:394
+   ✓ [2] app.TestImpactWarnsOnAmbiguousName   internal/app/app_test.go:1309
+   ✓ [2] app.TestServiceImpact                internal/app/app_test.go:1486
+   ✓ [2] app.TestImpactHeuristicTestCoverage  internal/app/app_test.go:1693
+   ✓ [2] app.TestImpactBlankSymbolRejected    internal/app/app_test.go:1871
+     [2] app.Service.FileImpact               internal/app/file_impact.go:39
+     [2] app.Service.Review                   internal/app/review.go:69
+     [2] app.Service.Risk                     internal/app/risk.go:37
+   ✓ [2] app.TestSecretImpact                 internal/app/secret_impact_test.go:79
+   ✓ [2] app.TestSecretImpactOrphanKey        internal/app/secret_impact_test.go:100
+   ✓ [2] app.TestSecretImpactNoValueLeak      internal/app/secret_impact_test.go:114
+     [2] app.Service.Context                  internal/app/service_context.go:69
+     [2] mcp.Server.handleImpact              internal/mcp/server.go:633
+   … (2 more — use --json for all, or lower --depth)
 Long lists are capped for readability (the nearest blast-radius nodes and the
 first covering tests, with a `… (N more)` line); `--json` always carries the
 complete set.
@@ -346,7 +361,7 @@ combine them: vecgrep/codemap to *find* code by meaning, codemap to learn *what 
 
 ## Documentation
 
-Full docs: **[docs/](./docs)** (VitePress). Design rationale: **[SPEC.md](./SPEC.md)**.
+Full docs: **[docs/](./docs)** (VitePress). Design rationale: `~/notes/projects/codemap/design-rationale.md` (Obsidian vault).
 
 ## License
 

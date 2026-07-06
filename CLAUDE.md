@@ -7,19 +7,26 @@ and the handful of things that are easy to get wrong.
 
 Local-first code intelligence: a structural code graph (Go via stdlib `go/parser`, plus
 `--precise` go/types; TypeScript **+ JavaScript** via one `typescript-language-server` — calls
-resolving across the `.ts`↔`.js` boundary — and **Python** via `pyright-langserver`;
-tree-sitter still planned) fused with semantic vectors (veclite), exposed as a unified query
-layer. Three surfaces over one store: CLI (`--json` for agents), MCP server (`codemap serve`),
-and the `studio` TUI.
+resolving across the `.ts`↔`.js` boundary — **Python** via `pyright-langserver`, and **Vue SFCs**
+(`.vue` → `<script>` blocks routed to the same TS server); tree-sitter still planned) fused with
+semantic vectors (veclite), exposed as a unified query layer. Three surfaces over one store: CLI
+(`--json` for agents), MCP server (`codemap serve`, 35 tools), and the `studio` TUI.
 
 Surfaces / key files:
-- CLI + all commands: `cmd/codemap/main.go`
-- Service layer (everything routes here): `internal/app/` (service.go, session.go)
-- MCP server (thin, 20 tools): `internal/mcp/server.go`
-- studio TUI: `internal/tui/` (model.go/view.go; tabs graph/metrics/impact/search)
+- CLI: `cmd/codemap/` — cobra CLI split per-command (main.go plus annotate/branch/cache/
+  config/daemon/index/init_status/query). Each `RunE` is thin → opens a session → calls `internal/app`.
+- Service layer (everything routes here): `internal/app/` (service_core / _init / _query /
+  _relations / _impact / _context / _semantic / _annotations; plus session, review, file_impact,
+  risk, readorder, secret_impact, branchswitch, cache, doctor, docs, vecgrep_client).
+- MCP server (thin, 35 tools): `internal/mcp/server.go`
+- studio TUI: `internal/tui/` (model.go/view.go/theme.go/run.go + anim.go [harmonica springs]
+  + highlight.go [chroma syntax]; tabs graph/metrics/impact/search)
 - Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`
-- Extraction: `internal/extract/` (`gosrc` = go/parser, `lspsrc` = LSP-backed)
+- Extraction: `internal/extract/` (`gosrc` = go/parser · `typesrc` = go/types [`--precise`] ·
+  `lspsrc` = LSP-backed [TS/JS/Python] · `vuesrc` = Vue SFC `.vue` → TS server)
 - LSP client: `internal/lsp/`  ·  indexer: `internal/index/`  ·  embeddings: `internal/embed/`
+- Branch/cache/daemon: `internal/branchstate` · `internal/cachestate` · `internal/snapshot`
+  (fcheap) · `internal/daemon` (watcher) · `internal/git` (branch/ref/diff for review + branch-switch)
   ·  config (XDG): `internal/config/`
 
 ## Two documentation surfaces — do not mix them
@@ -27,7 +34,8 @@ Surfaces / key files:
 - `docs/` → VitePress **product docs**, deployed to **Vercel** (no GitHub Pages).
 - `~/notes/projects/codemap/` → Obsidian vault for **working notes / handoffs**, via the
   `obsidian-cli` skill. **Never** write scratch `.md` into the repo. Repo root `.md` is
-  limited to: README, AGENTS, CLAUDE, BACKLOG, SPEC.
+  limited to: README, AGENTS, CLAUDE, BACKLOG. (Design rationale lives in the vault:
+  `~/notes/projects/codemap/design-rationale.md`.)
 
 ## Gotchas (learned the hard way)
 
