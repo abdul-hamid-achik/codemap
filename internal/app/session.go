@@ -7,6 +7,7 @@ package app
 
 import (
 	"errors"
+	"os"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
@@ -43,12 +44,21 @@ func Open(configPath string) (*Session, error) {
 	return &Session{Config: cfg}, nil
 }
 
-// Graph opens (once) and returns the graph store.
+// Graph opens (once) and returns the graph store. A failure to open the graph
+// DB is wrapped in a CodedError so the CLI/MCP can map it to a stable machine
+// code: an existing-but-broken DB is index_corrupt (back up + reindex); a
+// missing DB file (first run / wiped data dir) is index_missing.
 func (s *Session) Graph() (*graph.Store, error) {
 	if s.graph == nil {
-		g, err := graph.Open(config.DBPath())
+		dbPath := config.DBPath()
+		existed := fileExists(dbPath)
+		g, err := graph.Open(dbPath)
 		if err != nil {
-			return nil, err
+			if existed {
+				return nil, coded("index_corrupt",
+					"the graph DB exists but won't open — back it up, then run: codemap index --reindex", err)
+			}
+			return nil, coded("index_missing", "run: codemap index", err)
 		}
 		s.graph = g
 	}
@@ -142,4 +152,10 @@ func (s *Session) Close() error {
 		s.graph = nil
 	}
 	return err
+}
+
+// fileExists reports whether path names an existing file (follows symlinks).
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

@@ -62,6 +62,7 @@ codemap/
 │   │   ├── cache.go               #   fcheap content-addressed index cache
 │   │   ├── doctor.go              #   environment + daemon health checks
 │   │   ├── docs.go                #   the in-band agent guide (codemap docs / codemap_docs)
+│   │   ├── errors.go              #   CodedError (stable machine codes) for --json failures
 │   │   └── vecgrep_client.go      #   vecgrep semantic-fallback + memory recall
 │   ├── graph/                # SQLite graph store (pure Go, modernc.org/sqlite)
 │   │   ├── store.go          #   Open/Close, CRUD for nodes/edges/projects, stats
@@ -257,6 +258,19 @@ task install         # go install ./cmd/codemap
   per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable.
   `callers`/`callees --lsp` (`precise:true`) remains the per-query gopls path for a one-off without
   reindexing.
+- **Stable machine contract**: every impact/callers/callees/review/context report carries a
+  `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) so a consumer can switch on
+  confidence (resolved→high, name→medium, unresolved/none→low) without parsing the free-form
+  `resolution` sentence. `codemap review` additionally folds one aggregate `risk` band
+  (`level`/`score`/`factors`) from every changed symbol so a harness can gate verification on a
+  single call. The `blast_radius`/`covering_tests` elements are `ImpactNode` objects
+  (`symbol`/`fqn`/`kind`/`file`/`start_line`/`depth`; no `end_line`) — the stable element shape.
+- **CLI exit-code taxonomy** (extends P2-06): `0`=answered, `1`=operational error,
+  `2`=not found/not indexed, `3`=`index_missing`, `4`=`index_corrupt`, `5`=`not_a_repo`.
+  Under `--json`, ANY failure prints a structured envelope to **stdout**:
+  `{"ok":false,"error":"…","code":"index_missing|index_corrupt|not_a_repo|operational","hint":"run: codemap index"}`
+  (the `code` matches the exit-code suffix). The `cmd/codemap/jsonHandler` wraps every RunE;
+  hard failures are wrapped as `app.CodedError` at the `Session.Graph()` seam (`internal/app/errors.go`).
 
 ### Config precedence (highest → lowest)
 1. CLI flags (per-setting override flags — win when explicitly set; see `docs/configuration.md`).

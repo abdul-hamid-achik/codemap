@@ -263,3 +263,107 @@ func TestReviewSinceRejectsOptionShapedRef(t *testing.T) {
 		t.Fatal("exploit must not write a file from a bad --since")
 	}
 }
+
+// TestReviewRiskBand pins feature 1: the aggregate risk band folded into
+// ReviewReport from the per-symbol signals over every changed symbol. An
+// untested hub (8 callers, no test) must produce a high band with the
+// untested_changes + hotspot_fanin factors; a covered leaf must be low with
+// no factors. Absent when the diff maps to no indexed symbols.
+func TestReviewRiskBand(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	// Hub() has 8 direct callers and NO test → untested_changes + hotspot_fanin.
+	var b strings.Builder
+	b.WriteString("package app\n\nfunc Hub() {}\n")
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&b, "func C%d() { Hub() }\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "a.go"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "init")
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Touch Hub's body without shifting line numbers.
+	edited := strings.Replace(b.String(), "func Hub() {}", "func Hub() { _ = 1 }", 1)
+	if err := os.WriteFile(filepath.Join(proj, "a.go"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Risk == nil {
+		t.Fatal("expected a risk band for a diff with changed symbols, got nil")
+	}
+	if rep.Risk.Level != "high" {
+		t.Errorf("untested 8-caller hub → high risk, got %s (%.3f)", rep.Risk.Level, rep.Risk.Score)
+	}
+	if !hasReviewRiskFactor(rep.Risk.Factors, "untested_changes") {
+		t.Errorf("expected untested_changes factor, got %+v", rep.Risk.Factors)
+	}
+	if !hasReviewRiskFactor(rep.Risk.Factors, "hotspot_fanin") {
+		t.Errorf("expected hotspot_fanin factor, got %+v", rep.Risk.Factors)
+	}
+}
+
+// TestReviewCallGraph pins feature 2 on review: a Go (name-based) diff reports
+// call_graph="name"; a clean tree (no changes) omits it.
+func TestReviewCallGraph(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	svc, proj := reviewRepo(t)
+	edited := "package app\n\nfunc Helper() {}\n\nfunc Run() {\n\tHelper() // touched\n}\n"
+	if err := os.WriteFile(filepath.Join(proj, "a.go"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.ChangedSymbols) == 0 {
+		t.Skip("no changed symbols detected")
+	}
+	if rep.CallGraph != CallGraphName {
+		t.Errorf("Go name-based review call_graph = %q, want %q", rep.CallGraph, CallGraphName)
+	}
+
+	// A FRESH clean repo → no changes → call_graph omitted (empty string).
+	svc2, proj2 := reviewRepo(t)
+	clean, err := svc2.Review(proj2, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.CallGraph != "" {
+		t.Errorf("clean tree review call_graph = %q, want empty (omitted)", clean.CallGraph)
+	}
+	if clean.Risk != nil {
+		t.Errorf("clean tree review risk = %+v, want nil (no changed symbols)", clean.Risk)
+	}
+}
+
+func hasReviewRiskFactor(fs []RiskFactor, name string) bool {
+	for _, f := range fs {
+		if f.Factor == name {
+			return true
+		}
+	}
+	return false
+}

@@ -56,7 +56,7 @@ for the full lists.`},
   doctor                             check toolchains, language servers, embeddings (with install hints)
   callers / callees [--lsp]          who calls X / what X calls (--lsp = exact gopls resolution, Go)
   impact <sym> [--depth N]           definition, callers, transitive blast radius, covering tests
-  review [--since R] [--staged]      diff-scoped: your changed symbols, blast radius, the TESTS TO RUN
+  review [--since R] [--staged]      diff-scoped: changed symbols, blast radius, tests to run, risk band
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
   file-impact <file>                 file-level impact: dependents, blast radius, safe-to-delete verdict
   risk <sym>                         change-risk score: untested + fan-in + cross-package + ambiguity
@@ -82,8 +82,7 @@ cache_restore, cache_list, cache_drop, doctor, unannotate,
 required_keys).
 
 codemap_context bundles a symbol's definition+callers+callees+tests in one call;
-codemap_review is the post-edit query (diff → impact + tests to run);
-codemap_read_order ranks where to start; codemap_risk scores how careful to be.
+codemap_review is the post-edit query (diff → impact + tests to run + one aggregate risk band);
 callers/callees accept precise:true. codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
@@ -125,7 +124,10 @@ name-based call edges, so EVERY query (callers, callees, impact, hotspots, path)
 exact at once. (The LSP languages have NO name-based call edges, so --precise is what gives
 TS/JS/Python a call graph at all — so without it, impact/callers/callees on a TS/JS/Python symbol
 return a "resolution" note saying the call graph is unavailable, NOT a confidently-empty result or
-untested:true; the callers/tests are unresolved, not absent.) The Go pass
+untested:true; the callers/tests are unresolved, not absent.) Every impact/callers/callees/review/
+context report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
+so a consumer can switch on confidence (resolved→high, name→medium, unresolved/none→low) instead of
+parsing the free-form resolution sentence. The Go pass
 needs the go toolchain + a buildable module; packages that don't type-check keep
 name-based edges (per-package degrade), and no go/go.mod falls back wholesale with a
 "note" — never worse than name-based, never a hard error. Opt-in: without --precise the

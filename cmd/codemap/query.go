@@ -358,6 +358,10 @@ func runReview(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  changed symbols: %d\n", len(rep.ChangedSymbols))
 	fmt.Printf("  blast radius:    %d (depth ≤ %d)\n", len(rep.BlastRadius), rep.Depth)
 	fmt.Printf("  covering tests:  %d\n", len(rep.CoveringTests))
+	if rep.Risk != nil {
+		icon := map[string]string{"low": "✓", "medium": "•", "high": "⚠"}[rep.Risk.Level]
+		fmt.Printf("  risk:            %s %s (%.2f)\n", icon, strings.ToUpper(rep.Risk.Level), rep.Risk.Score)
+	}
 	if rep.Resolution != "" {
 		fmt.Println("  ⚠ " + rep.Resolution)
 	}

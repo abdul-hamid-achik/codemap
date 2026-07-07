@@ -48,6 +48,11 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		// A --json failure already printed its structured envelope and carries
+		// its exit code through exitCoded — honor it over the generic mapping.
+		if code, ok := asExitCoded(err); ok {
+			os.Exit(code)
+		}
 		// P2-06: map not-found / not-indexed to exit 2 so scripts
 		// can distinguish a dead-end from an operational failure
 		// (exit 1) or a successful answer (exit 0). Empty-but-
@@ -169,6 +174,17 @@ func init() {
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
 		callersCmd, calleesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, configCmd, daemonCmd)
+
+	// Wrap every subcommand's RunE so a --json failure prints the structured
+	// {ok,error,code,hint} envelope to stdout with a stable machine code, and
+	// returns an exitCoded error main() maps to the documented exit taxonomy.
+	// Commands without a RunE (e.g. version's Run) and the root's own RunE are
+	// left untouched; jsonHandler is a no-op on success.
+	for _, c := range rootCmd.Commands() {
+		if c.RunE != nil {
+			c.RunE = jsonHandler(c.RunE)
+		}
+	}
 }
 
 // --- shared helpers (used across command files) ---

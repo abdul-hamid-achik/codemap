@@ -31,7 +31,8 @@ type ContextReport struct {
 	BlastRadius  int                `json:"blast_radius"`          // count of transitively-affected nodes
 	BlastDepth   int                `json:"blast_depth"`           // depth the blast radius was traversed to (it's bounded, not the full closure)
 	Note         string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
-	Resolution   string             `json:"resolution,omitempty"`  // set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
+	Resolution   string             `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
+	CallGraph    string             `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none (carried from the bundled Impact)
 	Annotations  []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
 	// Memories are TRANSIENT agent notes recalled by meaning from vecgrep's global
 	// memory store, scoped to this project via codemap's project_key (G2) — distinct
@@ -73,7 +74,7 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 	rep := &ContextReport{
 		Symbol: symbol, Definitions: []SourceMatch{},
 		Callers: []SymbolRef{}, Callees: []SymbolRef{}, Tests: []ImpactNode{},
-		BlastDepth: depth, // the blast radius below is bounded to this depth
+		BlastDepth: depth, CallGraph: CallGraphNone, // refined from the bundled Impact below
 	}
 	src, err := svc.Source(cwd, symbol)
 	if err != nil {
@@ -103,6 +104,7 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 			rep.Note = imp.Note
 		}
 		rep.Resolution = imp.Resolution // carry the "call graph unavailable without --precise" honesty note
+		rep.CallGraph = imp.CallGraph   // carry the stable machine enum too
 	}
 	// G2: surface relevant agent memories from vecgrep's global store, scoped to
 	// this project by codemap's project_key (the leak-free recall convention).

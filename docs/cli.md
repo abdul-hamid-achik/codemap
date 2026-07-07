@@ -60,7 +60,7 @@ callers reached via interface dispatch or reflection — treat its output as dea
 |---|---|
 | `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, and covering tests |
 | `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Aggregates every symbol the file defines into the other files that depend on it, its blast radius, the covering tests, and two verdicts: `safe_to_delete` (nothing outside the file references it) and `breaking_change` (an externally-called symbol here is untested). The file-level peer of `impact` (a symbol) and `review` (a diff) — run it before a move/delete/split. |
-| `codemap review [--since <ref>] [--staged] [--depth N]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Carries the same `stale`/`resolution` honesty signals as `impact`. Answers *"what did I just affect, and what should I run?"* in one call. |
+| `codemap review [--since <ref>] [--staged] [--depth N]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Carries an aggregate **`risk` band** (low/medium/high + factors, folded from every changed symbol so a harness can gate verification on one band) and the same `stale`/`resolution` + stable `call_graph` honesty signals as `impact`. Answers *"what did I just affect, and what should I run?"* in one call. |
 | `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). |
 | `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. |
 | `codemap risk <symbol> [--depth N]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. Triage which of several edits is riskiest, or gate a change on test/review effort. |
@@ -200,7 +200,42 @@ Review (store · working)
 `--since main` reviews everything you changed on the branch (committed + uncommitted);
 `--staged` reviews just what's staged. The `codemap_review` MCP tool returns the same
 JSON — `{changed_symbols, blast_radius, covering_tests, untested, hotspots, stale,
-resolution}` — so an agent harness can ask "what did I just affect, and what should I
-run?" in a single call instead of parsing diffs and chaining per-symbol `impact`
-queries. It degrades gracefully (a plain changed-file list with a note) when the
-project isn't indexed or isn't a git repo.
+resolution, call_graph, risk}` — so an agent harness can ask "what did I just affect,
+and what should I run?" in a single call instead of parsing diffs and chaining
+per-symbol `impact` queries. It degrades gracefully (a plain changed-file list with a
+note) when the project isn't indexed or isn't a git repo.
+
+**`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`review`/`context`
+tells a consumer how much to trust the call graph without parsing prose: `resolved`
+(precise edges), `name` (Go name-based — same-named methods may over-match), `unresolved`
+(TS/JS/Python/Vue without `--precise` — callers/blast/tests are unknown, not absent),
+`none` (no matching symbol). The free-form `resolution` sentence stays for humans.
+
+**`risk`** on `review` is one band for the whole diff — `level` (low/medium/high),
+`score` (0..1), and `factors` (`untested_changes`/`hotspot_fanin`/`cross_package`/
+`ambiguity`/`unresolved`) folded from every changed symbol — so a harness can gate
+verification on one call instead of fanning `risk` out per symbol. Absent when the diff
+maps to no indexed symbols.
+
+### Machine-readable errors + exit codes
+
+Under `--json`, a failure prints a structured envelope to **stdout** (not stderr) so an
+agent parsing JSON still gets it:
+
+```json
+{"ok": false, "error": "…", "code": "index_missing|index_corrupt|not_a_repo|operational", "hint": "run: codemap index"}
+```
+
+The non-zero exit codes follow a documented taxonomy:
+
+| exit | meaning |
+---|---|
+| 0 | answered (results, possibly empty-but-resolved like "no callers") |
+| 1 | operational error (bad flag, git failure, untyped runtime error) |
+| 2 | not found / not indexed (a valid query with no answer) |
+| 3 | `index_missing` — no index for the project |
+| 4 | `index_corrupt` — the graph DB exists but won't open |
+| 5 | `not_a_repo` — a git operation was required but cwd isn't a repo |
+
+So a consumer can map `code`→action deterministically either way (the JSON `code`
+matches the exit-code suffix).

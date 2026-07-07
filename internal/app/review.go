@@ -57,8 +57,14 @@ type ReviewReport struct {
 	Hotspots        []SymbolRef      `json:"hotspots,omitempty"` // changed symbols with many direct callers
 	Stale           bool             `json:"stale"`
 	Staleness       *index.Staleness `json:"staleness,omitempty"`
-	Resolution      string           `json:"resolution,omitempty"` // set when some changed symbols' call graph is unresolved (TS/JS/Py without --precise)
-	Note            string           `json:"note,omitempty"`
+	Resolution      string           `json:"resolution,omitempty"` // human sentence set when some changed symbols' call graph is unresolved (TS/JS/Py without --precise)
+	CallGraph       string           `json:"call_graph,omitempty"` // stable machine enum: resolved|name|unresolved|none — the worst (least-confident) across changed symbols
+	// Risk is the aggregate change-risk band for the whole diff, folded from the
+	// per-symbol risk signals over every changed symbol so a harness can gate
+	// verification on ONE band (instead of fanning `risk` out per symbol). Absent
+	// when the diff maps to no indexed symbols.
+	Risk *ReviewRisk `json:"risk,omitempty"`
+	Note string      `json:"note,omitempty"`
 }
 
 // Review computes diff-scoped impact + test selection for the working tree. It
@@ -161,6 +167,7 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	// 2) Union the blast radius + covering tests across changed symbols; flag the
 	//    untested and load-bearing ones.
 	seenBlast, seenTest := map[string]bool{}, map[string]bool{}
+	imps := make([]*ImpactReport, 0, len(rep.ChangedSymbols))
 	for _, s := range rep.ChangedSymbols {
 		target := s.Symbol
 		if s.FQN != "" {
@@ -173,6 +180,7 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 		if ierr != nil || imp == nil || !imp.Found {
 			continue
 		}
+		imps = append(imps, imp)
 		if imp.Resolution != "" && rep.Resolution == "" {
 			rep.Resolution = imp.Resolution
 		}
@@ -194,6 +202,15 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 		if len(imp.DirectCallers) >= reviewHotspotMinCallers {
 			rep.Hotspots = append(rep.Hotspots, s)
 		}
+	}
+	// Fold the per-symbol resolution + risk signals into one diff-scoped band.
+	// call_graph is the worst (least-confident) across changed symbols — a
+	// review is only as trustworthy as its least-resolved change. Risk reuses
+	// the `risk` command's factor model, aggregated (max severity per factor)
+	// and combined with probabilistic OR.
+	if len(imps) > 0 {
+		rep.CallGraph = worstCallGraph(imps)
+		rep.Risk = aggregateReviewRisk(imps)
 	}
 
 	// Shallowest-first blast radius (the closest callers matter most), stable by file.

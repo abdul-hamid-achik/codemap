@@ -39,7 +39,8 @@ type ImpactReport struct {
 	Tests         []ImpactNode       `json:"tests"`
 	Untested      bool               `json:"untested"`
 	Note          string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
-	Resolution    string             `json:"resolution,omitempty"`  // set when the call graph is unresolved (e.g. TS/JS/Python without --precise) — direct_callers/blast_radius/tests are unavailable, not empty
+	Resolution    string             `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (e.g. TS/JS/Python without --precise) — direct_callers/blast_radius/tests are unavailable, not empty
+	CallGraph     string             `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none (keep Resolution for the human sentence)
 	Annotations   []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
@@ -65,7 +66,7 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		return nil, err
 	}
 	rep := &ImpactReport{
-		Symbol: symbol, Project: name,
+		Symbol: symbol, Project: name, CallGraph: CallGraphNone,
 		DirectCallers: []SymbolRef{}, BlastRadius: []ImpactNode{}, Tests: []ImpactNode{},
 	}
 
@@ -90,6 +91,10 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	for _, n := range locs {
 		rep.Locations = append(rep.Locations, nodeToRef(n))
 	}
+	// call_graph: the stable machine enum a consumer switches on (vs the
+	// human Resolution sentence). precise → resolved; a no-name-based-call
+	// language on a name-based index → unresolved; else name-based.
+	rep.CallGraph = callGraphEnum(svc.hasPreciseEdges(g, p.ID), locs)
 	if len(locs) > 1 {
 		// Lookup is by name, so the callers/blast-radius/tests below are the union
 		// across every definition with this name. Say so — a "71 callers" number is

@@ -40,7 +40,8 @@ type RelationReport struct {
 	Found       bool               `json:"found"` // whether the symbol exists in the index — distinguishes a typo from a real symbol with no callers/callees (both yield empty Results)
 	Results     []SymbolRef        `json:"results"`
 	Note        string             `json:"note,omitempty"`        // set when precise resolution fell back to name-based
-	Resolution  string             `json:"resolution,omitempty"`  // set when the call graph is unresolved (TS/JS/Python without --precise) — results are unavailable, not absent
+	Resolution  string             `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — results are unavailable, not absent
+	CallGraph   string             `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to the queried symbol
 }
 
@@ -56,7 +57,7 @@ func validSymbol(s string) bool {
 
 func (svc *Service) Callers(cwd, symbol string) (*RelationReport, error) {
 	if !validSymbol(symbol) {
-		return &RelationReport{Found: false, Resolution: "none", Note: "supply a non-empty symbol name (a blank symbol would match every file node)"}, nil
+		return &RelationReport{Found: false, Resolution: "none", CallGraph: CallGraphNone, Note: "supply a non-empty symbol name (a blank symbol would match every file node)"}, nil
 	}
 	rep, err := svc.relation(cwd, symbol, (*graph.Store).Callers)
 	if err != nil {
@@ -68,7 +69,7 @@ func (svc *Service) Callers(cwd, symbol string) (*RelationReport, error) {
 // Callees returns the functions/methods that symbol calls.
 func (svc *Service) Callees(cwd, symbol string) (*RelationReport, error) {
 	if !validSymbol(symbol) {
-		return &RelationReport{Found: false, Resolution: "none", Note: "supply a non-empty symbol name (a blank symbol would match every file node)"}, nil
+		return &RelationReport{Found: false, Resolution: "none", CallGraph: CallGraphNone, Note: "supply a non-empty symbol name (a blank symbol would match every file node)"}, nil
 	}
 	rep, err := svc.relation(cwd, symbol, (*graph.Store).Callees)
 	if err != nil {
@@ -100,7 +101,8 @@ func (svc *Service) autoUpgradeRelation(base *RelationReport, cwd, symbol string
 	}
 	base.Results = nonNil(results)
 	base.Found = true
-	base.Resolution = "" // resolved on demand; the "run --precise" note no longer applies
+	base.Resolution = ""               // resolved on demand; the "run --precise" note no longer applies
+	base.CallGraph = CallGraphResolved // on-demand callHierarchy resolved the edges
 	base.Note = "resolved on demand via the language server's callHierarchy (no --precise needed)"
 	return base
 }
@@ -133,7 +135,7 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	if err != nil {
 		return nil, err
 	}
-	rep := &RelationReport{Symbol: symbol, Project: name, Results: []SymbolRef{}}
+	rep := &RelationReport{Symbol: symbol, Project: name, Results: []SymbolRef{}, CallGraph: CallGraphNone}
 	p, err := g.GetProjectByName(name)
 	if errors.Is(err, graph.ErrNotFound) {
 		return rep, nil
@@ -157,6 +159,9 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	// Results set can be reported as "no such symbol" rather than "no callers".
 	defs, derr := g.FindNodesBySymbol(p.ID, symbol)
 	rep.Found = len(rep.Results) > 0 || (derr == nil && len(defs) > 0)
+	// call_graph: the stable enum. defs (the matching definitions) classify
+	// resolution; empty defs on an unknown symbol stays "none".
+	rep.CallGraph = callGraphEnum(svc.hasPreciseEdges(g, p.ID), defs)
 	if derr == nil && len(defs) > 1 {
 		if svc.hasPreciseEdges(g, p.ID) {
 			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but these results still merge all of them; query a more specific name to separate them", symbol, len(defs))
@@ -211,6 +216,7 @@ func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*Re
 	}
 	// preciseRelations succeeding means gopls resolved the symbol, so it exists.
 	return &RelationReport{Symbol: symbol, Project: project, Found: true, Results: nonNil(c),
+		CallGraph:   CallGraphResolved, // language-server callHierarchy resolved the edges exactly
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
 }
 
@@ -239,6 +245,7 @@ func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*Re
 	}
 	// preciseRelations succeeding means gopls resolved the symbol, so it exists.
 	return &RelationReport{Symbol: symbol, Project: project, Found: true, Results: nonNil(ce),
+		CallGraph:   CallGraphResolved, // language-server callHierarchy resolved the edges exactly
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
 }
 

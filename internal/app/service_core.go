@@ -54,6 +54,78 @@ func (svc *Service) callGraphUnavailable(g *graph.Store, pid int64, nodes []grap
 	return "", false
 }
 
+// CallGraphStatus is the stable, machine-readable enum a consumer reads to
+// down-weight confidence when the call graph is unresolved. It accompanies the
+// free-form human sentence (Resolution) on impact/callers/callees/review/context
+// so an adapter can switch on the enum instead of parsing prose:
+//
+//   - "resolved"   — the queried symbol's call graph is exact (precise edges:
+//     go/types for Go, language-server callHierarchy for TS/JS/Python/Vue).
+//   - "name"       — a name-based call graph (Go default). Intra-package calls
+//     resolve precisely, but a cross-package method call (x.Foo()) may match
+//     every same-named method — medium confidence.
+//   - "unresolved" — the symbol's language has NO name-based call edges and the
+//     index isn't precise (TS/JS/Python/Vue without --precise). callers/blast/
+//     tests are unavailable, NOT absent — low confidence; reindex --precise.
+//   - "none"       — no symbol matched, or no nodes to classify.
+const (
+	CallGraphResolved   = "resolved"
+	CallGraphName       = "name"
+	CallGraphUnresolved = "unresolved"
+	CallGraphNone       = "none"
+)
+
+// callGraphEnum classifies a query's call-graph resolution into the stable
+// enum a machine consumer reads. precise reports whether the project has
+// precise edges; nodes are the queried symbol's definition nodes (empty when
+// the symbol wasn't found). The worst-case wins: if any matching definition is
+// a no-name-based-call language on a non-precise index, the result is
+// "unresolved" (its callers/blast/tests are unknown, not empty).
+func callGraphEnum(precise bool, nodes []graph.Node) string {
+	if precise {
+		return CallGraphResolved
+	}
+	if len(nodes) == 0 {
+		return CallGraphNone
+	}
+	for _, n := range nodes {
+		if noNameBasedCallLang(n.Language) {
+			return CallGraphUnresolved
+		}
+	}
+	return CallGraphName
+}
+
+// callGraphRank orders the enum worst→best for aggregation (a review's band is
+// only as confident as its least-resolved changed symbol). Higher is better.
+func callGraphRank(s string) int {
+	switch s {
+	case CallGraphResolved:
+		return 3
+	case CallGraphName:
+		return 2
+	case CallGraphUnresolved:
+		return 1
+	}
+	return 0 // CallGraphNone
+}
+
+// worstCallGraph returns the least-confident call_graph enum across a set of
+// per-symbol impacts (a review is only as trustworthy as its least-resolved
+// change). An empty set is "none".
+func worstCallGraph(imps []*ImpactReport) string {
+	if len(imps) == 0 {
+		return CallGraphNone
+	}
+	worst := CallGraphResolved
+	for _, imp := range imps {
+		if callGraphRank(imp.CallGraph) < callGraphRank(worst) {
+			worst = imp.CallGraph
+		}
+	}
+	return worst
+}
+
 // embeddedCount reports how many vectors exist for the named project and whether
 // that count is known. It never creates the veclite store: if the file is absent
 // the project is structure-only, which is a known 0 — so a structure-only project

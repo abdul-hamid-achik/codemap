@@ -45,25 +45,40 @@ func (svc *Service) Risk(cwd, symbol string, depth int) (*RiskReport, error) {
 	}
 	rep.Callers = len(imp.DirectCallers)
 	rep.Tests = len(imp.Tests)
-
-	add := func(factor string, sev float64, detail string) {
-		rep.Factors = append(rep.Factors, RiskFactor{Factor: factor, Severity: sev, Detail: detail})
+	rep.Factors = riskFactorsFromImpact(imp)
+	if imp.Resolution != "" {
+		rep.Note = imp.Resolution
 	}
+	rep.Score = round3(combineRisk(rep.Factors))
+	rep.Level = riskLevel(rep.Score)
+	return rep, nil
+}
 
+// riskFactorsFromImpact computes the per-symbol change-risk factors from one
+// ImpactReport — the inner logic of Risk, extracted so Review can aggregate the
+// same signals across every changed symbol without re-running Impact. It does
+// NOT set Score/Level (those combine at the symbol OR the diff level).
+func riskFactorsFromImpact(imp *ImpactReport) []RiskFactor {
+	if imp == nil {
+		return []RiskFactor{}
+	}
+	factors := []RiskFactor{}
+	add := func(factor string, sev float64, detail string) {
+		factors = append(factors, RiskFactor{Factor: factor, Severity: sev, Detail: detail})
+	}
 	if imp.Resolution != "" {
 		// No call graph (TS/JS/Python without --precise): the other signals are
 		// unresolved, so risk is uncertain rather than computable. Surface that.
 		add("unresolved", 0.3, "call graph unavailable without --precise — fan-in and coverage are unknown")
-		rep.Note = imp.Resolution
 	} else {
 		if imp.Untested {
 			add("untested", 0.9, "no tests reach this symbol — a change here is unverified")
 		}
 		switch {
-		case rep.Callers >= 10:
-			add("high_fan_in", 0.5, fmt.Sprintf("%d direct callers — broadly depended on", rep.Callers))
-		case rep.Callers >= 5:
-			add("fan_in", 0.3, fmt.Sprintf("%d direct callers", rep.Callers))
+		case len(imp.DirectCallers) >= 10:
+			add("high_fan_in", 0.5, fmt.Sprintf("%d direct callers — broadly depended on", len(imp.DirectCallers)))
+		case len(imp.DirectCallers) >= 5:
+			add("fan_in", 0.3, fmt.Sprintf("%d direct callers", len(imp.DirectCallers)))
 		}
 		if pkgs := callerPackages(imp.DirectCallers); pkgs >= 3 {
 			add("cross_package", 0.3, fmt.Sprintf("called from %d packages — a change ripples across the codebase", pkgs))
@@ -72,10 +87,112 @@ func (svc *Service) Risk(cwd, symbol string, depth int) (*RiskReport, error) {
 	if strings.Contains(imp.Note, "matches") && strings.Contains(imp.Note, "definitions") {
 		add("ambiguous_name", 0.2, "the name resolves to multiple definitions — the analysis merges them")
 	}
+	return factors
+}
 
-	rep.Score = round3(combineRisk(rep.Factors))
-	rep.Level = riskLevel(rep.Score)
-	return rep, nil
+// ReviewRisk is the aggregate change-risk band for a whole diff, folded from
+// the per-symbol risk signals over every changed symbol. It lets a harness
+// gate verification on ONE band (instead of fanning `risk` out per symbol).
+// The factor names are the review-level categories a consumer reads:
+//
+//   - untested_changes — some changed symbol has no covering test
+//   - hotspot_fanin    — some changed symbol has many direct callers (a hub)
+//   - cross_package    — some changed symbol's callers span ≥3 packages
+//   - ambiguity        — some changed symbol's name resolves to multiple defs
+//   - unresolved       — some changed symbol's call graph is unavailable
+//
+// Each factor's severity is the MAX across changed symbols (the strongest
+// signal wins), and the factors combine with probabilistic OR into one score.
+type ReviewRisk struct {
+	Level   string       `json:"level"`   // low | medium | high
+	Score   float64      `json:"score"`   // 0..1, probabilistic-OR of the factor severities
+	Factors []RiskFactor `json:"factors"` // review-level categories (max severity across changed symbols)
+}
+
+// aggregateReviewRisk folds the per-symbol change-risk signals across a set of
+// changed symbols' impact reports into one diff-scoped band. A review-level
+// factor fires when ANY changed symbol triggers its per-symbol equivalent
+// (max severity carried, with a detail noting how many symbols contributed),
+// then the factors combine with probabilistic OR into one score + level.
+// Returns nil for an empty set (nothing to risk-assess → absent/low).
+func aggregateReviewRisk(imps []*ImpactReport) *ReviewRisk {
+	if len(imps) == 0 {
+		return nil
+	}
+	// category → (max severity, contributing symbol count)
+	type agg struct {
+		sev   float64
+		count int
+	}
+	cats := map[string]*agg{
+		"untested_changes": {},
+		"hotspot_fanin":    {},
+		"cross_package":    {},
+		"ambiguity":        {},
+		"unresolved":       {},
+	}
+	// Per-symbol factor → review category. Fan-in's two tiers (0.5/0.3)
+	// collapse to the one hotspot_fanin category, carrying the max severity.
+	mapFactor := func(f RiskFactor) (cat string, sev float64) {
+		switch f.Factor {
+		case "untested":
+			return "untested_changes", f.Severity
+		case "high_fan_in", "fan_in":
+			return "hotspot_fanin", f.Severity
+		case "cross_package":
+			return "cross_package", f.Severity
+		case "ambiguous_name":
+			return "ambiguity", f.Severity
+		case "unresolved":
+			return "unresolved", f.Severity
+		}
+		return "", 0
+	}
+	for _, imp := range imps {
+		for _, f := range riskFactorsFromImpact(imp) {
+			cat, sev := mapFactor(f)
+			if cat == "" {
+				continue
+			}
+			a := cats[cat]
+			if sev > a.sev {
+				a.sev = sev
+			}
+			a.count++
+		}
+	}
+	factors := []RiskFactor{}
+	for _, cat := range []string{"untested_changes", "hotspot_fanin", "cross_package", "ambiguity", "unresolved"} {
+		a := cats[cat]
+		if a.count == 0 {
+			continue
+		}
+		factors = append(factors, RiskFactor{Factor: cat, Severity: round3(a.sev), Detail: reviewRiskDetail(cat, a.count)})
+	}
+	score := round3(combineRisk(factors))
+	return &ReviewRisk{
+		Level:   riskLevel(score),
+		Score:   score,
+		Factors: factors,
+	}
+}
+
+// reviewRiskDetail renders a short, human-readable reason for a review-level
+// risk factor, noting how many changed symbols contributed.
+func reviewRiskDetail(cat string, count int) string {
+	switch cat {
+	case "untested_changes":
+		return fmt.Sprintf("%d changed symbol(s) have no covering test — changes are unverified", count)
+	case "hotspot_fanin":
+		return fmt.Sprintf("%d changed symbol(s) are hubs with many direct callers", count)
+	case "cross_package":
+		return fmt.Sprintf("%d changed symbol(s) are called from ≥3 packages — a change ripples widely", count)
+	case "ambiguity":
+		return fmt.Sprintf("%d changed symbol(s) resolve to multiple definitions — the analysis merges them", count)
+	case "unresolved":
+		return fmt.Sprintf("%d changed symbol(s) have an unresolved call graph — fan-in/coverage unknown; run 'codemap index --precise'", count)
+	}
+	return cat
 }
 
 // combineRisk folds independent factor severities with a probabilistic OR
