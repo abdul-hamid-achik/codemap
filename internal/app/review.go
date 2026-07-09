@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/git"
@@ -63,8 +65,10 @@ type ReviewReport struct {
 	// per-symbol risk signals over every changed symbol so a harness can gate
 	// verification on ONE band (instead of fanning `risk` out per symbol). Absent
 	// when the diff maps to no indexed symbols.
-	Risk *ReviewRisk `json:"risk,omitempty"`
-	Note string      `json:"note,omitempty"`
+	Risk         *ReviewRisk  `json:"risk,omitempty"`
+	Note         string       `json:"note,omitempty"`
+	TestCommands []string     `json:"test_commands,omitempty"`
+	Next         []NextAction `json:"next,omitempty"`
 }
 
 // Review computes diff-scoped impact + test selection for the working tree. It
@@ -227,7 +231,81 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	if len(rep.ChangedSymbols) == 0 && len(changed) > 0 {
 		rep.Note = joinNote(rep.Note, "changed lines don't map to indexed symbols (comments, imports, or unindexed/untracked files) — nothing to analyze")
 	}
+	rep.TestCommands = testCommands(rep.CoveringTests)
+	if rep.Stale {
+		rep.Next = append(rep.Next, nextAction("codemap_index",
+			"the index is stale; refresh it before trusting diff-scoped impact",
+			map[string]any{"path": cwd}))
+	}
+	if len(rep.TestCommands) > 0 && len(rep.Next) < 2 {
+		rep.Next = append(rep.Next, nextAction("terminal",
+			"run the selected regression tests that cover this changeset",
+			map[string]any{"command": rep.TestCommands[0]}))
+	} else if len(rep.UntestedSymbols) > 0 && len(rep.Next) < 2 {
+		rep.Next = append(rep.Next, nextAction("codemap_risk",
+			"some changed symbols have no covering tests; inspect their risk before declaring the change verified",
+			map[string]any{"path": cwd, "symbol": rep.UntestedSymbols[0].Symbol, "depth": opts.Depth}))
+	}
 	return rep, nil
+}
+
+// testCommands turns covering-test nodes into copy/paste-ready commands. It
+// deliberately emits a small bounded set and groups Go tests by package so a
+// weaker model doesn't have to infer tool syntax from file names.
+func testCommands(tests []ImpactNode) []string {
+	goTests := map[string][]string{}
+	other := map[string]bool{}
+	for _, t := range tests {
+		ext := strings.ToLower(filepath.Ext(t.File))
+		switch ext {
+		case ".go":
+			dir := filepath.Dir(t.File)
+			if dir == "." {
+				dir = ""
+			}
+			if t.Symbol != "" {
+				goTests[dir] = append(goTests[dir], regexp.QuoteMeta(t.Symbol))
+			}
+		case ".ts", ".tsx", ".js", ".jsx":
+			other["bun test "+t.File] = true
+		case ".py":
+			cmd := "pytest " + t.File
+			if t.Symbol != "" {
+				cmd += "::" + t.Symbol
+			}
+			other[cmd] = true
+		}
+	}
+	cmds := make([]string, 0, len(goTests)+len(other))
+	dirs := make([]string, 0, len(goTests))
+	for dir := range goTests {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	for _, dir := range dirs {
+		names := dedupStrings(goTests[dir])
+		sort.Strings(names)
+		pkg := "./"
+		if dir != "" {
+			pkg += filepath.ToSlash(dir)
+		}
+		// A giant -run regex is worse than the inference work it saves: it floods
+		// context, hits shell limits, and is fragile when a changed test file maps
+		// to many subtests. Above the small focused threshold, run the package.
+		if len(names) > 12 {
+			cmds = append(cmds, "go test "+pkg)
+		} else {
+			cmds = append(cmds, fmt.Sprintf("go test %s -run '^(%s)$'", pkg, strings.Join(names, "|")))
+		}
+	}
+	for cmd := range other {
+		cmds = append(cmds, cmd)
+	}
+	sort.Strings(cmds)
+	if len(cmds) > 10 {
+		cmds = cmds[:10]
+	}
+	return cmds
 }
 
 // symbolsForChangedFile resolves a diff path (relative to the git root) to its

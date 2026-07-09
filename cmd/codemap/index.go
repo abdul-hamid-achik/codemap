@@ -113,6 +113,13 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	}
 	watch, _ := cmd.Flags().GetBool("watch")
 	if watch {
+		// Render the completed one-shot index BEFORE handing terminal ownership
+		// to the long-running watcher. Previously startDaemonAfterIndex cleared
+		// the alternate screen, so the "Indexed" summary vanished and a human
+		// (or Glyphrun) could only see the daemon banner.
+		if !jsonOut(cmd) {
+			printIndexReport(cmd, rep, precise)
+		}
 		// Release the CLI's exclusive veclite handle so the daemon's writer
 		// can open. Session.Close is idempotent (the deferred Close below
 		// is a safe no-op once fields are nil).
@@ -126,10 +133,11 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	if jsonOut(cmd) {
 		return printJSON(envelope)
 	}
-	printIndexReport(cmd, rep, precise)
-	if watch {
-		// Watch already handed off above; startDaemonAfterIndex prints its
-		// own banner — nothing more to render here.
+	if !watch {
+		printIndexReport(cmd, rep, precise)
+	} else {
+		// Watch already handed off above; both the index summary and daemon
+		// banner are visible, so nothing more remains to render.
 		return nil
 	}
 	if envelope.Cache != nil && envelope.Cache.Action == "saved" {

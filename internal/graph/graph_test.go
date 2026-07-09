@@ -374,6 +374,42 @@ func TestCallersCallees(t *testing.T) {
 	}
 }
 
+// A capped agent-facing callers list must surface load-bearing callers first,
+// not whichever files happen to sort alphabetically. ZHub sorts after ALeaf by
+// location, but has three callers of its own and therefore ranks first.
+func TestCallersRankedByFanIn(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(file, sym string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: file, Symbol: sym, FQN: "p." + sym, Kind: KindFunction, Language: "go", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	target := mk("target.go", "Target")
+	leaf := mk("a.go", "ALeaf")
+	hub := mk("z.go", "ZHub")
+	for _, src := range []int64{leaf, hub} {
+		if _, err := s.AddEdge(src, target, EdgeCalls, WeightLSP); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		feeder := mk(fmt.Sprintf("feeder%d.go", i), fmt.Sprintf("Feeder%d", i))
+		if _, err := s.AddEdge(feeder, hub, EdgeCalls, WeightLSP); err != nil {
+			t.Fatal(err)
+		}
+	}
+	callers, err := s.Callers(pid, "Target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callers) != 2 || callers[0].Symbol != "ZHub" || callers[1].Symbol != "ALeaf" {
+		t.Fatalf("callers = %+v, want ZHub then ALeaf (fan-in ranking)", callers)
+	}
+}
+
 func TestBlastRadius(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")

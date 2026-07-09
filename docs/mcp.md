@@ -56,7 +56,7 @@ directory) and return JSON.
 | `codemap_callers` | Functions/methods that call a symbol (`precise: true` → exact gopls callers for Go). Carries a stable `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) so a consumer can down-weight confidence without parsing the `resolution` note |
 | `codemap_callees` | Functions/methods a symbol calls (`precise: true` → exact gopls callees for Go). Same `call_graph` enum |
 | `codemap_impact` | Callers + blast radius + covering tests (`depth`). Carries `call_graph` (`resolved`/`name`/`unresolved`/`none`) alongside the human `resolution` note — `unresolved` means the callers/blast/tests are unknown (not absent) on a TS/JS/Python/Vue symbol without `--precise` |
-| `codemap_review` | **Diff-scoped impact + test selection** — the query to run *after* editing. Maps your git diff (working tree by default; `staged: true`; or `since` a ref) to the changed symbols, then returns their union `blast_radius`, the `covering_tests` to run, and the changed symbols that are `untested` or `hotspots` — plus an aggregate **`risk` band** (one `level`/`score`/`factors` for the whole diff, folded from every changed symbol so a harness can gate verification on one call), `stale`/`resolution`, and a stable `call_graph` enum. *"What did I just affect, and what should I run?"* in one call, instead of parsing diffs and chaining per-symbol `codemap_impact` |
+| `codemap_review` | **Diff-scoped impact + test selection** — the query to run *after* editing. Maps your git diff (working tree by default; `staged: true`; or `since` a ref) to the changed symbols, then returns their union `blast_radius`, `covering_tests`, copy/paste-ready `test_commands`, and changed symbols that are `untested` or `hotspots` — plus aggregate `risk`, freshness, `call_graph`, and bounded `next` actions |
 | `codemap_file_impact` | **File-level impact** — "what happens if I change or DELETE this `file`?" Aggregates the file's symbols into `dependent_files`, `blast_radius`, `covering_tests`, and the verdicts `safe_to_delete` + `breaking_change`. The file-level peer of `codemap_impact`/`codemap_review` — run before a file move/delete/split |
 | `codemap_required_keys` | **Least-privilege key set** — for an `entrypoint`, the candidate secret key NAMES its transitive call tree actually reads. Pipe to `tvault seal`/`export`; operates on names only, never values |
 | `codemap_secret_impact` | **Secret-key rotation blast radius** — for each key NAME, the symbols that read it (`os.Getenv`/`os.environ`/`process.env`), the transitive callers affected, and covering tests (`untested:true` warns a key no test reaches). Operates on key NAMES only — never reads/returns values. Pairs with [tinyvault](/ecosystem); `via_vault` fetches names from it. Name-based unless the index is `--precise` |
@@ -92,7 +92,10 @@ the transitive blast radius, and which tests cover those paths, replacing many f
 
 ## Honesty signals (stable machine contract)
 
-The analysis tools carry two kinds of signal so a consumer can act on confidence, not just results:
+The analysis tools carry three kinds of signal so a consumer can act on confidence instead of guessing:
+
+- **`next`** — at most two executable `{tool,args,why}` follow-ups on `context`, `context_batch`, `impact`, `risk`, `file_impact`, and `review`. These are conditional recommendations, not a generic tool list: reindex when resolution is weak, run selected tests after a diff, or inspect risk for an untested hub.
+- **Structured errors** — MCP failures preserve stable `{code,message,hint}` metadata when the service returns a `CodedError`, while the visible text includes the remediation hint for clients that only render text.
 
 - **`call_graph`** — a stable enum on `codemap_impact`/`codemap_callers`/`codemap_callees`/
   `codemap_review`/`codemap_context` a consumer switches on (no prose parsing):

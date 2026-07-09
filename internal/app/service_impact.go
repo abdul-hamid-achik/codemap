@@ -42,6 +42,7 @@ type ImpactReport struct {
 	Resolution    string             `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (e.g. TS/JS/Python without --precise) — direct_callers/blast_radius/tests are unavailable, not empty
 	CallGraph     string             `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none (keep Resolution for the human sentence)
 	Annotations   []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
+	Next          []NextAction       `json:"next,omitempty"`
 }
 
 // Impact computes impact analysis for a symbol: its definition site(s), direct
@@ -160,6 +161,20 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		targets = append(targets, l.FQN, l.Symbol)
 	}
 	rep.Annotations = nodeAnnotationsFor(g, p.ID, targets...)
+	if rep.CallGraph == CallGraphUnresolved {
+		rep.Next = append(rep.Next, nextAction("codemap_index",
+			"impact is unresolved without a precise call graph",
+			map[string]any{"path": cwd, "precise": true}))
+	} else if rep.Untested {
+		rep.Next = append(rep.Next, nextAction("codemap_risk",
+			"no covering test reaches this symbol; quantify risk before editing",
+			map[string]any{"path": cwd, "symbol": symbol, "depth": depth}))
+	}
+	if len(rep.BlastRadius) >= 20 && len(rep.Next) < 2 {
+		rep.Next = append(rep.Next, nextAction("codemap_review",
+			"the blast radius is large; run diff-scoped review after editing to select regressions",
+			map[string]any{"path": cwd, "depth": depth}))
+	}
 	return rep, nil
 }
 

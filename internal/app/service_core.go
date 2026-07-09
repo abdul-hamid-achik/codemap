@@ -14,6 +14,19 @@ type Service struct {
 	s *Session
 }
 
+// NextAction is one bounded, executable follow-up recommendation attached to
+// an agent-facing report. Reports expose at most two: enough to remove tool
+// choice ambiguity without replacing it with a wall of suggestions.
+type NextAction struct {
+	Tool string         `json:"tool"`
+	Args map[string]any `json:"args,omitempty"`
+	Why  string         `json:"why"`
+}
+
+func nextAction(tool, why string, args map[string]any) NextAction {
+	return NextAction{Tool: tool, Args: args, Why: why}
+}
+
 // NewService wraps a session.
 func NewService(s *Session) *Service { return &Service{s: s} }
 

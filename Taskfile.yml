@@ -39,6 +39,7 @@ tasks:
       - 'echo "ollama up:    $(curl -sf http://localhost:11434/api/tags >/dev/null 2>&1 && echo yes || echo no)"'
       - 'echo "nomic model:  $(curl -sf http://localhost:11434/api/tags 2>/dev/null | grep -q nomic-embed-text && echo present || echo missing)"'
       - 'echo "bun:          $(bun --version 2>/dev/null || echo missing)"'
+      - 'echo "gopls:        $(command -v gopls >/dev/null 2>&1 && gopls version 2>/dev/null | head -1 || echo missing — run task tools)"'
 
   setup:
     desc: Install dependencies and dev tools
@@ -53,9 +54,10 @@ tasks:
       - go mod tidy
 
   tools:
-    desc: Install dev tools (air for hot reload)
+    desc: Install dev tools (air for hot reload, gopls for precise Studio flows)
     cmds:
       - go install github.com/air-verse/air@latest
+      - go install golang.org/x/tools/gopls@latest
 
   fmt:
     desc: Format Go code

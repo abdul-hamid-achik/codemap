@@ -30,6 +30,7 @@ type RiskReport struct {
 	Tests   int          `json:"covering_tests_count"`
 	Factors []RiskFactor `json:"factors"`
 	Note    string       `json:"note,omitempty"`
+	Next    []NextAction `json:"next,omitempty"`
 }
 
 // Risk computes a change-risk score for a symbol from its impact analysis. Reuses
@@ -51,6 +52,16 @@ func (svc *Service) Risk(cwd, symbol string, depth int) (*RiskReport, error) {
 	}
 	rep.Score = round3(combineRisk(rep.Factors))
 	rep.Level = riskLevel(rep.Score)
+	if imp.Resolution != "" {
+		rep.Next = append(rep.Next, nextAction("codemap_index",
+			"risk is uncertain because the call graph is unresolved",
+			map[string]any{"path": cwd, "precise": true}))
+	}
+	if rep.Level == "high" {
+		rep.Next = append(rep.Next, nextAction("codemap_impact",
+			"high-risk symbols need callers, blast radius, and covering tests reviewed before change",
+			map[string]any{"path": cwd, "symbol": symbol, "depth": depth}))
+	}
 	return rep, nil
 }
 

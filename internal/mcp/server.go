@@ -859,7 +859,7 @@ func cwdOf(path string) string {
 
 func result(v any, err error) (*sdkmcp.CallToolResult, any, error) {
 	if err != nil {
-		return errResult(err.Error()), nil, nil
+		return codedErrResult(err), nil, nil
 	}
 	// Indented JSON without HTML escaping — the inner result has no HTML context,
 	// so <, >, & stay literal (e.g. a path target "A -> B", generics Array<T>);
@@ -876,9 +876,44 @@ func result(v any, err error) (*sdkmcp.CallToolResult, any, error) {
 	}, v, nil
 }
 
+// errResult renders a bare error message for call sites with no error value
+// to inspect for a CodedError (e.g. hand-rolled failures). Prefer result(nil,
+// err) or codedErrResult(err) wherever an error value exists, so the agent
+// gets a stable code + hint instead of a free-form string.
 func errResult(msg string) *sdkmcp.CallToolResult {
 	return &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "Error: " + msg}},
 		IsError: true,
+	}
+}
+
+// mcpError is the structured error payload surfaced in CallToolResult.Meta,
+// mirroring the {code, message, hint} shape other tools in the ecosystem
+// (veclite, vecgrep) already emit — one machine-readable contract an agent
+// can switch on instead of parsing free-form text.
+type mcpError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+// codedErrResult renders err as a structured MCP error. When err carries a
+// *app.CodedError (via errors.As), the stable code and remediation hint ride
+// along in Meta["error"] and the hint is appended to the visible text so it
+// reads naturally even for clients that only surface Content. Falls back to
+// CodeOf/HintOf's "operational" default for untyped errors.
+func codedErrResult(err error) *sdkmcp.CallToolResult {
+	code := app.CodeOf(err)
+	hint := app.HintOf(err)
+	msg := err.Error()
+	text := "Error: " + msg
+	if hint != "" {
+		text += " (hint: " + hint + ")"
+	}
+	errData, _ := json.Marshal(mcpError{Code: code, Message: msg, Hint: hint})
+	return &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}},
+		IsError: true,
+		Meta:    sdkmcp.Meta{"error": json.RawMessage(errData)},
 	}
 }

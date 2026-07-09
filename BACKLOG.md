@@ -12,9 +12,9 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.19.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
-5 cross-compiled targets. Three surfaces over one store: **CLI** (24 commands incl. `daemon`, `--json`), **MCP**
-(`codemap serve`, 22 tools), **studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
+Released through **v0.36.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+5 cross-compiled targets. Three surfaces over one store: **CLI**, **MCP** (`codemap serve`, 35 tools),
+**studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
 (one typescript-language-server for TS+JS, pyright for Python; `--precise` = the unified exact pass —
 go/types for Go, LSP `callHierarchy` for the rest). Semantic vectors via veclite + Ollama nomic-embed-text

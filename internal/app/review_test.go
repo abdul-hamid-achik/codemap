@@ -110,6 +110,29 @@ func TestReviewWorking(t *testing.T) {
 	if !reached {
 		t.Errorf("blast radius should reach Other or TestRun, got %+v", rep.BlastRadius)
 	}
+	if len(rep.TestCommands) == 0 || !strings.Contains(rep.TestCommands[0], "go test") || !strings.Contains(rep.TestCommands[0], "TestRun") {
+		t.Errorf("review should emit a runnable Go regression command, got %+v", rep.TestCommands)
+	}
+	foundTerminalNext := false
+	for _, next := range rep.Next {
+		if next.Tool == "terminal" && next.Args["command"] == rep.TestCommands[0] {
+			foundTerminalNext = true
+		}
+	}
+	if !foundTerminalNext {
+		t.Errorf("review next actions should point directly at the selected test command, got %+v", rep.Next)
+	}
+}
+
+func TestTestCommandsFallsBackToPackageForLargeGoSelection(t *testing.T) {
+	tests := make([]ImpactNode, 0, 13)
+	for i := 0; i < 13; i++ {
+		tests = append(tests, ImpactNode{File: "internal/app/review_test.go", Symbol: fmt.Sprintf("TestCase%d", i)})
+	}
+	got := testCommands(tests)
+	if len(got) != 1 || got[0] != "go test ./internal/app" {
+		t.Fatalf("large selected test set = %+v, want package-level command", got)
+	}
 }
 
 func TestReviewNoChanges(t *testing.T) {

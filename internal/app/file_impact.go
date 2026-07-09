@@ -31,6 +31,7 @@ type FileImpactReport struct {
 	Stale           bool         `json:"stale"`
 	Resolution      string       `json:"resolution,omitempty"`
 	Note            string       `json:"note,omitempty"`
+	Next            []NextAction `json:"next,omitempty"`
 }
 
 // FileImpact computes file-level impact: the union of every defined symbol's
@@ -157,6 +158,15 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 		rep.BreakingChange = externalUntested
 	} else if rep.Resolution != "" {
 		rep.Note = joinNote(rep.Note, "safe_to_delete / breaking_change are unavailable without a resolved call graph — reindex with --precise")
+	}
+	if rep.Resolution != "" {
+		rep.Next = append(rep.Next, nextAction("codemap_index",
+			"file safety verdicts are withheld until a precise call graph is available",
+			map[string]any{"path": cwd, "precise": true}))
+	} else if rep.BreakingChange {
+		rep.Next = append(rep.Next, nextAction("codemap_review",
+			"this file exposes externally-called untested symbols; review the real diff and selected regressions before changing it",
+			map[string]any{"path": cwd, "depth": depth}))
 	}
 	return rep, nil
 }

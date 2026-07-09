@@ -54,7 +54,7 @@ steps:
     - press: "p"
     - wait:
         screen:
-            contains: "via gopls"
+            contains: "precise · gopls"
         timeoutMs: 15000
     - snapshot: graph_precise
     - press: "2"

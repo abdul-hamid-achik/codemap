@@ -213,25 +213,32 @@ func nodeColsAs(alias string) string {
 }
 
 // Callers returns the distinct nodes that call any node named symbol (incoming
-// `calls` edges), ordered by location.
+// `calls` edges), ranked by the caller's own in-degree (hubs first) with
+// location as a stable tiebreak. When a symbol has more callers than an agent
+// will ever see in one bundle (contextListCap et al.), this ordering means the
+// truncated view surfaces the callers that matter most — widely-depended-on
+// hubs — instead of an arbitrary alphabetical slice.
 func (s *Store) Callers(projectID int64, symbol string) ([]Node, error) {
 	q := "SELECT DISTINCT " + nodeColsAs("src") + " FROM edges e " +
 		"JOIN nodes tgt ON e.target_id = tgt.id " +
 		"JOIN nodes src ON e.source_id = src.id " +
 		"WHERE tgt.project_id = ? AND tgt.symbol = ? AND e.edge_type = ? " +
-		"ORDER BY src.file_path, src.start_line"
-	return s.queryNodes(q, projectID, symbol, EdgeCalls)
+		"ORDER BY (SELECT COUNT(*) FROM edges e2 WHERE e2.target_id = src.id AND e2.edge_type = ?) DESC, " +
+		"src.file_path, src.start_line"
+	return s.queryNodes(q, projectID, symbol, EdgeCalls, EdgeCalls)
 }
 
 // Callees returns the distinct nodes called by any node named symbol (outgoing
-// `calls` edges), ordered by location.
+// `calls` edges), ranked by the callee's own in-degree (hubs first) with
+// location as a stable tiebreak — see Callers for the rationale.
 func (s *Store) Callees(projectID int64, symbol string) ([]Node, error) {
 	q := "SELECT DISTINCT " + nodeColsAs("tgt") + " FROM edges e " +
 		"JOIN nodes src ON e.source_id = src.id " +
 		"JOIN nodes tgt ON e.target_id = tgt.id " +
 		"WHERE src.project_id = ? AND src.symbol = ? AND e.edge_type = ? " +
-		"ORDER BY tgt.file_path, tgt.start_line"
-	return s.queryNodes(q, projectID, symbol, EdgeCalls)
+		"ORDER BY (SELECT COUNT(*) FROM edges e3 WHERE e3.target_id = tgt.id AND e3.edge_type = ?) DESC, " +
+		"tgt.file_path, tgt.start_line"
+	return s.queryNodes(q, projectID, symbol, EdgeCalls, EdgeCalls)
 }
 
 func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,28 @@ func TestResultJSONNotHTMLEscaped(t *testing.T) {
 	// brackets/ampersand turned into \u00xx, and the literal check below would fail.
 	if !strings.Contains(txt, "A -> B & Array<string>") {
 		t.Errorf("result JSON should keep <, >, & literal (no HTML escaping): %s", txt)
+	}
+}
+
+func TestResultPreservesCodedErrorForAgents(t *testing.T) {
+	err := &app.CodedError{Code: app.CodeMissing, Hint: "run: codemap index", Err: fmt.Errorf("index unavailable")}
+	res, _, _ := result(nil, err)
+	if !res.IsError {
+		t.Fatal("coded error result should set IsError")
+	}
+	if got := textOf(res); !strings.Contains(got, "index unavailable") || !strings.Contains(got, "run: codemap index") {
+		t.Fatalf("visible error should include message + remediation hint, got %q", got)
+	}
+	raw, ok := res.Meta["error"].(json.RawMessage)
+	if !ok {
+		t.Fatalf("Meta[error] = %T, want json.RawMessage", res.Meta["error"])
+	}
+	var envelope mcpError
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != app.CodeMissing || envelope.Hint != "run: codemap index" {
+		t.Fatalf("structured error = %+v", envelope)
 	}
 }
 

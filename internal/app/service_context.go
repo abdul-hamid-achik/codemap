@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/git"
@@ -39,6 +40,7 @@ type ContextReport struct {
 	// from Annotations (codemap's own durable, symbol-pinned layer). Empty when
 	// vecgrep is absent/disabled or nothing matches.
 	Memories []MemoryNote `json:"memories,omitempty"`
+	Next     []NextAction `json:"next,omitempty"`
 }
 
 // MemoryNote is one recalled agent memory (vecgrep's store) attached to a context
@@ -91,10 +93,20 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 		rep.CallersTotal = len(ca.Results)
 		rep.Callers = capSlice(ca.Results, contextListCap)
 		rep.Note = ca.Note
+		if rep.CallersTotal > contextListCap {
+			rep.Note = joinNote(rep.Note, fmt.Sprintf(
+				"showing top %d of %d callers, ranked by fan-in (hubs first) — call codemap_callers for the complete list",
+				contextListCap, rep.CallersTotal))
+		}
 	}
 	if ce, cErr := svc.Callees(cwd, symbol); cErr == nil {
 		rep.CalleesTotal = len(ce.Results)
 		rep.Callees = capSlice(ce.Results, contextListCap)
+		if rep.CalleesTotal > contextListCap {
+			rep.Note = joinNote(rep.Note, fmt.Sprintf(
+				"showing top %d of %d callees, ranked by fan-in — call codemap_callees for the complete list",
+				contextListCap, rep.CalleesTotal))
+		}
 	}
 	if imp, iErr := svc.Impact(cwd, symbol, depth); iErr == nil {
 		rep.TestsTotal = len(imp.Tests)
@@ -114,6 +126,24 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 		rep.Memories = vecgrepMemoryRecall(mctx, svc.s.Config.Vecgrep, cwd, symbol,
 			[]string{"codemap", git.RepoHash(root)}, 5)
 		cancel()
+	}
+	if rep.CallGraph == CallGraphUnresolved {
+		rep.Next = append(rep.Next, nextAction("codemap_index",
+			"the call graph is unresolved; precise indexing is required before trusting callers, blast radius, or coverage",
+			map[string]any{"path": cwd, "precise": true}))
+	}
+	if rep.BlastRadius >= 20 || (rep.CallersTotal >= 10 && rep.TestsTotal == 0) {
+		rep.Next = append(rep.Next, nextAction("codemap_risk",
+			"this symbol is broadly depended on or appears untested; score change risk before editing",
+			map[string]any{"path": cwd, "symbol": symbol, "depth": depth}))
+	}
+	if len(rep.Annotations) > 0 && len(rep.Next) < 2 {
+		rep.Next = append(rep.Next, nextAction("codemap_annotations",
+			"pinned knowledge exists for this symbol; read it before changing behavior",
+			map[string]any{"path": cwd, "symbol": symbol}))
+	}
+	if len(rep.Next) > 2 {
+		rep.Next = rep.Next[:2]
 	}
 	return rep, nil
 }

@@ -198,9 +198,12 @@ Review (store · working)
 ```
 
 `--since main` reviews everything you changed on the branch (committed + uncommitted);
-`--staged` reviews just what's staged. The `codemap_review` MCP tool returns the same
-JSON — `{changed_symbols, blast_radius, covering_tests, untested, hotspots, stale,
-resolution, call_graph, risk}` — so an agent harness can ask "what did I just affect,
+`--staged` reviews just what's staged. JSON/MCP output also includes copy/paste-ready
+`test_commands` grouped by package and at most two conditional `next` actions, so an
+agent can execute the selected regressions without deriving runner syntax. The
+`codemap_review` MCP tool returns the same
+JSON — `{changed_symbols, blast_radius, covering_tests, test_commands, untested_symbols,
+hotspots, stale, resolution, call_graph, risk, next}` — so an agent harness can ask "what did I just affect,
 and what should I run?" in a single call instead of parsing diffs and chaining
 per-symbol `impact` queries. It degrades gracefully (a plain changed-file list with a
 note) when the project isn't indexed or isn't a git repo.
