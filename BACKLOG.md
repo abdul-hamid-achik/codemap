@@ -54,14 +54,17 @@ interim releases.) Details below.
 New flagship for the agent edit loop: **`codemap review`** (CLI) + **`codemap_review`** (MCP, now 30
 tools). Maps the working-tree git diff — or `--staged` / `--since <ref>` — to the symbols it touches
 (`internal/git.ChangedFiles` parses `git diff -U0` hunks → `Symbols` range-intersection), then unions each
-changed symbol's `impact` to return `{changed_symbols, blast_radius, covering_tests, untested, hotspots,
-stale, resolution}`. Answers *"what did I just affect, and what should I run?"* in one call instead of
+changed symbol's `impact` to return `{schema_version, changed_symbols, blast_radius, covering_tests,
+untested_symbols, hotspots, stale, resolution}`. Answers *"what did I just affect, and what should I run?"* in one call instead of
 diff-parsing + chaining per-symbol `impact`. Reuses existing primitives end to end; degrades gracefully on
 a non-repo / unindexed project. New: `internal/git/diff.go` (+test), `internal/app/review.go` (+test),
 `cmd/codemap` `review`, MCP tool + agent instructions, docs (cli.md/mcp.md). Research-backed: diff-scoped
 queries + regression test selection are the top agent-facing gaps (Sourcegraph/Glean/GitNexus/TDAD survey).
 This is the keystone both **cairntrace** (`--since-codemap`) and **glyphrun** (`affected-specs`) build on —
 see their `FEATURES.md`.
+The success contract is now published as `schemas/codemap.review.v1.schema.json` with an exact
+producer golden. Cortex, Glyphrun, and Cairntrace vendor that golden as a cross-release drift
+tripwire; absent version remains legacy-v1 compatible and unknown versions fail safely.
 
 **studio TUI — harmonica animations + charts.** The Metrics bar charts now **animate in** with spring
 physics (`github.com/charmbracelet/harmonica`, promoted to a direct dep): a self-rescheduling 60fps frame

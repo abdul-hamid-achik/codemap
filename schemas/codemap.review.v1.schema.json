@@ -1,0 +1,324 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:codemap:review:v1",
+  "title": "codemap review report v1",
+  "description": "The successful or gracefully degraded JSON report emitted by codemap review. Hard-failure envelopes are outside this schema.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project",
+    "mode",
+    "depth",
+    "is_repo",
+    "indexed",
+    "changed_files",
+    "changed_symbols",
+    "blast_radius",
+    "covering_tests",
+    "untested_symbols",
+    "stale"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "since"
+          }
+        }
+      },
+      "then": {
+        "required": ["since"]
+      }
+    }
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "project": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["working", "staged", "since"]
+    },
+    "since": {
+      "type": "string",
+      "minLength": 1
+    },
+    "depth": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "is_repo": {
+      "type": "boolean"
+    },
+    "indexed": {
+      "type": "boolean"
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/review_file"
+      }
+    },
+    "changed_symbols": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/symbol_ref"
+      }
+    },
+    "blast_radius": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impact_node"
+      }
+    },
+    "covering_tests": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/impact_node"
+      }
+    },
+    "untested_symbols": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/symbol_ref"
+      }
+    },
+    "hotspots": {
+      "type": "array",
+      "maxItems": 200,
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/symbol_ref"
+      }
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "staleness": {
+      "$ref": "#/$defs/staleness"
+    },
+    "resolution": {
+      "type": "string",
+      "minLength": 1
+    },
+    "call_graph": {
+      "type": "string",
+      "enum": ["resolved", "name", "unresolved", "none"]
+    },
+    "risk": {
+      "$ref": "#/$defs/risk"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "test_commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "next": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/$defs/next_action"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "review_file": {
+      "type": "object",
+      "required": ["path", "status", "symbols"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["A", "M", "D", "?"]
+        },
+        "symbols": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "symbol_ref": {
+      "type": "object",
+      "required": ["symbol", "kind", "file", "start_line", "end_line"],
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fqn": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["file", "function", "method", "type", "class", "module", "variable", "test"]
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 1
+        },
+        "doc": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "impact_node": {
+      "type": "object",
+      "required": ["symbol", "kind", "file", "start_line", "depth"],
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fqn": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["file", "function", "method", "type", "class", "module", "variable", "test"]
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 1
+        },
+        "doc": {
+          "type": "string",
+          "minLength": 1
+        },
+        "heuristic": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "staleness": {
+      "type": "object",
+      "required": ["changed", "new", "deleted"],
+      "properties": {
+        "changed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "new": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deleted": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "risk": {
+      "type": "object",
+      "required": ["level", "score", "factors"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "factors": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/risk_factor"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "risk_factor": {
+      "type": "object",
+      "required": ["factor", "severity", "detail"],
+      "properties": {
+        "factor": {
+          "type": "string",
+          "enum": ["untested_changes", "hotspot_fanin", "cross_package", "ambiguity", "unresolved"]
+        },
+        "severity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "next_action": {
+      "type": "object",
+      "required": ["tool", "why"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "enum": ["codemap_index", "terminal", "codemap_risk"]
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

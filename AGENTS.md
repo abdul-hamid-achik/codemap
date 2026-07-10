@@ -265,6 +265,11 @@ task install         # go install ./cmd/codemap
   (`level`/`score`/`factors`) from every changed symbol so a harness can gate verification on a
   single call. The `blast_radius`/`covering_tests` elements are `ImpactNode` objects
   (`symbol`/`fqn`/`kind`/`file`/`start_line`/`depth`; no `end_line`) — the stable element shape.
+  Successful review JSON always emits `schema_version: 1` and is governed by
+  `schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case; additive optional fields
+  are compatible within v1. Renames, removals, required-field additions, enum narrowing, or
+  nested shape changes require a new schema major and a consumer dual-read window. Keep the hard
+  CLI error envelope outside the success schema.
 - **CLI exit-code taxonomy** (extends P2-06): `0`=answered, `1`=operational error,
   `2`=not found/not indexed, `3`=`index_missing`, `4`=`index_corrupt`, `5`=`not_a_repo`.
   Under `--json`, ANY failure prints a structured envelope to **stdout**:
