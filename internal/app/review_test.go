@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/index"
+	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // reviewGit runs a git command in dir, failing the test on error.
@@ -72,6 +75,13 @@ func hasSymbol(refs []SymbolRef, name string) bool {
 	return false
 }
 
+func assertReviewSchemaVersion(t *testing.T, rep *ReviewReport) {
+	t.Helper()
+	if rep.SchemaVersion != 1 {
+		t.Fatalf("review schema_version = %d, want 1", rep.SchemaVersion)
+	}
+}
+
 func TestReviewWorking(t *testing.T) {
 	svc, proj := reviewRepo(t)
 
@@ -86,6 +96,7 @@ func TestReviewWorking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertReviewSchemaVersion(t, rep)
 	if !rep.IsRepo || !rep.Indexed {
 		t.Fatalf("expected IsRepo && Indexed, got %+v", rep)
 	}
@@ -141,6 +152,7 @@ func TestReviewNoChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertReviewSchemaVersion(t, rep)
 	if len(rep.ChangedSymbols) != 0 || len(rep.ChangedFiles) != 0 {
 		t.Errorf("clean working tree → no changes, got %+v", rep)
 	}
@@ -220,6 +232,7 @@ func TestReviewRepoButUnindexed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertReviewSchemaVersion(t, rep)
 	if !rep.IsRepo || rep.Indexed {
 		t.Fatalf("expected IsRepo:true, Indexed:false, got %+v", rep)
 	}
@@ -239,6 +252,7 @@ func TestReviewNotARepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("non-repo must not error: %v", err)
 	}
+	assertReviewSchemaVersion(t, rep)
 	if rep.IsRepo {
 		t.Errorf("a non-git dir should report IsRepo=false, got %+v", rep)
 	}
@@ -279,11 +293,38 @@ func TestReviewSinceRejectsOptionShapedRef(t *testing.T) {
 	if rep == nil {
 		t.Fatal("Review returned nil report")
 	}
+	assertReviewSchemaVersion(t, rep)
 	if !strings.Contains(rep.Note, "invalid --since ref") {
 		t.Errorf("expected graceful Note explaining invalid ref, got %q", rep.Note)
 	}
 	if _, statErr := os.Stat("/tmp/PWNED_for_P0_03"); statErr == nil {
 		t.Fatal("exploit must not write a file from a bad --since")
+	}
+}
+
+func TestReviewRejectsUnsupportedModeAndMissingSince(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	cases := []struct {
+		name    string
+		opts    ReviewOpts
+		wantErr string
+	}{
+		{name: "unsupported mode", opts: ReviewOpts{Mode: "bogus"}, wantErr: "unsupported review mode"},
+		{name: "since without ref", opts: ReviewOpts{Mode: "since"}, wantErr: "requires a non-empty since ref"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rep, err := svc.Review(proj, tc.opts)
+			if err == nil {
+				t.Fatalf("Review(%+v) = %+v, nil error; want rejection", tc.opts, rep)
+			}
+			if rep != nil {
+				t.Fatalf("Review(%+v) report = %+v, want nil on invalid input", tc.opts, rep)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Review(%+v) error = %q, want %q", tc.opts, err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -389,4 +430,134 @@ func hasReviewRiskFactor(fs []RiskFactor, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestReviewContractV1(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	edited := "package app\n\nfunc Helper() {}\n\nfunc Run() {\n\tHelper() // touched\n}\n"
+	if err := os.WriteFile(filepath.Join(proj, "a.go"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReviewSchemaVersion(t, rep)
+	rep.Project = "contract-project"
+	for i := range rep.Next {
+		if rep.Next[i].Tool == "codemap_index" {
+			rep.Next[i].Args["path"] = "contract-project"
+		}
+	}
+
+	got, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+	goldenPath := filepath.Join("testdata", "contracts", "codemap.review.v1.json")
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("ReviewReport JSON does not match %s\n--- got ---\n%s--- want ---\n%s", goldenPath, got, want)
+	}
+
+	schemaPath := filepath.Join("..", "..", "schemas", "codemap.review.v1.schema.json")
+	schemaJSON, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
+		t.Fatalf("parse %s: %v", schemaPath, err)
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", schemaPath, err)
+	}
+	var document any
+	if err := json.Unmarshal(got, &document); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolved.Validate(document); err != nil {
+		t.Fatalf("%s does not validate against %s: %v", goldenPath, schemaPath, err)
+	}
+
+	cloneDocument := func() map[string]any {
+		encoded, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cloned map[string]any
+		if err := json.Unmarshal(encoded, &cloned); err != nil {
+			t.Fatal(err)
+		}
+		return cloned
+	}
+	invalidCases := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "zero depth", mutate: func(root map[string]any) { root["depth"] = float64(0) }},
+		{name: "null stale", mutate: func(root map[string]any) { root["stale"] = nil }},
+		{name: "invalid changed file status", mutate: func(root map[string]any) {
+			root["changed_files"].([]any)[0].(map[string]any)["status"] = "R"
+		}},
+		{name: "invalid symbol start line", mutate: func(root map[string]any) {
+			root["changed_symbols"].([]any)[0].(map[string]any)["start_line"] = float64(0)
+		}},
+		{name: "invalid impact depth", mutate: func(root map[string]any) {
+			root["blast_radius"].([]any)[0].(map[string]any)["depth"] = float64(-1)
+		}},
+		{name: "null risk", mutate: func(root map[string]any) { root["risk"] = nil }},
+		{name: "invalid risk level", mutate: func(root map[string]any) {
+			root["risk"].(map[string]any)["level"] = "critical"
+		}},
+		{name: "risk score above one", mutate: func(root map[string]any) {
+			root["risk"].(map[string]any)["score"] = 1.01
+		}},
+		{name: "invalid risk factor", mutate: func(root map[string]any) {
+			root["risk"].(map[string]any)["factors"] = []any{
+				map[string]any{"factor": "other", "severity": 0.5, "detail": "invalid"},
+			}
+		}},
+		{name: "negative risk severity", mutate: func(root map[string]any) {
+			root["risk"].(map[string]any)["factors"] = []any{
+				map[string]any{"factor": "unresolved", "severity": -0.01, "detail": "invalid"},
+			}
+		}},
+		{name: "camel case schema version alias", mutate: func(root map[string]any) {
+			root["schemaVersion"] = root["schema_version"]
+			delete(root, "schema_version")
+		}},
+		{name: "unsupported schema version", mutate: func(root map[string]any) {
+			root["schema_version"] = float64(2)
+		}},
+		{name: "missing schema version", mutate: func(root map[string]any) {
+			delete(root, "schema_version")
+		}},
+		{name: "since mode without ref", mutate: func(root map[string]any) {
+			root["mode"] = "since"
+			delete(root, "since")
+		}},
+	}
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			malformed := cloneDocument()
+			tc.mutate(malformed)
+			if err := resolved.Validate(malformed); err == nil {
+				t.Fatalf("v1 schema accepted malformed document: %#v", malformed)
+			}
+		})
+	}
+
+	root := cloneDocument()
+	root["future_optional_field"] = true
+	root["changed_symbols"].([]any)[0].(map[string]any)["future_symbol_field"] = "additive"
+	root["risk"].(map[string]any)["future_risk_field"] = 1
+	if err := resolved.Validate(root); err != nil {
+		t.Fatalf("v1 schema rejected additive optional fields: %v", err)
+	}
 }

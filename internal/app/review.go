@@ -45,6 +45,7 @@ type ReviewFile struct {
 // It is the keystone an agent harness queries after editing — "what did I just
 // affect, and what should I run?" — in one call.
 type ReviewReport struct {
+	SchemaVersion   int              `json:"schema_version"`
 	Project         string           `json:"project"`
 	Mode            string           `json:"mode"`
 	Since           string           `json:"since,omitempty"`
@@ -84,12 +85,21 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	if mode == "" {
 		mode = "working"
 	}
+	switch mode {
+	case "working", "staged":
+	case "since":
+		if opts.Since == "" {
+			return nil, fmt.Errorf("review mode %q requires a non-empty since ref", mode)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported review mode %q: must be working, staged, or since", mode)
+	}
 	_, name, err := svc.resolveProject(cwd)
 	if err != nil {
 		return nil, err
 	}
 	rep := &ReviewReport{
-		Project: name, Mode: mode, Since: opts.Since, Depth: opts.Depth,
+		SchemaVersion: 1, Project: name, Mode: mode, Since: opts.Since, Depth: opts.Depth,
 		ChangedFiles: []ReviewFile{}, ChangedSymbols: []SymbolRef{},
 		BlastRadius: []ImpactNode{}, CoveringTests: []ImpactNode{}, UntestedSymbols: []SymbolRef{},
 	}

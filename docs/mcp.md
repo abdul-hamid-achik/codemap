@@ -108,6 +108,10 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
 - **`risk` on `codemap_review`** — one band for the whole diff (`level` low/medium/high, `score` 0..1, `factors`), folded from every changed symbol so a harness can gate verification on a single call instead of fanning `codemap_risk` out per symbol. Absent when the diff maps to no indexed symbols.
 - **`stale` / `staleness`** on `codemap_review` (and `codemap_status`) — index drift since the last index; surface a "reindex before trusting the blast radius" warning when set. The blast radius is computed from the snapshot, so a stale index can miss/misattribute — honest by design.
 - **`blast_radius` / `covering_tests` element shape** — both are `ImpactNode` objects (`symbol`, `fqn`, `kind`, `file`, `start_line`, `depth`, …; no `end_line`). `depth` is the blast-radius hop distance. This is the stable element contract.
+- **`schema_version` on `codemap_review`** — every successful review emits version `1` and
+  conforms to `schemas/codemap.review.v1.schema.json` (Draft 2020-12,
+  `urn:codemap:review:v1`). Consumers may accept an absent version as legacy v1, but must reject
+  unknown future versions rather than treating contract drift as an authoritative empty radius.
 
 ## Branches & caching
 

@@ -201,12 +201,14 @@ Review (store · working)
 `--staged` reviews just what's staged. JSON/MCP output also includes copy/paste-ready
 `test_commands` grouped by package and at most two conditional `next` actions, so an
 agent can execute the selected regressions without deriving runner syntax. The
-`codemap_review` MCP tool returns the same
-JSON — `{changed_symbols, blast_radius, covering_tests, test_commands, untested_symbols,
-hotspots, stale, resolution, call_graph, risk, next}` — so an agent harness can ask "what did I just affect,
-and what should I run?" in a single call instead of parsing diffs and chaining
-per-symbol `impact` queries. It degrades gracefully (a plain changed-file list with a
-note) when the project isn't indexed or isn't a git repo.
+`codemap_review` MCP tool returns the same JSON. Every successful review document emits
+`schema_version: 1`; the authoritative Draft 2020-12 contract is
+`schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case:
+`{schema_version, changed_symbols, blast_radius, covering_tests, test_commands,
+untested_symbols, hotspots, stale, resolution, call_graph, risk, next}`. Version 1 permits
+additive optional properties but does not rename or repurpose existing fields. The command
+degrades gracefully (a plain changed-file list with a note) when the project isn't indexed or
+isn't a git repo; hard-failure error envelopes are separate from the success schema.
 
 **`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`review`/`context`
 tells a consumer how much to trust the call graph without parsing prose: `resolved`

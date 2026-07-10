@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "project": "contract-project",
+  "mode": "working",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    {
+      "path": "a.go",
+      "status": "M",
+      "symbols": 1
+    }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "Run",
+      "fqn": "app.Run",
+      "kind": "function",
+      "file": "a.go",
+      "start_line": 5,
+      "end_line": 7,
+      "signature": "func Run()"
+    }
+  ],
+  "blast_radius": [
+    {
+      "symbol": "TestRun",
+      "fqn": "app.TestRun",
+      "kind": "test",
+      "file": "a_test.go",
+      "start_line": 5,
+      "depth": 1,
+      "signature": "func TestRun(t *testing.T)"
+    },
+    {
+      "symbol": "Other",
+      "fqn": "app.Other",
+      "kind": "function",
+      "file": "b.go",
+      "start_line": 3,
+      "depth": 1,
+      "signature": "func Other()"
+    }
+  ],
+  "covering_tests": [
+    {
+      "symbol": "TestRun",
+      "fqn": "app.TestRun",
+      "kind": "test",
+      "file": "a_test.go",
+      "start_line": 5,
+      "depth": 1,
+      "signature": "func TestRun(t *testing.T)"
+    }
+  ],
+  "untested_symbols": [],
+  "stale": true,
+  "staleness": {
+    "changed": 1,
+    "new": 0,
+    "deleted": 0
+  },
+  "call_graph": "name",
+  "risk": {
+    "level": "low",
+    "score": 0,
+    "factors": []
+  },
+  "test_commands": [
+    "go test ./ -run '^(TestRun)$'"
+  ],
+  "next": [
+    {
+      "tool": "codemap_index",
+      "args": {
+        "path": "contract-project"
+      },
+      "why": "the index is stale; refresh it before trusting diff-scoped impact"
+    },
+    {
+      "tool": "terminal",
+      "args": {
+        "command": "go test ./ -run '^(TestRun)$'"
+      },
+      "why": "run the selected regression tests that cover this changeset"
+    }
+  ]
+}
