@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/spf13/cobra"
@@ -29,7 +28,6 @@ var (
 
 func init() {
 	configCmd.AddCommand(configPathCmd, configShowCmd)
-	rootCmd.AddCommand(configCmd)
 }
 
 func runConfigPath(cmd *cobra.Command, _ []string) error {
@@ -42,11 +40,12 @@ func runConfigPath(cmd *cobra.Command, _ []string) error {
 }
 
 func runConfigShow(cmd *cobra.Command, _ []string) error {
-	cfgPath, _ := cmd.Flags().GetString("config")
-	cfg, err := config.Load(cfgPath)
+	sess, err := openSession(cmd)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = sess.Close() }()
+	cfg := sess.Config
 	if jsonOut(cmd) {
 		return printJSON(cfg)
 	}
@@ -65,7 +64,3 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	}
 	return nil
 }
-
-// ensure configCmd is registered in main.go's rootCmd.AddCommand list.
-// This is invoked by init() above; the command is auto-discovered by Cobra.
-func _() { _ = os.Getenv("") }

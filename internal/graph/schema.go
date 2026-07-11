@@ -2,8 +2,9 @@ package graph
 
 // schemaVersion is bumped whenever schemaSQL changes in a way that requires a
 // migration. The current version is stored in SQLite's PRAGMA user_version.
-// v2 adds the annotations table. v3 adds the edges.provenance column.
-const schemaVersion = 4 // P1-13 (O18): composite indexes
+// v2 adds annotations, v3 edge provenance, v4 composite query indexes, and v5
+// per-file precise call-graph coverage.
+const schemaVersion = 5
 
 // Edge provenance: how an edge's target was resolved. Name-based fan-out (the
 // fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
@@ -116,6 +117,21 @@ CREATE TABLE IF NOT EXISTS index_state (
     PRIMARY KEY (project_id, file_path),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+
+-- A row means call resolution completed successfully for this file, even when
+-- the file has no outgoing calls. Edge provenance alone cannot represent leaf
+-- files and must never be used as a project-wide precision proxy.
+CREATE TABLE IF NOT EXISTS call_graph_coverage (
+    project_id  INTEGER NOT NULL,
+    file_path   TEXT NOT NULL,
+    resolver    TEXT NOT NULL,
+    resolved_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, file_path),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_graph_coverage_project
+    ON call_graph_coverage(project_id);
 
 -- User-attached knowledge: notes + external data (DB rows, findings) pinned to a
 -- symbol ('node') or a call path ('path'). Keyed by project, NOT by node row id,

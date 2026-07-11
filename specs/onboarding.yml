@@ -2,8 +2,8 @@ version: 1
 name: onboarding
 intent: |
     A brand-new project (registered by being a directory, but not yet indexed):
-    EVERY query command guides you to the one fix — "Project X is not indexed yet.
-    Run 'codemap index'." — instead of a confusing empty result that reads like the
+    EVERY query command guides you to the one fix — "project X is not indexed yet"
+    with a "run: codemap index" hint — instead of a confusing empty result that reads like the
     symbol doesn't exist. After indexing, the same query works. This pins the
     cold-start onboarding so find/hotspots/symbols stay consistent with
     status/context/impact/path (all gate on requireIndexed). Pure-Go.
@@ -28,10 +28,10 @@ outcomes:
       description: a query before indexing tells you to run 'codemap index' (not a confusing empty result)
       verify:
         screen:
-            contains: "Run 'codemap index'"
+            contains: "run: codemap index"
     - id: works_after_index
       description: after indexing, the same query finds the symbol
       verify:
         screen:
             contains: "func Hello()"
-contractHash: sha256:648389c91af7f88531a57219d950fd8e1eb7c789166e9bc4caee9ac815ea9961
+contractHash: sha256:8d79c4662f533e48d6bad0d4a2689282e1db7561044992507f0cb4e7d234eac5

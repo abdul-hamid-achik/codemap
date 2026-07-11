@@ -64,6 +64,15 @@ func TestBranchSwitchRestoresSnapshot(t *testing.T) {
 	if _, err := svc.Index(ctx, root, index.Options{}, false); err != nil {
 		t.Fatal(err)
 	}
+	g, _ := sess.Graph()
+	projs, _ := g.ListProjects()
+	if len(projs) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(projs))
+	}
+	pid := projs[0].ID
+	if err := g.MarkCallGraphResolved(pid, "main.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.BranchSnapshot(ctx, root, "main"); err != nil {
 		t.Fatal(err)
 	}
@@ -76,16 +85,16 @@ func TestBranchSwitchRestoresSnapshot(t *testing.T) {
 	if _, err := svc.Index(ctx, root, index.Options{}, false); err != nil {
 		t.Fatal(err)
 	}
+	if err := g.ClearCallGraphResolved(pid, "main.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(pid, "feature.go", "lsp"); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.BranchSnapshot(ctx, root, "feature"); err != nil {
 		t.Fatal(err)
 	}
 
-	g, _ := sess.Graph()
-	projs, _ := g.ListProjects()
-	if len(projs) != 1 {
-		t.Fatalf("expected 1 project, got %d", len(projs))
-	}
-	pid := projs[0].ID
 	// Sanity: on feature, both symbols are present.
 	if ns, _ := g.FindNodesBySymbol(pid, "FeatureOnly"); len(ns) != 1 {
 		t.Fatalf("FeatureOnly should be indexed on feature, got %d", len(ns))
@@ -101,6 +110,13 @@ func TestBranchSwitchRestoresSnapshot(t *testing.T) {
 	if ns, _ := g.FindNodesBySymbol(pid, "MainOnly"); len(ns) != 1 {
 		t.Errorf("after switching to main, MainOnly should be restored, got %d nodes", len(ns))
 	}
+	coverage, err := g.ProjectCallGraphCoverage(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coverage) != 1 || coverage[0].FilePath != "main.go" || coverage[0].Resolver != "go/types" {
+		t.Fatalf("main branch restore lost coverage: %+v", coverage)
+	}
 
 	// Switch back to feature using from-DEFAULTING (no --from → uses the recorded
 	// ActiveBranch="main"). FeatureOnly comes back from feature's snapshot.
@@ -109,6 +125,13 @@ func TestBranchSwitchRestoresSnapshot(t *testing.T) {
 	}
 	if ns, _ := g.FindNodesBySymbol(pid, "FeatureOnly"); len(ns) != 1 {
 		t.Errorf("after switching back to feature (from-default), FeatureOnly should be restored, got %d", len(ns))
+	}
+	coverage, err = g.ProjectCallGraphCoverage(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coverage) != 1 || coverage[0].FilePath != "feature.go" || coverage[0].Resolver != "lsp" {
+		t.Fatalf("feature branch restore lost coverage: %+v", coverage)
 	}
 }
 

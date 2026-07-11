@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -11,32 +10,41 @@ const fileImpactMaxSymbols = 200
 
 // FileImpactReport answers "what happens if I change or delete THIS file?" — the
 // file-level peer of impact (symbol) and review (changeset). It aggregates every
-// symbol the file defines into: the other files that depend on it (call into it),
-// the transitive blast radius, the tests that cover it, whether it's safe to delete
-// (nothing external references it), and whether changing it is a breaking change (an
-// externally-called symbol is untested). Useful for file move/delete/split refactors.
+// symbol the file defines into grouped inbound call/reference/import evidence,
+// the transitive blast radius, the tests that cover it, conservative deletion
+// coverage, and whether changing it is a breaking change (an externally-called
+// symbol is untested). Useful for file move/delete/split refactors.
 type FileImpactReport struct {
-	Project         string       `json:"project"`
-	File            string       `json:"file"`
-	Depth           int          `json:"depth"` // effective blast-radius depth (after the <=0 → 3 default)
-	Indexed         bool         `json:"indexed"`
-	Found           bool         `json:"found"` // the file has indexed symbols
-	Symbols         int          `json:"symbols"`
-	DependentFiles  []string     `json:"dependent_files"`    // other files whose code calls into this one
-	BlastRadius     int          `json:"blast_radius_count"` // transitively-affected symbols outside this file (P1-19: bare name was the int count in some reports; now always _count, with the list under blast_radius if needed)
-	CoveringTests   []ImpactNode `json:"covering_tests"`
-	UntestedSymbols []SymbolRef  `json:"untested_symbols"` // externally-called symbols with no covering test
-	SafeToDelete    bool         `json:"safe_to_delete"`   // nothing outside the file references it
-	BreakingChange  bool         `json:"breaking_change"`  // an externally-called symbol is untested
-	Stale           bool         `json:"stale"`
-	Resolution      string       `json:"resolution,omitempty"`
-	Note            string       `json:"note,omitempty"`
-	Next            []NextAction `json:"next,omitempty"`
+	Project            string                  `json:"project"`
+	File               string                  `json:"file"`
+	Depth              int                     `json:"depth"` // effective blast-radius depth (after the <=0 → 3 default)
+	Indexed            bool                    `json:"indexed"`
+	Found              bool                    `json:"found"` // the file has indexed nodes
+	Symbols            int                     `json:"symbols"`
+	DependentFiles     []string                `json:"dependent_files"`    // files with inbound call/reference/import evidence (imports may be package-scoped; inspect DependencyEvidence)
+	BlastRadius        int                     `json:"blast_radius_count"` // transitively-affected symbols outside this file (P1-19: bare name was the int count in some reports; now always _count, with the list under blast_radius if needed)
+	CoveringTests      []ImpactNode            `json:"covering_tests"`
+	UntestedSymbols    []SymbolRef             `json:"untested_symbols"` // externally-called symbols with no covering test
+	DependencyEvidence *FileDependenciesReport `json:"dependency_evidence,omitempty"`
+	CallGraph          string                  `json:"call_graph"`      // resolved|name|unresolved|none across the analyzed symbols
+	DeleteVerdict      string                  `json:"delete_verdict"`  // unsafe when file-scoped dependency evidence exists; otherwise unknown
+	SafeToDelete       bool                    `json:"safe_to_delete"`  // legacy compatibility field; conservatively false until dependency evidence is complete
+	BreakingChange     bool                    `json:"breaking_change"` // an externally-called symbol is untested
+	Stale              bool                    `json:"stale"`
+	Resolution         string                  `json:"resolution,omitempty"`
+	Note               string                  `json:"note,omitempty"`
+	Next               []NextAction            `json:"next,omitempty"`
 }
 
-// FileImpact computes file-level impact: the union of every defined symbol's
-// callers, blast radius, and covering tests, framed as the questions an agent asks
-// before touching a file — who depends on it, what breaks, and is it safe to remove.
+const (
+	DeleteVerdictUnsafe  = "unsafe"
+	DeleteVerdictUnknown = "unknown"
+)
+
+// FileImpact computes file-level dependency evidence plus the union of every
+// exact defined symbol's callers, blast radius, and covering tests, framed as the
+// questions an agent asks before touching a file — who depends on it, what
+// breaks, and what is still unknown before removal.
 func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, error) {
 	if depth <= 0 {
 		depth = 3
@@ -48,6 +56,7 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 	rep := &FileImpactReport{
 		Project: name, File: file, Depth: depth, Indexed: found,
 		DependentFiles: []string{}, CoveringTests: []ImpactNode{}, UntestedSymbols: []SymbolRef{},
+		CallGraph: CallGraphNone, DeleteVerdict: DeleteVerdictUnknown,
 	}
 	if !found {
 		return rep, nil
@@ -58,44 +67,46 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 		return nil, err
 	}
 	rep.File = syms.File // normalized project-relative path
-	defined := definableSymbols(syms.Symbols)
-	if len(defined) == 0 {
-		rep.Note = "no indexed symbols in this file (not indexed, or only declarations/comments)"
+	deps, err := svc.Dependencies(cwd, rep.File)
+	if err != nil {
+		return nil, err
+	}
+	rep.DependencyEvidence = deps
+	rep.DependentFiles = append([]string(nil), deps.allDependentFiles...)
+	rep.CallGraph = deps.CallGraph
+	rep.Stale = deps.Stale
+	rep.Found = deps.Found
+	if !deps.Found {
+		rep.Note = "no indexed nodes in this file (not indexed, excluded, or path not found)"
 		return rep, nil
 	}
-	rep.Found = true
+	if deps.CallGraph == CallGraphUnresolved {
+		rep.Resolution = "call dependency evidence is unavailable for at least one callable file — reindex with --precise before treating missing callers as absent"
+	}
+	defined := definableSymbols(syms.Symbols)
 	rep.Symbols = len(defined)
-
-	if st, serr := svc.Staleness(cwd); serr == nil && st != nil {
-		rep.Stale = st.Any()
+	definedTotal := len(defined)
+	if definedTotal == 0 {
+		rep.Note = joinNote(rep.Note, "no callable/type symbols in this file; blast-radius and test analysis are empty, but file-level dependency evidence still applies")
 	}
 
-	if len(defined) > fileImpactMaxSymbols {
-		rep.Note = joinNote(rep.Note, fmt.Sprintf("large file — analyzed the first %d of %d symbols", fileImpactMaxSymbols, len(defined)))
+	if definedTotal > fileImpactMaxSymbols {
+		rep.Note = joinNote(rep.Note, fmt.Sprintf("large file — analyzed the first %d of %d symbols", fileImpactMaxSymbols, definedTotal))
 		defined = defined[:fileImpactMaxSymbols]
 	}
 
-	depFiles := map[string]bool{}
 	blast := map[string]bool{}
 	seenTest := map[string]bool{}
 	skipped := 0
-	anyExternalCaller, externalUntested := false, false
+	externalUntested := false
 
 	for _, s := range defined {
-		target := s.Symbol
-		if s.FQN != "" {
-			target = s.FQN
-		}
-		imp, ierr := svc.Impact(cwd, target, depth)
-		if (ierr != nil || imp == nil || !imp.Found) && target != s.Symbol {
-			imp, ierr = svc.Impact(cwd, s.Symbol, depth)
-		}
+		imp, ierr := svc.ImpactBySelector(cwd, SymbolSelector{
+			File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
+		}, depth)
 		if ierr != nil || imp == nil || !imp.Found {
-			// P1-16 (B10): silent skips used to leave SafeToDelete /
-			// BreakingChange silently computable. Now we count them
-			// and withhold the verdicts below when ANY symbol was
-			// skipped (otherwise we might say "safe to delete" on
-			// partial data).
+			// Count partial analysis so the report never promotes absence of
+			// evidence into a deletion-safety claim.
 			skipped++
 			continue
 		}
@@ -106,11 +117,9 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 		for _, c := range imp.DirectCallers {
 			if c.File != rep.File {
 				externalCallers++
-				depFiles[c.File] = true
 			}
 		}
 		if externalCallers > 0 {
-			anyExternalCaller = true
 			if imp.Untested && imp.Resolution == "" {
 				externalUntested = true
 				rep.UntestedSymbols = append(rep.UntestedSymbols, s)
@@ -129,21 +138,16 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 		}
 	}
 
-	rep.DependentFiles = sortedKeys(depFiles)
 	rep.BlastRadius = len(blast)
-	// The delete/breaking verdicts are only trustworthy when the call graph was
-	// actually resolved. For TS/JS/Python without --precise there are NO call edges,
-	// so "no external callers" is unverified, not established — never claim a file is
-	// safe to delete then (a false green that could delete live code). Leave both
-	// verdicts false and let Resolution explain why.
-	verdictWithheld := rep.Resolution != ""
-	// P1-16 (B10): also withhold the verdicts when the analysis was
-	// incomplete (truncation above the cap, or any per-symbol skip
-	// from a failed Impact lookup). Both leave us with PARTIAL data
-	// on which we'd otherwise emit a confident green.
-	truncated := len(syms.Symbols) > fileImpactMaxSymbols
+
+	applyFileDependencyVerdict(rep, deps)
+
+	// breaking_change is still a narrower call/test signal. Withhold it when the
+	// call graph or per-file analysis is incomplete.
+	breakingWithheld := rep.Resolution != ""
+	truncated := definedTotal > fileImpactMaxSymbols
 	if truncated || skipped > 0 {
-		verdictWithheld = true
+		breakingWithheld = true
 		parts := []string{}
 		if truncated {
 			parts = append(parts, fmt.Sprintf("file has >%d symbols (analyzed first %d)", fileImpactMaxSymbols, fileImpactMaxSymbols))
@@ -151,24 +155,53 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 		if skipped > 0 {
 			parts = append(parts, fmt.Sprintf("%d symbol(s) skipped (impact lookup failed)", skipped))
 		}
-		rep.Note = joinNote(rep.Note, "safe_to_delete / breaking_change withheld — "+strings.Join(parts, "; "))
+		rep.Note = joinNote(rep.Note, "breaking_change withheld — "+strings.Join(parts, "; "))
 	}
-	if !verdictWithheld {
-		rep.SafeToDelete = !anyExternalCaller
+	if !breakingWithheld {
 		rep.BreakingChange = externalUntested
 	} else if rep.Resolution != "" {
-		rep.Note = joinNote(rep.Note, "safe_to_delete / breaking_change are unavailable without a resolved call graph — reindex with --precise")
+		rep.Note = joinNote(rep.Note, "breaking_change is unavailable without a resolved call graph — reindex with --precise")
 	}
 	if rep.Resolution != "" {
 		rep.Next = append(rep.Next, nextAction("codemap_index",
-			"file safety verdicts are withheld until a precise call graph is available",
+			"resolve the call graph before assessing call-based change risk",
 			map[string]any{"path": cwd, "precise": true}))
-	} else if rep.BreakingChange {
+	}
+	if rep.DeleteVerdict == DeleteVerdictUnsafe || rep.BreakingChange {
 		rep.Next = append(rep.Next, nextAction("codemap_review",
-			"this file exposes externally-called untested symbols; review the real diff and selected regressions before changing it",
+			"review the real diff and selected regressions before changing a file with proven inbound dependencies",
 			map[string]any{"path": cwd, "depth": depth}))
+	} else if len(rep.Next) < 2 {
+		rep.Next = append(rep.Next, nextAction("codemap_related_files",
+			"inspect broader co-change evidence before deleting a file whose dependency completeness is unknown",
+			map[string]any{"path": cwd, "file": rep.File}))
 	}
 	return rep, nil
+}
+
+func applyFileDependencyVerdict(rep *FileImpactReport, deps *FileDependenciesReport) {
+	// The legacy bool remains conservative. Calls/references (and future
+	// file-specific imports) can prove an exact file unsafe. A Go import targets a
+	// representative package file, so it is useful package evidence but cannot by
+	// itself prove that deleting this exact file is unsafe.
+	rep.SafeToDelete = false
+	if deps.FileScopedEvidenceTotal > 0 {
+		rep.DeleteVerdict = DeleteVerdictUnsafe
+		kinds := dependencyEvidenceKinds(deps, true)
+		rep.Note = joinNote(rep.Note, fmt.Sprintf(
+			"delete verdict is unsafe — %s evidence enters this file from %d dependent file(s)",
+			strings.Join(kinds, "/"), deps.DependentsTotal))
+		return
+	}
+	rep.DeleteVerdict = DeleteVerdictUnknown
+	coverage := dependencyCoverageSummary(deps.Coverage)
+	if deps.PackageScopedEvidenceTotal > 0 {
+		rep.Note = joinNote(rep.Note, fmt.Sprintf(
+			"delete verdict is unknown — %d package-scoped import relationship(s) show package use but do not prove this exact file is required; incomplete domains: %s",
+			deps.PackageScopedEvidenceTotal, coverage))
+		return
+	}
+	rep.Note = joinNote(rep.Note, "delete verdict is unknown — no inbound dependency evidence was found, and missing evidence cannot prove safety while domains remain incomplete: "+coverage)
 }
 
 // definableSymbols keeps only the symbols a file "owns" for impact purposes —
@@ -181,14 +214,5 @@ func definableSymbols(refs []SymbolRef) []SymbolRef {
 			out = append(out, r)
 		}
 	}
-	return out
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
 	return out
 }

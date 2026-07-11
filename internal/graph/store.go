@@ -146,7 +146,8 @@ func (s *Store) OptimizeStats() error {
 
 // BeginTx starts a transaction on the graph database. Use the Tx-aware
 // functions (AddNodeTx, AddEdgeProvTx, SetFileHashTx, DeleteNodesInFileTx,
-// UpdateNodeVecIDTx, AddAnnotationTx) to batch writes inside one BEGIN/COMMIT,
+// MarkCallGraphResolvedTx, ClearCallGraphResolvedTx, UpdateNodeVecIDTx,
+// AddAnnotationTx) to batch writes inside one BEGIN/COMMIT,
 // amortizing SQLite's fsync cost: ~60 standalone INSERTs per file become one
 // fsync. See the indexer's indexFile for the canonical usage.
 func (s *Store) BeginTx(ctx context.Context) (*sql.Tx, error) {
@@ -326,6 +327,23 @@ func (s *Store) GetProjectByName(name string) (*Project, error) {
 	return p, nil
 }
 
+// GetProjectByID returns the canonical stored project row. UpsertProject may
+// disambiguate a colliding basename, so callers that need the project name for
+// reports or vector payloads must read it back by the returned id.
+func (s *Store) GetProjectByID(id int64) (*Project, error) {
+	p := &Project{}
+	err := s.db.QueryRow(
+		"SELECT id, name, path, language, created_at, updated_at FROM projects WHERE id=?", id).
+		Scan(&p.ID, &p.Name, &p.Path, &p.Language, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 // ListProjects returns all registered projects ordered by name.
 func (s *Store) ListProjects() ([]Project, error) {
 	rows, err := s.db.Query("SELECT id, name, path, language, created_at, updated_at FROM projects ORDER BY name")
@@ -429,6 +447,16 @@ func (s *Store) FindNodesBySymbol(projectID int64, symbol string) ([]Node, error
 		return nil, nil
 	}
 	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND symbol=? ORDER BY file_path, start_line", projectID, symbol)
+}
+
+// FindNodesByFQN returns exact fully-qualified-name matches. Unlike
+// ResolveQualifiedName it preserves node identity, allowing a unique FQN to be
+// used as an exact endpoint instead of being collapsed back to a bare name.
+func (s *Store) FindNodesByFQN(projectID int64, fqn string) ([]Node, error) {
+	if fqn == "" {
+		return nil, nil
+	}
+	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND fqn=? ORDER BY file_path, start_line", projectID, fqn)
 }
 
 // ResolveQualifiedName maps a fully- or partially-qualified name — the form
@@ -706,6 +734,90 @@ func (s *Store) DeleteFileHash(projectID int64, file string) error {
 	return err
 }
 
+// ---- precise call-graph coverage ----
+
+// MarkCallGraphResolved records that precise call resolution completed
+// successfully for file. A row is meaningful even when the resolver found zero
+// call edges (leaf files cannot be represented by edge provenance).
+func (s *Store) MarkCallGraphResolved(projectID int64, file, resolver string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO call_graph_coverage(project_id, file_path, resolver, resolved_at)
+		VALUES(?,?,?,?)
+		ON CONFLICT(project_id, file_path) DO UPDATE SET
+			resolver=excluded.resolver, resolved_at=excluded.resolved_at`,
+		projectID, file, resolver, now())
+	return err
+}
+
+// MarkCallGraphResolvedTx is the transaction-scoped sibling of
+// MarkCallGraphResolved, used by precise edge replacement passes.
+func MarkCallGraphResolvedTx(tx *sql.Tx, projectID int64, file, resolver string) error {
+	_, err := tx.Exec(`
+		INSERT INTO call_graph_coverage(project_id, file_path, resolver, resolved_at)
+		VALUES(?,?,?,?)
+		ON CONFLICT(project_id, file_path) DO UPDATE SET
+			resolver=excluded.resolver, resolved_at=excluded.resolved_at`,
+		projectID, file, resolver, now())
+	return err
+}
+
+// ClearCallGraphResolved removes a file's precise-resolution coverage. Normal
+// extraction calls this whenever it replaces that file's node generation.
+func (s *Store) ClearCallGraphResolved(projectID int64, file string) error {
+	_, err := s.db.Exec("DELETE FROM call_graph_coverage WHERE project_id=? AND file_path=?", projectID, file)
+	return err
+}
+
+// ClearCallGraphResolvedTx is the transaction-scoped sibling of
+// ClearCallGraphResolved.
+func ClearCallGraphResolvedTx(tx *sql.Tx, projectID int64, file string) error {
+	_, err := tx.Exec("DELETE FROM call_graph_coverage WHERE project_id=? AND file_path=?", projectID, file)
+	return err
+}
+
+// CallGraphCoverageEntry is the portable portion of one coverage row. The
+// timestamp is intentionally omitted so snapshots deduplicate by resolution
+// content and regenerate timing on restore.
+type CallGraphCoverageEntry struct {
+	FilePath string `json:"file_path"`
+	Resolver string `json:"resolver"`
+}
+
+// ProjectCallGraphCoverage returns precise-resolution coverage in stable file
+// order for snapshot export and diagnostics.
+func (s *Store) ProjectCallGraphCoverage(projectID int64) ([]CallGraphCoverageEntry, error) {
+	rows, err := s.db.Query(
+		"SELECT file_path, resolver FROM call_graph_coverage WHERE project_id=? ORDER BY file_path, resolver",
+		projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var entries []CallGraphCoverageEntry
+	for rows.Next() {
+		var entry CallGraphCoverageEntry
+		if err := rows.Scan(&entry.FilePath, &entry.Resolver); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+// CallGraphResolvedFiles returns the set of files whose precise call resolution
+// completed successfully. An empty set is the conservative legacy-index state.
+func (s *Store) CallGraphResolvedFiles(projectID int64) (map[string]bool, error) {
+	entries, err := s.ProjectCallGraphCoverage(projectID)
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		files[entry.FilePath] = true
+	}
+	return files, nil
+}
+
 // ---- project wipe ----
 
 // WipeProject deletes all nodes (edges cascade) and index state for a project.
@@ -722,6 +834,9 @@ func (s *Store) WipeProject(projectID int64) error {
 	if _, err := tx.Exec("DELETE FROM index_state WHERE project_id=?", projectID); err != nil {
 		return err
 	}
+	if _, err := tx.Exec("DELETE FROM call_graph_coverage WHERE project_id=?", projectID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -732,7 +847,10 @@ func WipeProjectTx(tx *sql.Tx, projectID int64) error {
 	if _, err := tx.Exec("DELETE FROM nodes WHERE project_id=?", projectID); err != nil {
 		return err
 	}
-	_, err := tx.Exec("DELETE FROM index_state WHERE project_id=?", projectID)
+	if _, err := tx.Exec("DELETE FROM index_state WHERE project_id=?", projectID); err != nil {
+		return err
+	}
+	_, err := tx.Exec("DELETE FROM call_graph_coverage WHERE project_id=?", projectID)
 	return err
 }
 

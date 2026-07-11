@@ -5,17 +5,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/spf13/cobra"
 )
-
-func getCwd() string {
-	d, _ := os.Getwd()
-	return d
-}
 
 var cacheCmd = &cobra.Command{
 	Use:   "cache",
@@ -37,7 +31,7 @@ var cacheSaveCmd = &cobra.Command{
 		}
 		defer func() { _ = sess.Close() }()
 		svc := app.NewService(sess)
-		stashID, treeHash, err := svc.CacheSave(context.Background(), getCwd())
+		stashID, treeHash, err := svc.CacheSave(context.Background(), targetDir(cmd))
 		if err != nil {
 			return err
 		}
@@ -66,7 +60,7 @@ var cacheRestoreCmd = &cobra.Command{
 		}
 		defer func() { _ = sess.Close() }()
 		svc := app.NewService(sess)
-		restored, stashID, err := svc.CacheRestore(context.Background(), getCwd())
+		restored, stashID, err := svc.CacheRestore(context.Background(), targetDir(cmd))
 		if err != nil {
 			return err
 		}
@@ -93,7 +87,7 @@ var cacheListCmd = &cobra.Command{
 		defer func() { _ = sess.Close() }()
 		svc := app.NewService(sess)
 		rebuild, _ := cmd.Flags().GetBool("rebuild")
-		rep, err := svc.CacheList(context.Background(), getCwd(), rebuild)
+		rep, err := svc.CacheList(context.Background(), targetDir(cmd), rebuild)
 		if err != nil {
 			return err
 		}
@@ -134,7 +128,7 @@ var cacheDropCmd = &cobra.Command{
 		if treeHash == "" && !all {
 			return fmt.Errorf("specify --tree <hash> or --all")
 		}
-		dropped, err := svc.CacheDrop(context.Background(), getCwd(), treeHash, all)
+		dropped, err := svc.CacheDrop(context.Background(), targetDir(cmd), treeHash, all)
 		if err != nil {
 			return err
 		}

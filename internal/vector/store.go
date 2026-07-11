@@ -18,6 +18,10 @@ const CollectionName = "codemap"
 
 const profileKey = "codemap.embedding_profile"
 
+// ErrCollectionNotFound is returned by OpenExistingFromDB when the veclite
+// database exists but has no codemap collection to maintain.
+var ErrCollectionNotFound = errors.New("codemap vector collection not found")
+
 // Payload keys stored alongside each embedding.
 const (
 	keyNodeID    = "node_id"
@@ -74,6 +78,23 @@ func OpenFromDB(db *veclite.DB, profile embed.EmbeddingProfile) (*Store, error) 
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenExistingFromDB opens the existing codemap collection without creating it
+// or validating an embedding profile. It is intentionally maintenance-only:
+// structure-only indexing needs to delete vectors for changed files even when
+// embeddings are disabled or the configured model has changed. Search and
+// insertion paths must continue to use OpenFromDB so incompatible spaces are
+// rejected.
+func OpenExistingFromDB(db *veclite.DB) (*Store, error) {
+	if !db.HasCollection(CollectionName) {
+		return nil, ErrCollectionNotFound
+	}
+	coll, err := db.GetCollection(CollectionName)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{db: db, coll: coll, ownsDB: false}, nil
 }
 
 // DB returns the underlying veclite.DB handle (for Reload calls).

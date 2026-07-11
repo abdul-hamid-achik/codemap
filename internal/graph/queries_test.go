@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -122,5 +123,35 @@ func TestPathCycle(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Path hung on a cyclic graph (P1-21 regression: visited guard missing)")
+	}
+}
+
+func TestPathNonPositiveDepthIsUnbounded(t *testing.T) {
+	s := openStore(t)
+	pid, _ := s.UpsertProject("longpath", t.TempDir(), "go")
+	ids := make([]int64, 13)
+	for i := range ids {
+		id, err := s.AddNode(&Node{
+			ProjectID: pid, FilePath: fmt.Sprintf("n%d.go", i), Symbol: fmt.Sprintf("N%d", i),
+			FQN: fmt.Sprintf("longpath.N%d", i), Kind: KindFunction, Language: "go", SourceHash: "h",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = id
+		if i > 0 {
+			if _, err := s.AddEdge(ids[i-1], ids[i], EdgeCalls, 1); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got, err := s.Path(pid, "N0", "N12", 10); err != nil || len(got) != 0 {
+		t.Fatalf("explicit 10-hop bound = (%d, %v), want no path", len(got), err)
+	}
+	for _, maxDepth := range []int{0, -1} {
+		got, err := s.Path(pid, "N0", "N12", maxDepth)
+		if err != nil || len(got) != 13 {
+			t.Fatalf("unbounded Path(maxDepth=%d) = (%d, %v), want 13 nodes", maxDepth, len(got), err)
+		}
 	}
 }

@@ -31,6 +31,7 @@ type ImpactNode struct {
 // symbol, and which tests cover those paths.
 type ImpactReport struct {
 	Symbol        string             `json:"symbol"`
+	Selector      *SymbolSelector    `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
 	Project       string             `json:"project"`
 	Found         bool               `json:"found"`
 	Locations     []SymbolRef        `json:"locations,omitempty"`
@@ -66,27 +67,58 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	if err != nil {
 		return nil, err
 	}
-	rep := &ImpactReport{
-		Symbol: symbol, Project: name, CallGraph: CallGraphNone,
-		DirectCallers: []SymbolRef{}, BlastRadius: []ImpactNode{}, Tests: []ImpactNode{},
-	}
-
 	p, err := g.GetProjectByName(name)
 	if errors.Is(err, graph.ErrNotFound) {
-		return rep, nil
+		return emptyImpactReport(name, symbol, depth, nil), nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	symbol = canonicalSymbol(g, p.ID, symbol) // accept the qualified form hotspots/orphans print
-	rep.Symbol = symbol
 
 	locs, err := g.FindNodesBySymbol(p.ID, symbol)
 	if err != nil {
 		return nil, err
 	}
 	if len(locs) == 0 {
-		return rep, nil // symbol not in the graph
+		return emptyImpactReport(name, symbol, depth, nil), nil // symbol not in the graph
+	}
+	return svc.impactFromLocations(cwd, g, p, symbol, locs, depth, nil)
+}
+
+// ImpactBySelector analyzes one exact definition. The selector resolves to the
+// current node after each reindex; traversal then uses that ephemeral node id so
+// another definition with the same short name is never merged into the result.
+func (svc *Service) ImpactBySelector(cwd string, selector SymbolSelector, depth int) (*ImpactReport, error) {
+	if depth <= 0 {
+		depth = 3
+	}
+	res, err := svc.resolveSourceSelector(cwd, selector)
+	if err != nil {
+		return nil, err
+	}
+	project := res.projectName
+	if res.project != nil {
+		project = res.project.Name
+	}
+	if !res.found {
+		return emptyImpactReport(project, "", depth, &selector), nil
+	}
+	n := res.node
+	return svc.impactFromLocations(cwd, res.graph, res.project, n.Symbol, []graph.Node{n}, depth, &n)
+}
+
+func emptyImpactReport(project, symbol string, _ int, selector *SymbolSelector) *ImpactReport {
+	return &ImpactReport{
+		Symbol: symbol, Selector: selector, Project: project, CallGraph: CallGraphNone,
+		DirectCallers: []SymbolRef{}, BlastRadius: []ImpactNode{}, Tests: []ImpactNode{},
+	}
+}
+
+func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Project, symbol string, locs []graph.Node, depth int, exact *graph.Node) (*ImpactReport, error) {
+	rep := emptyImpactReport(p.Name, symbol, depth, nil)
+	if exact != nil {
+		rep.Selector = selectorForNode(*exact)
 	}
 	rep.Found = true
 	for _, n := range locs {
@@ -95,21 +127,27 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	// call_graph: the stable machine enum a consumer switches on (vs the
 	// human Resolution sentence). precise → resolved; a no-name-based-call
 	// language on a name-based index → unresolved; else name-based.
-	rep.CallGraph = callGraphEnum(svc.hasPreciseEdges(g, p.ID), locs)
+	rep.CallGraph = svc.callGraphStatus(g, p.ID, locs)
 	if len(locs) > 1 {
 		// Lookup is by name, so the callers/blast-radius/tests below are the union
 		// across every definition with this name. Say so — a "71 callers" number is
 		// misleading when it merges six unrelated Close() methods. The fix depends
 		// on the index: name-based can be reindexed --precise; a precise index has
 		// exact per-method edges, so only the query name itself is ambiguous.
-		if svc.hasPreciseEdges(g, p.ID) {
+		if rep.CallGraph == CallGraphResolved {
 			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but the direct callers, blast radius, and covering tests below still merge all of them; query a more specific name to separate them", symbol, len(locs))
 		} else {
-			rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — direct callers, blast radius, and covering tests below merge all of them; reindex with 'codemap index --precise' for exact edges, or use callers/callees --lsp for one method", symbol, len(locs))
+			rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — direct callers, blast radius, and covering tests below merge all of them; reindex with 'codemap index --precise' for exact edges, or use callers/callees --precise for one method", symbol, len(locs))
 		}
 	}
 
-	callers, err := g.Callers(p.ID, symbol)
+	var callers []graph.Node
+	var err error
+	if exact != nil {
+		callers, err = g.CallersOfNode(p.ID, exact.ID)
+	} else {
+		callers, err = g.Callers(p.ID, symbol)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +155,12 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 		rep.DirectCallers = append(rep.DirectCallers, nodeToRef(n))
 	}
 
-	radius, err := g.BlastRadius(p.ID, symbol, depth)
+	var radius []graph.NodeDepth
+	if exact != nil {
+		radius, err = g.BlastRadiusFromNode(p.ID, exact.ID, depth)
+	} else {
+		radius, err = g.BlastRadius(p.ID, symbol, depth)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +181,16 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	// it(() => …) callback filtered at index time, #196), OR there's no call graph at
 	// all (TS/JS/Python without --precise) — scan test files for a reference to the
 	// symbol so a covered symbol isn't reported untested. Conservative + bounded.
-	if len(rep.Tests) == 0 {
+	allowHeuristic := true
+	if exact != nil {
+		// A text scan for the bare name cannot distinguish two same-named
+		// definitions. Keep an exact-selector result exact rather than attaching
+		// another definition's likely test as if it covered this one.
+		if sameName, findErr := g.FindNodesBySymbol(p.ID, symbol); findErr == nil && len(sameName) > 1 {
+			allowHeuristic = false
+		}
+	}
+	if len(rep.Tests) == 0 && allowHeuristic {
 		if ht := heuristicTestCoverage(g, p.ID, p.Path, symbol); len(ht) > 0 {
 			rep.Tests = append(rep.Tests, ht...)
 			rep.Untested = false
@@ -166,9 +218,13 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 			"impact is unresolved without a precise call graph",
 			map[string]any{"path": cwd, "precise": true}))
 	} else if rep.Untested {
+		args := map[string]any{"path": cwd, "symbol": symbol, "depth": depth}
+		if rep.Selector != nil {
+			args = map[string]any{"path": cwd, "selector": rep.Selector, "depth": depth}
+		}
 		rep.Next = append(rep.Next, nextAction("codemap_risk",
 			"no covering test reaches this symbol; quantify risk before editing",
-			map[string]any{"path": cwd, "symbol": symbol, "depth": depth}))
+			args))
 	}
 	if len(rep.BlastRadius) >= 20 && len(rep.Next) < 2 {
 		rep.Next = append(rep.Next, nextAction("codemap_review",

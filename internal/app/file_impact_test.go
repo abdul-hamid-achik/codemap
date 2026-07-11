@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
@@ -54,6 +56,9 @@ func TestFileImpactDependedOn(t *testing.T) {
 	if rep.SafeToDelete {
 		t.Errorf("a.go is referenced by b.go — must not be safe to delete")
 	}
+	if rep.DeleteVerdict != DeleteVerdictUnsafe {
+		t.Errorf("a.go has proven inbound calls: delete_verdict = %q, want %q", rep.DeleteVerdict, DeleteVerdictUnsafe)
+	}
 	if len(rep.CoveringTests) == 0 {
 		t.Errorf("TestHelper covers a.go's Helper — expected covering tests")
 	}
@@ -66,7 +71,7 @@ func TestFileImpactDependedOn(t *testing.T) {
 	}
 }
 
-func TestFileImpactSafeToDelete(t *testing.T) {
+func TestFileImpactDeletionUnknownWithoutInboundCalls(t *testing.T) {
 	svc, proj := fileImpactProj(t)
 	rep, err := svc.FileImpact(proj, "c.go", 3)
 	if err != nil {
@@ -75,8 +80,14 @@ func TestFileImpactSafeToDelete(t *testing.T) {
 	if !rep.Found {
 		t.Fatalf("c.go should be found, got %+v", rep)
 	}
-	if len(rep.DependentFiles) != 0 || !rep.SafeToDelete {
-		t.Errorf("c.go's Lonely has no callers — should be safe to delete, got %+v", rep)
+	if len(rep.DependentFiles) != 0 {
+		t.Errorf("c.go's Lonely has no callers, got dependent files %+v", rep.DependentFiles)
+	}
+	if rep.SafeToDelete || rep.DeleteVerdict != DeleteVerdictUnknown {
+		t.Errorf("absence of call edges cannot prove deletion safe, got %+v", rep)
+	}
+	if rep.Note == "" {
+		t.Error("unknown deletion verdict should explain the missing dependency evidence")
 	}
 }
 
@@ -112,12 +123,8 @@ func TestFileImpactUnindexed(t *testing.T) {
 	}
 }
 
-// TestFileImpactVerdictsWithheldOnTruncation pins P1-16 (B10): pre-fix
-// SafeToDelete stayed true even when the file was truncated to
-// the fileImpactMaxSymbols cap or when any per-symbol Impact lookup
-// failed silently. A false green that could delete live code. The
-// fix withholds the verdicts + adds a note when the analysis was
-// incomplete.
+// TestFileImpactVerdictsWithheldOnTruncation pins the conservative legacy
+// safe_to_delete field even for a complete, small calls-only analysis.
 func TestFileImpactVerdictsWithheldOnTruncation(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
@@ -138,10 +145,69 @@ func TestFileImpactVerdictsWithheldOnTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Only 1 symbol in the file; nothing truncated; the file is
-	// safe to delete (no external callers). The verdict should
-	// still be available (we only withhold on truncation or skips).
-	if !rep.SafeToDelete {
-		t.Errorf("small file with no external callers should be SafeToDelete=true; got false (Note=%q)", rep.Note)
+	if rep.SafeToDelete || rep.DeleteVerdict != DeleteVerdictUnknown {
+		t.Errorf("calls-only analysis must not claim deletion safety; got %+v", rep)
+	}
+}
+
+func TestFileImpactUsesExactDefinitionSelectors(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "a.go", "package app\n\ntype A struct{}\nfunc (A) Close() {}\n")
+	mustWrite(t, proj, "b.go", "package app\n\ntype B struct{}\nfunc (B) Close() {}\n")
+	mustWrite(t, proj, "use.go", "package app\n\nfunc UseA() {}\n")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject(config.DeriveProjectName(proj), proj, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(file, symbol, fqn, kind string, line int) int64 {
+		t.Helper()
+		id, addErr := g.AddNode(&graph.Node{
+			ProjectID: pid, FilePath: file, Symbol: symbol, FQN: fqn, Kind: kind,
+			Language: "go", StartLine: line, EndLine: line, SourceHash: "h",
+		})
+		if addErr != nil {
+			t.Fatal(addErr)
+		}
+		return id
+	}
+	for _, file := range []string{"a.go", "b.go", "use.go"} {
+		add(file, "", "", graph.KindFile, 1)
+		if err := g.MarkCallGraphResolved(pid, file, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("a.go", "A", "app.A", graph.KindType, 3)
+	aClose := add("a.go", "Close", "app.A.Close", graph.KindMethod, 4)
+	add("b.go", "B", "app.B", graph.KindType, 3)
+	add("b.go", "Close", "app.B.Close", graph.KindMethod, 4)
+	useA := add("use.go", "UseA", "app.UseA", graph.KindFunction, 3)
+	if _, err := g.AddEdgeProv(useA, aClose, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(sess)
+	aImpact, err := svc.FileImpact(proj, "a.go", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bImpact, err := svc.FileImpact(proj, "b.go", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aImpact.DeleteVerdict != DeleteVerdictUnsafe || !contains(aImpact.DependentFiles, "use.go") {
+		t.Fatalf("A.Close exact impact = %+v, want use.go dependency", aImpact)
+	}
+	if bImpact.DeleteVerdict != DeleteVerdictUnknown || bImpact.BreakingChange || bImpact.BlastRadius != 0 || len(bImpact.DependentFiles) != 0 {
+		t.Fatalf("B.Close must not inherit A.Close callers from the shared short name: %+v", bImpact)
 	}
 }

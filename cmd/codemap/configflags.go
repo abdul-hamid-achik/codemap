@@ -18,7 +18,7 @@ import (
 // unset flag never overrides a config-file or env value.
 func registerConfigFlags(root, index, daemonStart *cobra.Command) {
 	pf := root.PersistentFlags()
-	pf.String("embed-provider", "ollama", "embedding provider: ollama, openai, cohere, voyage")
+	pf.String("embed-provider", "ollama", "embedding provider (currently only ollama)")
 	pf.String("embed-model", "nomic-embed-text", "embedding model")
 	pf.String("ollama-url", "http://localhost:11434", "Ollama base URL")
 	pf.Int("embed-dimensions", 768, "embedding vector dimension")
@@ -30,7 +30,7 @@ func registerConfigFlags(root, index, daemonStart *cobra.Command) {
 	index.Flags().StringSlice("exclude", nil, "path globs to skip, REPLACING the built-in defaults (.git, node_modules, …)")
 	index.Flags().Int("max-file-bytes", 1<<20, "skip files larger than this many bytes")
 	index.Flags().Int("embed-batch-size", 64, "node texts sent to the embedder per request")
-	index.Flags().Int("embed-concurrency", 4, "concurrent embedding requests (big win for network providers)")
+	index.Flags().Int("embed-concurrency", 4, "concurrent embedding requests")
 	index.Flags().Int("embed-max-chars", 0, "cap per-node embed text (0 = no cap); lower = faster reindex, less body recall")
 
 	df := daemonStart.Flags()

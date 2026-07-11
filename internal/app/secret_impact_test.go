@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -27,7 +29,10 @@ func TestScanLiteralUsages(t *testing.T) {
 	must("b.py", "os.environ[\"STRIPE_KEY\"]   # reads it\n"+ // line 1: code → hit
 		"# STRIPE_KEY mentioned only in a comment\n") // line 2: comment → excluded
 
-	sites := scanLiteralUsages(dir, []string{"a.go", "b.py"}, "STRIPE_KEY")
+	sites, err := scanLiteralUsages(dir, []string{"a.go", "b.py"}, "STRIPE_KEY")
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Expect: a.go:3 (string), b.py:1 (code). NOT a.go:4/5, NOT b.py:2.
 	got := map[string]string{}
 	for _, s := range sites {
@@ -46,6 +51,73 @@ func TestScanLiteralUsages(t *testing.T) {
 		if _, ok := got[bad]; ok {
 			t.Errorf("%s must NOT be a hit (comment / different key)", bad)
 		}
+	}
+}
+
+func TestScanLiteralUsagesForKeys(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "keys.go"), []byte("package keys\nconst a = \"STRIPE_KEY\"\nconst b = \"DATABASE_URL\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	byKey, err := scanLiteralUsagesForKeys(context.Background(), dir, []string{"keys.go"}, []string{"STRIPE_KEY", "DATABASE_URL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"STRIPE_KEY", "DATABASE_URL"} {
+		if len(byKey[key]) != 1 {
+			t.Fatalf("%s sites = %v, want one", key, byKey[key])
+		}
+	}
+}
+
+func TestSecretKeyNameLimits(t *testing.T) {
+	var svc Service // validation must happen before any session/store access
+
+	oversized := strings.Repeat("K", MaxSecretKeyNameBytes+1)
+	if _, err := svc.SecretImpactWithContext(context.Background(), ".", []string{oversized}, 3); err == nil || !strings.Contains(err.Error(), "byte limit") {
+		t.Fatalf("oversized key error = %v, want byte-limit error", err)
+	}
+
+	tooMany := make([]string, MaxSecretKeyNames+1)
+	for i := range tooMany {
+		tooMany[i] = "KEY_" + itoa(i+1)
+	}
+	if _, err := svc.RequiredKeysWithContext(context.Background(), ".", "Entry", tooMany, 5); err == nil || !strings.Contains(err.Error(), "too many unique") {
+		t.Fatalf("count-cap error = %v, want unique-key limit error", err)
+	}
+
+	// The cap applies after normalization and deduplication.
+	withDuplicates := append(append([]string(nil), tooMany[:MaxSecretKeyNames]...), " KEY_1 ", "KEY_1")
+	got, err := validateSecretKeyNames(withDuplicates)
+	if err != nil {
+		t.Fatalf("duplicates should not consume the unique-key budget: %v", err)
+	}
+	if len(got) != MaxSecretKeyNames {
+		t.Fatalf("normalized keys = %d, want %d", len(got), MaxSecretKeyNames)
+	}
+
+	invalidUTF8 := string([]byte{0xff})
+	if _, err := validateSecretKeyNames([]string{invalidUTF8}); err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("invalid UTF-8 error = %v, want validation error", err)
+	}
+	if _, err := compileSecretKeyPatterns([]string{invalidUTF8}); err == nil {
+		t.Fatal("invalid pattern input must return an error, not panic")
+	}
+}
+
+func TestSecretQueriesHonorCancellation(t *testing.T) {
+	svc, proj := secretProj(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := svc.SecretImpactWithContext(ctx, proj, []string{"STRIPE_KEY"}, 3); !errors.Is(err, context.Canceled) {
+		t.Fatalf("SecretImpactWithContext error = %v, want context.Canceled", err)
+	}
+	if _, err := svc.RequiredKeysWithContext(ctx, proj, "Caller", []string{"STRIPE_KEY"}, 5); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RequiredKeysWithContext error = %v, want context.Canceled", err)
+	}
+	if _, err := svc.SecretImpactWithInventory(ctx, proj, nil, 3, "demo", ""); !errors.Is(err, context.Canceled) {
+		t.Fatalf("inventory cancellation error = %v, want context.Canceled", err)
 	}
 }
 
@@ -94,6 +166,106 @@ func TestSecretImpact(t *testing.T) {
 	}
 	if k.CoveringTests < 1 || k.Untested {
 		t.Errorf("ReadKey is reached by TestReadKey → covered, got tests=%d untested=%v", k.CoveringTests, k.Untested)
+	}
+}
+
+func TestSecretImpactPrecisionRequiresPerFileCoverage(t *testing.T) {
+	svc, proj := secretProj(t)
+	g, err := svc.s.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, name, err := svc.resolveProject(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := g.GetProjectByName(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(p.ID, "a.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.SecretImpact(proj, []string{"STRIPE_KEY"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Precise {
+		t.Fatal("coverage for one reader file must not make the whole project blast radius precise")
+	}
+
+	// Cover the remaining callable files, including a leaf with no call edges.
+	for _, file := range []string{"a_test.go", "config.go"} {
+		if err := g.MarkCallGraphResolved(p.ID, file, "go/types"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep, err = svc.SecretImpact(proj, []string{"STRIPE_KEY"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Precise {
+		t.Fatalf("all callable files are covered; expected precise secret impact, got note %q", rep.Note)
+	}
+}
+
+func TestSecretImpactWithVaultInventory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a small POSIX tvault stub")
+	}
+	svc, proj := secretProj(t)
+	bin := t.TempDir()
+	stub := filepath.Join(bin, "tvault")
+	script := `#!/bin/sh
+case " $* " in
+  *" -p demo list --json --prefix STRIPE_ "*) printf '["STRIPE_KEY","STRIPE_KEY"]' ;;
+  *) exit 17 ;;
+esac
+`
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	rep, err := svc.SecretImpactWithInventory(context.Background(), proj, nil, 3, "demo", "STRIPE_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Keys) != 1 || rep.Keys[0].Key != "STRIPE_KEY" {
+		t.Fatalf("vault inventory should be honored and deduplicated, got %+v", rep)
+	}
+	required, err := svc.RequiredKeysWithInventory(context.Background(), proj, "Caller", nil, 5, "demo", "STRIPE_")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(required.RequiredKeys) != 1 || required.RequiredKeys[0] != "STRIPE_KEY" {
+		t.Fatalf("required-keys should honor the same vault inventory, got %+v", required)
+	}
+}
+
+func TestVaultInventoryHonorsUniqueKeyCap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a small POSIX tvault stub")
+	}
+	keys := make([]string, MaxSecretKeyNames+1)
+	for i := range keys {
+		keys[i] = "VAULT_KEY_" + itoa(i+1)
+	}
+	payload, err := json.Marshal(keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	stub := filepath.Join(bin, "tvault")
+	script := "#!/bin/sh\nprintf '%s' '" + string(payload) + "'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err = keyNamesWithInventory(context.Background(), nil, "demo", "")
+	if err == nil || !strings.Contains(err.Error(), "too many unique") {
+		t.Fatalf("oversized inventory error = %v, want unique-key limit error", err)
 	}
 }
 

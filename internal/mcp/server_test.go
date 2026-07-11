@@ -70,6 +70,7 @@ func TestInstructionsCoverKeyCapabilities(t *testing.T) {
 	// with the actual tools and accuracy model.
 	for _, want := range []string{"codemap_index", "codemap_impact", "codemap_semantic",
 		"codemap_source", "codemap_projects", "precise:true", "name-based",
+		"selector", "start_line", "volatile database ids",
 		`"indexed": false`, "degrades to name-based",
 		// precise:true spans engines — agents on an LSP-language project must know
 		// it's the only way to get a call graph (callHierarchy), not just a Go fix.
@@ -93,6 +94,10 @@ func TestMCPServer(t *testing.T) {
 	proj := t.TempDir()
 	if err := os.WriteFile(filepath.Join(proj, "main.go"),
 		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "other.go"),
+		[]byte("package app\n\nfunc Other() { Helper() }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,12 +130,69 @@ func TestMCPServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[string]bool{}
+	toolsByName := map[string]*sdkmcp.Tool{}
 	for _, tool := range lt.Tools {
 		got[tool.Name] = true
+		toolsByName[tool.Name] = tool
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_file_impact", "codemap_risk", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
+		}
+	}
+	// Exact-definition tools accept a source selector projected directly from
+	// the file/start_line/fqn/kind fields already present on symbol results. Once
+	// selector exists, symbol must not remain schema-required.
+	for _, name := range []string{"codemap_callers", "codemap_callees", "codemap_impact", "codemap_risk", "codemap_source", "codemap_context"} {
+		tool := toolsByName[name]
+		raw, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema struct {
+			Required   []string       `json:"required"`
+			Properties map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := schema.Properties["selector"]; !ok {
+			t.Errorf("%s schema has no selector: %s", name, raw)
+		}
+		for _, required := range schema.Required {
+			if required == "symbol" {
+				t.Errorf("%s still requires symbol, preventing selector-only calls: %s", name, raw)
+			}
+		}
+	}
+	// Inventory-only calls must be representable: keys is optional when
+	// via_vault supplies value-free key names, and both inventory fields must be
+	// present on secret-impact and required-keys.
+	for _, name := range []string{"codemap_secret_impact", "codemap_required_keys"} {
+		tool := toolsByName[name]
+		if tool == nil {
+			t.Fatalf("missing tool %q", name)
+		}
+		raw, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema struct {
+			Required   []string       `json:"required"`
+			Properties map[string]any `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		_, viaVault := schema.Properties["via_vault"]
+		_, prefix := schema.Properties["prefix"]
+		if !viaVault || !prefix {
+			t.Errorf("%s schema must expose via_vault + prefix: %s", name, raw)
+		}
+		for _, required := range schema.Required {
+			if required == "keys" {
+				t.Errorf("%s schema requires keys, preventing a via_vault-only call: %s", name, raw)
+			}
 		}
 	}
 
@@ -165,6 +227,22 @@ func TestMCPServer(t *testing.T) {
 		t.Errorf("callers of Helper should include Run and found:true: %s", txt)
 	}
 
+	// codemap_dependencies is the thin MCP twin of Service.Dependencies. The
+	// cross-file Other→Helper call must survive the transport with grouped
+	// evidence and explicit completeness instead of a raw edge/id dump.
+	deps, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_dependencies",
+		Arguments: map[string]any{"path": proj, "file": "main.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(deps); deps.IsError || !strings.Contains(txt, `"evidence_total": 1`) ||
+		!strings.Contains(txt, `"file": "other.go"`) || !strings.Contains(txt, `"coverage"`) ||
+		strings.Contains(txt, `"id":`) {
+		t.Fatalf("dependencies transport payload is incomplete or leaked an id: %s", txt)
+	}
+
 	// A nonexistent symbol must report found:false so an agent can tell a typo
 	// from a real symbol with no callers (both have empty results).
 	res3, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
@@ -176,6 +254,23 @@ func TestMCPServer(t *testing.T) {
 	}
 	if txt := textOf(res3); !strings.Contains(txt, `"found": false`) {
 		t.Errorf("callers of a nonexistent symbol should report found:false: %s", txt)
+	}
+
+	// Selector-only source is the exact drill-down after find/symbols/context.
+	exactSource, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_source",
+		Arguments: map[string]any{
+			"path": proj,
+			"selector": map[string]any{
+				"file": "main.go", "start_line": 5, "fqn": "app.Helper", "kind": "function",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exactSource.IsError || !strings.Contains(textOf(exactSource), `"selector"`) || !strings.Contains(textOf(exactSource), "func Helper") {
+		t.Fatalf("selector-only source failed: %s", textOf(exactSource))
 	}
 }
 
@@ -221,6 +316,7 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 		{"codemap_callers", map[string]any{"path": proj, "symbol": "Run"}},
 		{"codemap_impact", map[string]any{"path": proj, "symbol": "Run"}},
 		{"codemap_context", map[string]any{"path": proj, "symbol": "Run"}},
+		{"codemap_dependencies", map[string]any{"path": proj, "file": "main.go"}},
 		{"codemap_find", map[string]any{"path": proj, "query": "Run"}},
 		{"codemap_semantic", map[string]any{"path": proj, "query": "run"}},
 		{"codemap_hotspots", map[string]any{"path": proj}},

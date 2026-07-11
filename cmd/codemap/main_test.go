@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/spf13/cobra"
 )
 
 // TestPreciseEdgeNote pins the engine-aware status phrasing: precise edges are
@@ -307,4 +308,58 @@ func TestGlobalPathFlag(t *testing.T) {
 		t.Errorf("targetDir with --path=/tmp/some/project = %q, want /tmp/some/project", got)
 	}
 	_ = rootCmd.PersistentFlags().Set("path", "") // reset
+}
+
+func TestRelationPreciseFlagAndLegacyAlias(t *testing.T) {
+	cmd := &cobra.Command{Use: "relation"}
+	cmd.Flags().Bool("precise", false, "")
+	cmd.Flags().Bool("lsp", false, "")
+	if relationPreciseRequested(cmd) {
+		t.Fatal("precision should be off by default")
+	}
+	_ = cmd.Flags().Set("precise", "true")
+	if !relationPreciseRequested(cmd) {
+		t.Fatal("canonical --precise must enable on-demand resolution")
+	}
+	_ = cmd.Flags().Set("precise", "false")
+	_ = cmd.Flags().Set("lsp", "true")
+	if !relationPreciseRequested(cmd) {
+		t.Fatal("hidden --lsp alias must remain backward compatible")
+	}
+}
+
+func TestRiskBadgeAlwaysLabelsUnknown(t *testing.T) {
+	icon, label := riskBadge("unknown")
+	if icon == "" || label != "UNKNOWN" {
+		t.Fatalf("unknown risk badge = %q %q, want an explicit icon + UNKNOWN", icon, label)
+	}
+	icon, label = riskBadge("")
+	if icon == "" || label != "UNKNOWN" {
+		t.Fatalf("empty/unrecognized risk badge = %q %q, want a safe UNKNOWN fallback", icon, label)
+	}
+}
+
+func TestPathReportAnsweredDistinguishesMissingEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rep  *app.PathReport
+		want bool
+	}{
+		{name: "found", rep: &app.PathReport{Found: true, CallGraph: app.CallGraphResolved}, want: true},
+		{name: "resolved no path", rep: &app.PathReport{CallGraph: app.CallGraphResolved}, want: true},
+		{name: "name based no path", rep: &app.PathReport{CallGraph: app.CallGraphName}, want: true},
+		{name: "unresolved", rep: &app.PathReport{CallGraph: app.CallGraphUnresolved}, want: true},
+		{name: "missing endpoint", rep: &app.PathReport{CallGraph: app.CallGraphNone, Note: "missing is not a symbol"}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pathReportAnswered(tc.rep); got != tc.want {
+				t.Fatalf("pathReportAnswered(%+v) = %v, want %v", tc.rep, got, tc.want)
+			}
+		})
+	}
+
+	err := pathMissError(&app.PathReport{From: "A", To: "Missing", Note: `"Missing" is not a symbol`})
+	if !errors.Is(err, errNotFound) || !strings.Contains(err.Error(), "not a symbol") {
+		t.Fatalf("missing endpoint must remain an exit-2 outcome, got %v", err)
+	}
 }

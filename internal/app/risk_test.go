@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
@@ -76,6 +78,54 @@ func TestRiskCoveredLeafIsLow(t *testing.T) {
 	}
 	if rep.Level != "low" {
 		t.Errorf("a covered, low-fan-in symbol should be low risk, got %s (%.2f)", rep.Level, rep.Score)
+	}
+}
+
+func TestRiskUnresolvedIsUnknown(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject(config.DeriveProjectName(proj), proj, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "a.ts", Symbol: "compute", FQN: "compute",
+		Kind: graph.KindFunction, Language: "typescript", StartLine: 1, EndLine: 1, SourceHash: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := NewService(sess).Risk(proj, "compute", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found || rep.Level != "unknown" {
+		t.Fatalf("unresolved TypeScript risk = found:%v level:%q, want found:true level:unknown", rep.Found, rep.Level)
+	}
+	if !hasFactor(rep.Factors, "unresolved") {
+		t.Fatalf("unresolved risk should explain why it is unknown, got %+v", rep.Factors)
+	}
+	if len(rep.Next) == 0 || rep.Next[0].Tool != "codemap_index" {
+		t.Fatalf("unresolved risk should recommend precise indexing, got %+v", rep.Next)
+	}
+}
+
+func TestReviewRiskUnresolvedIsUnknown(t *testing.T) {
+	rep := aggregateReviewRisk([]*ImpactReport{{
+		Symbol: "compute", Found: true, CallGraph: CallGraphUnresolved,
+		Resolution: "call graph unavailable",
+	}})
+	if rep == nil || rep.Level != "unknown" {
+		t.Fatalf("unresolved review risk = %+v, want level:unknown", rep)
 	}
 }
 

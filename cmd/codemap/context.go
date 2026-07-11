@@ -28,25 +28,44 @@ func runContext(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	if len(args) > 1 {
-		return runContextBatch(cmd, svc, cwd, args, depth)
-	}
-	rep, err := svc.Context(cwd, args[0], depth)
+	selector, err := selectorFromAtFlag(svc, cwd, cmd)
 	if err != nil {
 		return err
 	}
-	if jsonOut(cmd) {
-		return printJSON(rep)
+	if selector == nil && len(args) == 0 {
+		return fmt.Errorf("context needs at least one <symbol> or --at <file>:<line>")
+	}
+	if selector != nil && len(args) > 1 {
+		return fmt.Errorf("context --at selects one definition and cannot be combined with a symbol batch")
+	}
+	if len(args) > 1 {
+		return runContextBatch(cmd, svc, cwd, args, depth)
+	}
+	var rep *app.ContextReport
+	if selector != nil {
+		rep, err = svc.ContextBySelectorWithContext(cmd.Context(), cwd, *selector, depth)
+	} else {
+		rep, err = svc.ContextWithContext(cmd.Context(), cwd, args[0], depth)
+	}
+	if err != nil {
+		return err
 	}
 	if !rep.Found {
-		printNoSymbol(rep.Symbol, rep.Project)
-		return nil
+		if selector != nil {
+			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
+		}
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
+			fmt.Sprintf("run: codemap find %q", rep.Symbol))
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
 	}
 
 	color := term.IsTerminal(os.Stdout.Fd())
@@ -61,6 +80,11 @@ func runContext(cmd *cobra.Command, args []string) error {
 	if rep.Note != "" {
 		fmt.Println("  ⚠ " + rep.Note)
 	}
+	fmt.Printf("  %s %s\n", label("call graph:"), rep.CallGraph)
+	if rep.Resolution != "" {
+		fmt.Println("  ⚠ " + rep.Resolution)
+	}
+	renderContextPartialErrors(rep.PartialErrors)
 	for _, d := range rep.Definitions {
 		fmt.Printf("  %s %s:%d-%d  (%s)\n", label("defined"), d.File, d.StartLine, d.EndLine, d.Kind)
 		if s := strings.TrimSpace(d.Signature); s != "" {
@@ -116,9 +140,14 @@ func runContext(cmd *cobra.Command, args []string) error {
 // runContextBatch renders the one-call bundle for several symbols plus the callers
 // they share (likely shared entrypoints / coupling). --json carries the full batch.
 func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, depth int) error {
-	rep, err := svc.ContextBatch(cwd, symbols, depth)
+	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, depth)
 	if err != nil {
 		return err
+	}
+	if len(rep.Results) > 0 && len(rep.NotFound) == len(rep.Results) {
+		return notFoundError(
+			fmt.Sprintf("none of the requested symbols were found: %s", strings.Join(rep.NotFound, ", ")),
+			"check the names with codemap find")
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
@@ -131,6 +160,14 @@ func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols [
 		return s
 	}
 	fmt.Printf("%s %d symbols (%s)\n", label("Context batch:"), len(rep.Results), rep.Project)
+	if rep.Note != "" {
+		fmt.Println("  ⚠ " + rep.Note)
+	}
+	if rep.SourceBudget.TruncatedDefinitions > 0 {
+		fmt.Printf("  ⚠ source bodies: %d/%d bytes included (%d definition(s) truncated)\n",
+			rep.SourceBudget.IncludedBytes, rep.SourceBudget.OriginalBytes, rep.SourceBudget.TruncatedDefinitions)
+	}
+	renderContextPartialErrors(rep.PartialErrors)
 	for _, r := range rep.Results {
 		if !r.Found {
 			fmt.Printf("  %s — not found\n", r.Symbol)
@@ -140,8 +177,8 @@ func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols [
 		if len(r.Definitions) > 0 {
 			loc = fmt.Sprintf("%s:%d", r.Definitions[0].File, r.Definitions[0].StartLine)
 		}
-		fmt.Printf("  %s  %s  callers %d · callees %d · tests %d · blast %d\n",
-			label(r.Symbol), loc, r.CallersTotal, r.CalleesTotal, r.TestsTotal, r.BlastRadius)
+		fmt.Printf("  %s  %s  callers %d · callees %d · tests %d · blast %d · graph %s\n",
+			label(r.Symbol), loc, r.CallersTotal, r.CalleesTotal, r.TestsTotal, r.BlastRadius, r.CallGraph)
 	}
 	if len(rep.NotFound) > 0 {
 		fmt.Printf("  not found: %s\n", strings.Join(rep.NotFound, ", "))
@@ -160,6 +197,20 @@ func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols [
 		fmt.Printf("  %s %s\n", label("shared callers:"), line)
 	}
 	return nil
+}
+
+func renderContextPartialErrors(errs []app.ContextPartialError) {
+	shown, more := capList(errs, 5)
+	for _, partial := range shown {
+		symbol := ""
+		if partial.Symbol != "" {
+			symbol = partial.Symbol + " · "
+		}
+		fmt.Printf("  ⚠ partial %s%s: %s\n", symbol, partial.Component, partial.Error)
+	}
+	if more > 0 {
+		fmt.Printf("  ⚠ … %d more partial error(s); use --json for all\n", more)
+	}
 }
 
 // firstLine returns s up to its first newline — the docstring summary.

@@ -36,6 +36,9 @@ func TestRoundTrip(t *testing.T) {
 	if err := g.SetFileHash(pid, "a.go", "h"); err != nil {
 		t.Fatal(err)
 	}
+	if err := g.MarkCallGraphResolved(pid, "a.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
 	annID, err := g.AddAnnotation(pid, graph.Annotation{Kind: "node", Target: "app.Helper", Source: "note", Note: "the helper"})
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +49,8 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Nodes != 3 || m.Edges != 2 || m.IndexState != 1 || m.Annotations != 1 {
-		t.Fatalf("manifest = %+v, want 3 nodes / 2 edges / 1 index_state / 1 annotation", m)
+	if m.Nodes != 3 || m.Edges != 2 || m.IndexState != 1 || m.CallGraphCoverage != 1 || m.Annotations != 1 {
+		t.Fatalf("manifest = %+v, want 3 nodes / 2 edges / 1 index_state / 1 coverage / 1 annotation", m)
 	}
 
 	// Mutate the project: add a stray node + remove the annotation, so import has
@@ -56,6 +59,12 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := g.DeleteAnnotation(pid, annID); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.ClearCallGraphResolved(pid, "a.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(pid, "stray.go", "lsp"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,6 +96,13 @@ func TestRoundTrip(t *testing.T) {
 	if h, _ := g.FileHash(pid, "a.go"); h != "h" {
 		t.Errorf("index_state file hash = %q, want h", h)
 	}
+	coverage, err := g.ProjectCallGraphCoverage(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coverage) != 1 || coverage[0].FilePath != "a.go" || coverage[0].Resolver != "go/types" {
+		t.Errorf("call-graph coverage after import = %+v, want a.go via go/types", coverage)
+	}
 
 	// A mismatched embedding profile is refused (never mix models).
 	if _, err := Import(g, nil, pid, "app", dir, "other:model:4:cosine"); err == nil {
@@ -98,6 +114,50 @@ func TestRoundTrip(t *testing.T) {
 	}
 	if anns, _ := g.AllAnnotations(pid); len(anns) != 1 {
 		t.Errorf("re-import duplicated annotations: %+v", anns)
+	}
+}
+
+// TestImportLegacySnapshotWithoutCoverageArtifact proves the schema-v1 additive
+// extension remains backward compatible. Old snapshots have neither the
+// manifest count nor call_graph_coverage.jsonl; importing one succeeds and
+// conservatively clears any current coverage rather than inventing precision.
+func TestImportLegacySnapshotWithoutCoverageArtifact(t *testing.T) {
+	g, err := graph.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	pid, _ := g.UpsertProject("app", "/x", "go")
+	if _, err := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "leaf.go", Symbol: "Leaf", FQN: "app.Leaf",
+		Kind: graph.KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "h",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.SetFileHash(pid, "leaf.go", "h"); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if _, err := Export(g, nil, pid, "app", dir, profile, "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	// Zero coverage is omitted from the manifest; deleting the empty additive
+	// artifact reproduces an export created before call-graph coverage existed.
+	if err := os.Remove(filepath.Join(dir, fileCallGraph)); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(pid, "leaf.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Import(g, nil, pid, "app", dir, profile); err != nil {
+		t.Fatalf("legacy snapshot import failed: %v", err)
+	}
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved) != 0 {
+		t.Fatalf("legacy snapshot invented/retained precise coverage: %v", resolved)
 	}
 }
 

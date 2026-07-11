@@ -6,8 +6,10 @@ provenance and honesty signals attached — instead of making an agent chain doz
 `grep`/`read` calls to reconstruct what the graph already knows.
 
 Every CLI command takes `--json`; every capability has a thin **`codemap_<name>` MCP
-tool** that returns the same shape. Point your harness at `codemap serve` (a stdio
-MCP server) or shell the CLI — the data is identical. The built-in guide
+tool backed by the same service reports. Point your harness at `codemap serve` (a
+stdio MCP server) or shell the CLI — successful report data is identical, while
+transport-level misses follow each surface's convention (CLI exit codes/error
+envelopes; MCP structured tool results). The built-in guide
 `codemap docs workflow` (and the `codemap_docs` tool) is the in-band version of this
 page.
 
@@ -24,7 +26,8 @@ A typical "understand or change this code" loop, and the one-call tool for each 
 | **Model a component** | `codemap_context_batch` | the bundle for several symbols at once, plus the callers they share (coupling) |
 | **Go deeper** | `codemap_impact` · `codemap_source` | full blast radius · the implementation body |
 | **How careful?** | `codemap_risk` | a 0..1 change-risk score (untested + fan-in + cross-package spread + ambiguity) + the factors |
-| **Touch a whole file?** | `codemap_file_impact` | who depends on it, its blast radius, and a `safe_to_delete` / `breaking_change` verdict |
+| **Need file dependencies?** | `codemap_dependencies` | bounded inbound call/reference/import evidence with source→target samples and explicit domain coverage |
+| **Touch a whole file?** | `codemap_file_impact` | the same dependency evidence plus blast radius, tests, and conservative `delete_verdict` |
 | **Trace flow** | `codemap_path` | the shortest call chain between two symbols |
 | **AFTER you edit** | `codemap_review` | your git diff → the changed symbols, their union blast radius, and the **tests to run** (regression test selection) |
 | **Survey** | `codemap_hotspots` · `codemap_orphans` | hubs · dead-code candidates |
@@ -43,10 +46,16 @@ calibrate its confidence:
   surfaces it too.
 - **`resolution`** — set when a call graph is *unavailable* (TypeScript/JavaScript/
   Python without `--precise`): callers/blast/tests are **unresolved, not absent**.
-  `codemap_review`/`codemap_file_impact`/`codemap_risk` will not assert "no tests" or
-  "safe to delete" in that state — they say the verdict is unavailable.
+  `codemap_review`/`codemap_risk` will not assert "no tests" in that state;
+  `codemap_file_impact` reports deletion as `unsafe` only from positive inbound
+  evidence and `unknown` otherwise — never "safe" from an empty call result.
+- **`dependency_evidence.coverage`** — `complete`/`partial`/`unavailable` by
+  calls, references, imports, runtime wiring, and external consumers. Evidence is
+  grouped by dependent file/kind with totals and bounded source→target samples.
+  Go imports are package-scoped hints, not proof that the representative file is required.
 - **`note` / `shared_name`** — the name resolves to several definitions, so a count
-  merges them; reindex `--precise` (or use `callers --lsp`) to separate.
+  merges them. Precise indexing fixes the edges; pass an exact source selector to
+  choose one definition.
 - **`untested` / `heuristic`** — a symbol has no covering tests, or a test was matched
   by name-scan rather than the call graph (flag it, don't trust it blindly).
 - **`*_total`** — true counts behind a capped list, so you know when to drill with
@@ -54,10 +63,22 @@ calibrate its confidence:
 
 ## Precision when you need it
 
-The Go graph is exact from `go/parser`. For TypeScript/JavaScript/Python — and for
+The Go graph starts name-based from `go/parser`. For TypeScript/JavaScript/Python — and for
 exact Go method resolution — run `codemap index --precise` (go/types + language-server
-`callHierarchy`): every query becomes exact, no per-call flag. For a one-off exact Go
+`callHierarchy`). Precise coverage is tracked per file: a query is `resolved` only when every
+matched definition file completed the pass; partial failures remain `name`/`unresolved`. For a one-off exact Go
 answer without reindexing, pass `precise: true` to `codemap_callers`/`codemap_callees`.
+
+## Exact source selectors
+
+Every symbol result already has `file`, `start_line`, `fqn`, and `kind`. Project those
+same fields into `selector` for `codemap_source`, `codemap_context`, `codemap_callers`,
+`codemap_callees`, `codemap_impact`, or `codemap_risk`; path accepts `from_selector`
+and `to_selector`. This scopes the whole query to one definition even when a short
+name is shared. File+FQN+kind is preferred, so a declaration can shift lines across
+a reindex. A move or rename can invalidate the selector and returns a miss; codemap
+never exposes the SQLite node id as a durable API. People can use the equivalent
+`--at <file>:<line>` CLI flag.
 
 ## The knowledge layer
 

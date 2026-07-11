@@ -6,8 +6,9 @@ intent: |
     via gopls, switches to Metrics (bar charts) and Impact, searches by name,
     opens the context "orient" card for a hit with ctrl+o (definition, callers,
     callees, tests, blast radius — the codemap_context bundle, in the TUI), opens
-    a search hit in the Graph walker with ctrl+g (cross-tab navigation), then
-    quits cleanly.
+    a search hit in the Graph walker with ctrl+g (cross-tab navigation), then uses
+    the task-oriented Path tab to find and inspect the Run → Helper call chain
+    with explicit call-graph confidence before quitting cleanly.
 target:
     cmd:
         - "/bin/sh"
@@ -126,7 +127,35 @@ steps:
         timeoutMs: 5000
     - snapshot: source_search
     - press: "q"
-    # ? opens the keybinding help overlay (works even with the search input focused).
+    # Tab from Search into Path. The selected Run hit becomes the rich FROM
+    # endpoint automatically (FQN/file/line retained), so only TO needs typing.
+    - press: "tab"
+    - wait:
+        screen:
+            contains: "shortest call chain"
+        timeoutMs: 5000
+    - type: "Helper"
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "call_graph: name"
+        timeoutMs: 8000
+    - wait:
+        screen:
+            contains: "Run → Helper"
+        timeoutMs: 5000
+    - snapshot: path
+    # Vim navigation selects the target step; the global source action works on
+    # the Path result just as it does on Graph/Impact/Search.
+    - press: "j"
+    - press: "ctrl+s"
+    - wait:
+        screen:
+            contains: "esc/q close"
+        timeoutMs: 5000
+    - snapshot: path_source
+    - press: "q"
+    # ? opens the keybinding help overlay from the Path result too.
     - press: "?"
     - wait:
         screen:
@@ -145,4 +174,4 @@ outcomes:
       verify:
         process:
             exitCode: 0
-contractHash: sha256:8c1ef20b29c08743429c1c846f75938c79b5c4cf74ac50ec8132b58652a31ad7
+contractHash: sha256:e8a17a98f7a7053f56702f61a24038a7919de038b5f1c7ab702f856b726619a0

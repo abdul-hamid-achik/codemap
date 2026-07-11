@@ -3,11 +3,7 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -18,21 +14,21 @@ import (
 
 var (
 	callersCmd = &cobra.Command{
-		Use:   "callers <symbol>",
+		Use:   "callers [<symbol>]",
 		Short: "List functions/methods that call a symbol",
-		Args:  cobra.ExactArgs(1),
+		Args:  symbolOrAtArgs,
 		RunE:  runCallers,
 	}
 	calleesCmd = &cobra.Command{
-		Use:   "callees <symbol>",
+		Use:   "callees [<symbol>]",
 		Short: "List functions/methods that a symbol calls",
-		Args:  cobra.ExactArgs(1),
+		Args:  symbolOrAtArgs,
 		RunE:  runCallees,
 	}
 	impactCmd = &cobra.Command{
-		Use:   "impact <symbol>",
+		Use:   "impact [<symbol>]",
 		Short: "Impact analysis: blast radius (transitive callers) + test coverage",
-		Args:  cobra.MaximumNArgs(1), // 0 args when --at <file>:<line> resolves the symbol
+		Args:  symbolOrAtArgs,
 		RunE:  runImpact,
 	}
 	reviewCmd = &cobra.Command{
@@ -60,9 +56,9 @@ var (
 		RunE:  runFileImpact,
 	}
 	riskCmd = &cobra.Command{
-		Use:   "risk <symbol>",
+		Use:   "risk [<symbol>]",
 		Short: "Change-risk score: untested + fan-in + cross-package spread + ambiguity, combined into one number",
-		Args:  cobra.ExactArgs(1),
+		Args:  symbolOrAtArgs,
 		RunE:  runRisk,
 	}
 	symbolAtCmd = &cobra.Command{
@@ -74,14 +70,18 @@ var (
 	secretImpactCmd = &cobra.Command{
 		Use:   "secret-impact [<KEY>...]",
 		Short: "Code blast radius of rotating secret keys: which symbols read each key, + covering tests (value-free — only key NAMES)",
-		Args:  cobra.ArbitraryArgs, // 0 args is valid with --via-vault
-		RunE:  runSecretImpact,
+		Long: fmt.Sprintf("Code blast radius of rotating secret key names, including readers and covering tests. Inputs are value-free and bounded to %d unique names of at most %d bytes each, including names loaded with --via-vault.",
+			app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
+		Args: cobra.ArbitraryArgs, // 0 args is valid with --via-vault
+		RunE: runSecretImpact,
 	}
 	requiredKeysCmd = &cobra.Command{
 		Use:   "required-keys <entrypoint>",
 		Short: "Least-privilege key set: which candidate secret keys an entrypoint's call tree actually reads (for tvault seal/export)",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runRequiredKeys,
+		Long: fmt.Sprintf("Return the least-privilege candidate key names read by an entrypoint's call tree. Inputs are value-free and bounded to %d unique names of at most %d bytes each, including names loaded with --via-vault.",
+			app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
+		Args: cobra.ExactArgs(1),
+		RunE: runRequiredKeys,
 	}
 	semanticCmd = &cobra.Command{
 		Use:     "semantic <query>",
@@ -119,15 +119,15 @@ var (
 		RunE:  runFind,
 	}
 	sourceCmd = &cobra.Command{
-		Use:   "source <symbol>",
+		Use:   "source [<symbol>]",
 		Short: "Print a symbol's source code (the body behind its signature)",
-		Args:  cobra.ExactArgs(1),
+		Args:  symbolOrAtArgs,
 		RunE:  runSource,
 	}
 	contextCmd = &cobra.Command{
-		Use:   "context <symbol> [<symbol>...]",
+		Use:   "context [<symbol>...]",
 		Short: "Everything about a symbol in one call: definition, callers, callees, tests, notes (pass several for a batch + shared callers)",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  contextOrAtArgs,
 		RunE:  runContext,
 	}
 	projectsCmd = &cobra.Command{
@@ -144,38 +144,73 @@ var (
 	}
 )
 
+func symbolOrAtArgs(cmd *cobra.Command, args []string) error {
+	at, _ := cmd.Flags().GetString("at")
+	if at != "" {
+		return cobra.MaximumNArgs(1)(cmd, args)
+	}
+	return cobra.ExactArgs(1)(cmd, args)
+}
+
+func contextOrAtArgs(cmd *cobra.Command, args []string) error {
+	at, _ := cmd.Flags().GetString("at")
+	if at != "" {
+		return cobra.MaximumNArgs(1)(cmd, args)
+	}
+	return cobra.MinimumNArgs(1)(cmd, args)
+}
+
 func runCallers(cmd *cobra.Command, args []string) error {
-	return runRelation(cmd, args[0], true)
+	return runRelation(cmd, args, true)
 }
 
 func runCallees(cmd *cobra.Command, args []string) error {
-	return runRelation(cmd, args[0], false)
+	return runRelation(cmd, args, false)
 }
 
 // runRelation implements callers/callees. The only differences are the service
-// method and the human label; --json, --lsp, and the not-found/annotation flow
+// method and the human label; --json, --precise, and the not-found/annotation flow
 // are identical.
-func runRelation(cmd *cobra.Command, symbol string, callers bool) error {
+func runRelation(cmd *cobra.Command, args []string, callers bool) error {
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	useLSP, _ := cmd.Flags().GetBool("lsp")
+	usePrecise := relationPreciseRequested(cmd)
+	symbol := ""
+	if len(args) > 0 {
+		symbol = args[0]
+	}
+	selector, err := selectorFromAtFlag(svc, cwd, cmd)
+	if err != nil {
+		return err
+	}
+	if selector == nil && symbol == "" {
+		return fmt.Errorf("%s needs a <symbol> argument or --at <file>:<line>", map[bool]string{true: "callers", false: "callees"}[callers])
+	}
 	var rep *app.RelationReport
 	if callers {
-		if useLSP {
+		if selector != nil && usePrecise {
+			rep, err = svc.PreciseCallersBySelector(cmd.Context(), cwd, *selector)
+		} else if selector != nil {
+			rep, err = svc.CallersBySelector(cwd, *selector)
+		} else if usePrecise {
 			rep, err = svc.PreciseCallers(cmd.Context(), cwd, symbol)
 		} else {
 			rep, err = svc.Callers(cwd, symbol)
 		}
 	} else {
-		if useLSP {
+		if selector != nil && usePrecise {
+			rep, err = svc.PreciseCalleesBySelector(cmd.Context(), cwd, *selector)
+		} else if selector != nil {
+			rep, err = svc.CalleesBySelector(cwd, *selector)
+		} else if usePrecise {
 			rep, err = svc.PreciseCallees(cmd.Context(), cwd, symbol)
 		} else {
 			rep, err = svc.Callees(cwd, symbol)
@@ -184,16 +219,20 @@ func runRelation(cmd *cobra.Command, symbol string, callers bool) error {
 	if err != nil {
 		return err
 	}
+	if !rep.Found {
+		if selector != nil {
+			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
+		}
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
+			fmt.Sprintf("run: codemap find %q", symbol))
+	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	if !rep.Found {
-		printNoSymbol(rep.Symbol, rep.Project)
-		return nil
-	}
 	label := fmt.Sprintf("%s of %s", map[bool]string{true: "Callers", false: "Callees"}[callers], rep.Symbol)
-	if useLSP && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
-		label += " (precise, via gopls)"
+	if usePrecise && rep.Note == "" { // Note set => precise fell back to name-based; don't mislabel
+		label += " (precise, via language server)"
 	}
 	renderRefsCapped(label, rep.Results, relationsDisplayCap)
 	if rep.Note != "" {
@@ -206,13 +245,29 @@ func runRelation(cmd *cobra.Command, symbol string, callers bool) error {
 	return nil
 }
 
-// printNoSymbol reports a symbol that isn't in the index, with a recovery hint:
-// `find` does name/substring search — the right next step when a name was
-// guessed, partial, or misspelled. Shared by the symbol-query commands so the
-// "no such symbol" message (and its fix) reads the same everywhere.
-func printNoSymbol(symbol, project string) {
-	fmt.Printf("no symbol named %q in project %s\n", symbol, project)
-	fmt.Printf("  try: codemap find %s   (search symbols by name/substring)\n", symbol)
+func selectorFromAtFlag(svc *app.Service, cwd string, cmd *cobra.Command) (*app.SymbolSelector, error) {
+	at, _ := cmd.Flags().GetString("at")
+	if at == "" {
+		return nil, nil
+	}
+	file, line, err := parseFileLine(at)
+	if err != nil {
+		return nil, err
+	}
+	rep, err := svc.SymbolAt(cwd, file, line)
+	if err != nil {
+		return nil, err
+	}
+	if rep.Resolution == "none" || rep.Selector == nil {
+		return nil, notFoundError("no symbol found at "+at, "check the file path and line number")
+	}
+	return rep.Selector, nil
+}
+
+func relationPreciseRequested(cmd *cobra.Command) bool {
+	precise, _ := cmd.Flags().GetBool("precise")
+	legacy, _ := cmd.Flags().GetBool("lsp")
+	return precise || legacy
 }
 
 func runImpact(cmd *cobra.Command, args []string) error {
@@ -221,44 +276,44 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	// Resolve the target symbol: either a positional name or --at <file>:<line>.
+	// Resolve the target: a positional name unions matching definitions; --at
+	// carries the exact source selector through the impact traversal.
 	symbol := ""
 	if len(args) > 0 {
 		symbol = args[0]
 	}
-	if at, _ := cmd.Flags().GetString("at"); at != "" {
-		file, line, perr := parseFileLine(at)
-		if perr != nil {
-			return perr
-		}
-		sa, serr := svc.SymbolAt(cwd, file, line)
-		if serr != nil {
-			return serr
-		}
-		if sa.Resolution == "none" {
-			return fmt.Errorf("no symbol found at %s", at)
-		}
-		symbol = sa.Symbol
-	}
-	if symbol == "" {
-		return fmt.Errorf("impact needs a <symbol> argument or --at <file>:<line>")
-	}
-	rep, err := svc.Impact(cwd, symbol, depth)
+	selector, err := selectorFromAtFlag(svc, cwd, cmd)
 	if err != nil {
 		return err
 	}
-	if jsonOut(cmd) {
-		return printJSON(rep)
+	if selector == nil && symbol == "" {
+		return fmt.Errorf("impact needs a <symbol> argument or --at <file>:<line>")
+	}
+	var rep *app.ImpactReport
+	if selector != nil {
+		rep, err = svc.ImpactBySelector(cwd, *selector, depth)
+	} else {
+		rep, err = svc.Impact(cwd, symbol, depth)
+	}
+	if err != nil {
+		return err
 	}
 	if !rep.Found {
-		printNoSymbol(rep.Symbol, rep.Project)
-		return nil
+		if selector != nil {
+			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
+		}
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
+			fmt.Sprintf("run: codemap find %q", symbol))
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
 	}
 	fmt.Printf("Impact of %s (%s)\n", rep.Symbol, rep.Project)
 	for _, l := range rep.Locations {
@@ -315,7 +370,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	since, _ := cmd.Flags().GetString("since")
 	staged, _ := cmd.Flags().GetBool("staged")
@@ -359,8 +414,8 @@ func runReview(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  blast radius:    %d (depth ≤ %d)\n", len(rep.BlastRadius), rep.Depth)
 	fmt.Printf("  covering tests:  %d\n", len(rep.CoveringTests))
 	if rep.Risk != nil {
-		icon := map[string]string{"low": "✓", "medium": "•", "high": "⚠"}[rep.Risk.Level]
-		fmt.Printf("  risk:            %s %s (%.2f)\n", icon, strings.ToUpper(rep.Risk.Level), rep.Risk.Score)
+		icon, label := riskBadge(rep.Risk.Level)
+		fmt.Printf("  risk:            %s %s (%.2f)\n", icon, label, rep.Risk.Score)
 	}
 	if rep.Resolution != "" {
 		fmt.Println("  ⚠ " + rep.Resolution)
@@ -413,25 +468,38 @@ func runRisk(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	rep, err := svc.Risk(cwd, args[0], depth)
+	selector, err := selectorFromAtFlag(svc, cwd, cmd)
 	if err != nil {
 		return err
+	}
+	var rep *app.RiskReport
+	if selector != nil {
+		rep, err = svc.RiskBySelector(cwd, *selector, depth)
+	} else {
+		rep, err = svc.Risk(cwd, args[0], depth)
+	}
+	if err != nil {
+		return err
+	}
+	if !rep.Found {
+		if selector != nil {
+			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
+		}
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
+			fmt.Sprintf("run: codemap find %q", args[0]))
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	if !rep.Found {
-		printNoSymbol(rep.Symbol, rep.Project)
-		return nil
-	}
-	icon := map[string]string{"low": "✓", "medium": "•", "high": "⚠"}[rep.Level]
-	fmt.Printf("Risk of %s (%s): %s %s (%.2f)\n", rep.Symbol, rep.Project, icon, strings.ToUpper(rep.Level), rep.Score)
+	icon, label := riskBadge(rep.Level)
+	fmt.Printf("Risk of %s (%s): %s %s (%.2f)\n", rep.Symbol, rep.Project, icon, label, rep.Score)
 	fmt.Printf("  %d direct callers · %d covering tests\n", rep.Callers, rep.Tests)
 	if rep.Note != "" {
 		fmt.Println("  ⚠ " + rep.Note)
@@ -447,6 +515,25 @@ func runRisk(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func riskBadge(level string) (icon, label string) {
+	label = strings.ToUpper(strings.TrimSpace(level))
+	switch level {
+	case "low":
+		return "✓", label
+	case "medium":
+		return "•", label
+	case "high":
+		return "⚠", label
+	case "unknown":
+		return "?", "UNKNOWN"
+	default:
+		if label == "" {
+			label = "UNKNOWN"
+		}
+		return "?", label
+	}
+}
+
 // runReadOrder renders the suggested reading order for orienting on a codebase:
 // entrypoints and load-bearing hubs first, each with the reason it ranked. --json
 // carries the full ranked list for an agent harness.
@@ -456,7 +543,7 @@ func runReadOrder(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	top, _ := cmd.Flags().GetInt("top")
 	query := ""
 	if len(args) > 0 {
@@ -525,14 +612,14 @@ func parseFileLine(s string) (string, int, error) {
 }
 
 // runFileImpact renders file-level impact: dependent files, blast radius, covering
-// tests, and the safe-to-delete / breaking-change verdicts for a whole file.
+// tests, and conservative deletion/change evidence for a whole file.
 func runFileImpact(cmd *cobra.Command, args []string) error {
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -542,14 +629,15 @@ func runFileImpact(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if !rep.Found {
+		return notFoundError(
+			fmt.Sprintf("no indexed symbols in file %q", rep.File),
+			"check the path relative to the project root")
+	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
 	fmt.Printf("File impact: %s (%s)\n", rep.File, rep.Project)
-	if !rep.Found {
-		fmt.Println("  " + strings.TrimSpace(rep.Note))
-		return nil
-	}
 	if rep.Stale {
 		fmt.Println("  ⚠ index is stale — reindex (ctrl+r / codemap index) for accurate impact")
 	}
@@ -557,16 +645,17 @@ func runFileImpact(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  dependent files:  %d\n", len(rep.DependentFiles))
 	fmt.Printf("  blast radius:     %d (depth ≤ %d)\n", rep.BlastRadius, rep.Depth)
 	fmt.Printf("  covering tests:   %d\n", len(rep.CoveringTests))
-	switch {
-	case rep.Resolution != "":
-		// No call graph → the delete/breaking verdicts are unavailable, not "safe".
-		fmt.Println("  ⚠ verdict unavailable: " + rep.Resolution)
-	case rep.SafeToDelete:
-		fmt.Println("  ✓ safe to delete: nothing outside this file references it")
-	case rep.BreakingChange:
-		fmt.Println("  ⚠ breaking change: externally-called symbols here are untested")
+	switch rep.DeleteVerdict {
+	case app.DeleteVerdictUnsafe:
+		fmt.Println("  ⚠ delete verdict: unsafe — indexed calls prove external dependencies")
 	default:
-		fmt.Println("  • other files depend on this file — change carefully")
+		fmt.Println("  ? delete verdict: unknown — dependency evidence is not complete enough to prove safety")
+	}
+	if rep.Resolution != "" {
+		fmt.Println("  ⚠ call graph: " + rep.Resolution)
+	}
+	if rep.BreakingChange {
+		fmt.Println("  ⚠ breaking change: externally-called symbols here are untested")
 	}
 	if len(rep.DependentFiles) > 0 {
 		fmt.Println("  depended on by:")
@@ -590,18 +679,17 @@ func runRelatedFiles(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
 	rep, err := svc.RelatedFiles(cwd, args[0])
 	if err != nil {
 		return err
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
-	}
-	if !rep.Indexed {
-		fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", rep.Project)
-		return nil
 	}
 	if len(rep.Related) == 0 {
 		fmt.Printf("No files related to %s in the graph.\n", rep.File)
@@ -624,7 +712,7 @@ func runSymbolAt(cmd *cobra.Command, args []string) error {
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	file, line, err := parseFileLine(args[0])
 	if err != nil {
 		return err
@@ -633,39 +721,16 @@ func runSymbolAt(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if rep.Resolution == "none" {
+		return notFoundError(
+			fmt.Sprintf("no symbol at %s:%d", file, line),
+			"check the file path and line number")
+	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	if rep.Resolution == "none" {
-		fmt.Printf("No symbol at %s:%d\n", file, line)
-		return nil
-	}
 	fmt.Printf("%s  %s:%d-%d  (%s, %s)\n", disp(rep.FQN, rep.Symbol), rep.File, rep.StartLine, rep.EndLine, rep.Kind, rep.Resolution)
 	return nil
-}
-
-// fetchVaultKeys shells `tvault [-p project] list [--prefix p] --json` to get the
-// project's secret key NAMES (a JSON array of strings — value-free). The ONLY tvault
-// verb it runs is `list`; `tvault get` is never reachable, so secret values can't
-// enter codemap.
-func fetchVaultKeys(ctx context.Context, project, prefix string) ([]string, error) {
-	tvault, err := exec.LookPath("tvault")
-	if err != nil {
-		return nil, fmt.Errorf("--via-vault needs tinyvault: 'tvault' not found on PATH")
-	}
-	args := []string{"-p", project, "list", "--json"}
-	if prefix != "" {
-		args = append(args, "--prefix", prefix)
-	}
-	out, err := exec.CommandContext(ctx, tvault, args...).Output()
-	if err != nil {
-		return nil, fmt.Errorf("tvault list failed for project %q: %w", project, err)
-	}
-	var keys []string
-	if err := json.Unmarshal(out, &keys); err != nil {
-		return nil, fmt.Errorf("parse tvault list output: %w", err)
-	}
-	return keys, nil
 }
 
 func runSecretImpact(cmd *cobra.Command, args []string) error {
@@ -674,30 +739,24 @@ func runSecretImpact(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	keys := append([]string{}, args...)
-	if vault, _ := cmd.Flags().GetString("via-vault"); vault != "" {
-		prefix, _ := cmd.Flags().GetString("prefix")
-		vk, ferr := fetchVaultKeys(cmd.Context(), vault, prefix)
-		if ferr != nil {
-			return ferr
-		}
-		keys = append(keys, vk...)
-	}
-	if len(keys) == 0 {
+	vault, _ := cmd.Flags().GetString("via-vault")
+	prefix, _ := cmd.Flags().GetString("prefix")
+	if len(keys) == 0 && vault == "" {
 		return fmt.Errorf("supply one or more secret key names, or --via-vault <project> to fetch them")
 	}
-	rep, err := app.NewService(sess).SecretImpact(cwd, keys, depth)
+	svc := app.NewService(sess)
+	if ok, ierr := requireIndexed(cmd, svc); ierr != nil || !ok {
+		return ierr
+	}
+	rep, err := svc.SecretImpactWithInventory(cmd.Context(), cwd, keys, depth, vault, prefix)
 	if err != nil {
 		return err
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
-	}
-	if !rep.Indexed {
-		fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", rep.Project)
-		return nil
 	}
 	for _, k := range rep.Keys {
 		warn := ""
@@ -728,30 +787,29 @@ func runRequiredKeys(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	keys, _ := cmd.Flags().GetStringSlice("keys")
-	if vault, _ := cmd.Flags().GetString("via-vault"); vault != "" {
-		prefix, _ := cmd.Flags().GetString("prefix")
-		vk, ferr := fetchVaultKeys(cmd.Context(), vault, prefix)
-		if ferr != nil {
-			return ferr
-		}
-		keys = append(keys, vk...)
-	}
-	if len(keys) == 0 {
+	vault, _ := cmd.Flags().GetString("via-vault")
+	prefix, _ := cmd.Flags().GetString("prefix")
+	if len(keys) == 0 && vault == "" {
 		return fmt.Errorf("supply candidate keys with --keys K1,K2 or --via-vault <project>")
 	}
-	rep, err := app.NewService(sess).RequiredKeys(cwd, args[0], keys, depth)
+	svc := app.NewService(sess)
+	if ok, ierr := requireIndexed(cmd, svc); ierr != nil || !ok {
+		return ierr
+	}
+	rep, err := svc.RequiredKeysWithInventory(cmd.Context(), cwd, args[0], keys, depth, vault, prefix)
 	if err != nil {
 		return err
 	}
+	if !rep.Found {
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Entrypoint, rep.Project),
+			fmt.Sprintf("run: codemap find %q", rep.Entrypoint))
+	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
-	}
-	if !rep.Found {
-		printNoSymbol(rep.Entrypoint, rep.Project)
-		return nil
 	}
 	// One key per line — pipe-friendly: `… | xargs -I{} tvault seal --key {}`.
 	for _, k := range rep.RequiredKeys {
@@ -766,7 +824,7 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -775,6 +833,11 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 	rep, err := svc.Semantic(cmd.Context(), cwd, strings.Join(args, " "), top)
 	if err != nil {
 		return err
+	}
+	if len(rep.Hits) == 0 && rep.Mode != "none" {
+		return notFoundError(
+			fmt.Sprintf("no semantic matches for %q", rep.Query),
+			fmt.Sprintf("run: codemap find %q", rep.Query))
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
@@ -802,7 +865,7 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -816,9 +879,8 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 		return printJSON(rep)
 	}
 	if len(rep.Hotspots) == 0 {
-		// Indexed (requireIndexed passed) but no call edges → almost always a
-		// TS/JS/Python project indexed name-based, which has no call graph.
-		fmt.Printf("no hotspots in %s (no call edges — TypeScript/JavaScript/Python need 'codemap index --precise')\n", rep.Project)
+		fmt.Printf("Hotspots in %s: none\n", rep.Project)
+		renderCallGraphReliability(rep.CallGraph, rep.Resolution, rep.Note)
 		return nil
 	}
 	fmt.Printf("Hotspots in %s:\n", rep.Project)
@@ -834,8 +896,9 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 	// The ⚠ rows say WHAT is wrong; point at the fix. Inflation only happens on a
 	// name-based index (precise edges are exact), so the hint is always actionable here.
 	if anyInflated {
-		fmt.Println("  → ⚠ counts are inflated by same-named symbols; 'codemap index --precise' resolves them exactly")
+		fmt.Println("  → ⚠ counts are inflated by same-named symbols; 'codemap index --precise' records exact edges for files it resolves")
 	}
+	renderCallGraphReliability(rep.CallGraph, rep.Resolution, rep.Note)
 	return nil
 }
 
@@ -845,7 +908,7 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -858,8 +921,29 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	renderRefs(fmt.Sprintf("Orphans in %s (no callers — dead-code candidates)", rep.Project), rep.Orphans)
+	label := fmt.Sprintf("Orphans in %s (no callers — dead-code candidates)", rep.Project)
+	if rep.CallGraph == app.CallGraphUnresolved {
+		label = fmt.Sprintf("Orphan candidates in %s (call graph unresolved)", rep.Project)
+	}
+	renderRefs(label, rep.Orphans)
+	renderCallGraphReliability(rep.CallGraph, rep.Resolution, rep.Note)
 	return nil
+}
+
+func renderCallGraphReliability(callGraph, resolution, note string) {
+	if callGraph != "" {
+		fmt.Printf("  call graph: %s\n", callGraph)
+	}
+	if resolution != "" {
+		if callGraph == app.CallGraphUnresolved && !strings.ContainsAny(strings.TrimSpace(resolution), " \t\n") {
+			fmt.Printf("  ⚠ call graph unavailable for %s — run 'codemap index --precise'\n", resolution)
+		} else {
+			fmt.Println("  ⚠ " + resolution)
+		}
+	}
+	if note != "" && note != resolution {
+		fmt.Println("  ⚠ " + note)
+	}
 }
 
 func runPath(cmd *cobra.Command, args []string) error {
@@ -868,7 +952,7 @@ func runPath(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
@@ -877,16 +961,23 @@ func runPath(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if !pathReportAnswered(rep) {
+		return pathMissError(rep)
+	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
 	if !rep.Found {
-		if rep.Note != "" {
-			fmt.Println(rep.Note)
+		if rep.CallGraph == app.CallGraphUnresolved {
+			fmt.Printf("Call path from %s to %s is unresolved\n", rep.From, rep.To)
 		} else {
-			fmt.Printf("no call path from %s to %s\n", rep.From, rep.To)
+			fmt.Printf("No call path from %s to %s\n", rep.From, rep.To)
 		}
-		renderAnnotations(rep.Annotations) // a pinned path note is worth showing even with no current path
+		renderCallGraphReliability(rep.CallGraph, rep.Resolution, rep.Note)
+		if rep.Stale {
+			fmt.Println("  ⚠ index is stale — reindex before trusting this path result")
+		}
+		renderAnnotations(rep.Annotations)
 		return nil
 	}
 	names := make([]string, 0, len(rep.Path))
@@ -901,13 +992,25 @@ func runPath(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func pathReportAnswered(rep *app.PathReport) bool {
+	return rep != nil && (rep.Found || rep.CallGraph != app.CallGraphNone)
+}
+
+func pathMissError(rep *app.PathReport) error {
+	msg := rep.Note
+	if msg == "" {
+		msg = fmt.Sprintf("no call path from %s to %s", rep.From, rep.To)
+	}
+	return notFoundError(msg, "check both symbols with codemap find")
+}
+
 func runFind(cmd *cobra.Command, args []string) error {
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	top, _ := cmd.Flags().GetInt("top")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
@@ -917,13 +1020,11 @@ func runFind(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(rep.Hits) == 0 {
+		return notFoundError(fmt.Sprintf("no symbols matching %q", rep.Query), "try a broader name or substring")
+	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
-	}
-	if len(rep.Hits) == 0 {
-		// requireIndexed passed, so the project IS indexed — the name just isn't here.
-		fmt.Printf("no symbols matching %q\n", rep.Query)
-		return nil
 	}
 	for _, h := range rep.Hits {
 		fmt.Printf("%s%-9s %-26s %s\n", annMark(h.Annotations), h.Kind, fmt.Sprintf("%s:%d", h.File, h.StartLine),
@@ -938,7 +1039,7 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
@@ -947,13 +1048,13 @@ func runSymbols(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(rep.Symbols) == 0 {
+		return notFoundError(
+			fmt.Sprintf("no indexed symbols in file %q", rep.File),
+			"check the path relative to the project root")
+	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
-	}
-	if len(rep.Symbols) == 0 {
-		// requireIndexed passed, so the project IS indexed — the file path isn't.
-		fmt.Printf("no symbols in %s (file not in the index — check the path, relative to the project root)\n", rep.File)
-		return nil
 	}
 	fmt.Printf("%s (%d symbols):\n", rep.File, len(rep.Symbols))
 	for _, s := range rep.Symbols {
@@ -972,17 +1073,33 @@ func runSource(cmd *cobra.Command, args []string) error {
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	cwd, _ := os.Getwd()
-	rep, err := svc.Source(cwd, args[0])
+	cwd := targetDir(cmd)
+	selector, err := selectorFromAtFlag(svc, cwd, cmd)
 	if err != nil {
 		return err
 	}
-	if jsonOut(cmd) {
-		return printJSON(rep)
+	if selector == nil && len(args) == 0 {
+		return fmt.Errorf("source needs a <symbol> argument or --at <file>:<line>")
+	}
+	var rep *app.SourceReport
+	if selector != nil {
+		rep, err = svc.SourceBySelector(cwd, *selector)
+	} else {
+		rep, err = svc.Source(cwd, args[0])
+	}
+	if err != nil {
+		return err
 	}
 	if len(rep.Matches) == 0 {
-		fmt.Printf("no symbol named %q (is the project indexed?)\n", rep.Symbol)
-		return nil
+		if selector != nil {
+			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
+		}
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
+			fmt.Sprintf("run: codemap find %q", rep.Symbol))
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
 	}
 	for i, mch := range rep.Matches {
 		if i > 0 {
@@ -1031,27 +1148,17 @@ func runDocs(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-// requireIndexed reports whether the current project has been indexed, printing a
-// clear "run codemap index" message first if not — text, or a structured
-// {indexed:false,…} object under --json so agents get the same signal. Query
-// commands gate on it so a cold repo doesn't yield misleading empty results.
+// requireIndexed reports whether the target project has been indexed. A cold
+// repo returns the exit-2 errNotIndexed sentinel; jsonHandler turns it into the
+// same structured failure envelope as every other CLI error.
 func requireIndexed(cmd *cobra.Command, svc *app.Service) (bool, error) {
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	indexed, name, err := svc.Indexed(cwd)
 	if err != nil {
 		return false, err
 	}
 	if !indexed {
-		if jsonOut(cmd) {
-			_ = printJSON(map[string]any{
-				"project": name,
-				"indexed": false,
-				"note":    "project not indexed — run 'codemap index' first",
-			})
-		} else {
-			fmt.Printf("Project %q is not indexed yet. Run 'codemap index'.\n", name)
-		}
-		return false, nil
+		return false, notIndexedError(name)
 	}
 	return true, nil
 }

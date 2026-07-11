@@ -34,9 +34,7 @@ var (
 func runBranchSwitch(cmd *cobra.Command, _ []string) error {
 	root, _ := cmd.Flags().GetString("root")
 	if root == "" {
-		if wd, err := os.Getwd(); err == nil {
-			root = wd
-		}
+		root = targetDir(cmd)
 	}
 	if install, _ := cmd.Flags().GetBool("install-hook"); install {
 		bin := "codemap"
@@ -50,7 +48,7 @@ func runBranchSwitch(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("installed git post-checkout hook: %s\n", path)
 		return nil
 	}
-	sess, err := openSession(cmd)
+	sess, err := openSessionAt(cmd, root)
 	if err != nil {
 		return err
 	}
@@ -79,11 +77,9 @@ func runBranchSwitch(cmd *cobra.Command, _ []string) error {
 func runBranchSnapshot(cmd *cobra.Command, _ []string) error {
 	root, _ := cmd.Flags().GetString("root")
 	if root == "" {
-		if wd, err := os.Getwd(); err == nil {
-			root = wd
-		}
+		root = targetDir(cmd)
 	}
-	sess, err := openSession(cmd)
+	sess, err := openSessionAt(cmd, root)
 	if err != nil {
 		return err
 	}
@@ -110,14 +106,8 @@ func runBranchSnapshot(cmd *cobra.Command, _ []string) error {
 // runBranchStatus reports the read-only git state of the repo at the given path
 // (or cwd) — the foundation for branch-aware index switching. No writes.
 func runBranchStatus(cmd *cobra.Command, args []string) error {
-	dir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	if len(args) > 0 {
-		dir = args[0]
-	}
-	sess, err := openSession(cmd)
+	dir := targetDirArg(cmd, args)
+	sess, err := openSessionAt(cmd, dir)
 	if err != nil {
 		return err
 	}

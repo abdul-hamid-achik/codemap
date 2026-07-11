@@ -238,9 +238,10 @@ func stripVersionSuffix(s string) string {
 	return s[:i]
 }
 
-// writeAllImportEdges writes file→file EdgeImports edges in a single
-// project-wide transaction, after all parallel indexFile workers
-// have joined. Doing it inside indexFile races with the target file's
+// writeImportEdgesForFiles writes file→file EdgeImports edges in a single
+// transaction, after all indexFile workers have joined. IndexProject passes the
+// whole project; IndexFiles passes the incrementally processed set. Doing it
+// inside indexFile races with the target file's
 // own indexFile call — a concurrent DeleteNodesInFileTx (the first
 // step of every indexFile) cascades to delete the imports edge that
 // the previous worker just wrote, because the file node it points to
@@ -251,7 +252,7 @@ func stripVersionSuffix(s string) string {
 // oblivious to import resolution (the worker pipeline stays simple),
 // and re-extract is cheap — no graph writes, no I/O beyond the
 // already-warm file cache.
-func (ix *Indexer) writeAllImportEdges(ctx context.Context, projectID int64, files []fileTask, impIdx *importIndex) error {
+func (ix *Indexer) writeImportEdgesForFiles(ctx context.Context, projectID int64, files []fileTask, impIdx *importIndex) error {
 	if impIdx == nil {
 		return nil
 	}
@@ -298,7 +299,16 @@ func (ix *Indexer) writeAllImportEdges(ctx context.Context, projectID int64, fil
 // file node is needed for the target — the real file node (with its
 // real line range) is used.
 func writeImportEdgesForFileTx(tx *sql.Tx, projectID int64, ft fileTask, fromID int64, fr *extract.FileResult) error {
-	if len(fr.Imports) == 0 || ft.importIndex == nil {
+	if ft.importIndex == nil {
+		return nil
+	}
+	// Replace, don't append: the full incremental pass visits unchanged files
+	// too, and the watcher may receive duplicate events. Deleting first also
+	// removes imports that disappeared from a changed source file.
+	if _, err := tx.Exec("DELETE FROM edges WHERE source_id=? AND edge_type=?", fromID, graph.EdgeImports); err != nil {
+		return err
+	}
+	if len(fr.Imports) == 0 {
 		return nil
 	}
 	targets := make(map[string]int64, len(fr.Imports))

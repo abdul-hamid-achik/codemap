@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/spf13/cobra"
@@ -31,7 +30,7 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	source, _ := cmd.Flags().GetString("source")
 	note, _ := cmd.Flags().GetString("note")
 	data, _ := cmd.Flags().GetString("data")
@@ -86,7 +85,7 @@ func runAnnotations(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
+	cwd := targetDir(cmd)
 	svc := app.NewService(sess)
 
 	if rm, _ := cmd.Flags().GetInt64("rm"); rm > 0 {

@@ -37,7 +37,7 @@ type availabler interface {
 
 // Doctor inspects the local environment so a user can see, before indexing, which
 // languages and features are ready: the go toolchain (`--precise` Go), gopls
-// (`--lsp`), each language server (TypeScript/JavaScript, Python), and Ollama
+// (one-off callers/callees `--precise`), each language server (TypeScript/JavaScript, Python), and Ollama
 // embeddings (semantic search). It makes no changes and needs no index.
 func (svc *Service) Doctor(ctx context.Context) *DoctorReport {
 	rep := &DoctorReport{DataDir: config.DataDir()}
@@ -64,7 +64,7 @@ func (svc *Service) Doctor(ctx context.Context) *DoctorReport {
 		}
 	}
 	tool("go toolchain", "go", "index --precise on Go", "install Go: https://go.dev/dl")
-	tool("gopls", "gopls", "callers/callees --lsp on Go", "go install golang.org/x/tools/gopls@latest")
+	tool("gopls", "gopls", "callers/callees --precise on Go", "go install golang.org/x/tools/gopls@latest")
 
 	// Language servers for the LSP-backed languages.
 	for _, spec := range lspsrc.DefaultServers {

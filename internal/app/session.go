@@ -20,10 +20,11 @@ import (
 type Session struct {
 	Config *config.Config
 
-	graph     *graph.Store
-	vectors   *vector.Store
-	vectorsRO *vector.Store
-	embedder  embed.Provider // optional override (tests)
+	graph              *graph.Store
+	vectors            *vector.Store  // profile-validated read/write handle
+	vectorsRO          *vector.Store  // profile-validated read handle
+	vectorsMaintenance *vector.Store  // intentionally unvalidated; cleanup only
+	embedder           embed.Provider // optional override (tests)
 
 	// vecSession manages the lazy dual-handle DB access (RO with shared
 	// flock, RW with exclusive flock). Created lazily on first vector open.
@@ -116,6 +117,44 @@ func (s *Session) Vectors() (*vector.Store, error) {
 	return s.vectors, nil
 }
 
+// VectorsForMaintenance opens an existing vector collection for deletion and
+// sync only. It bypasses the embedding-profile guard because cleanup must still
+// work after a model/profile change; it never creates a vector database or
+// collection. Query and insert paths must use Vectors/VectorsReadOnly instead.
+func (s *Session) VectorsForMaintenance() (*vector.Store, error) {
+	if s.vectors != nil {
+		return s.vectors, nil // already profile-validated and writable
+	}
+	if s.vectorsMaintenance != nil {
+		return s.vectorsMaintenance, nil
+	}
+	if !fileExists(config.VeclitePath()) {
+		return nil, nil
+	}
+	// ReadWrite closes vecSession's cached RO database before acquiring the
+	// exclusive handle. Drop the Store wrapper too so VectorsReadOnly cannot
+	// later return a wrapper around that closed database.
+	if s.vectorsRO != nil {
+		_ = s.vectorsRO.Close()
+		s.vectorsRO = nil
+	}
+	db, err := s.vecSess().ReadWrite()
+	if err != nil {
+		return nil, err
+	}
+	v, err := vector.OpenExistingFromDB(db)
+	if errors.Is(err, vector.ErrCollectionNotFound) {
+		return nil, s.closeVectorSession()
+	}
+	if err != nil {
+		return nil, errors.Join(err, s.closeVectorSession())
+	}
+	// Never place this guard-bypassing wrapper in s.vectors: normal query/insert
+	// paths must call OpenFromDB and validate the configured embedding profile.
+	s.vectorsMaintenance = v
+	return s.vectorsMaintenance, nil
+}
+
 // ReleaseVectors closes the profile-validated writer acquired by Vectors and
 // releases its exclusive flock. Long-lived processes must call this after each
 // index operation so subsequent reads reopen a fresh shared handle and unrelated
@@ -137,8 +176,40 @@ func (s *Session) ReleaseVectors() error {
 	return err
 }
 
+// ReleaseMaintenanceVectors releases the exclusive vecSession handle acquired
+// solely for cleanup. It is safe to call unconditionally after a no-embed index:
+// when maintenance reused a pre-existing validated RW store, no maintenance
+// wrapper exists and this is a no-op.
+func (s *Session) ReleaseMaintenanceVectors() error {
+	if s.vectorsMaintenance == nil {
+		return nil
+	}
+	var err error
+	err = errors.Join(err, s.vectorsMaintenance.Close())
+	s.vectorsMaintenance = nil
+
+	// A validated writer opened after maintenance now owns the RW lifecycle; do
+	// not close its database. This also protects future callers that explicitly
+	// validate before releasing the cleanup wrapper.
+	if s.vectors != nil {
+		return err
+	}
+	// Any read wrapper opened after maintenance points at vecSession's RW DB
+	// (ReadOnly returns the cached writer). Invalidate it before releasing RW.
+	if s.vectorsRO != nil {
+		err = errors.Join(err, s.vectorsRO.Close())
+		s.vectorsRO = nil
+	}
+	if s.vecSession != nil {
+		err = errors.Join(err, s.closeVectorSession())
+	}
+	return err
+}
+
 // closeVectorSession releases all veclite DB handles and resets the manager so
-// the next vector operation reopens lazily.
+// the next vector operation reopens lazily. The pinned veclite/session version
+// has no per-RW release API; cleanup-only callers use this only when no validated
+// writer is cached.
 func (s *Session) closeVectorSession() error {
 	if s.vecSession == nil {
 		return nil
@@ -181,6 +252,10 @@ func (s *Session) Close() error {
 	if s.vectorsRO != nil {
 		err = errors.Join(err, s.vectorsRO.Close())
 		s.vectorsRO = nil
+	}
+	if s.vectorsMaintenance != nil {
+		err = errors.Join(err, s.vectorsMaintenance.Close())
+		s.vectorsMaintenance = nil
 	}
 	if s.vecSession != nil {
 		err = errors.Join(err, s.vecSession.Close())

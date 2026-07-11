@@ -13,8 +13,8 @@
 
 ## Current state — what's shipped
 Released through **v0.36.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
-5 cross-compiled targets. Three surfaces over one store: **CLI**, **MCP** (`codemap serve`, 35 tools),
-**studio** TUI (Graph/Metrics/Impact/Search + `?` help + source & context
+5 cross-compiled targets. Three surfaces over one store: **CLI**, **MCP** (`codemap serve`, 36 tools),
+**studio** TUI (Graph/Metrics/Impact/Search/Path + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
 (one typescript-language-server for TS+JS, pyright for Python; `--precise` = the unified exact pass —
 go/types for Go, LSP `callHierarchy` for the rest). Semantic vectors via veclite + Ollama nomic-embed-text
@@ -303,16 +303,15 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
     `// Code generated … DO NOT EDIT.` before the package clause) in `indexFile` — robust across
     sqlc/protobuf/stringer regardless of filename; skipped files surface in `Result.Generated` + record their
     hash (no false staleness). Tests `TestIndexSkipsGeneratedCode`/`TestIsGenerated`; `task check` green.
-- [ ] **P4 — studio for humans** (capped — human surface on an agent-first project; do the cheap wins,
-  defer the rest until P0 lands): mouse support (`run.go:14` passes zero options — no `WithMouseCellMotion`);
-  drive `ctrl+r` from empty/cold states instead of telling the user to open a shell (`view.go:399-408`).
-  Second wave: a **Path tab** (`svc.Path` has zero TUI surface), in-TUI annotate (svc.AnnotateNode exists,
-  rendered but read-only), jump-to-`$EDITOR` + yank `file:line`, blast-radius-as-tree, scrollbars, fix the
-  per-tab `q`/digit key traps.
+- [ ] **P4 — studio for humans** (capped — human surface on an agent-first project):
+  - [x] **Path tab** — source/target editors, exact selector-aware endpoints, async shortest-call-path lookup,
+    explicit confidence/stale/unresolved states, vim+arrow navigation, and Graph/source/context drills.
+  - [ ] Mouse support; drive `ctrl+r` from empty/cold states; in-TUI annotate; jump-to-`$EDITOR` + yank
+    `file:line`; blast-radius-as-tree; scrollbars; remaining per-tab `q` traps.
 - [ ] **P5 — Ecosystem integration** (the EI.* epic below).
 - [ ] **Unbuilt query/tooling debt:** E2.3 unified extractor (LSP-over-go/parser merge + FQN dedupe);
-  E3.2 `codemap_semantic_callers`; E3.3 `codemap_refactor_plan`; E2.5 remainder (`references`/`symbols`/
-  `dependencies` MCP tools); E3.1 TODO (`impact` semantically-similar via `vector.Similar`); E5.1 high-
+  E3.2 `codemap_semantic_callers`; E3.3 `codemap_refactor_plan`; E2.5 remainder (`references` MCP tool);
+  E3.1 TODO (`impact` semantically-similar via `vector.Similar`); E5.1 high-
   coverage unit sweep.
 - [ ] **Process:** cut **0.10.0** (FIX.md §1/§2/§3 are on `main`; needs explicit auth). Move/delete the
   **untracked** `FIX.md` (it's fully addressed and outside the root-`.md` convention).
@@ -672,7 +671,7 @@ _v0.14.0 shipped 2026-06-25._
 ## Original epic checklist — remaining open work
 Epics 0–6 are complete and shipped through v0.9.1 (full per-item detail in the vault archive). Remaining:
 - [ ] **E2.3** unified extractor (merge LSP precedence over go/parser, dedupe by FQN) — Go + LSP paths run side-by-side today.
-- [~] **E2.5** MCP query tools — callees/impact/path/hotspots/orphans done; `references`/`symbols`/`dependencies` still TODO.
+- [~] **E2.5** MCP query tools — callees/impact/path/hotspots/orphans/symbols/dependencies done; `references` remains.
 - [ ] **E3.2** `codemap_semantic_callers` (semantic → graph expansion) · [ ] **E3.3** `codemap_refactor_plan`.
 - [ ] **E3.1 follow-up** — `impact` add semantically-similar (needs `vector.Similar`).
 - [ ] **E4.2** ntcharts real charts for Metrics (validate R1 first) · **E4.3** Graph node-link/Sugiyama canvas (future).

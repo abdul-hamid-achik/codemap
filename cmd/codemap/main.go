@@ -10,10 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -35,11 +37,36 @@ var (
 // every command uses this instead of a bare os.Getwd() so the CLI can
 // target a project the way MCP tools do (uniform 'path' param).
 func targetDir(cmd *cobra.Command) string {
-	if p, _ := cmd.PersistentFlags().GetString("path"); p != "" {
+	p, _ := cmd.Root().PersistentFlags().GetString("path")
+	if p != "" {
+		p = config.ExpandPath(p)
+		if abs, err := filepath.Abs(p); err == nil {
+			return abs
+		}
 		return p
 	}
 	d, _ := os.Getwd()
 	return d
+}
+
+// targetDirArg gives an optional positional project path the same semantics as
+// -C. An explicitly-set -C wins when both are supplied; otherwise the positional
+// path wins, then cwd. Commands with a historical [path] argument (index,
+// studio, daemon start, branch-status) use this helper consistently.
+func targetDirArg(cmd *cobra.Command, args []string) string {
+	if pathFlagChanged(cmd) || len(args) == 0 || args[0] == "" {
+		return targetDir(cmd)
+	}
+	p := config.ExpandPath(args[0])
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
+}
+
+func pathFlagChanged(cmd *cobra.Command) bool {
+	f := cmd.Root().PersistentFlags().Lookup("path")
+	return f != nil && f.Changed
 }
 
 func init() {
@@ -47,11 +74,21 @@ func init() {
 }
 
 func main() {
+	jsonRequested := jsonRequestedInArgs(os.Args[1:])
+	if jsonRequested {
+		// Unknown flags and Args validation fail before a RunE wrapper can set
+		// SilenceErrors. Suppress Cobra's plain stderr so main can emit the same
+		// stdout JSON envelope as handler failures.
+		rootCmd.SilenceErrors = true
+	}
 	if err := rootCmd.Execute(); err != nil {
 		// A --json failure already printed its structured envelope and carries
 		// its exit code through exitCoded — honor it over the generic mapping.
 		if code, ok := asExitCoded(err); ok {
 			os.Exit(code)
+		}
+		if jsonRequested {
+			os.Exit(jsonFailure(err).code)
 		}
 		// P2-06: map not-found / not-indexed to exit 2 so scripts
 		// can distinguish a dead-end from an operational failure
@@ -75,9 +112,6 @@ var rootCmd = &cobra.Command{
 	// P2-05: global --path / -C flag so every command can target a project
 	// directory the way MCP tools do (uniform 'path' param). Falls back to
 	// os.Getwd() when absent, so backward compat is exact.
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Resolve --path once; targetDir() reads it.
-	},
 	Long: `codemap combines a structural code graph (LSP + parsers) with semantic
 vector search (veclite) and exposes both as a unified query layer.
 
@@ -132,9 +166,11 @@ func init() {
 	// gopls (Go), typescript-language-server (TS/JS/Vue), or pyright
 	// (Python) per the project's present languages.
 	callersCmd.Flags().Bool("precise", false, "use the language server for precise callers (gopls / typescript-language-server / pyright, per the project's languages)")
+	callersCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	callersCmd.Flags().Bool("lsp", false, "(alias for --precise; kept for back-compat)")
 	_ = callersCmd.Flags().MarkHidden("lsp")
 	calleesCmd.Flags().Bool("precise", false, "use the language server for precise callees (gopls / typescript-language-server / pyright, per the project's languages)")
+	calleesCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	calleesCmd.Flags().Bool("lsp", false, "(alias for --precise; kept for back-compat)")
 	_ = calleesCmd.Flags().MarkHidden("lsp")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
@@ -145,6 +181,7 @@ func init() {
 	readOrderCmd.Flags().Int("top", 20, "maximum entries to rank")
 	fileImpactCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
 	riskCmd.Flags().Int("depth", 3, "max hops for the fan-in/blast analysis")
+	riskCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	secretImpactCmd.Flags().Int("depth", 3, "max hops for each key's blast radius")
 	secretImpactCmd.Flags().String("via-vault", "", "fetch the key NAMES from `tvault -p <project> list` (value-free) instead of passing them")
 	secretImpactCmd.Flags().String("prefix", "", "with --via-vault, only keys with this prefix (e.g. STRIPE_)")
@@ -153,10 +190,12 @@ func init() {
 	requiredKeysCmd.Flags().String("via-vault", "", "use all of `tvault -p <project> list` as the candidate keys (value-free)")
 	requiredKeysCmd.Flags().String("prefix", "", "with --via-vault, restrict candidates to this prefix")
 	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
+	contextCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
 	findCmd.Flags().Int("top", 50, "maximum results")
+	sourceCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	annotateCmd.Flags().String("source", "note", "annotation producer (ecosystem convention): note, vecgrep, tinyvault, fcheap, vidtrace, cairntrace, glyphrun, mongosh, postgres")
 	annotateCmd.Flags().String("note", "", "free-form note text")
 	annotateCmd.Flags().String("data", "", "opaque data payload (e.g. JSON from a DB query)")
@@ -172,18 +211,23 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, configCmd, daemonCmd)
 
-	// Wrap every subcommand's RunE so a --json failure prints the structured
+	// Wrap every descendant's RunE so a --json failure prints the structured
 	// {ok,error,code,hint} envelope to stdout with a stable machine code, and
 	// returns an exitCoded error main() maps to the documented exit taxonomy.
-	// Commands without a RunE (e.g. version's Run) and the root's own RunE are
-	// left untouched; jsonHandler is a no-op on success.
-	for _, c := range rootCmd.Commands() {
+	// This must be recursive: config/cache/daemon subcommands previously bypassed
+	// the envelope because only root's direct children were wrapped.
+	wrapJSONHandlers(rootCmd)
+}
+
+func wrapJSONHandlers(parent *cobra.Command) {
+	for _, c := range parent.Commands() {
 		if c.RunE != nil {
 			c.RunE = jsonHandler(c.RunE)
 		}
+		wrapJSONHandlers(c)
 	}
 }
 
@@ -239,12 +283,33 @@ func capList[T any](xs []T, n int) (shown []T, more int) {
 }
 
 func openSession(cmd *cobra.Command) (*app.Session, error) {
+	return openSessionAt(cmd, targetDir(cmd))
+}
+
+// openSessionAt loads project-local configuration as though dir were the
+// process working directory, then restores the caller's cwd. This makes -C and
+// positional project paths affect both service calls and config discovery.
+func openSessionAt(cmd *cobra.Command, dir string) (*app.Session, error) {
 	cfgPath, _ := cmd.Flags().GetString("config")
+	oldwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	if dir != "" {
+		if err := os.Chdir(dir); err != nil {
+			return nil, fmt.Errorf("change to project directory %q: %w", dir, err)
+		}
+		defer func() { _ = os.Chdir(oldwd) }()
+	}
 	sess, err := app.Open(cfgPath)
 	if err != nil {
 		return nil, err
 	}
 	applyConfigFlags(cmd, sess.Config) // flags win over config file + env
+	if err := sess.Config.Validate(); err != nil {
+		_ = sess.Close()
+		return nil, err
+	}
 	return sess, nil
 }
 

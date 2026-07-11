@@ -296,6 +296,9 @@ func (ix *Indexer) pruneDeleted(projectID int64, projectName, root string, res *
 		if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
 			return err
 		}
+		if err := ix.graph.ClearCallGraphResolved(projectID, rel); err != nil {
+			return err
+		}
 		if ix.vectors != nil {
 			if _, err := ix.vectors.DeleteByFile(projectName, rel); err != nil {
 				return err
@@ -356,11 +359,92 @@ type fileTask struct {
 	rel  string
 	lang string
 	ext  extract.Extractor
-	// importIndex is the project-wide package→file map built once in
-	// IndexProject; it's nil for IndexFiles callers (the incremental
-	// watcher path doesn't re-resolve imports — the file→file graph
-	// from the prior full index is preserved as-is).
+	// importIndex is the project-wide package→file map built once per index
+	// operation and shared by both IndexProject and IndexFiles tasks.
 	importIndex *importIndex
+}
+
+// changedFilePaths returns the files whose current content differs from the
+// last successfully indexed hash. It runs before any node replacement so the
+// caller graph can still be inspected for inbound sources that also need to be
+// refreshed.
+func (ix *Indexer) changedFilePaths(projectID int64, files []fileTask) ([]string, error) {
+	state, err := ix.graph.ProjectIndexState(projectID)
+	if err != nil {
+		return nil, err
+	}
+	indexed := make(map[string]string, len(state))
+	for _, entry := range state {
+		indexed[entry.FilePath] = entry.FileHash
+	}
+
+	changed := make([]string, 0)
+	for _, ft := range files {
+		content, err := os.ReadFile(ft.abs)
+		if err != nil {
+			continue // indexFile will surface the read error in the normal pass
+		}
+		if indexed[ft.rel] != sha256hex(content) {
+			changed = append(changed, ft.rel)
+		}
+	}
+	return changed, nil
+}
+
+// expandWithInboundSources adds every file whose current outbound graph edges
+// target one of rels. The returned added slice is the subset whose cached hash
+// must be cleared so unchanged callers/importers are actually re-extracted.
+// This is shared by full incremental indexing and the watcher path.
+func (ix *Indexer) expandWithInboundSources(projectID int64, rels []string) (expanded, added []string, err error) {
+	expanded = append([]string(nil), rels...)
+	seen := make(map[string]bool, len(rels))
+	for _, rel := range rels {
+		seen[rel] = true
+	}
+	// Walk the inbound closure, not only the first hop. Re-extracting a direct
+	// caller replaces its nodes too, which cascades edges from callers above it.
+	// The seen set both dedupes and terminates cycles.
+	for i := 0; i < len(expanded); i++ {
+		rel := expanded[i]
+		sources, queryErr := ix.graph.SourceFilesTargeting(projectID, rel)
+		if queryErr != nil {
+			return nil, nil, queryErr
+		}
+		for _, source := range sources {
+			if seen[source] {
+				continue
+			}
+			seen[source] = true
+			expanded = append(expanded, source)
+			added = append(added, source)
+		}
+	}
+	return expanded, added, nil
+}
+
+// incrementalImportIndex builds the project-wide import lookup without walking
+// the whole tree on every watcher event. Previously indexed files plus the
+// event's paths are sufficient to resolve imports to graph file nodes.
+func incrementalImportIndex(root string, rels []string) *importIndex {
+	seen := make(map[string]bool, len(rels))
+	files := make([]fileTask, 0, len(rels))
+	for _, rel := range rels {
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		abs := filepath.Join(root, rel)
+		info, err := os.Stat(abs)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		lang := extract.LanguageForPath(abs)
+		if lang == "" {
+			continue
+		}
+		files = append(files, fileTask{abs: abs, rel: rel, lang: lang})
+	}
+	return newImportIndex(root, files)
 }
 
 // embedItem is one node awaiting a semantic vector: its graph node id, the text
@@ -385,12 +469,21 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	res := &Result{}
 	defer func() { _ = ix.Close() }() // shut down any language servers spawned below
 
+	// A structure-only run is an explicit project-wide semantic mode change, not
+	// merely "do not update changed vectors". Clear the full project scope before
+	// any hash short-circuit or cancellation can leave old embeddings queryable.
+	if ix.embedder == nil && ix.vectors != nil {
+		if err := ix.clearProjectVectors(projectName); err != nil {
+			return nil, err
+		}
+	}
+
 	if opts.Reindex {
 		if err := ix.graph.WipeProject(projectID); err != nil {
 			return nil, err
 		}
-		if ix.vectors != nil {
-			if _, err := ix.vectors.DeleteByProject(projectName); err != nil {
+		if ix.vectors != nil && ix.embedder != nil {
+			if err := ix.clearProjectVectors(projectName); err != nil {
 				return nil, err
 			}
 		}
@@ -420,6 +513,51 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 			res.Languages = map[string]int{}
 		}
 		res.Languages[f.lang]++
+	}
+
+	// A repeat Go --precise run must be able to downgrade a package that now
+	// type-fails. Re-extract every previously-resolved Go file first so it gets a
+	// fresh parser/name graph; the precise pass then supersedes only CleanFiles.
+	// Without this, unchanged package mates retain stale precise edges after a
+	// different file introduces a package-wide type error.
+	if opts.Precise && !opts.Reindex {
+		resolved, err := ix.graph.CallGraphResolvedFiles(projectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, ft := range files {
+			if ft.lang == "go" && resolved[ft.rel] {
+				if err := ix.graph.DeleteFileHash(projectID, ft.rel); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	// Before replacing any changed file nodes, remember which unchanged files
+	// point into them. Replacing a target cascades those inbound edges; forcing
+	// their source files through extraction lets the final resolution pass rebuild
+	// the edges against the replacement nodes.
+	if !opts.Reindex {
+		changed, err := ix.changedFilePaths(projectID, files)
+		if err != nil {
+			return nil, err
+		}
+		_, inbound, err := ix.expandWithInboundSources(projectID, changed)
+		if err != nil {
+			return nil, err
+		}
+		present := make(map[string]bool, len(files))
+		for _, ft := range files {
+			present[ft.rel] = true
+		}
+		for _, rel := range inbound {
+			if present[rel] {
+				if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	// Incremental only: prune files that were indexed before but are gone from disk
@@ -563,7 +701,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// Re-extraction is intentional: cheap, no graph writes, and it
 	// keeps the worker pipeline simple (workers stay oblivious to
 	// import resolution).
-	if err := ix.writeAllImportEdges(ctx, projectID, files, impIdx); err != nil {
+	if err := ix.writeImportEdgesForFiles(ctx, projectID, files, impIdx); err != nil {
 		return res, err
 	}
 
@@ -607,7 +745,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 
 	// Pass 4: embed all collected nodes in large concurrent batches.
 	embedStart = time.Now()
-	if err := ix.embedAndStore(ctx, embedAcc, opts, res); err != nil {
+	if err := ix.embedAndStore(ctx, projectName, embedAcc, opts, res); err != nil {
 		return res, err
 	}
 	res.EmbedMs = int(time.Since(embedStart).Milliseconds())
@@ -643,14 +781,29 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 // daemon's watcher target. Each existing source file runs through indexFile (which
 // hash-skips unchanged files and clears + re-extracts + embeds changed ones); each
 // path that's GONE on disk is pruned (nodes + index-state + vectors), exactly like
-// pruneDeleted but scoped to the watched set. Edges for the changed files are
-// resolved once at the end. (Like the full incremental path, inbound name-based
-// edges from UNCHANGED files into a changed file are only refreshed on a full
-// reindex — the daemon can reconcile periodically.)
+// pruneDeleted but scoped to the watched set. The changed set expands through
+// the existing inbound-edge closure, then calls and imports are resolved once
+// all replacement nodes are settled.
 func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName, root string, rels []string, opts Options) (*Result, error) {
 	res := &Result{}
 	var pending []extract.Reference
 	var embedAcc []embedItem
+	var importFiles []fileTask
+
+	// Match IndexProject's structure-only contract for direct/watcher callers:
+	// unchanged files must not retain vectors from an earlier embedded run.
+	if ix.embedder == nil && ix.vectors != nil {
+		if err := ix.clearProjectVectors(projectName); err != nil {
+			return res, err
+		}
+	}
+
+	// Capture the project file set before clearing any inbound source hashes.
+	// It supplies the package/file lookup used to resolve imports below.
+	indexedFiles, err := ix.graph.IndexedFiles(projectID)
+	if err != nil {
+		return res, err
+	}
 
 	// Pin P0-04: expand the changed set with every file that currently has
 	// edges TARGETING nodes in a changed file. Pre-fix the FK-cascaded
@@ -660,36 +813,21 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	// source files so their outbound refs end up in `pending` and the
 	// resolve pass rebuilds the now-dangling inbound edges.
 	if len(rels) > 0 {
-		var inbound []string
-		for _, rel := range rels {
-			extra, err := ix.graph.SourceFilesTargeting(projectID, rel)
-			if err != nil {
-				return res, err
-			}
-			inbound = append(inbound, extra...)
-		}
-		// Dedupe + skip files already in rels (the changed set itself).
-		original := len(rels)
-		seen := make(map[string]bool, len(rels))
-		for _, r := range rels {
-			seen[r] = true
-		}
-		for _, r := range inbound {
-			if !seen[r] {
-				seen[r] = true
-				rels = append(rels, r)
-			}
+		var added []string
+		rels, added, err = ix.expandWithInboundSources(projectID, rels)
+		if err != nil {
+			return res, err
 		}
 		// Force re-extraction of the inbound-expanded files: their content
 		// didn't change, so the hash short-circuit inside indexFile would
-		// skip them, and we need their fresh refs to re-resolve the inbound
-		// edges. Delete the cached hash so indexFile re-extracts.
-		for i := original; i < len(rels); i++ {
-			if err := ix.graph.DeleteFileHash(projectID, rels[i]); err != nil {
+		// otherwise skip the refs needed to rebuild cascaded inbound edges.
+		for _, rel := range added {
+			if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
 				return res, err
 			}
 		}
 	}
+	impIdx := incrementalImportIndex(root, append(indexedFiles, rels...))
 
 	for _, rel := range rels {
 		if err := ctx.Err(); err != nil {
@@ -703,6 +841,9 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 					return res, err
 				}
 				if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
+					return res, err
+				}
+				if err := ix.graph.ClearCallGraphResolved(projectID, rel); err != nil {
 					return res, err
 				}
 				if ix.vectors != nil {
@@ -723,7 +864,8 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			continue // a language codemap doesn't index (or no server registered) — skip
 		}
 		res.FilesScanned++
-		changed, refs, toEmbed, err := ix.indexFile(ctx, projectID, projectName, fileTask{abs: abs, rel: rel, lang: lang, ext: ext}, opts, res)
+		ft := fileTask{abs: abs, rel: rel, lang: lang, ext: ext, importIndex: impIdx}
+		changed, refs, toEmbed, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
 		if err != nil {
 			res.Errors = append(res.Errors, FileError{File: rel, Err: err.Error()})
 			res.FilesSkipped++
@@ -733,6 +875,12 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			pending = append(pending, refs...)
 			embedAcc = append(embedAcc, toEmbed...)
 		}
+		importFiles = append(importFiles, ft)
+	}
+	// Import edges need the same deferred treatment as IndexProject: write them
+	// only after every changed target file node is settled.
+	if err := ix.writeImportEdgesForFiles(ctx, projectID, importFiles, impIdx); err != nil {
+		return res, err
 	}
 	ni, err := ix.buildNodeIndex(projectID)
 	if err != nil {
@@ -741,7 +889,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	if _, err := ix.resolveEdgesWith(projectID, pending, ni); err != nil {
 		return res, err
 	}
-	if err := ix.embedAndStore(ctx, embedAcc, opts, res); err != nil {
+	if err := ix.embedAndStore(ctx, projectName, embedAcc, opts, res); err != nil {
 		return res, err
 	}
 	if ix.vectors != nil {
@@ -870,6 +1018,9 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		// the SetFileHash ran first and the deletes after, so the
 		// ghost survived indefinitely.
 		_ = ix.graph.DeleteNodesInFile(projectID, ft.rel)
+		if err := ix.graph.ClearCallGraphResolved(projectID, ft.rel); err != nil {
+			return false, nil, nil, err
+		}
 		if ix.vectors != nil {
 			_, _ = ix.vectors.DeleteByFile(projectName, ft.rel)
 		}
@@ -882,6 +1033,9 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		// — a file that GAINS a generated header (e.g. was edited to
 		// regenerate) must lose its previously-indexed symbols.
 		_ = ix.graph.DeleteNodesInFile(projectID, ft.rel)
+		if err := ix.graph.ClearCallGraphResolved(projectID, ft.rel); err != nil {
+			return false, nil, nil, err
+		}
 		if ix.vectors != nil {
 			_, _ = ix.vectors.DeleteByFile(projectName, ft.rel)
 		}
@@ -905,25 +1059,21 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		}
 	}
 
-	// Changed: clear the old structure (edges cascade) and vectors for this file.
-	// The veclite delete is outside the graph transaction (separate store).
+	fr, err := ft.ext.ExtractFile(ft.rel, content)
+	if err != nil {
+		// Keep the last-good hash, graph, and vectors intact. The mismatch makes
+		// staleness honest and ensures every subsequent index retries and reports
+		// the failure instead of silently treating stale nodes as fresh.
+		return false, nil, nil, err
+	}
+
+	// Extraction succeeded: clear vectors for the prior node generation before
+	// atomically replacing its graph nodes below. Delaying this until after parse
+	// success preserves the complete last-good state on extraction failures.
 	if ix.vectors != nil {
 		if _, err := ix.vectors.DeleteByFile(projectName, ft.rel); err != nil {
 			return false, nil, nil, err
 		}
-	}
-
-	fr, err := ft.ext.ExtractFile(ft.rel, content)
-	if err != nil {
-		// The file was scanned but can't be parsed/extracted. Record its hash so
-		// staleness doesn't report it as perpetually "new" (the bug: a parse-error
-		// file never entered index_state, so every status showed "1 new" forever).
-		// A later edit that fixes the error changes the hash and re-indexes it; its
-		// old nodes were already cleared above, which is correct for a broken file.
-		if herr := ix.graph.SetFileHash(projectID, ft.rel, hash); herr != nil {
-			return false, nil, nil, herr
-		}
-		return false, nil, nil, err
 	}
 
 	// Transaction-batched graph writes: the file node + all symbol nodes + all
@@ -938,6 +1088,13 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	defer func() { _ = tx.Rollback() }() // safe: Commit renders this a no-op
 
 	if err := graph.DeleteNodesInFileTx(tx, projectID, ft.rel); err != nil {
+		return false, nil, nil, err
+	}
+	// A successful normal extraction replaces this file's node/edge generation.
+	// Its prior precise coverage is no longer valid until this run's precise pass
+	// succeeds for the file. Extraction failures return before this transaction,
+	// preserving the complete last-good generation and its coverage.
+	if err := graph.ClearCallGraphResolvedTx(tx, projectID, ft.rel); err != nil {
 		return false, nil, nil, err
 	}
 
@@ -1001,7 +1158,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 // concurrently, then inserts the vectors serially (veclite/SQLite writes aren't
 // safe to parallelize). On any embed error it degrades gracefully — the
 // structural index is already complete — recording a note instead of failing.
-func (ix *Indexer) embedAndStore(ctx context.Context, items []embedItem, opts Options, res *Result) error {
+func (ix *Indexer) embedAndStore(ctx context.Context, projectName string, items []embedItem, opts Options, res *Result) error {
 	if ix.embedder == nil || ix.vectors == nil || len(items) == 0 {
 		return nil
 	}
@@ -1041,9 +1198,14 @@ func (ix *Indexer) embedAndStore(ctx context.Context, items []embedItem, opts Op
 	}
 	if err := g.Wait(); err != nil {
 		// Embeddings failed (e.g. Ollama unreachable). The structural index is
-		// already stored, so keep it and report — matching the long-standing
-		// "structure works without Ollama" behavior, just at the project level.
+		// already stored, so keep it and report. Because changed-file vectors were
+		// removed before extraction, retaining unchanged-file vectors here would
+		// expose a silently partial semantic index. Degrade the whole project to
+		// structure-only instead.
 		res.EmbedNote = "embeddings skipped: " + err.Error()
+		if clearErr := ix.clearProjectVectors(projectName); clearErr != nil {
+			return fmt.Errorf("clear project vectors after embedding failure: %w", clearErr)
+		}
 		return nil
 	}
 
@@ -1078,6 +1240,19 @@ func (ix *Indexer) embedAndStore(ctx context.Context, items []embedItem, opts Op
 		}
 	}
 	return nil
+}
+
+// clearProjectVectors makes a project-level semantic mode transition durable
+// immediately. It deliberately leaves other projects in the shared collection
+// untouched.
+func (ix *Indexer) clearProjectVectors(projectName string) error {
+	if ix.vectors == nil {
+		return nil
+	}
+	if _, err := ix.vectors.DeleteByProject(projectName); err != nil {
+		return err
+	}
+	return ix.vectors.Sync()
 }
 
 // nodeIndex is the project-wide symbol index built once from ProjectNodes and
@@ -1169,11 +1344,17 @@ type precisePos struct {
 	line int
 }
 
+const (
+	preciseResolverGoTypes = "go/types"
+	preciseResolverLSP     = "lsp"
+)
+
 // resolveLSPCallEdges adds exact call edges for LSP-backed languages (TypeScript)
 // by driving each registered CallResolver's callHierarchy over its files, joining
 // callees to nodes by declaration position. Edges are written ProvPrecise (there's
 // no name-based call extraction for these languages to supersede). Best-effort:
-// errors skip a file, never abort. The servers are still alive (closed by the
+// callHierarchy errors downgrade that file's coverage and continue; database
+// errors abort and roll back the pass. The servers remain alive until Indexer.Close.
 // resolveLSPCallEdgesWith is the shared resolver that takes a pre-built nodeIndex.
 func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, projectID int64, root string, res *Result, ni *nodeIndex) error {
 	resolvers := map[string]extract.CallResolver{} // language -> resolver
@@ -1240,6 +1421,13 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 	upgraded := 0
 	for lang, cr := range resolvers {
 		for file := range filesByLang[lang] {
+			// Supersede prior coverage for this file, then re-mark it only after
+			// CallEdges succeeds. An empty result is still a successful precise
+			// resolution for a leaf file.
+			if clearErr := graph.ClearCallGraphResolvedTx(tx, projectID, file); clearErr != nil {
+				res.PreciseNote = "LSP precise coverage clear failed: " + clearErr.Error()
+				return clearErr
+			}
 			edges, cErr := cr.CallEdges(ctx, file)
 			if cErr != nil {
 				continue
@@ -1262,6 +1450,11 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 					return aErr
 				}
 				upgraded++
+			}
+			if markErr := graph.MarkCallGraphResolvedTx(tx, projectID, file, preciseResolverLSP); markErr != nil {
+				res.PreciseNote = "LSP precise coverage mark failed: " + markErr.Error()
+				res.PreciseUpgraded += upgraded
+				return markErr
 			}
 		}
 	}
@@ -1290,16 +1483,28 @@ func (ix *Indexer) resolvePreciseEdgesFromIndex(ctx context.Context, projectID i
 	if pr.ErrorPkgs > 0 {
 		res.PreciseNote = fmt.Sprintf("precise skipped for %d package(s) with type errors; kept name-based edges for those packages", pr.ErrorPkgs)
 	}
-	ix.resolvePreciseEdgesWith(ctx, projectID, root, res, ni, pr)
+	tx, err := ix.graph.BeginTx(ctx)
+	if err != nil {
+		res.PreciseNote = "precise transaction failed: " + err.Error()
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := ix.resolvePreciseEdgesWith(tx, projectID, res, ni, pr); err != nil {
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		res.PreciseNote = "precise commit failed: " + err.Error()
+	}
 }
 
 // resolvePreciseEdgesWith is the shared resolver that takes a pre-built nodeIndex
 // and the go/types result.
-func (ix *Indexer) resolvePreciseEdgesWith(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex, pr *typesrc.Result) {
+func (ix *Indexer) resolvePreciseEdgesWith(tx *sql.Tx, projectID int64, res *Result, ni *nodeIndex, pr *typesrc.Result) error {
 	fqnTo := ni.fqnTo
 	posTo := make(map[precisePos]int64, len(ni.nodes))
 	posCollide := map[precisePos]bool{} // (file,line) shared by >1 decl — ambiguous
 	var cleanSources []int64
+	goFiles := map[string]bool{}
 	for _, n := range ni.nodes {
 		key := precisePos{n.FilePath, n.StartLine}
 		if _, dup := posTo[key]; dup {
@@ -1310,25 +1515,38 @@ func (ix *Indexer) resolvePreciseEdgesWith(ctx context.Context, projectID int64,
 		if pr.CleanFiles[n.FilePath] {
 			cleanSources = append(cleanSources, n.ID)
 		}
+		if n.Language == "go" && n.Kind == graph.KindFile {
+			goFiles[n.FilePath] = true
+		}
 	}
 	// Remove ambiguous (file,line) keys so the position join misses for them and
 	// falls back to the unique FQN match — robust to multiple decls on one line.
 	for key := range posCollide {
 		delete(posTo, key)
 	}
+	// A completed go/types run gives a clean/error partition. Clear prior
+	// coverage for every indexed Go file; only CleanFiles are re-marked below.
+	// This truthfully downgrades packages that now fail type checking.
+	for file := range goFiles {
+		if err := graph.ClearCallGraphResolvedTx(tx, projectID, file); err != nil {
+			res.PreciseNote = "precise coverage clear failed: " + err.Error()
+			return err
+		}
+	}
+
 	// Drop the name-based call edges of every clean source, then re-insert the
 	// precise ones below. Doing the delete first (on provenance='name', regardless
 	// of weight) is what prevents the in-package WeightLSP=1.0 name edges from
 	// surviving and double-counting against the precise 1.0 edges.
-	if err := ix.graph.DeleteCallEdgesBySource(cleanSources, graph.ProvName); err != nil {
+	if err := graph.DeleteCallEdgesBySourceTx(tx, cleanSources, graph.ProvName); err != nil {
 		res.PreciseNote = "precise supersede (delete name) failed: " + err.Error()
-		return
+		return err
 	}
 	// Pin P0-05: delete prior ProvPrecise edges too. The edges table has no
 	// UNIQUE constraint, so a second --precise run would double-insert.
-	if err := ix.graph.DeleteCallEdgesBySource(cleanSources, graph.ProvPrecise); err != nil {
+	if err := graph.DeleteCallEdgesBySourceTx(tx, cleanSources, graph.ProvPrecise); err != nil {
 		res.PreciseNote = "precise supersede (delete prior precise) failed: " + err.Error()
-		return
+		return err
 	}
 
 	upgraded, skipped := 0, 0
@@ -1353,17 +1571,24 @@ func (ix *Indexer) resolvePreciseEdgesWith(ctx context.Context, projectID int64,
 		if to == from {
 			continue
 		}
-		if _, err := ix.graph.AddEdgeProv(from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); err != nil {
+		if _, err := graph.AddEdgeProvTx(tx, from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); err != nil {
 			res.PreciseNote = "precise edge insert failed: " + err.Error()
-			return
+			return err
 		}
 		upgraded++
 	}
+	for file := range pr.CleanFiles {
+		if err := graph.MarkCallGraphResolvedTx(tx, projectID, file, preciseResolverGoTypes); err != nil {
+			res.PreciseNote = "precise coverage mark failed: " + err.Error()
+			return err
+		}
+	}
 	res.PreciseUpgraded = upgraded
 	res.PreciseSkipped = skipped
-	if upgraded == 0 {
-		res.PreciseNote = "precise pass resolved no in-module call edges (single-package leaf project, or all calls external/dynamic); kept name-based edges"
+	if upgraded == 0 && res.PreciseNote == "" {
+		res.PreciseNote = "precise pass completed; no in-module call edges found (leaf project, or all calls external/dynamic)"
 	}
+	return nil
 }
 
 func samePackage(ids []int64, dirOf map[int64]string, dir string) []int64 {

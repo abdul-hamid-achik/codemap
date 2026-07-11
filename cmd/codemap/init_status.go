@@ -55,7 +55,7 @@ JSON-RPC framing.`,
 	studioCmd = &cobra.Command{
 		Use:     "studio [path]",
 		Aliases: []string{"browse"},
-		Short:   "Open the interactive studio TUI (Graph / Metrics / Impact / Search)",
+		Short:   "Open the interactive studio TUI (Graph / Metrics / Impact / Search / Path)",
 		Args:    cobra.MaximumNArgs(1),
 		RunE:    runStudio,
 	}
@@ -67,10 +67,7 @@ func runInit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+	cwd := targetDir(cmd)
 	local, _ := cmd.Flags().GetBool("local")
 	rep, err := app.NewService(sess).Init(cwd, local)
 	if err != nil {
@@ -90,10 +87,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+	cwd := targetDir(cmd)
 	svc := app.NewService(sess)
 	rep, err := svc.Status(cwd)
 	if err != nil {
@@ -190,15 +184,12 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 }
 
 func runStudio(cmd *cobra.Command, args []string) error {
-	sess, err := openSession(cmd)
+	cwd := targetDirArg(cmd, args)
+	sess, err := openSessionAt(cmd, cwd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, _ := os.Getwd()
-	if len(args) > 0 {
-		cwd = args[0]
-	}
 	return tui.Run(cmd.Context(), sess, cwd)
 }
 
@@ -208,6 +199,16 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
+	// MCP tools with no explicit path default to the server working directory;
+	// make `codemap -C project serve` set that default just like CLI commands.
+	oldwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if err := os.Chdir(targetDir(cmd)); err != nil {
+		return fmt.Errorf("change to project directory: %w", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return mcpserver.NewServer(sess).Run(ctx)

@@ -264,7 +264,7 @@
       "properties": {
         "level": {
           "type": "string",
-          "enum": ["low", "medium", "high"]
+          "enum": ["unknown", "low", "medium", "high"]
         },
         "score": {
           "type": "number",

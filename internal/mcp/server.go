@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 
@@ -40,6 +41,9 @@ Understand a symbol:
   codemap_context_batch — the same for several symbols at once, plus the callers they share
   (coupling), so you model a whole component in one round-trip.
 Results carry each symbol's signature and docstring, so you rarely need to open files.
+When a result's short name is shared, project its existing file, start_line, fqn, and kind
+fields into a selector object for codemap_source/context/callers/callees/impact/path. Selectors
+choose one definition without exposing volatile database ids; file+fqn+kind survives line shifts.
 
 After you edit: codemap_review — diff-scoped impact + test selection. It reads your git diff
 (working tree by default; staged:true, or since:<ref>), finds the changed symbols, and returns
@@ -47,11 +51,13 @@ their union blast radius, the covering_tests to RUN, and which changes are untes
 hotspot. Run it after making changes to learn what you affected and what to test — one call
 instead of diffing by hand and chaining codemap_impact per symbol.
 
-Before touching a whole file (move/delete/split): codemap_file_impact — who depends on the file,
-its blast radius, covering tests, and the safe_to_delete / breaking_change verdicts.
+Before touching a whole file (move/delete/split): codemap_dependencies returns bounded inbound
+call/reference/import evidence plus explicit domain coverage; codemap_file_impact adds blast radius,
+covering tests, and conservative delete_verdict (file-scoped evidence → unsafe; otherwise unknown).
 
-How careful to be: codemap_risk — a symbol's change-risk as one score + level (low/medium/high) from
-untested coverage, fan-in, cross-package spread, and name ambiguity. Triage which edit is riskiest.
+How careful to be: codemap_risk — a symbol's change-risk as one score + level
+(unknown/low/medium/high) from untested coverage, fan-in, cross-package spread, and name ambiguity.
+An unavailable call graph is unknown, never low. Triage which edit is riskiest.
 
 Survey a codebase: codemap_read_order (where to START — entrypoints + hubs ranked into a reading
 guide; run this on first contact with an unfamiliar repo, then drill the top entries with
@@ -62,8 +68,9 @@ Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matc
 named Foo — codemap_callers/codemap_impact note when a name is ambiguous and codemap_hotspots flags
 the inflation. The graph-wide fix is to re-run codemap_index with precise:true — the unified
 exact-resolution pass: go/types for Go, language-server callHierarchy for the LSP languages
-(TypeScript, JavaScript, Python). It makes EVERY query exact (callers, callees, impact, hotspots,
-path) with no per-call flag. The LSP languages have NO name-based call edges, so for a TS/JS/Python
+(TypeScript, JavaScript, Python). It makes graph EDGES exact; when multiple definitions share the
+queried name, pass a source selector to keep the query on one definition. The LSP languages have NO
+name-based call edges, so for a TS/JS/Python
 project precise:true is what gives codemap_callers/impact/hotspots/path a call graph at all. For a
 one-off exact answer on Go without reindexing, pass precise:true to codemap_callers/codemap_callees
 (gopls; Go only — on the LSP languages, reindex with codemap_index precise:true instead). Precise
@@ -149,15 +156,17 @@ type semanticInput struct {
 }
 
 type symbolQueryInput struct {
-	Symbol  string `json:"symbol" jsonschema:"the symbol name to look up"`
-	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"use the language server (gopls) for exact results (Go) — slower, but not inflated by same-named symbols"`
+	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol name to look up; omit when selector is provided"`
+	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from a result's file/start_line/fqn/kind fields; takes precedence over symbol"`
+	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Precise  bool                `json:"precise,omitempty" jsonschema:"use the language server (gopls) for exact results (Go) — slower, but not inflated by same-named symbols"`
 }
 
 type impactInput struct {
-	Symbol string `json:"symbol" jsonschema:"the symbol to analyze"`
-	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
+	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to analyze; omit when selector is provided"`
+	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
 }
 
 type reviewInput struct {
@@ -178,6 +187,11 @@ type relatedFilesInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
+type dependenciesInput struct {
+	File string `json:"file" jsonschema:"project-relative file path to inspect for inbound dependencies"`
+	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+}
+
 type fileImpactInput struct {
 	File  string `json:"file" jsonschema:"project-relative file path to analyze"`
 	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
@@ -185,9 +199,10 @@ type fileImpactInput struct {
 }
 
 type riskInput struct {
-	Symbol string `json:"symbol" jsonschema:"the symbol to score"`
-	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the fan-in/blast analysis (default 3)"`
+	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to score; omit when selector is provided"`
+	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the fan-in/blast analysis (default 3)"`
 }
 
 type symbolAtInput struct {
@@ -197,11 +212,11 @@ type symbolAtInput struct {
 }
 
 type secretImpactInput struct {
-	Keys     []string `json:"keys" jsonschema:"secret key NAMES to analyze (e.g. STRIPE_KEY) — names only, never values"`
+	Keys     []string `json:"keys,omitempty" jsonschema:"secret key NAMES to analyze (e.g. STRIPE_KEY) — names only, never values; optional when via_vault is set; maximum 256 unique names, 256 bytes each"`
 	Path     string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Depth    int      `json:"depth,omitempty" jsonschema:"max hops for each key's blast radius (default 3)"`
 	ViaVault string   `json:"via_vault,omitempty" jsonschema:"optional: tinyvault project name to also list keys from its inventory"`
-	Prefix   string   `json:"prefix,omitempty" jsonschema:"optional: only count keys with this prefix (e.g. STRIPE_)"`
+	Prefix   string   `json:"prefix,omitempty" jsonschema:"with via_vault, only inventory keys with this prefix (e.g. STRIPE_)"`
 }
 
 // P2-01: codemap_required_keys — the MCP twin of the CLI 'required-keys'
@@ -209,9 +224,11 @@ type secretImpactInput struct {
 // transitive call tree actually reads, for tinyvault least-privilege sealing.
 type requiredKeysInput struct {
 	Entrypoint string   `json:"entrypoint" jsonschema:"the entrypoint symbol (function/method) to scope from"`
-	Keys       []string `json:"keys,omitempty" jsonschema:"candidate key NAMES to check (if omitted, all indexed keys are tested)"`
+	Keys       []string `json:"keys,omitempty" jsonschema:"candidate key NAMES to check; optional when via_vault is set; maximum 256 unique names, 256 bytes each"`
 	Depth      int      `json:"depth,omitempty" jsonschema:"max hops for the forward call-graph closure (default 5)"`
 	Path       string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	ViaVault   string   `json:"via_vault,omitempty" jsonschema:"optional: tinyvault project whose value-free key inventory supplies candidates"`
+	Prefix     string   `json:"prefix,omitempty" jsonschema:"optional: restrict tinyvault inventory candidates to this prefix"`
 }
 
 type limitInput struct {
@@ -220,9 +237,11 @@ type limitInput struct {
 }
 
 type pathQueryInput struct {
-	From string `json:"from" jsonschema:"the starting symbol"`
-	To   string `json:"to" jsonschema:"the destination symbol"`
-	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	From         string              `json:"from,omitempty" jsonschema:"starting symbol; omit when from_selector is provided"`
+	To           string              `json:"to,omitempty" jsonschema:"destination symbol; omit when to_selector is provided"`
+	FromSelector *app.SymbolSelector `json:"from_selector,omitempty" jsonschema:"exact starting definition projected from file/start_line/fqn/kind"`
+	ToSelector   *app.SymbolSelector `json:"to_selector,omitempty" jsonschema:"exact destination definition projected from file/start_line/fqn/kind"`
+	Path         string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
 type symbolsInput struct {
@@ -237,8 +256,9 @@ type findInput struct {
 }
 
 type sourceInput struct {
-	Symbol string `json:"symbol" jsonschema:"the symbol whose source code to return"`
-	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol whose source code to return; omit when selector is provided"`
+	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
 type contextBatchInput struct {
@@ -248,9 +268,10 @@ type contextBatchInput struct {
 }
 
 type contextInput struct {
-	Symbol string `json:"symbol" jsonschema:"the symbol to gather full context for"`
-	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
+	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to gather full context for; omit when selector is provided"`
+	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
 }
 
 // emptyInput is for tools that take no arguments (e.g. codemap_projects).
@@ -327,15 +348,15 @@ func (s *Server) register() {
 	}, s.handleSemantic)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callers",
-		Description: "List the functions/methods that call a given symbol. Pass precise=true for exact, gopls-resolved callers (Go) instead of the fast name-based graph.",
+		Description: "List functions/methods that call a symbol. Name-only queries remain backward-compatible and may merge same-named definitions. For one exact definition, pass selector:{file,start_line,fqn,kind} projected from any codemap symbol result; the source selector survives reindex and line shifts when file+fqn+kind still match. precise=true optionally resolves it on demand through the language server.",
 	}, s.handleCallers)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callees",
-		Description: "List the functions/methods that a given symbol calls. Pass precise=true for exact, gopls-resolved callees (Go).",
+		Description: "List functions/methods called by a symbol. Pass selector:{file,start_line,fqn,kind} projected from a prior result to select one exact definition instead of merging same-named definitions. Pass precise=true for an on-demand language-server resolution.",
 	}, s.handleCallees)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_impact",
-		Description: "Impact analysis for a symbol: definition sites, direct callers, the transitive blast radius (everything affected by a change), and which tests cover those paths. The flagship query — one call replaces many file reads.",
+		Description: "Impact analysis: definition sites, direct callers, transitive blast radius, and covering tests. Pass selector:{file,start_line,fqn,kind} projected from a find/symbols/context result to analyze one exact definition; name-only input remains supported and honestly reports when same-named definitions are merged.",
 	}, s.handleImpact)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_review",
@@ -350,12 +371,16 @@ func (s *Server) register() {
 		Description: "Files structurally related to a file via the call/test graph: the files of its callers, its callees, and the tests covering its symbols, each with a reason (caller|callee|test) and a confidence. Graph-accurate alternative to import-text heuristics; returns {indexed:false} when the project isn't indexed.",
 	}, s.handleRelatedFiles)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_dependencies",
+		Description: "Direct inbound dependency evidence for one file, grouped and capped by dependent file and edge kind (calls, value references, imports). Returns stable source→target locations, file-vs-package scope, totals/truncation, stale/call_graph, and complete|partial|unavailable coverage for calls, references, imports, runtime wiring, and external consumers. Use it before a move/delete/split when you need the evidence without the blast/test work of codemap_file_impact. Missing evidence is never proof of safety.",
+	}, s.handleDependencies)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_file_impact",
-		Description: "File-level impact — 'what happens if I change or DELETE this file?' Aggregates every symbol the file defines into: dependent_files (other files that call into it), the blast_radius, the covering_tests, safe_to_delete (true when nothing outside the file references it), and breaking_change (true when an externally-called symbol here is untested). The file-level peer of codemap_impact (a symbol) and codemap_review (a diff) — use it before a file move/delete/split.",
+		Description: "File-level impact — 'what happens if I change or DELETE this file?' Returns dependency_evidence grouped by dependent file and edge kind (calls/references/imports), bounded source→target samples with totals/truncation, per-domain coverage, blast radius, tests, and a conservative delete_verdict. File-scoped calls/references prove unsafe; Go imports are package-scoped hints and remain unknown for the exact file. Missing evidence never proves safety while type/value uses, runtime wiring, and external consumers are incomplete; legacy safe_to_delete remains false.",
 	}, s.handleFileImpact)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_risk",
-		Description: "Change-risk score for a symbol — 'how careful should I be changing this?' in one number (0..1) + level (low/medium/high). Combines the signals codemap already computes — untested coverage, fan-in (direct callers), how many packages call it (cross-package spread), and name ambiguity — into a saturating score, with the factors that produced it. Use it to decide how much test/review care a change warrants, or to triage which of several edits is riskiest. Returns a note when the call graph is unresolved (TS/JS/Python without --precise).",
+		Description: "Change-risk score in one number (0..1) + level (unknown/low/medium/high), combining coverage, fan-in, cross-package spread, and ambiguity. Pass selector:{file,start_line,fqn,kind} to score one exact definition. An unresolved call graph returns unknown, never a reassuring low.",
 	}, s.handleRisk)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_symbol_at",
@@ -363,11 +388,11 @@ func (s *Server) register() {
 	}, s.handleSymbolAt)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_secret_impact",
-		Description: "Code blast radius of rotating secret keys: for each key NAME, the symbols that read it (os.Getenv/os.environ/process.env), the transitive callers affected, and the covering tests (untested=true is a loud warning). Operates on key NAMES only — never reads, requests, or returns secret values. Pairs with tinyvault's value-free key inventory. blast radius is name-based unless the index is precise (precise:false note); reindex --precise for exact figures.",
+		Description: fmt.Sprintf("Code blast radius of rotating secret keys: for each key NAME, the symbols that read it (os.Getenv/os.environ/process.env), the transitive callers affected, and the covering tests (untested=true is a loud warning). Operates on key NAMES only — never reads, requests, or returns secret values. Inputs, including tinyvault inventory, are bounded to %d unique names of at most %d bytes each. blast radius is name-based unless the index is precise (precise:false note); reindex --precise for exact figures.", app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
 	}, s.handleSecretImpact)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_required_keys",
-		Description: "Return the minimal set of secret key NAMES an entrypoint's transitive call tree actually reads — for tinyvault least-privilege sealing (seal/inject only these). Value-free: only key names and positions, never secret values.",
+		Description: fmt.Sprintf("Return the minimal set of secret key NAMES an entrypoint's transitive call tree actually reads — for tinyvault least-privilege sealing (seal/inject only these). Supply keys directly or use via_vault plus optional prefix to read tinyvault's value-free inventory. Inputs are bounded to %d unique names of at most %d bytes each. Only key names and positions are handled, never secret values.", app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
 	}, s.handleRequiredKeys)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_hotspots",
@@ -379,7 +404,7 @@ func (s *Server) register() {
 	}, s.handleOrphans)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_path",
-		Description: "Find the shortest call path between two symbols.",
+		Description: "Find the shortest call path between two symbols. For exact same-name-safe endpoints, pass both from_selector and to_selector as file/start_line/fqn/kind projections from prior results.",
 	}, s.handlePath)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_symbols",
@@ -391,15 +416,15 @@ func (s *Server) register() {
 	}, s.handleFind)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_source",
-		Description: "Return a symbol's source code (the implementation behind its signature), read from the indexed file's line range — so you can read a definition without opening the whole file.",
+		Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition.",
 	}, s.handleSource)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_context",
-		Description: "Everything about a symbol in ONE call: its definition(s) with source, who calls it, what it calls, the tests covering it, the blast-radius size, and any pinned annotations. Prefer this when orienting on an unfamiliar symbol — it replaces separate codemap_source + codemap_callers + codemap_callees + codemap_impact round-trips. The callers/callees/tests lists are capped to keep the bundle small; callers_total/callees_total/tests_total give the true counts — call codemap_callers/codemap_callees/codemap_impact for a complete list when a total exceeds what's shown.",
+		Description: "Everything about a symbol in ONE call: source, callers, callees, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported. Uses the indexed graph only; capped lists carry true *_total counts and optional failures appear in partial_errors.",
 	}, s.handleContext)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_context_batch",
-		Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's full context plus cross-symbol analysis: combined_blast_radius and common_callers (callers that reach two or more of the queried symbols — a likely shared entrypoint or coupling point). Deduped and capped at 25; missing symbols land in not_found.",
+		Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures.",
 	}, s.handleContextBatch)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_projects",
@@ -638,6 +663,17 @@ func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
+	if in.Selector != nil && in.Precise {
+		rep, err := s.svc.PreciseCallersBySelector(ctx, cwdOf(in.Path), *in.Selector)
+		return result(rep, err)
+	}
+	if in.Selector != nil {
+		rep, err := s.svc.CallersBySelector(cwdOf(in.Path), *in.Selector)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return result(nil, fmt.Errorf("callers needs symbol or selector"))
+	}
 	if in.Precise {
 		rep, err := s.svc.PreciseCallers(ctx, cwdOf(in.Path), in.Symbol)
 		return result(rep, err)
@@ -650,6 +686,17 @@ func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
+	if in.Selector != nil && in.Precise {
+		rep, err := s.svc.PreciseCalleesBySelector(ctx, cwdOf(in.Path), *in.Selector)
+		return result(rep, err)
+	}
+	if in.Selector != nil {
+		rep, err := s.svc.CalleesBySelector(cwdOf(in.Path), *in.Selector)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return result(nil, fmt.Errorf("callees needs symbol or selector"))
+	}
 	if in.Precise {
 		rep, err := s.svc.PreciseCallees(ctx, cwdOf(in.Path), in.Symbol)
 		return result(rep, err)
@@ -661,6 +708,13 @@ func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in impactInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
+	}
+	if in.Selector != nil {
+		rep, err := s.svc.ImpactBySelector(cwdOf(in.Path), *in.Selector, in.Depth)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return result(nil, fmt.Errorf("impact needs symbol or selector"))
 	}
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
@@ -690,6 +744,14 @@ func (s *Server) handleRelatedFiles(_ context.Context, _ *sdkmcp.CallToolRequest
 	return result(rep, err)
 }
 
+func (s *Server) handleDependencies(_ context.Context, _ *sdkmcp.CallToolRequest, in dependenciesInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Dependencies(cwdOf(in.Path), in.File)
+	return result(rep, err)
+}
+
 func (s *Server) handleFileImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in fileImpactInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
@@ -701,6 +763,13 @@ func (s *Server) handleFileImpact(_ context.Context, _ *sdkmcp.CallToolRequest, 
 func (s *Server) handleRisk(_ context.Context, _ *sdkmcp.CallToolRequest, in riskInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
+	}
+	if in.Selector != nil {
+		rep, err := s.svc.RiskBySelector(cwdOf(in.Path), *in.Selector, in.Depth)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return result(nil, fmt.Errorf("risk needs symbol or selector"))
 	}
 	rep, err := s.svc.Risk(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
@@ -714,8 +783,8 @@ func (s *Server) handleSymbolAt(_ context.Context, _ *sdkmcp.CallToolRequest, in
 	return result(rep, err)
 }
 
-func (s *Server) handleSecretImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in secretImpactInput) (*sdkmcp.CallToolResult, any, error) {
-	rep, err := s.svc.SecretImpact(cwdOf(in.Path), in.Keys, in.Depth)
+func (s *Server) handleSecretImpact(ctx context.Context, _ *sdkmcp.CallToolRequest, in secretImpactInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.SecretImpactWithInventory(ctx, cwdOf(in.Path), in.Keys, in.Depth, in.ViaVault, in.Prefix)
 	return result(rep, err)
 }
 
@@ -738,6 +807,16 @@ func (s *Server) handleOrphans(_ context.Context, _ *sdkmcp.CallToolRequest, in 
 func (s *Server) handlePath(_ context.Context, _ *sdkmcp.CallToolRequest, in pathQueryInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
+	}
+	if in.FromSelector != nil || in.ToSelector != nil {
+		if in.FromSelector == nil || in.ToSelector == nil {
+			return result(nil, fmt.Errorf("path needs both from_selector and to_selector"))
+		}
+		rep, err := s.svc.PathBySelectors(cwdOf(in.Path), *in.FromSelector, *in.ToSelector)
+		return result(rep, err)
+	}
+	if in.From == "" || in.To == "" {
+		return result(nil, fmt.Errorf("path needs from and to symbols or two selectors"))
 	}
 	rep, err := s.svc.Path(cwdOf(in.Path), in.From, in.To)
 	return result(rep, err)
@@ -763,23 +842,37 @@ func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in s
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
+	if in.Selector != nil {
+		rep, err := s.svc.SourceBySelector(cwdOf(in.Path), *in.Selector)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return result(nil, fmt.Errorf("source needs symbol or selector"))
+	}
 	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol)
 	return result(rep, err)
 }
 
-func (s *Server) handleContext(_ context.Context, _ *sdkmcp.CallToolRequest, in contextInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleContext(ctx context.Context, _ *sdkmcp.CallToolRequest, in contextInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.Context(cwdOf(in.Path), in.Symbol, in.Depth)
+	if in.Selector != nil {
+		rep, err := s.svc.ContextBySelectorWithContext(ctx, cwdOf(in.Path), *in.Selector, in.Depth)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return result(nil, fmt.Errorf("context needs symbol or selector"))
+	}
+	rep, err := s.svc.ContextWithContext(ctx, cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
 }
 
-func (s *Server) handleContextBatch(_ context.Context, _ *sdkmcp.CallToolRequest, in contextBatchInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleContextBatch(ctx context.Context, _ *sdkmcp.CallToolRequest, in contextBatchInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.ContextBatch(cwdOf(in.Path), in.Symbols, in.Depth)
+	rep, err := s.svc.ContextBatchWithContext(ctx, cwdOf(in.Path), in.Symbols, in.Depth)
 	return result(rep, err)
 }
 
@@ -841,7 +934,7 @@ func (s *Server) handleDoctor(ctx context.Context, _ *sdkmcp.CallToolRequest, _ 
 
 // ---- helpers ----
 
-func (s *Server) handleRequiredKeys(_ context.Context, _ *sdkmcp.CallToolRequest, in requiredKeysInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleRequiredKeys(ctx context.Context, _ *sdkmcp.CallToolRequest, in requiredKeysInput) (*sdkmcp.CallToolResult, any, error) {
 	if in.Entrypoint == "" {
 		return errResult("specify an entrypoint symbol (the function/method to scope from)"), nil, nil
 	}
@@ -849,7 +942,7 @@ func (s *Server) handleRequiredKeys(_ context.Context, _ *sdkmcp.CallToolRequest
 	if depth <= 0 {
 		depth = 5
 	}
-	rep, err := s.svc.RequiredKeys(cwdOf(in.Path), in.Entrypoint, in.Keys, depth)
+	rep, err := s.svc.RequiredKeysWithInventory(ctx, cwdOf(in.Path), in.Entrypoint, in.Keys, depth, in.ViaVault, in.Prefix)
 	return result(rep, err)
 }
 

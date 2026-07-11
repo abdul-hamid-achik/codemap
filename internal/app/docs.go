@@ -35,7 +35,8 @@ store, and the project registry — so other tools can inspect the same store.`}
                                # codemap_context_batch <s1> <s2> …  (several symbols at once + shared callers)
   5. go deeper                 # codemap_impact (blast radius) · codemap_source (full body)
                                # codemap_callers / codemap_callees (add precise:true on Go)
-  6. before a risky change     # codemap_risk <sym>  (how careful?) · codemap_file_impact <file>  (safe to move/delete?)
+  6. before a risky change     # codemap_risk <sym>  (how careful?)
+                               # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
   7. trace flow                # codemap_path <from> <to>  (shortest call chain)
   8. AFTER you edit            # codemap_review  (your diff → changed symbols, blast radius, the TESTS TO RUN)
   9. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
@@ -49,25 +50,30 @@ Every query takes an optional "path" (project dir; defaults to cwd) and returns
 JSON. Results carry each symbol's signature and docstring, so you rarely open
 files; use codemap_source when you need the implementation. codemap_context's
 callers/callees/tests are capped (see *_total); drill with codemap_callers/impact
-for the full lists.`},
+for the full lists. When a short name has several definitions, project a result's
+existing {file,start_line,fqn,kind} fields into the "selector" input accepted by
+source/context/callers/callees/impact/risk (and paired selectors for path). This
+keeps every follow-up on one definition without persisting volatile database ids;
+file+fqn+kind still resolves after declaration lines shift.`},
 
 	{"commands", `CLI commands (all query commands accept --json):
   init / index / status / projects   register, index (--reindex, --no-embed, --precise), stats, projects
   doctor                             check toolchains, language servers, embeddings (with install hints)
-  callers / callees [--lsp]          who calls X / what X calls (--lsp = exact gopls resolution, Go)
-  impact <sym> [--depth N]           definition, callers, transitive blast radius, covering tests
+  callers / callees [--precise|--at] who calls X / what X calls (exact definition with --at file:line)
+  impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests
   review [--since R] [--staged]      diff-scoped: changed symbols, blast radius, tests to run, risk band
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
-  file-impact <file>                 file-level impact: dependents, blast radius, safe-to-delete verdict
-  risk <sym>                         change-risk score: untested + fan-in + cross-package + ambiguity
-  context <sym> [<sym>...]           one-call bundle; pass several symbols for a batch + shared callers
+  dependencies <file>                bounded inbound calls/references/imports + domain coverage
+  file-impact <file>                 file-level impact: grouped call/reference/import evidence + coverage + delete verdict
+  risk <sym> [--at file:line]        change-risk: unknown when graph coverage is missing; otherwise low/medium/high
+  context <sym> [<sym>...] [--at]    one-call bundle; pass several symbols for a batch + shared callers
   path <from> <to>                   shortest call path between two symbols
   symbols <file>                     a file's outline (signatures)
   find <query>                       name search (offline, no embeddings)
   semantic <query>                   meaning-based search (needs an embedded index;
                                      on a structure-only project it returns mode
                                      "none" with a note — use find instead)
-  source <sym>                       a symbol's source code
+  source <sym> [--at file:line]      source for all same-named definitions, or one exact definition
   hotspots / orphans [--top N]       hubs / dead-code candidates
   annotate <sym> | <from> <to>       pin a note/data to a symbol or call path
   annotations [sym] | [from] [to]    list annotations (--rm <id> to remove)
@@ -75,15 +81,19 @@ for the full lists.`},
   studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, projects, semantic,
-find, callers, callees, impact, review, read_order, file_impact, risk, path, symbols,
+find, callers, callees, impact, review, read_order, dependencies, file_impact, risk, path, symbols,
 source, context, context_batch, hotspots, orphans, annotate, annotations,
 related_files, symbol_at, branch_status, branch_switch, cache_save,
 cache_restore, cache_list, cache_drop, doctor, unannotate,
 required_keys).
 
-codemap_context bundles a symbol's definition+callers+callees+tests in one call;
+codemap_context bundles a symbol's definition+callers+callees+tests in one graph-only call
+(no implicit language-server spawn); context_batch budgets aggregate source bodies and both
+surfaces report optional component failures in partial_errors;
 codemap_review is the post-edit query (diff → impact + tests to run + one aggregate risk band);
-callers/callees accept precise:true. codemap_docs returns this guide.`},
+callers/callees accept precise:true. Agent-facing source/context/callers/callees/
+impact/risk accept selector:{file,start_line,fqn,kind}; path accepts from_selector
+and to_selector. codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
 external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a
@@ -119,21 +129,37 @@ type-checker). codemap flags this rather than hiding it:
 THE GRAPH-WIDE FIX: re-index with 'codemap index --precise' (CLI) or codemap_index
 precise:true (MCP) — the unified exact-resolution pass. For Go it's a pure-Go go/types
 pass; for the LSP languages (TypeScript, JavaScript, Python) it drives the language
-server's callHierarchy. It resolves every call to the one it invokes and replaces the
-name-based call edges, so EVERY query (callers, callees, impact, hotspots, path) becomes
-exact at once. (The LSP languages have NO name-based call edges, so --precise is what gives
+server's callHierarchy. Successful precise coverage is recorded per file; a query is
+"resolved" only when every matched definition file completed the pass. Partial failures
+remain honestly "name" or "unresolved" rather than upgrading the whole project. (The LSP
+languages have NO name-based call edges, so --precise is what gives
 TS/JS/Python a call graph at all — so without it, impact/callers/callees on a TS/JS/Python symbol
 return a "resolution" note saying the call graph is unavailable, NOT a confidently-empty result or
 untested:true; the callers/tests are unresolved, not absent.) Every impact/callers/callees/review/
-context report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
+context/hotspots/orphans/path report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
 so a consumer can switch on confidence (resolved→high, name→medium, unresolved/none→low) instead of
 parsing the free-form resolution sentence. The Go pass
 needs the go toolchain + a buildable module; packages that don't type-check keep
 name-based edges (per-package degrade), and no go/go.mod falls back wholesale with a
 "note" — never worse than name-based, never a hard error. Opt-in: without --precise the
 index is the fast name-based path. For a one-off exact Go answer without reindexing,
-callers/callees also accept precise:true / --lsp (gopls). Interface dispatch is statically
-undecidable, so a precise edge points at the interface method, not concrete implementors.`},
+callers/callees also accept precise:true / --precise for one-off language-server resolution. Interface dispatch is statically
+undecidable, so a precise edge points at the interface method, not concrete implementors.
+
+Precise indexing makes call EDGES exact; a bare query name can still intentionally
+match several exact definitions. Use the source selector {file,start_line,fqn,kind}
+from find/symbols/context results to choose one. Selectors are stable across reindex
+and ordinary line shifts when file+FQN+kind remain, but moves/renames can invalidate
+them and return found:false rather than silently selecting a different node. Raw graph
+node ids are never part of the public contract.
+
+File dependency evidence is deliberately broader and more conservative than the call graph:
+file-impact groups inbound calls, Go function-value references, and imports by dependent file,
+with per-domain complete/partial/unavailable coverage and bounded source→target samples. Calls
+and references into this file can prove delete_verdict=unsafe. Go imports are package-scoped
+(they target one representative package file), so import-only evidence remains unknown for an
+exact file. General type/value uses, runtime wiring/reflection, and external consumers are not
+complete; missing evidence therefore never means safe_to_delete.`},
 
 	{"ecosystem", `codemap is one tool in a local, XDG-stored toolchain for analyzing and fixing
 code. A harness can chain them:

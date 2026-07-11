@@ -12,7 +12,7 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 
 - **[Ollama](https://ollama.com)** with the embedding model (for semantic search):
   `ollama pull nomic-embed-text`. Structure-only indexing works without it.
-- Optionally, **`gopls`** for `--lsp` precise Go results.
+- Optionally, **`gopls`** for one-off `callers`/`callees --precise` Go results.
 
 > Indexes **Go** (full graph), **TypeScript + JavaScript** (one `typescript-language-server`), and
 > **Python** (`pyright-langserver`) — structure + semantic search always, plus a precise call graph
@@ -40,6 +40,7 @@ name-based call edges for them), so `callers`/`callees`/`impact` need it — run
 
 ```bash
 codemap context  authenticateUser     # everything about it in ONE call (def, callers, callees, tests)
+codemap context  --at auth.go:42      # exactly one definition when a short name is shared
 codemap callers  authenticateUser     # who calls it
 codemap impact   authenticateUser     # callers + blast radius + covering tests
 codemap path     Handler Login        # shortest call path
@@ -49,6 +50,9 @@ codemap status                        # stats + warns if the index is stale vs y
 ```
 
 Add `--json` to any query for machine-readable output (handy for agents and scripts).
+JSON symbol results carry `file`, `start_line`, `fqn`, and `kind`; MCP clients project
+those fields into `selector` to keep source/context/callers/callees/impact/risk on that
+same definition across calls. See [MCP exact source selectors](/mcp#exact-source-selectors).
 
 ## Explore visually
 

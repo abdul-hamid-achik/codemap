@@ -370,6 +370,97 @@ func TestIndexIncremental(t *testing.T) {
 	}
 }
 
+// TestIndexProjectRebuildsInboundEdges pins the full-project incremental path:
+// editing a callee file replaces its nodes (and cascades inbound edges), so
+// unchanged caller files must be re-extracted before edge resolution. IndexFiles
+// already expands its changed set this way; IndexProject must provide the same
+// graph-integrity guarantee.
+func TestIndexProjectRebuildsInboundEdges(t *testing.T) {
+	g, _ := newStores(t)
+	dir := setupProject(t)
+	writeFile(t, dir, "c.go", "package app\n\nfunc Top() { Other() }\n")
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	assertCallee := func(want bool) {
+		t.Helper()
+		callees, err := g.Callees(pid, "Other")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := false
+		for _, n := range callees {
+			if n.Symbol == "Run" {
+				got = true
+			}
+		}
+		if got != want {
+			t.Fatalf("Other calls Run = %v, want %v; callees=%+v", got, want, callees)
+		}
+	}
+	assertCallee(true)
+
+	writeFile(t, dir, "a.go", "package app\n\nfunc Helper() {}\n\nfunc Run() {\n\tHelper()\n\t_ = 1 // edited callee file\n}\n")
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	assertCallee(true)
+	callees, err := g.Callees(pid, "Top")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callees) != 1 || callees[0].Symbol != "Other" {
+		t.Fatalf("Top should retain its transitive inbound edge to Other, got %+v", callees)
+	}
+}
+
+// TestIndexParseFailureKeepsLastGoodStateHonest verifies that a failed
+// extraction does not stamp the broken content as successfully indexed. The
+// previous, last-good graph remains available, and an unchanged broken file is
+// retried (and reported) on the next index instead of being hash-skipped as
+// fresh.
+func TestIndexParseFailureKeepsLastGoodStateHonest(t *testing.T) {
+	g, _ := newStores(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "a.go", "package app\n\nfunc LastGood() {}\n")
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	lastGoodHash, err := g.FileHash(pid, "a.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, dir, "a.go", "package app\n\nfunc LastGood(\n")
+	for run := 1; run <= 2; run++ {
+		res, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Errors) != 1 {
+			t.Fatalf("failed extraction run %d: errors=%v, want one visible parse error", run, res.Errors)
+		}
+		gotHash, err := g.FileHash(pid, "a.go")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotHash != lastGoodHash {
+			t.Fatalf("failed extraction run %d stamped hash %q, want last-good hash %q", run, gotHash, lastGoodHash)
+		}
+		if nodes, err := g.FindNodesBySymbol(pid, "LastGood"); err != nil {
+			t.Fatal(err)
+		} else if len(nodes) != 1 {
+			t.Fatalf("failed extraction run %d lost last-good graph node: %+v", run, nodes)
+		}
+	}
+}
+
 func TestIndexReindexIsStable(t *testing.T) {
 	g, v := newStores(t)
 	dir := setupProject(t)

@@ -19,6 +19,8 @@ import (
 // index_missing→3, index_corrupt→4, not_a_repo→5, anything else→1.
 func TestExitCodeFor(t *testing.T) {
 	cases := map[string]int{
+		codeNotFound:        exitNotFound,
+		codeNotIndexed:      exitNotFound,
 		app.CodeMissing:     exitIndexMissing,
 		app.CodeCorrupt:     exitIndexCorrupt,
 		app.CodeNotARepo:    exitNotARepo,
@@ -30,6 +32,67 @@ func TestExitCodeFor(t *testing.T) {
 		if got := exitCodeFor(code); got != want {
 			t.Errorf("exitCodeFor(%q) = %d, want %d", code, got, want)
 		}
+	}
+}
+
+func TestOutcomeErrorsUseExitTwoCodes(t *testing.T) {
+	cases := []struct {
+		err  error
+		code string
+	}{
+		{notFoundError("no such symbol", "try find"), codeNotFound},
+		{notIndexedError("demo"), codeNotIndexed},
+	}
+	for _, tc := range cases {
+		cmd := &cobra.Command{Use: "t"}
+		cmd.Flags().Bool("json", false, "")
+		_ = cmd.Flags().Set("json", "true")
+		wrapped := jsonHandler(func(*cobra.Command, []string) error { return tc.err })
+
+		r, w, _ := os.Pipe()
+		old := os.Stdout
+		os.Stdout = w
+		ret := wrapped(cmd, nil)
+		_ = w.Close()
+		os.Stdout = old
+		var out bytes.Buffer
+		_, _ = out.ReadFrom(r)
+		_ = r.Close()
+
+		if code, ok := asExitCoded(ret); !ok || code != exitNotFound {
+			t.Fatalf("%s returned exit=%d ok=%v, want exit 2", tc.code, code, ok)
+		}
+		var env jsonEnvelope
+		if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+			t.Fatalf("decode envelope: %v", err)
+		}
+		if env.Code != tc.code {
+			t.Errorf("envelope code = %q, want %q", env.Code, tc.code)
+		}
+	}
+}
+
+func TestJSONRequestedInArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"after command", []string{"callers", "--json"}, true},
+		{"before command", []string{"--json", "callers"}, true},
+		{"after unknown flag", []string{"callers", "--bad", "--json"}, true},
+		{"explicit true", []string{"callers", "--json=true"}, true},
+		{"explicit false", []string{"callers", "--json=false"}, false},
+		{"last occurrence wins false", []string{"--json", "callers", "--json=false"}, false},
+		{"after terminator is positional", []string{"callers", "--", "--json"}, false},
+		{"absent", []string{"callers"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := jsonRequestedInArgs(tc.args); got != tc.want {
+				t.Fatalf("jsonRequestedInArgs(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 

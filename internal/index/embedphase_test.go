@@ -85,6 +85,17 @@ func TestEmbedPhaseDegradesOnError(t *testing.T) {
 	g, v := newStores(t)
 	dir := setupProject(t)
 	pid, _ := g.UpsertProject("app", dir, "go")
+	if _, err := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index).IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	seeded, err := v.CountByProject("app")
+	if err != nil || seeded < 2 {
+		t.Fatalf("seed vectors = (%d, %v), want vectors from both files", seeded, err)
+	}
+	// Only one file changes. Pre-fix its vectors were removed before the failed
+	// embed, while b.go's old vectors remained and made the local collection look
+	// valid despite being partial.
+	writeFile(t, dir, "a.go", fileA+"\nfunc Changed() {}\n")
 	rec := &recordingEmbedder{dims: 4, fail: fmt.Errorf("ollama unreachable")}
 	res, err := New(g, v, rec, config.DefaultConfig().Index).IndexProject(context.Background(), pid, "app", dir, Options{})
 	if err != nil {
@@ -98,6 +109,45 @@ func TestEmbedPhaseDegradesOnError(t *testing.T) {
 	}
 	if res.Nodes < 3 {
 		t.Errorf("structure should still be indexed despite the embed failure, got %d nodes", res.Nodes)
+	}
+}
+
+func TestIncrementalNoEmbedClearsWholeProjectVectors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*Indexer, int64, string) (*Result, error)
+	}{
+		{
+			name: "project",
+			run: func(ix *Indexer, pid int64, dir string) (*Result, error) {
+				return ix.IndexProject(context.Background(), pid, "app", dir, Options{})
+			},
+		},
+		{
+			name: "watcher files",
+			run: func(ix *Indexer, pid int64, dir string) (*Result, error) {
+				return ix.IndexFiles(context.Background(), pid, "app", dir, []string{"a.go"}, Options{})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, v := newStores(t)
+			dir := setupProject(t)
+			pid, _ := g.UpsertProject("app", dir, "go")
+			if _, err := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index).IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := v.CountByProject("app"); got < 2 {
+				t.Fatalf("seed vectors = %d, want vectors from both files", got)
+			}
+			writeFile(t, dir, "a.go", fileA+"\nfunc Changed() {}\n")
+			if _, err := tc.run(New(g, v, nil, config.DefaultConfig().Index), pid, dir); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := v.CountByProject("app"); err != nil || got != 0 {
+				t.Fatalf("incremental no-embed vectors = (%d, %v), want honest project-wide zero", got, err)
+			}
+		})
 	}
 }
 

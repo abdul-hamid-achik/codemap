@@ -66,6 +66,26 @@ func TestDigitTabSwitch(t *testing.T) {
 	}
 }
 
+func TestPathTabKeepsDigitsInEndpointInput(t *testing.T) {
+	m := testModel()
+	m.graphCenter = graphCenter{} // no source to auto-seed
+	m.graphSym = ""
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: '5', Mod: tea.ModAlt}))
+	if m.active != tabPath || m.pathFocus != focusPathFrom {
+		t.Fatalf("alt+5 should open Path at FROM, got tab=%v focus=%v", m.active, m.pathFocus)
+	}
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "2", Code: '2'}))
+	if m.active != tabPath || m.pathFromInput.Value() != "2" {
+		t.Fatalf("bare digit on Path should type, got tab=%v FROM=%q", m.active, m.pathFromInput.Value())
+	}
+	m.pathFocus = focusPathResult
+	m.syncFocus()
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "2", Code: '2'}))
+	if m.active != tabMetrics {
+		t.Fatalf("bare digit with Path result focused should switch tabs, got %v", m.active)
+	}
+}
+
 // TestAltDigitTabSwitch: on an input tab a BARE digit types into the query, but
 // alt+digit still switches tabs (and leaves the typed query intact).
 func TestAltDigitTabSwitch(t *testing.T) {
@@ -231,6 +251,153 @@ func TestSearchHeaderShowsResultCount(t *testing.T) {
 	out := m.render()
 	if !strings.Contains(out, "name mode") || !strings.Contains(out, "3 results") {
 		t.Errorf("search header should show the mode and result count:\n%s", out)
+	}
+}
+
+func TestPathTabSeedsRichSourceFromSelection(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.graphSym = "Run"
+	m.graphCenter = graphCenter{sym: "Run", fqn: "app.Run", kind: "function", file: "app.go", line: 12}
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: '5', Mod: tea.ModAlt}))
+	if m.active != tabPath || m.pathFocus != focusPathTo {
+		t.Fatalf("Path should open with seeded FROM and TO focused, got tab=%v focus=%v", m.active, m.pathFocus)
+	}
+	if m.pathFromInput.Value() != "app.Run" || m.pathFrom.center.file != "app.go" || m.pathFrom.center.line != 12 {
+		t.Fatalf("seeded endpoint lost selector identity: input=%q endpoint=%+v", m.pathFromInput.Value(), m.pathFrom)
+	}
+	selector, ok := m.pathFrom.center.selector()
+	if !ok || selector.File != "app.go" || selector.StartLine != 12 || selector.FQN != "app.Run" || selector.Kind != "function" {
+		t.Fatalf("center→selector projection = %+v ok=%v", selector, ok)
+	}
+}
+
+func TestPathSelectorRoutingRequiresTwoRichEndpoints(t *testing.T) {
+	from := pathEndpoint{query: "app.Run", center: graphCenter{sym: "Run", fqn: "app.Run", kind: "function", file: "a.go", line: 12}}
+	to := pathEndpoint{query: "app.Helper", center: graphCenter{sym: "Helper", fqn: "app.Helper", kind: "function", file: "a.go", line: 3}}
+	fromSelector, toSelector, exact := exactPathSelectors(from, to)
+	if !exact || fromSelector.FQN != "app.Run" || fromSelector.Kind != "function" || toSelector.StartLine != 3 {
+		t.Fatalf("rich endpoints should route to PathBySelectors: from=%+v to=%+v exact=%v", fromSelector, toSelector, exact)
+	}
+	typed := pathEndpointForInput("Helper", pathEndpoint{})
+	if _, _, exact := exactPathSelectors(from, typed); exact {
+		t.Fatal("a manually typed endpoint without file:line must retain the legacy/FQN fallback")
+	}
+
+	// A selector-aware disconnected answer has no Path nodes to upgrade from, so
+	// the report selectors themselves must preserve exact endpoints for reruns.
+	m := sized(t, 100, 28)
+	m.active = tabPath
+	rep := &app.PathReport{
+		From: "Run", To: "Helper", CallGraph: app.CallGraphResolved,
+		FromSelector: &app.SymbolSelector{File: "a.go", StartLine: 12, FQN: "app.Run", Kind: "function"},
+		ToSelector:   &app.SymbolSelector{File: "a.go", StartLine: 3, FQN: "app.Helper", Kind: "function"},
+	}
+	m, _ = applyMsg(m, pathMsg{from: typed, to: typed, rep: rep})
+	if _, _, exact := exactPathSelectors(m.pathFrom, m.pathTo); !exact {
+		t.Fatal("disconnected selector report should retain exact endpoints for a rerun")
+	}
+}
+
+func TestPathWorkflowRunsAsyncAndInspectsResult(t *testing.T) {
+	m := sized(t, 120, 40)
+	m.loading = false
+	m.active = tabPath
+	m.pathFocus = focusPathFrom
+	m.syncFocus()
+	m.pathFromInput.SetValue("app.Top")
+
+	// Enter advances FROM → TO without blocking or querying.
+	m, cmd := applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd != nil || m.pathFocus != focusPathTo {
+		t.Fatalf("FROM enter should focus TO only, cmd=%v focus=%v", cmd != nil, m.pathFocus)
+	}
+	m.pathToInput.SetValue("app.Helper")
+	m, cmd = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil || !m.pathLoading || m.statusMsg != "finding path…" {
+		t.Fatalf("TO enter should start async lookup, cmd=%v loading=%v status=%q", cmd != nil, m.pathLoading, m.statusMsg)
+	}
+
+	from, to := m.pathFrom, m.pathTo
+	rep := &app.PathReport{
+		From: "Top", To: "Helper", Found: true, CallGraph: app.CallGraphName,
+		Path: []app.SymbolRef{
+			{Symbol: "Top", FQN: "app.Top", Kind: "function", File: "a.go", StartLine: 8},
+			{Symbol: "Run", FQN: "app.Run", Kind: "function", File: "a.go", StartLine: 5},
+			{Symbol: "Helper", FQN: "app.Helper", Kind: "function", File: "a.go", StartLine: 3},
+		},
+	}
+	m, _ = applyMsg(m, pathMsg{from: from, to: to, rep: rep})
+	if m.pathLoading || m.pathFocus != focusPathResult || m.pathSel != 0 {
+		t.Fatalf("path result should focus first node, loading=%v focus=%v sel=%d", m.pathLoading, m.pathFocus, m.pathSel)
+	}
+	out := m.render()
+	for _, want := range []string{"call_graph: name", "confidence: medium", "Top → Helper", "2 hops", "│ calls"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Path result missing %q:\n%s", want, out)
+		}
+	}
+
+	// Arrow and vim navigation both inspect the ordered nodes, and selection is
+	// available to global source/context/Graph actions as a full graphCenter.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
+	if m.pathSel != 2 {
+		t.Fatalf("down+j pathSel=%d, want target node 2", m.pathSel)
+	}
+	c, ok := m.selectedCenter()
+	if !ok || c.fqn != "app.Helper" || c.file != "a.go" || c.line != 3 {
+		t.Fatalf("selected path node = %+v ok=%v", c, ok)
+	}
+	m, cmd = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if m.active != tabGraph || m.graphCenter.fqn != "app.Helper" || cmd == nil {
+		t.Fatalf("enter should open selected node in Graph, tab=%v center=%+v cmd=%v", m.active, m.graphCenter, cmd != nil)
+	}
+	// Browser back restores the complete Path task, including endpoints/result.
+	m, _ = applyMsg(m, tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft, Mod: tea.ModAlt}))
+	if m.active != tabPath || m.pathRep == nil || m.pathSel != 2 || m.pathToInput.Value() != "app.Helper" {
+		t.Fatalf("back should restore Path exactly: tab=%v sel=%d to=%q rep=%v", m.active, m.pathSel, m.pathToInput.Value(), m.pathRep != nil)
+	}
+}
+
+func TestPathStatesStayDistinct(t *testing.T) {
+	base := sized(t, 100, 28)
+	base.active = tabPath
+	base.pathFocus = focusPathFrom
+	base.syncFocus()
+	if out := base.render(); !strings.Contains(out, "Choose two endpoints") {
+		t.Fatalf("initial Path state should instruct the user:\n%s", out)
+	}
+
+	from := pathEndpoint{query: "A", center: graphCenter{sym: "A"}}
+	to := pathEndpoint{query: "B", center: graphCenter{sym: "B"}}
+	for _, tc := range []struct {
+		name string
+		rep  *app.PathReport
+		want []string
+	}{
+		{name: "resolved disconnected", rep: &app.PathReport{From: "A", To: "B", CallGraph: app.CallGraphResolved}, want: []string{"call_graph: resolved", "confidence: high", "No path found"}},
+		{name: "unresolved", rep: &app.PathReport{From: "A", To: "B", CallGraph: app.CallGraphUnresolved, Resolution: "call graph not available for typescript"}, want: []string{"call_graph: unresolved", "confidence: low", "Path unknown", "typescript"}},
+		{name: "missing endpoint", rep: &app.PathReport{From: "A", To: "Missing", CallGraph: app.CallGraphNone, Note: `"Missing" is not a symbol`}, want: []string{"call_graph: none", "Endpoint not found", "not a symbol"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := applyMsg(base, pathMsg{from: from, to: to, rep: tc.rep})
+			out := m.render()
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("state missing %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+
+	loading := base
+	loading.pathLoading = true
+	if out := loading.render(); !strings.Contains(out, "finding shortest path") {
+		t.Fatalf("loading state missing:\n%s", out)
+	}
+	failed, _ := applyMsg(base, pathMsg{from: from, to: to, err: fakeErr("graph unavailable")})
+	if out := failed.render(); !strings.Contains(out, "Path lookup failed") || !strings.Contains(out, "graph unavailable") {
+		t.Fatalf("error state missing:\n%s", out)
 	}
 }
 
@@ -855,6 +1022,7 @@ func TestColdStartTabsHintToIndex(t *testing.T) {
 	}{
 		{"Impact", tabImpact},
 		{"Search", tabSearch},
+		{"Path", tabPath},
 	} {
 		m := sized(t, 120, 40)
 		m.active = tc.active
@@ -1062,7 +1230,7 @@ func TestHelpOverlay(t *testing.T) {
 	// Document every key that actually works, where it works: the vim aliases
 	// (k/j) and the Source-view scroll mode were undocumented before, and
 	// Metrics was wrongly grouped with the text-input tabs (which have no k/j).
-	for _, want := range []string{"Global", "Graph", "Metrics", "Impact / Search",
+	for _, want := range []string{"Global", "Graph", "Metrics", "Impact / Search", "Path",
 		"re-center", "precise", "k/j", "home/end", "Source / context", "ctrl+o", "orient"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay should document %q:\n%s", want, out)

@@ -418,6 +418,21 @@ func TestCacheSaveRestoreDropHitPath(t *testing.T) {
 	if _, err := svc.Index(ctx, root, index.Options{}, false); err != nil {
 		t.Fatalf("Index: %v", err)
 	}
+	g, err := svc.s.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, projectName, err := svc.resolveProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := g.GetProjectByName(projectName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(p.ID, "main.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
 
 	// 1. CacheSave: fcheap is present, so this must produce a real stash id
 	//    and record a pointer entry keyed by the working-tree hash.
@@ -431,6 +446,9 @@ func TestCacheSaveRestoreDropHitPath(t *testing.T) {
 	if treeHash == "" {
 		t.Fatal("CacheSave returned empty tree hash")
 	}
+	if err := g.ClearCallGraphResolved(p.ID, "main.go"); err != nil {
+		t.Fatal(err)
+	}
 
 	// 2. CacheRestore on the UNCHANGED tree must HIT (restored=true). This is
 	//    the path that was previously untested end-to-end against real fcheap.
@@ -443,6 +461,13 @@ func TestCacheSaveRestoreDropHitPath(t *testing.T) {
 	}
 	if restoredID != stashID {
 		t.Errorf("restored stash id = %q, want %q", restoredID, stashID)
+	}
+	coverage, err := g.ProjectCallGraphCoverage(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coverage) != 1 || coverage[0].FilePath != "main.go" || coverage[0].Resolver != "go/types" {
+		t.Fatalf("cache restore lost precise coverage: %+v", coverage)
 	}
 
 	// 3. Edit a file on disk WITHOUT reindexing → the working-tree hash drifts

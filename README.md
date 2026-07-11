@@ -33,22 +33,26 @@ instead of dozens of file reads.
 - **Built for agent harnesses** — `context <symbol>` bundles definition + callers + callees +
   tests + blast radius in **one call** (no four-round-trip stitching), and `status` reports index
   *freshness* (files changed since indexing) so an agent reindexes before trusting a stale answer.
+- **Exact, reusable source selectors** — every symbol result already carries `file`, `start_line`,
+  `fqn`, and `kind`. Agents project those fields into a `selector` for `source`/`context`/`callers`/
+  `callees`/`impact`/`risk` (or paired path selectors), while people use `--at file:line`. This picks
+  one same-named definition without persisting reindex-volatile database IDs.
 - **Multi-project registry** — one shared store indexes all your repos; `projects` lists what's
   indexed, and any query targets one project (resolved from cwd, or `--path`).
 - **Annotations** — pin notes and external data (DB rows from mongosh/postgres, vidtrace/vecgrep
   findings, …) to a symbol or a call path; they persist across reindex. A knowledge layer over the
   graph for agent harnesses (`annotate` / `annotations`, also on MCP).
 - **Precise call resolution** — the fast name-based graph over-matches same-named methods
-  (`x.Close()` links to *every* `Close`). One `codemap index --precise` resolves each call to the one
-  it actually invokes and makes **every** query — callers, callees, impact, hotspots, path — exact at
-  once, no per-query flag (e.g. a `Close` method that name-matching credited with 71 callers shows only
-  its real ones). It's the unified exact-resolution pass across languages: an in-process, pure-Go
+  (`x.Close()` links to *every* `Close`). `codemap index --precise` attempts to resolve each call to
+  the one it actually invokes and records successful precise coverage per file. A query is reported
+  `resolved` only when every matched definition file completed that pass; partial failures remain
+  honestly `name`/`unresolved` instead of upgrading the whole project. It's the unified exact-resolution pass across languages: an in-process, pure-Go
   `go/types` pass for **Go**, and the language server's `callHierarchy` for the **LSP languages**
   (TypeScript, JavaScript, Python — which have no name-based call edges, so `--precise` is what gives
   them a call graph at all). Opt-in and additive (name-based stays the default for Go); the Go pass
   degrades to name-based **with a note**
   when the `go` toolchain or module isn't available. For a one-off exact answer without reindexing,
-  `callers`/`callees` also take `--lsp` (gopls `callHierarchy`). CLI + MCP.
+  `callers`/`callees` also take `--precise` (language-server `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider/model/dimension changes instead of corrupting the vector space.
 - **Three surfaces, one store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
@@ -61,11 +65,11 @@ instead of dozens of file reads.
 ## studio (TUI)
 
 `codemap studio` opens an interactive, full-screen explorer of your code (Charm v2 — Bubble
-Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`4` or `tab`; navigate with `↑`/`↓`.
+Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`5` or `tab`; navigate with `↑`/`↓`.
 
 ```
  codemap studio                       codemap · 509 nodes · 1849 edges · 35 files
-  1 Graph   2 Metrics   3 Impact   4 Search
+  1 Graph   2 Metrics   3 Impact   4 Search   5 Path
  Hubs (164)                           │ lspsrc.Extractor.Close
     57  lspsrc.Extractor.Close        │  Called by (57)
     56  app.Session.Close             │   ▸ main.runInit   cmd/codemap/init_status.go:64
@@ -91,6 +95,9 @@ the selected node's signature is previewed (`⟩ func runInit(...)`).
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
 - **Search** — semantic search by meaning, falling back to fast name search when there are no
   embeddings (so it works even without Ollama).
+- **Path** — choose `FROM` and `TO`, then inspect the shortest directed call chain.
+  The ordered nodes are keyboard-navigable and every answer shows its `call_graph` confidence,
+  keeping “disconnected,” “unresolved,” and “missing endpoint” visibly distinct.
 
 ## Installation
 
@@ -105,7 +112,7 @@ brew install abdul-hamid-achik/tap/codemap
 - **Go 1.25+** (only to build from source)
 - **[Ollama](https://ollama.com)** with the embedding model:
   `ollama pull nomic-embed-text` (optional — without it, indexing is structure-only)
-- **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for `--lsp` precise Go results
+- **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for one-off `callers`/`callees --precise` Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
 **Languages** — structure + semantic search work for all of these; a precise call graph
@@ -157,10 +164,12 @@ codemap config show
 
 # 3. Orient on a symbol — everything in one call (definition, callers, callees, tests)
 codemap context authenticateUser   # the one-call overview (agents: codemap_context)
+codemap context --at auth.go:42    # exactly one same-named definition
 
 # 4. Navigate the call graph
 codemap callers authenticateUser   # who calls it (fast, name-based)
-codemap callers authenticateUser --lsp   # exact callers via gopls (Go)
+codemap callers authenticateUser --precise   # exact one-off callers via the language server
+codemap callers --at auth.go:42    # exact definition from the indexed graph
 codemap callees authenticateUser   # what it calls
 codemap path     Handler Login     # shortest call path between two symbols
 
@@ -236,12 +245,12 @@ complete set.
 | Project | `doctor` | check the environment — toolchains, language servers, embeddings — with install hints |
 | Project | `projects` | list all registered projects and their index sizes |
 | Project | `config path` / `config show` | resolved config file path and values (`--json`) |
-| Navigate | `callers` / `callees` / `path` | call-graph navigation (`--lsp` for exact gopls results) |
+| Navigate | `callers` / `callees` / `path` | call-graph navigation (`--at file:line` selects one definition; `--precise` resolves on demand) |
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, tests, blast radius |
 | Navigate | `read-order` | ranked reading list for an unfamiliar repo |
-| Analyze | `impact` / `file-impact` / `review` | blast radius + tests for a symbol, file, or diff |
+| Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact, file dependency evidence, or diff-scoped tests |
 | Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
 | Analyze | `risk` | 0..1 change-risk score with factors |
 | Analyze | `secret-impact` / `required-keys` | key-rotation blast radius and least-privilege key sets |
@@ -262,10 +271,11 @@ links to *every* method named `Close`, because resolving the receiver's type nee
 codemap is honest about this rather than hiding it: `callers`/`callees`/`impact` flag when a name
 resolves to multiple definitions, and `hotspots` marks name-collision inflation.
 
-**For an exact graph, reindex with `codemap index --precise`** (Go). It runs an in-process, pure-Go
-`go/types` pass that resolves every call to the one method it actually invokes and **replaces** the
-name-based call edges — so *every* query (`callers`, `callees`, `impact`, `hotspots`, `path`) becomes
-precise at once, with no per-query flag. On the codemap repo itself this collapses the `Close`/`Error`
+**For precise graph coverage, reindex with `codemap index --precise`** (Go). It runs an in-process,
+pure-Go `go/types` pass that replaces name-based edges in each package/file it resolves successfully.
+Each query is `resolved` only when all definition files it matches have precise coverage; packages
+that fail type-checking stay name-based, and an uncovered LSP-language definition stays `unresolved`.
+On the codemap repo itself this collapses the `Close`/`Error`
 fan-out (e.g. one `Close` method that name-matching credited with 71 callers drops to its real ~12)
 and turns `hotspots` from name-collision noise into genuine hubs. Requirements and guarantees:
 
@@ -278,12 +288,20 @@ and turns `hotspots` from name-collision noise into genuine hubs. Requirements a
 
 **For TypeScript, `--precise` is the *only* source of call edges.** The name-based pass extracts TS
 structure (classes, methods, functions) but not calls, so a plain `index` gives TS no call graph;
-`index --precise` drives `typescript-language-server` `callHierarchy` to resolve them exactly, and the
-same `callers`/`callees`/`impact`/`hotspots`/`path` queries then work for TS with no flag of their own.
+`index --precise` drives `typescript-language-server` `callHierarchy`; files it resolves gain exact
+edges, while any uncovered definition remains explicitly `unresolved`. The same
+`callers`/`callees`/`impact`/`hotspots`/`path` queries then use that indexed coverage with no flag of their own.
 Needs `typescript-language-server` on `PATH`.
 
-For a one-off exact answer *without* reindexing, `callers`/`callees` also accept `--lsp` (gopls
-`callHierarchy`), which likewise degrades to name-based with a note when gopls can't resolve.
+For a one-off exact answer *without* reindexing, `callers`/`callees` also accept `--precise`
+(`callHierarchy` through the language server), which degrades to the indexed graph with a note
+when the server can't resolve.
+
+Precise indexing makes the **edges** exact; a bare query such as `impact Close` still deliberately
+unions every definition named `Close`. To keep a follow-up on one definition, use CLI `--at
+file:line`, or pass MCP `selector:{file,start_line,fqn,kind}` projected from any symbol result.
+Selectors prefer file+FQN+kind, so ordinary line shifts survive reindex; moves/renames return a
+miss instead of silently selecting another node. Raw SQLite node IDs are never a public contract.
 
 `orphans` finds call-graph dead ends. It follows functions wired by *value* — handlers in a
 table like cobra's `RunE: runInit`, callbacks passed to a registrar — and excludes methods that
@@ -328,6 +346,17 @@ gopls-resolved results (Go); `codemap_source` returns a symbol's body; `codemap_
 what's indexed; **`codemap_docs`** returns an agent guide so a harness can learn the tool;
 **`codemap_annotate` / `codemap_annotations`** pin notes and external data (DB rows, findings) to
 symbols and call paths — a knowledge layer over the graph (see below).
+
+For same-named definitions, pass `selector:{file,start_line,fqn,kind}` to `codemap_source`,
+`codemap_context`, `codemap_callers`, `codemap_callees`, `codemap_impact`, or `codemap_risk`.
+`codemap_path` accepts `from_selector` + `to_selector`. The fields are a direct projection of the
+symbol objects these tools already return, so chaining adds no database-ID contract.
+
+`codemap_context` uses the indexed graph only: it never launches language servers implicitly, and
+reports `call_graph:"unresolved"` plus a precise-index action when the graph is incomplete.
+`codemap_context_batch` caps aggregate source bodies at 64 KiB while retaining signatures, docs,
+and locations; `source_budget` / `source_truncations` disclose any shortening. Optional component
+failures appear in `partial_errors` without discarding the usable parts of the bundle.
 
 Results carry each symbol's **signature** (e.g. `func (s *Store) Hotspots(projectID int64, limit
 int) ([]Hotspot, error)`) and **docstring**, so an agent understands what callers/callees/hits are

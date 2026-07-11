@@ -56,12 +56,85 @@ func TestImportsEdgesWired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n == 0 {
+	if n != 1 {
 		// Pin a precise failure: b.go's import "imports-test/a" must
 		// produce a file→file edge, since the schema declares the
 		// type but no writer ever materialized one. Pre-fix this
 		// silently returned 0.
-		t.Errorf("P2-04 (O30): no EdgeImports written for b.go→a/alpha.go cross-file import — the schema declared `imports` for E2.3 but no extractor ever wrote one")
+		t.Fatalf("P2-04 (O30): import edge count = %d, want exactly 1 for b.go→a/alpha.go", n)
+	}
+
+	// A no-op IndexProject still runs the deferred import pass. It must
+	// replace the source file's import edges, not append duplicates.
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	n, err = g.CountEdgesByType(pid, graph.EdgeImports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("no-op incremental index duplicated imports: got %d edges, want 1", n)
+	}
+}
+
+// TestIndexFilesMaintainsImportEdges verifies that the watcher path resolves
+// imports against the whole project and replaces stale edges when an importing
+// file changes. Repeating the same IndexFiles call must remain idempotent.
+func TestIndexFilesMaintainsImportEdges(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module imports-test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, sub := range []string{"a", "c"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a", "alpha.go"), []byte("package a\n\nfunc Alpha() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "c", "gamma.go"), []byte("package c\n\nfunc Gamma() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bPath := filepath.Join(dir, "b.go")
+	if err := os.WriteFile(bPath, []byte("package b\n\nimport \"imports-test/a\"\n\nfunc Run() { a.Alpha() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := graph.Open(filepath.Join(t.TempDir(), "g.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(bPath, []byte("package b\n\nimport \"imports-test/c\"\n\nfunc Run() { c.Gamma() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for run := 1; run <= 2; run++ {
+		if _, err := ix.IndexFiles(context.Background(), pid, "app", dir, []string{"b.go"}, Options{}); err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		var target string
+		err := g.DB().QueryRow(`
+			SELECT COUNT(*), COALESCE(MIN(dst.file_path), '')
+			FROM edges e
+			JOIN nodes src ON src.id=e.source_id
+			JOIN nodes dst ON dst.id=e.target_id
+			WHERE src.project_id=? AND src.file_path='b.go' AND e.edge_type=?`,
+			pid, graph.EdgeImports).Scan(&count, &target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 || filepath.ToSlash(target) != "c/gamma.go" {
+			t.Fatalf("IndexFiles run %d imports = %d target %q, want one edge to c/gamma.go", run, count, target)
+		}
 	}
 }
 

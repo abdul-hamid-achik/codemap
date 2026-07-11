@@ -36,6 +36,7 @@ func nodeToRef(n graph.Node) SymbolRef {
 // RelationReport is returned by Callers/Callees.
 type RelationReport struct {
 	Symbol      string             `json:"symbol"`
+	Selector    *SymbolSelector    `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
 	Project     string             `json:"project"`
 	Found       bool               `json:"found"` // whether the symbol exists in the index — distinguishes a typo from a real symbol with no callers/callees (both yield empty Results)
 	Results     []SymbolRef        `json:"results"`
@@ -161,17 +162,17 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	rep.Found = len(rep.Results) > 0 || (derr == nil && len(defs) > 0)
 	// call_graph: the stable enum. defs (the matching definitions) classify
 	// resolution; empty defs on an unknown symbol stays "none".
-	rep.CallGraph = callGraphEnum(svc.hasPreciseEdges(g, p.ID), defs)
+	rep.CallGraph = svc.callGraphStatus(g, p.ID, defs)
 	if derr == nil && len(defs) > 1 {
-		if svc.hasPreciseEdges(g, p.ID) {
+		if rep.CallGraph == CallGraphResolved {
 			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but these results still merge all of them; query a more specific name to separate them", symbol, len(defs))
 		} else {
-			rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — these results merge all of them; reindex with 'codemap index --precise' for exact per-method edges, or use --lsp for one method", symbol, len(defs))
+			rep.Note = fmt.Sprintf("%q matches %d definitions (name-based) — these results merge all of them; reindex with 'codemap index --precise' for exact per-method edges, or use callers/callees --precise for one method", symbol, len(defs))
 		}
 	}
 	// Empty results for a no-name-based-call language on a non-precise index mean
 	// "unresolved", not "no callers" — flag it instead of a confident empty.
-	if lang, yes := svc.callGraphUnavailable(g, p.ID, defs); yes && len(rep.Results) == 0 {
+	if lang, yes := svc.callGraphUnavailable(g, p.ID, defs); yes {
 		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang)
 	}
 	rep.Annotations = symbolAnnotations(g, p.ID, symbol)

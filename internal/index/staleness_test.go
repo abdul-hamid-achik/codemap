@@ -50,11 +50,11 @@ func TestStaleness(t *testing.T) {
 	}
 }
 
-// TestStalenessTracksParseErrorFile pins finding E: a scanned-but-unparseable
-// file is recorded in index_state so staleness doesn't report it as perpetually
-// "new" (before, a parse-error file never entered index_state → "1 new" forever,
-// and a re-index never cleared it). The error is still surfaced once.
-func TestStalenessTracksParseErrorFile(t *testing.T) {
+// TestStalenessReportsParseErrorFile pins the last-good-state contract: a file
+// is recorded in index_state only after successful extraction. An unparseable
+// new file therefore remains honestly "new" and is retried on every index,
+// keeping the extraction failure visible instead of stamping stale data fresh.
+func TestStalenessReportsParseErrorFile(t *testing.T) {
 	g, v := newStores(t)
 	dir := t.TempDir()
 	writeFile(t, dir, "good.go", "package app\nfunc Good() {}\n")
@@ -66,26 +66,27 @@ func TestStalenessTracksParseErrorFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The parse error is still surfaced (the file genuinely isn't indexed)...
+	// The parse error is surfaced because the file genuinely isn't indexed.
 	if len(res.Errors) == 0 {
 		t.Fatal("broken.go should be recorded in res.Errors")
 	}
-	// ...but it is tracked in index_state, so staleness reports NO drift.
+	// The failed content is not tracked as successful, so staleness remains
+	// honest about the unindexed file.
 	st, err := ix.Staleness(pid, dir, map[string]bool{"go": true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Any() {
-		t.Errorf("a tracked parse-error file must not show as drift, got %+v", st)
+	if st.New != 1 || st.Changed != 0 || st.Deleted != 0 {
+		t.Errorf("an unindexed parse-error file should remain new, got %+v", st)
 	}
-	// A second incremental index re-indexes nothing (no pointless retry of the
-	// unchanged broken file) — i.e. the re-index actually clears the false "new".
+	// A second incremental index retries and reports the same still-broken file;
+	// it must not hash-skip the failure as if it were current graph data.
 	res2, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res2.FilesIndexed != 0 {
-		t.Errorf("second index should re-index nothing, got FilesIndexed=%d", res2.FilesIndexed)
+	if len(res2.Errors) == 0 {
+		t.Error("second index should retry and report broken.go")
 	}
 }
 

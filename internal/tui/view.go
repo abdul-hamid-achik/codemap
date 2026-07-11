@@ -57,8 +57,8 @@ func renderHelp() string {
 		b.WriteString("  " + symStyle.Render(padRight(k, 24)) + mutedStyle.Render(d) + "\n")
 	}
 	b.WriteString(sectionStyle.Render("Global") + "\n")
-	row("1–4 / tab / shift+tab", "switch tabs")
-	row("alt+1–4", "switch tabs while a text input has focus (Search/Impact)")
+	row("1–5 / tab / shift+tab", "switch tabs")
+	row("alt+1–5", "switch tabs while a text input has focus (Search/Impact/Path)")
 	row("ctrl+g", "open the selection in the Graph walker")
 	row("ctrl+s", "view the selected symbol's source")
 	row("ctrl+o", "orient: context card (callers/callees/tests/blast)")
@@ -74,14 +74,19 @@ func renderHelp() string {
 	row("backspace", "step back along the walk")
 	row("s · p", "view source · precise relations (gopls)")
 	row("m", "toggle the neighborhood map (callers → node → calls)")
-	b.WriteString("\n" + sectionStyle.Render("Metrics") + "\n")
+	b.WriteString(sectionStyle.Render("Metrics") + "\n")
 	row("↑/↓ · k/j", "move the selection (also pgup/pgdn · home/end)")
 	row("enter", "drill the selected symbol into Impact")
-	b.WriteString("\n" + sectionStyle.Render("Impact / Search") + "\n")
+	b.WriteString(sectionStyle.Render("Impact / Search") + "\n")
 	row("type", "edit the query; enter runs it")
 	row("↑/↓ · pgup/pgdn", "move the result selection")
 	row("enter", "run the query, or open the selected hit")
-	b.WriteString("\n" + sectionStyle.Render("Source / context overlay (s · ctrl+s · ctrl+o)") + "\n")
+	b.WriteString(sectionStyle.Render("Path") + "\n")
+	row("↑/↓", "move between FROM and TO while editing")
+	row("enter", "FROM → TO · TO → find shortest path · result → Graph")
+	row("↑/↓ · k/j", "inspect returned path nodes (also pgup/pgdn · home/end)")
+	row("f / t · r", "edit FROM / TO · rerun the current endpoints")
+	b.WriteString(sectionStyle.Render("Source / context overlay (s · ctrl+s · ctrl+o)") + "\n")
 	row("↑/↓ · k/j", "scroll (also pgup/pgdn · g/G top & bottom)")
 	row("esc / q", "close the overlay")
 	return b.String()
@@ -215,6 +220,14 @@ func (m Model) footer() string {
 	case tabImpact:
 		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
 		compact = "type · enter · ↑/↓ · ctrl+g graph · ctrl+s src · tab"
+	case tabPath:
+		if m.pathFocus == focusPathResult {
+			hint = "↑/↓ · k/j inspect · enter/ctrl+g graph · ctrl+s source · f/t edit · r rerun · ctrl+c quit"
+			compact = "↑/↓ · k/j · enter graph · f/t edit · r rerun"
+		} else {
+			hint = "type endpoint · ↑/↓ field · enter next/run · alt+1–5 tabs · ctrl+c quit"
+			compact = "type · ↑/↓ field · enter next/run · alt+1–5 tabs"
+		}
 	default: // metrics
 		hint = "↑/↓ select · enter → impact · ctrl+g graph · ctrl+s source · ctrl+r reindex · ctrl+c quit"
 		compact = "↑/↓ · enter impact · ctrl+g graph · ctrl+s src · ctrl+r reindex"
@@ -237,6 +250,8 @@ func (m Model) body(w, h int) string {
 		return m.renderImpact(w, h)
 	case tabSearch:
 		return m.renderSearch(w, h)
+	case tabPath:
+		return m.renderPath(w, h)
 	}
 	return ""
 }
@@ -837,6 +852,144 @@ func (m Model) renderSearch(w, h int) string {
 		}
 	}
 	return b.String()
+}
+
+// ---- Path tab ----
+
+// renderPath is a task-oriented shortest-path workflow rather than a graph
+// algorithm in the view: people choose FROM/TO, an async command calls app.Path,
+// and this pane renders the report's ordered nodes plus its confidence evidence.
+func (m Model) renderPath(w, h int) string {
+	if m.status != nil && !m.status.Registered {
+		return notIndexedHint("Path")
+	}
+	var b strings.Builder
+	b.WriteString(title("Path") + "   " + mutedStyle.Render("shortest call chain") + "\n")
+	b.WriteString(m.pathInputRow("FROM", m.pathFromInput.View(), m.pathFocus == focusPathFrom, w) + "\n")
+	b.WriteString(m.pathInputRow("TO", m.pathToInput.View(), m.pathFocus == focusPathTo, w) + "\n")
+	if m.pathFocus == focusPathResult {
+		b.WriteString(mutedStyle.Render(truncate("  result focused · ↑/↓ or k/j inspect · enter opens Graph · f/t edits endpoints", w)) + "\n")
+	} else {
+		b.WriteString(mutedStyle.Render(truncate("  ↑/↓ moves fields · enter runs · selected endpoints or unique FQNs stay exact", w)) + "\n")
+	}
+	b.WriteByte('\n')
+
+	switch {
+	case m.pathLoading:
+		b.WriteString(mutedStyle.Render(truncate(m.spinnerGlyph()+" finding shortest path through the indexed graph…", w)))
+		return b.String()
+	case m.pathErr != "":
+		b.WriteString(errorStyle.Render("Path lookup failed") + "\n")
+		b.WriteString(mutedStyle.Render(truncate(m.pathErr, w)))
+		return b.String()
+	case m.pathRep == nil:
+		b.WriteString(sectionStyle.Render("Choose two endpoints") + "\n")
+		b.WriteString(mutedStyle.Render(truncate("Start from the current selection (when available), or type a symbol/FQN.", w)) + "\n")
+		b.WriteString(mutedStyle.Render(truncate("Studio asks the shared codemap call graph for the shortest path; it never guesses from text.", w)))
+		return b.String()
+	}
+
+	rep := m.pathRep
+	b.WriteString(pathEvidence(rep.CallGraph) + "\n")
+	if rep.Stale {
+		b.WriteString(warnStyle.Render("⚠ stale index — ctrl+r before relying on this path") + "\n")
+	}
+	if rep.Resolution != "" {
+		b.WriteString(errorStyle.Render("⚠ ") + mutedStyle.Render(truncate(rep.Resolution, w-2)) + "\n")
+	}
+	if rep.Note != "" && rep.Note != rep.Resolution {
+		b.WriteString(warnStyle.Render("⚠ ") + mutedStyle.Render(truncate(rep.Note, w-2)) + "\n")
+	}
+
+	if !rep.Found {
+		b.WriteByte('\n')
+		switch rep.CallGraph {
+		case app.CallGraphUnresolved:
+			b.WriteString(errorStyle.Render("Path unknown") + "\n")
+			b.WriteString(mutedStyle.Render(truncate("The indexed call graph is incomplete, so an empty path is not evidence that the endpoints are disconnected.", w)))
+		case app.CallGraphNone:
+			b.WriteString(sectionStyle.Render("Endpoint not found") + "\n")
+			b.WriteString(mutedStyle.Render(truncate("Edit FROM or TO; choose an existing selection or a unique FQN for an exact endpoint.", w)))
+		default:
+			b.WriteString(sectionStyle.Render("No path found") + "\n")
+			b.WriteString(mutedStyle.Render(truncate(fmt.Sprintf("%s and %s are both indexed, but this graph contains no directed path between them.", rep.From, rep.To), w)))
+		}
+		return b.String()
+	}
+
+	hops := len(rep.Path) - 1
+	pathTitle := truncate(fmt.Sprintf("%s → %s  ·  %d hops", rep.From, rep.To, hops), w)
+	b.WriteString("\n" + sectionStyle.Render(pathTitle) + "\n")
+	// Header/inputs/evidence consume roughly 10 lines; keep the selected row in a
+	// bounded window so the layout remains useful after any terminal resize.
+	budget := clamp((h-13)/2, 1, 20)
+	start := windowStart(m.pathSel, budget, len(rep.Path))
+	end := clamp(start+budget, 0, len(rep.Path))
+	if start > 0 {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d earlier nodes\n", start)))
+	}
+	for i := start; i < end; i++ {
+		n := rep.Path[i]
+		name := displayName(n.FQN, n.Symbol)
+		loc := fmt.Sprintf("%s:%d", n.File, n.StartLine)
+		plain := fmt.Sprintf(" %2d  %-9s  %s  %s", i, n.Kind, name, loc)
+		if i == m.pathSel && m.pathFocus == focusPathResult {
+			b.WriteString(selectedStyle.Width(w).Render(truncate(" ▸"+plain, w)) + "\n")
+		} else {
+			contentW := w - 19 // fixed indent/index/kind/separators
+			if contentW < 2 {
+				contentW = 2
+			}
+			locW := contentW / 3
+			if locW < 1 {
+				locW = 1
+			}
+			nameW := contentW - locW
+			if nameW < 1 {
+				nameW = 1
+			}
+			kind := padRight(truncate(n.Kind, 9), 9)
+			b.WriteString("  " + countStyle.Render(fmt.Sprintf("%2d", i)) + "  " +
+				mutedStyle.Render(kind) + "  " + symStyle.Render(truncate(name, nameW)) + "  " +
+				mutedStyle.Render(truncate(loc, locW)) + "\n")
+		}
+		if i < end-1 {
+			b.WriteString(mutedStyle.Render("       │ calls") + "\n")
+		}
+	}
+	if end < len(rep.Path) {
+		b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d later nodes", len(rep.Path)-end)) + "\n")
+	}
+	if m.pathSel < len(rep.Path) {
+		if p := detailPreview(rep.Path[m.pathSel].Signature, rep.Path[m.pathSel].Doc, w); p != "" {
+			b.WriteString("\n" + p)
+		}
+	}
+	return b.String()
+}
+
+func (m Model) pathInputRow(label, input string, focused bool, w int) string {
+	chip := chipStyle.Render(" " + label + " ")
+	if focused {
+		chip = activeChipStyle.Render("▸ " + label + " ")
+	}
+	return lipgloss.NewStyle().MaxWidth(w).Render("  " + chip + " " + input)
+}
+
+func pathEvidence(callGraph string) string {
+	label, confidence := callGraph, "unknown"
+	style := mutedStyle
+	switch callGraph {
+	case app.CallGraphResolved:
+		confidence, style = "high", symStyle
+	case app.CallGraphName:
+		confidence, style = "medium", warnStyle
+	case app.CallGraphUnresolved:
+		confidence, style = "low", errorStyle
+	case app.CallGraphNone, "":
+		label = app.CallGraphNone
+	}
+	return style.Render(fmt.Sprintf("call_graph: %s · confidence: %s", label, confidence))
 }
 
 // ---- helpers ----

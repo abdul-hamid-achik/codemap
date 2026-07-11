@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"fmt"
 	"go/scanner"
 	"go/token"
 	"os"
@@ -20,6 +22,11 @@ type literalSite struct {
 	Confidence string
 }
 
+type secretKeyPattern struct {
+	key  string
+	word *regexp.Regexp
+}
+
 // scanLiteralUsages finds where key appears as a USAGE (string literal / non-comment
 // code) across the project's indexed files, returning project-relative file:line
 // sites. This is the only net-new primitive of secret-impact, and the critique's
@@ -29,47 +36,99 @@ type literalSite struct {
 // identifiers are excluded by construction); other languages drop the comment
 // portion of each line before matching. Word-boundary-anchored so STRIPE_KEY never
 // matches STRIPE_KEY_BACKUP. NEVER returns line content — only positions.
-func scanLiteralUsages(root string, files []string, key string) []literalSite {
-	if key == "" {
-		return nil
+func scanLiteralUsages(root string, files []string, key string) ([]literalSite, error) {
+	byKey, err := scanLiteralUsagesForKeys(context.Background(), root, files, []string{key})
+	if err != nil {
+		return nil, err
 	}
-	word := regexp.MustCompile(`\b` + regexp.QuoteMeta(key) + `\b`)
-	var sites []literalSite
-	for _, rel := range files {
-		data, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil || !word.Match(data) {
-			continue
-		}
-		if strings.HasSuffix(rel, ".go") {
-			sites = append(sites, scanGoLiteral(rel, data, word)...)
-		} else {
-			sites = append(sites, scanGenericLiteral(rel, data, word)...)
-		}
-	}
-	return sites
+	return byKey[key], nil
 }
 
-// scanGoLiteral returns the lines where key appears inside a Go STRING literal —
-// exact, via go/scanner (mode 0 skips comments), so a key in a // comment or as an
-// identifier is never counted.
-func scanGoLiteral(rel string, data []byte, word *regexp.Regexp) []literalSite {
+// scanLiteralUsagesForKeys compiles every key before touching source, then reads
+// each indexed file at most once. A file is tokenized/line-scanned once and each
+// candidate key is matched against the resulting string token or code line. This
+// avoids the old keys x files reread loop and gives long scans a cancellation
+// point at every file, token, and source line.
+func scanLiteralUsagesForKeys(ctx context.Context, root string, files, keys []string) (map[string][]literalSite, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	patterns, err := compileSecretKeyPatterns(keys)
+	if err != nil {
+		return nil, err
+	}
+	byKey := make(map[string][]literalSite, len(patterns))
+	for _, pattern := range patterns {
+		byKey[pattern.key] = nil
+	}
+	if len(patterns) == 0 {
+		return byKey, nil
+	}
+	for _, rel := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if strings.HasSuffix(rel, ".go") {
+			if err := scanGoLiteralKeys(ctx, rel, data, patterns, byKey); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := scanGenericLiteralKeys(ctx, rel, data, patterns, byKey); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return byKey, nil
+}
+
+func compileSecretKeyPatterns(keys []string) ([]secretKeyPattern, error) {
+	patterns := make([]secretKeyPattern, 0, len(keys))
+	for i, key := range keys {
+		if key == "" {
+			continue
+		}
+		word, err := regexp.Compile(`\b` + regexp.QuoteMeta(key) + `\b`)
+		if err != nil {
+			return nil, fmt.Errorf("compile secret key name %d: %w", i+1, err)
+		}
+		patterns = append(patterns, secretKeyPattern{key: key, word: word})
+	}
+	return patterns, nil
+}
+
+func scanGoLiteralKeys(ctx context.Context, rel string, data []byte, patterns []secretKeyPattern, byKey map[string][]literalSite) error {
 	var fset token.FileSet
 	file := fset.AddFile(rel, fset.Base(), len(data))
 	var s scanner.Scanner
 	s.Init(file, data, nil /*no error handler*/, 0 /*skip comments*/)
-	var out []literalSite
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pos, tok, lit := s.Scan()
 		if tok == token.EOF {
 			break
 		}
 		if tok == token.STRING {
-			if unq, err := strconv.Unquote(lit); err == nil && word.MatchString(unq) {
-				out = append(out, literalSite{File: rel, Line: fset.Position(pos).Line, Confidence: "string"})
+			unq, err := strconv.Unquote(lit)
+			if err != nil {
+				continue
+			}
+			for _, pattern := range patterns {
+				if pattern.word.MatchString(unq) {
+					byKey[pattern.key] = append(byKey[pattern.key], literalSite{File: rel, Line: fset.Position(pos).Line, Confidence: "string"})
+				}
 			}
 		}
 	}
-	return out
+	return nil
 }
 
 // scanGenericLiteral matches key in the non-comment portion of each line — a
@@ -82,16 +141,27 @@ func scanGoLiteral(rel string, data []byte, word *regexp.Regexp) []literalSite {
 // is no longer truncated. inBlock carries across lines so an interior
 // /* ... */ block spanning multiple lines is fully consumed.
 func scanGenericLiteral(rel string, data []byte, word *regexp.Regexp) []literalSite {
-	var out []literalSite
+	const key = "key"
+	byKey := map[string][]literalSite{key: nil}
+	_ = scanGenericLiteralKeys(context.Background(), rel, data, []secretKeyPattern{{key: key, word: word}}, byKey)
+	return byKey[key]
+}
+
+func scanGenericLiteralKeys(ctx context.Context, rel string, data []byte, patterns []secretKeyPattern, byKey map[string][]literalSite) error {
 	inBlock := false
 	for i, raw := range strings.Split(string(data), "\n") {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		stripped, stillInBlock := stripLineComment(raw, inBlock)
 		inBlock = stillInBlock
-		if word.MatchString(stripped) {
-			out = append(out, literalSite{File: rel, Line: i + 1, Confidence: "code"})
+		for _, pattern := range patterns {
+			if pattern.word.MatchString(stripped) {
+				byKey[pattern.key] = append(byKey[pattern.key], literalSite{File: rel, Line: i + 1, Confidence: "code"})
+			}
 		}
 	}
-	return out
+	return nil
 }
 
 // stripLineComment removes a line/block-comment tail (best-effort: // # /*) so a

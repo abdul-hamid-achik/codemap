@@ -1,7 +1,8 @@
 // Package snapshot serializes a project's code-intelligence slice to a portable,
 // store-agnostic directory and restores it — the basis for stashing/restoring a
 // branch's index without re-indexing (see the BD.* epic in BACKLOG). It writes
-// graph nodes, edges, index state, and annotations as newline-delimited JSON in a
+// graph nodes, edges, index state, call-graph coverage, and annotations as
+// newline-delimited JSON in a
 // deterministic order, so identical slices across branches serialize byte-for-byte
 // identically and fcheap can content-dedup them. (Embedding vectors are a separate
 // slice, BD.2b.) Edges reference nodes by their position in the sorted node list,
@@ -24,6 +25,8 @@ import (
 )
 
 // SchemaVersion is bumped when the on-disk snapshot format changes incompatibly.
+// call_graph_coverage is an optional additive v1 artifact: an absent manifest
+// field/file is a legacy snapshot with conservatively unknown coverage.
 const SchemaVersion = 1
 
 const (
@@ -31,21 +34,23 @@ const (
 	fileNodes       = "nodes.jsonl"
 	fileEdges       = "edges.jsonl"
 	fileIndexState  = "index_state.jsonl"
+	fileCallGraph   = "call_graph_coverage.jsonl"
 	fileAnnotations = "annotations.jsonl"
 	fileVectors     = "vectors.jsonl"
 )
 
 // Manifest is snapshot.json — the header describing a snapshot directory.
 type Manifest struct {
-	SchemaVersion    int    `json:"schema_version"`
-	Project          string `json:"project"`
-	EmbeddingProfile string `json:"embedding_profile"`
-	BaseSHA          string `json:"base_sha"`
-	Nodes            int    `json:"nodes"`
-	Edges            int    `json:"edges"`
-	IndexState       int    `json:"index_state"`
-	Annotations      int    `json:"annotations"`
-	Vectors          int    `json:"vectors"`
+	SchemaVersion     int    `json:"schema_version"`
+	Project           string `json:"project"`
+	EmbeddingProfile  string `json:"embedding_profile"`
+	BaseSHA           string `json:"base_sha"`
+	Nodes             int    `json:"nodes"`
+	Edges             int    `json:"edges"`
+	IndexState        int    `json:"index_state"`
+	CallGraphCoverage int    `json:"call_graph_coverage,omitempty"`
+	Annotations       int    `json:"annotations"`
+	Vectors           int    `json:"vectors"`
 }
 
 // snapNode is a node's content without its volatile identity (DB id, project id,
@@ -99,7 +104,7 @@ func nodeKey(n graph.Node) string {
 func itoa(i int) string { return fmt.Sprintf("%d", i) }
 
 // Export writes the project's slice into dir (created if needed): the graph
-// (nodes/edges/index_state/annotations) and, when vec != nil, its embedding
+// (nodes/edges/index_state/call_graph_coverage/annotations) and, when vec != nil, its embedding
 // vectors. Rows are emitted in deterministic order so identical slices
 // hash-identically (fcheap dedups them).
 func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, profile, baseSHA string) (*Manifest, error) {
@@ -173,6 +178,18 @@ func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, pr
 		return nil, err
 	}
 
+	coverage, err := g.ProjectCallGraphCoverage(projectID)
+	if err != nil {
+		return nil, err
+	}
+	cAny := make([]any, len(coverage))
+	for i, entry := range coverage {
+		cAny[i] = entry
+	}
+	if err := writeJSONL(filepath.Join(dir, fileCallGraph), cAny); err != nil {
+		return nil, err
+	}
+
 	anns, err := g.AllAnnotations(projectID)
 	if err != nil {
 		return nil, err
@@ -224,7 +241,7 @@ func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, pr
 
 	m := &Manifest{
 		SchemaVersion: SchemaVersion, Project: project, EmbeddingProfile: profile, BaseSHA: baseSHA,
-		Nodes: len(nodes), Edges: len(sedges), IndexState: len(idx), Annotations: len(anns), Vectors: nVectors,
+		Nodes: len(nodes), Edges: len(sedges), IndexState: len(idx), CallGraphCoverage: len(coverage), Annotations: len(anns), Vectors: nVectors,
 	}
 	if err := writeJSON(filepath.Join(dir, fileManifest), m); err != nil {
 		return nil, err
@@ -233,8 +250,8 @@ func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, pr
 }
 
 // Import restores a snapshot dir INTO the project with id projectID (already
-// registered). It wipes the project's nodes + index state, bulk-reinserts the
-// snapshot's nodes/edges/index-state, and MERGES annotations (adds those not
+// registered). It wipes the project's nodes + index state + call-graph coverage,
+// bulk-reinserts the snapshot's nodes/edges/index-state/coverage, and MERGES annotations (adds those not
 // already present — never deletes existing ones). It refuses if the snapshot's
 // embedding_profile disagrees with wantProfile (never mix models). Both empty
 // profiles are treated as compatible. When vec != nil, the project's embeddings
@@ -276,6 +293,10 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 	if err := readJSONL(filepath.Join(dir, fileIndexState), &idxState); err != nil {
 		return nil, fmt.Errorf("read index_state.jsonl: %w", err)
 	}
+	var coverage []graph.CallGraphCoverageEntry
+	if err := readJSONL(filepath.Join(dir, fileCallGraph), &coverage); err != nil {
+		return nil, fmt.Errorf("read call_graph_coverage.jsonl: %w", err)
+	}
 	var sanns []snapAnnotation
 	if err := readJSONL(filepath.Join(dir, fileAnnotations), &sanns); err != nil {
 		return nil, fmt.Errorf("read annotations.jsonl: %w", err)
@@ -292,6 +313,9 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 	}
 	if len(idxState) != m.IndexState {
 		return nil, fmt.Errorf("snapshot corrupt: index_state.jsonl has %d rows, manifest says %d", len(idxState), m.IndexState)
+	}
+	if len(coverage) != m.CallGraphCoverage {
+		return nil, fmt.Errorf("snapshot corrupt: call_graph_coverage.jsonl has %d rows, manifest says %d", len(coverage), m.CallGraphCoverage)
 	}
 	if len(sanns) != m.Annotations {
 		return nil, fmt.Errorf("snapshot corrupt: annotations.jsonl has %d rows, manifest says %d", len(sanns), m.Annotations)
@@ -339,6 +363,11 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 
 	for _, e := range idxState {
 		if err := graph.SetFileHashTx(tx, projectID, e.FilePath, e.FileHash); err != nil {
+			return nil, err
+		}
+	}
+	for _, entry := range coverage {
+		if err := graph.MarkCallGraphResolvedTx(tx, projectID, entry.FilePath, entry.Resolver); err != nil {
 			return nil, err
 		}
 	}
@@ -456,6 +485,15 @@ func readJSONL(path string, out any) error {
 	case *[]graph.IndexEntry:
 		return decodeLines(f, func(b []byte) error {
 			var x graph.IndexEntry
+			if err := json.Unmarshal(b, &x); err != nil {
+				return err
+			}
+			*v = append(*v, x)
+			return nil
+		})
+	case *[]graph.CallGraphCoverageEntry:
+		return decodeLines(f, func(b []byte) error {
+			var x graph.CallGraphCoverageEntry
 			if err := json.Unmarshal(b, &x); err != nil {
 				return err
 			}

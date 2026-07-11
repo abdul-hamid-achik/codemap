@@ -4,9 +4,12 @@ intent: |
     `codemap file-impact <file>` answers "what happens if I change or delete this
     file?" — the file-level peer of impact (a symbol) and review (a diff). It
     aggregates the file's symbols into dependent files, blast radius, covering tests,
-    and the safe-to-delete / breaking-change verdicts. Here a.go's Helper is called
-    from b.go (so a.go is depended on), while c.go's Lonely has no callers (so c.go
-    is safe to delete) — and the codemap_file_impact MCP tool returns the same JSON.
+    call-graph confidence, and a conservative deletion verdict. Here a.go's Helper is
+    called from b.go, which proves deleting a.go is unsafe. c.go's Lonely has no
+    indexed callers, but calls alone cannot prove the absence of type/value/import,
+    interface, reflection, or dynamic dependencies, so its verdict is unknown rather
+    than a destructive false-green. The codemap_file_impact MCP tool returns the same
+    report fields.
 target:
     cmd:
         - "/bin/sh"
@@ -34,14 +37,19 @@ outcomes:
       verify:
         screen:
             contains: "b.go"
-    - id: safe_to_delete
-      description: c.go (no callers) is reported safe to delete
+    - id: unsafe_when_depended_on
+      description: a.go has a proven inbound caller and is reported unsafe to delete
       verify:
         screen:
-            contains: "safe to delete"
+            contains: "delete verdict: unsafe"
+    - id: unknown_without_complete_evidence
+      description: c.go has no indexed callers but is not falsely reported safe
+      verify:
+        screen:
+            contains: "delete verdict: unknown"
     - id: clean_exit
       description: file-impact exits cleanly
       verify:
         process:
             exitCode: 0
-contractHash: sha256:a03eb51d4ba47da824649ac7431a972ba783e372d2c90bf7da3dd05e09129366
+contractHash: sha256:e566789c58773c212c5d1c8a0341e92eea9e17902650b7845eea7acff7422e27

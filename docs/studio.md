@@ -5,7 +5,7 @@
 
 ```
  codemap studio          ● daemon main   codemap · 509 nodes · 1849 edges · 35 files
-  1 Graph   2 Metrics   3 Impact   4 Search
+  1 Graph   2 Metrics   3 Impact   4 Search   5 Path
  Hubs (164)                           │ lspsrc.Extractor.Close
     57  lspsrc.Extractor.Close        │  Called by (57)
     56  app.Session.Close             │   ▸ main.runInit    cmd/codemap/main.go:186
@@ -16,9 +16,9 @@
  ↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit · ? help
 ```
 
-While an async operation is running (indexing, a semantic search, an impact analysis, a precise
-recompute), the footer shows an **animated spinner** beside the status — a spring-driven frame loop
-that stops the instant the work completes, so an idle studio costs nothing.
+While an async operation is running (indexing, a semantic search, an impact analysis, a path lookup,
+or a precise recompute), the footer shows an **animated spinner** beside the status — a spring-driven
+frame loop that stops the instant the work completes, so an idle studio costs nothing.
 
 ## Tabs
 
@@ -49,21 +49,31 @@ that stops the instant the work completes, so an idle studio costs nothing.
   falling back to fast name search otherwise; the header shows which mode is active. `ctrl+s`
   reads the selected hit's source; `ctrl+g` opens it in the Graph walker to explore its call
   neighborhood.
+- **Path** — answer “how does this entrypoint reach that callee?” as an explicit task. Choose
+  `FROM` and `TO` (a unique FQN disambiguates same-named definitions), then inspect the shortest
+  directed call chain returned by the shared codemap graph. Entering Path from
+  another tab pre-fills `FROM` with the current rich selection, including its FQN/file/line identity;
+  type `TO` and press `enter`. The ordered result is navigable with `↑`/`↓` or `k`/`j`; `enter`
+  opens the selected step in Graph, while `ctrl+s` reads its source and `ctrl+o` opens its context.
+  Every answer shows `call_graph` and a confidence label. A resolved disconnection, a name-based
+  result, an unresolved graph, and a missing endpoint remain visibly different; stale-index and
+  `--precise` guidance are shown in place rather than turning “unknown” into “no path.”
 
 ## Keys
 
 | Key | Action |
 |---|---|
 | `?` | Toggle a full-screen keybinding help overlay (works on any tab) |
-| `1`–`4` / `tab` / `shift+tab` | Switch tabs. On **Search**/**Impact** a bare digit types into the query box (so `sha256`, `oauth2` work) — use `alt`+`1`–`4` to switch tabs while a text input is focused |
-| `↑` / `↓` (`k` / `j`) | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), or a blast-radius node (Impact); `k`/`j` work on Graph & Metrics (on Search/Impact those keys type into the query box) |
+| `1`–`5` / `tab` / `shift+tab` | Switch tabs. On **Search**/**Impact**/**Path** a bare digit types into the focused input — use `alt`+`1`–`5` to switch tabs while a text input is focused |
+| `↑` / `↓` (`k` / `j`) | Select a hub/ref (Graph), a hub/dead-code row (Metrics), a result (Search), a blast-radius node (Impact), or a returned Path step. While editing Path, `↑`/`↓` moves between `FROM` and `TO`; after a result, both arrows and `k`/`j` inspect its nodes |
 | `pgup` / `pgdn` | Jump a page through any of those lists (plus `home`/`end` on Graph and Metrics) |
 | `→` / `←` (`l` / `h`) | (Graph) move focus between the hub list and the callers/callees pane |
-| `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection · or run the query after editing the text |
+| `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection or run edited text · (Path) advance `FROM` → `TO`, run the lookup, or open a selected result step in Graph |
+| `f` / `t` / `r` | (Path result) edit `FROM`, edit `TO`, or rerun the current endpoint pair |
 | `backspace` | (Graph) step back to the previous centered node while walking |
 | `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓` or `k`/`j`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
 | `o` (Graph/Metrics) / `ctrl+o` (any tab) | **orient** — open the context card for the selected symbol in a scrollable overlay: its definition, callers, callees, covering tests, blast-radius count, and pinned annotations in one view (the same bundle `codemap context` / `codemap_context` returns), so you get the whole picture without hopping between tabs |
-| `ctrl+g` (any tab) | **open the selection in the Graph walker** — re-centers the Graph on the selected hit/blast node/row and switches to it, focused on the callers/calls pane, so any symbol becomes a place to start walking the call graph (not just the hubs) |
+| `ctrl+g` (any tab) | **open the selection in the Graph walker** — re-centers the Graph on the selected hit/blast node/Path step/row and switches to it, focused on the callers/calls pane, so any symbol becomes a place to start walking the call graph (not just the hubs) |
 | `p` | (Graph) recompute the centered node's callers/callees precisely via gopls (Go) |
 | `ctrl+r` | Reindex the project and refresh, without leaving studio — keeps the project's precision (re-runs `--precise` when it already has a precise call graph, so the graph isn't dropped). The header shows `⚠ stale C/N/D` (changed/new/deleted) when your files have drifted from the index since it was built, so you know when to press it |
 | `alt+←` / `alt+→` (any tab) | **Global back / forward** — browser-style history across tabs and drills. Drilling a search hit into Impact, opening it in the Graph walker, etc. records where you came from; `alt+←` returns to the *exact* prior view **with the text you'd typed still in the bar** and the prior selection highlighted. `alt+→` re-walks forward; a new search/drill clears the forward stack. (This is a layer above the Graph's own `⌫` walk.) |
@@ -76,6 +86,6 @@ that edits are being re-indexed automatically.
 
 Symbols are shown with their fully-qualified names so same-named methods (e.g.
 `graph.Store.Close` vs `app.Session.Close`) are easy to tell apart. In the Graph, Impact, and
-Search panes the selected symbol's **signature** and the first line of its **docstring** are
+Search panes—and for the selected step in Path—the symbol's **signature** and the first line of its **docstring** are
 previewed at the bottom (`⟩ func …`), so you can tell what a symbol is and what it does without
 opening the file.

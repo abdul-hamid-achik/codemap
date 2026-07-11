@@ -84,6 +84,116 @@ func TestServiceLifecycle(t *testing.T) {
 	}
 }
 
+func TestInitReportsCanonicalNameForSameBasenameProjects(t *testing.T) {
+	isolate(t)
+	root := t.TempDir()
+	proj1 := filepath.Join(root, "one", "app")
+	proj2 := filepath.Join(root, "two", "app")
+	for _, dir := range []string{proj1, proj2} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	first, err := svc.Init(proj1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Init(proj2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Project == second.Project {
+		t.Fatalf("same-basename projects reported the same canonical name %q", first.Project)
+	}
+	g, _ := sess.Graph()
+	stored, err := g.GetProjectByID(second.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Project != stored.Name {
+		t.Fatalf("Init project = %q, stored canonical name = %q", second.Project, stored.Name)
+	}
+}
+
+func TestIndexSameBasenameProjectsKeepsVectorScopesSeparate(t *testing.T) {
+	isolate(t)
+	root := t.TempDir()
+	proj1 := filepath.Join(root, "one", "app")
+	proj2 := filepath.Join(root, "two", "app")
+	writeFile := func(dir, symbol string) {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		src := fmt.Sprintf("package app\n\nfunc %s() {}\n", symbol)
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(proj1, "AlphaUnique")
+	writeFile(proj2, "BetaUnique")
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.SetEmbedder(fakeEmbedder{dims: 8})
+	svc := NewService(sess)
+	first, err := svc.Index(context.Background(), proj1, index.Options{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Index(context.Background(), proj2, index.Options{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Project == second.Project {
+		t.Fatalf("direct Index reused vector project key %q for both roots", first.Project)
+	}
+
+	v, err := sess.Vectors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCount, err := v.CountByProject(first.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondCount, err := v.CountByProject(second.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstCount != 1 || secondCount != 1 {
+		t.Fatalf("vector counts by canonical project = %d/%d, want 1/1", firstCount, secondCount)
+	}
+	firstRecords, err := v.IterByProject(first.Project)
+	if err != nil || len(firstRecords) != 1 {
+		t.Fatalf("first project records = %d err=%v", len(firstRecords), err)
+	}
+	for project, forbidden := range map[string]string{
+		first.Project:  "BetaUnique",
+		second.Project: "AlphaUnique",
+	} {
+		hits, err := v.Search(firstRecords[0].Vector, 10, project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hits) != 1 || hits[0].Meta.Project != project {
+			t.Fatalf("search scope %q returned %+v", project, hits)
+		}
+		if hits[0].Meta.Symbol == forbidden {
+			t.Fatalf("search scope %q leaked symbol %q from the other project", project, forbidden)
+		}
+	}
+}
+
 // fakeEmbedder produces deterministic vectors so semantic tests need no Ollama.
 type fakeEmbedder struct{ dims int }
 
@@ -103,6 +213,28 @@ func (f fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, err
 		out[i] = v
 	}
 	return out, nil
+}
+
+type failingEmbedder struct {
+	dims int
+	err  error
+}
+
+func (f failingEmbedder) Profile() embed.EmbeddingProfile {
+	return embed.EmbeddingProfile{Provider: "fake", Model: "fake", Dimensions: f.dims, Distance: "cosine"}
+}
+
+func (f failingEmbedder) Embed(context.Context, []string) ([][]float32, error) {
+	return nil, f.err
+}
+
+func hasSymbolHit(hits []SemanticHit, symbol string) bool {
+	for _, hit := range hits {
+		if hit.Symbol == symbol {
+			return true
+		}
+	}
+	return false
 }
 
 func TestServiceCallers(t *testing.T) {
@@ -176,7 +308,8 @@ func TestCallersFoundDistinguishesTypoFromNoCallers(t *testing.T) {
 
 // TestCallGraphUnavailableDetection guards the §1 honesty fix: impact/callers must
 // flag (not confidently-empty) a no-name-based-call-edge language (TS/JS/Python) on a
-// name-based index, but stay silent for Go and once the index has precise edges.
+// name-based index, but stay silent for Go and only after the queried file has
+// successful precise-resolution coverage.
 func TestCallGraphUnavailableDetection(t *testing.T) {
 	for _, l := range []string{"typescript", "javascript", "python"} {
 		if !noNameBasedCallLang(l) {
@@ -214,12 +347,24 @@ func TestCallGraphUnavailableDetection(t *testing.T) {
 	if _, yes := svc.callGraphUnavailable(g, pid, []graph.Node{*goNode}); yes {
 		t.Error("Go symbol must not be flagged unavailable on a name-based index")
 	}
-	// Once the project has ANY precise edges, the call graph is resolved → not flagged.
+	// A precise edge elsewhere must NOT upgrade this TypeScript definition.
 	if _, err := g.AddEdgeProv(goID, tsID, graph.EdgeCalls, 1.0, graph.ProvPrecise); err != nil {
 		t.Fatal(err)
 	}
+	if _, yes := svc.callGraphUnavailable(g, pid, []graph.Node{*tsNode}); !yes {
+		t.Error("an unrelated precise edge must not make the TS symbol available")
+	}
+	if err := g.MarkCallGraphResolved(pid, "b.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	if _, yes := svc.callGraphUnavailable(g, pid, []graph.Node{*tsNode}); !yes {
+		t.Error("precise coverage for b.go must not upgrade a.ts")
+	}
+	if err := g.MarkCallGraphResolved(pid, "a.ts", "lsp"); err != nil {
+		t.Fatal(err)
+	}
 	if _, yes := svc.callGraphUnavailable(g, pid, []graph.Node{*tsNode}); yes {
-		t.Error("TS symbol must not be flagged once the index has precise edges")
+		t.Error("TS symbol should be available once its own file is resolved")
 	}
 }
 
@@ -835,6 +980,72 @@ func TestStatusReportsVectors(t *testing.T) {
 	}
 	if st, _ := svc.Status(proj); st.Vectors == 0 {
 		t.Errorf("embedded status should report vectors > 0, got %d", st.Vectors)
+	}
+	// A structure-only rebuild removes the project's old semantic records. They
+	// must not survive and describe source that no longer exists in the graph.
+	// Reopen without the test embedder too: maintenance cleanup must bypass the
+	// profile guard so --no-embed remains usable after a model/dimension change.
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+	maintenanceSession, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer maintenanceSession.Close()
+	maintenanceSvc := NewService(maintenanceSession)
+	rep, err := maintenanceSvc.Index(context.Background(), proj, index.Options{Reindex: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Embedded {
+		t.Error("structure-only rebuild must report embedded:false")
+	}
+	if st, _ := maintenanceSvc.Status(proj); st.Vectors != 0 {
+		t.Errorf("structure-only rebuild left %d stale vectors, want 0", st.Vectors)
+	}
+}
+
+func TestEmbeddingFailureClearsSemanticModeAndFallsBack(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Authenticate() {}\n")
+	mustWrite(t, proj, "b.go", "package app\n\nfunc Render() {}\n")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.SetEmbedder(fakeEmbedder{dims: 8})
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, true); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := svc.Status(proj); err != nil || st.Vectors < 2 {
+		t.Fatalf("seed status vectors = (%v, %v), want vectors from both files", st, err)
+	}
+
+	// Change only a.go, then fail its replacement embeddings. Keeping b.go's old
+	// vector would expose a silently partial local semantic collection.
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Authenticate() {}\nfunc Authorize() {}\n")
+	sess.SetEmbedder(failingEmbedder{dims: 8, err: errors.New("provider unavailable")})
+	rep, err := svc.Index(context.Background(), proj, index.Options{}, true)
+	if err != nil {
+		t.Fatalf("structural indexing should survive embedding degradation: %v", err)
+	}
+	if rep.Embedded || !strings.Contains(rep.Warning, "embeddings skipped") {
+		t.Fatalf("degraded index report = %+v, want structure-only warning", rep)
+	}
+	if st, err := svc.Status(proj); err != nil || st.Vectors != 0 {
+		t.Fatalf("degraded status vectors = (%v, %v), want project-wide zero", st, err)
+	}
+	semantic, err := svc.Semantic(context.Background(), proj, "authentication", 5)
+	if err != nil || semantic.Mode != "none" {
+		t.Fatalf("Semantic after degradation = (%+v, %v), want mode none without calling failed provider", semantic, err)
+	}
+	search, err := svc.Search(context.Background(), proj, "Auth", 5)
+	if err != nil || search.Mode != "name" || !hasSymbolHit(search.Hits, "Authenticate") {
+		t.Fatalf("Search after degradation = (%+v, %v), want name fallback with Authenticate", search, err)
 	}
 }
 

@@ -33,6 +33,74 @@ func TestOpenMigrate(t *testing.T) {
 	}
 }
 
+func TestMigrateV4AddsCallGraphCoverage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v4.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.db.Exec("DROP TABLE call_graph_coverage"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.db.Exec("PRAGMA user_version=4"); err != nil {
+		t.Fatal(err)
+	}
+	_ = old.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open v4 graph: %v", err)
+	}
+	defer s.Close()
+	var table string
+	if err := s.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='call_graph_coverage'").Scan(&table); err != nil {
+		t.Fatalf("coverage table missing after migration: %v", err)
+	}
+	if table != "call_graph_coverage" {
+		t.Fatalf("migrated table = %q", table)
+	}
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion {
+		t.Errorf("user_version = %d, want %d", version, schemaVersion)
+	}
+}
+
+func TestCallGraphCoverageTracksLeafFilesAndWipe(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	if err := s.MarkCallGraphResolved(pid, "leaf.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	files, err := s.CallGraphResolvedFiles(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !files["leaf.go"] {
+		t.Fatalf("leaf file with zero edges missing from coverage: %v", files)
+	}
+	if err := s.ClearCallGraphResolved(pid, "leaf.go"); err != nil {
+		t.Fatal(err)
+	}
+	files, _ = s.CallGraphResolvedFiles(pid)
+	if files["leaf.go"] {
+		t.Fatalf("cleared leaf remains resolved: %v", files)
+	}
+	if err := s.MarkCallGraphResolved(pid, "leaf.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WipeProject(pid); err != nil {
+		t.Fatal(err)
+	}
+	files, _ = s.CallGraphResolvedFiles(pid)
+	if len(files) != 0 {
+		t.Fatalf("wipe retained call-graph coverage: %v", files)
+	}
+}
+
 func TestUpsertProject(t *testing.T) {
 	s := openTest(t)
 	id1, err := s.UpsertProject("demo", "/tmp/demo", "go")
@@ -67,6 +135,9 @@ func TestGetProjectNotFound(t *testing.T) {
 	s := openTest(t)
 	if _, err := s.GetProjectByName("nope"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.GetProjectByID(-1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetProjectByID err = %v, want ErrNotFound", err)
 	}
 }
 

@@ -47,13 +47,7 @@ func init() {
 }
 
 func runDaemonStart(cmd *cobra.Command, args []string) error {
-	root, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	if len(args) > 0 {
-		root = args[0]
-	}
+	root := targetDirArg(cmd, args)
 	return startDaemonForeground(cmd, root)
 }
 
@@ -62,11 +56,22 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 // so the config flag application and foreground lifecycle can't drift.
 func startDaemonForeground(cmd *cobra.Command, root string) error {
 	cfgPath, _ := cmd.Flags().GetString("config")
+	oldwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if err := os.Chdir(root); err != nil {
+		return fmt.Errorf("change to project directory %q: %w", root, err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return err
 	}
 	applyConfigFlags(cmd, cfg) // flags win over config file + env
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
 	dc := cfg.Daemon
 	d, err := daemon.Start(cmd.Context(), root, daemon.Config{

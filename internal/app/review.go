@@ -183,14 +183,13 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	seenBlast, seenTest := map[string]bool{}, map[string]bool{}
 	imps := make([]*ImpactReport, 0, len(rep.ChangedSymbols))
 	for _, s := range rep.ChangedSymbols {
-		target := s.Symbol
-		if s.FQN != "" {
-			target = s.FQN
-		}
-		imp, ierr := svc.Impact(cwd, target, opts.Depth)
-		if (ierr != nil || imp == nil || !imp.Found) && target != s.Symbol {
-			imp, ierr = svc.Impact(cwd, s.Symbol, opts.Depth) // FQN missed → retry bare name
-		}
+		// ChangedSymbols already carry a durable source identity. Keep the
+		// per-symbol review exact instead of sending the FQN through the legacy
+		// name resolver, which canonicalizes to a short name and unions unrelated
+		// same-named definitions even on a precise graph.
+		imp, ierr := svc.ImpactBySelector(cwd, SymbolSelector{
+			File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
+		}, opts.Depth)
 		if ierr != nil || imp == nil || !imp.Found {
 			continue
 		}

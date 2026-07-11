@@ -30,15 +30,6 @@ func nextAction(tool, why string, args map[string]any) NextAction {
 // NewService wraps a session.
 func NewService(s *Session) *Service { return &Service{s: s} }
 
-// hasPreciseEdges reports whether the project has any go/types-resolved call edges
-// (i.e. was indexed with --precise). Ambiguity notes use it to recommend the right
-// fix: a name-based index can be reindexed --precise; on a precise index the only
-// remaining ambiguity is the query name itself matching several definitions.
-func (svc *Service) hasPreciseEdges(g *graph.Store, pid int64) bool {
-	n, err := g.CountEdgesByProvenance(pid, graph.ProvPrecise)
-	return err == nil && n > 0
-}
-
 // noNameBasedCallLang reports whether a language has NO name-based call edges — its
 // call graph exists ONLY under `index --precise` (callHierarchy). For these, empty
 // callers/callees/blast/tests on a name-based index means "unresolved", not "none".
@@ -50,17 +41,19 @@ func noNameBasedCallLang(lang string) bool {
 	return false
 }
 
-// callGraphUnavailable returns the language (and true) when the queried symbol's call
-// graph can't be resolved on the current index: its language has no name-based call
-// edges AND the project has no precise edges. Callers use this to replace a
+// callGraphUnavailable returns the language (and true) when at least one queried
+// definition has no usable call graph: its language has no name-based edges and
+// that definition's file lacks successful precise-resolution coverage. Callers
+// use this to replace a
 // confidently-empty callers/blast/tests result (and a misleading untested:true) with
 // an honest "run --precise" note — so `[]` never reads as ground-truth "none".
 func (svc *Service) callGraphUnavailable(g *graph.Store, pid int64, nodes []graph.Node) (string, bool) {
-	if svc.hasPreciseEdges(g, pid) {
-		return "", false // a precise index resolved the call graph — empty really means empty
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil {
+		resolved = nil // conservative on legacy/corrupt coverage state
 	}
 	for _, n := range nodes {
-		if noNameBasedCallLang(n.Language) {
+		if !resolved[n.FilePath] && noNameBasedCallLang(n.Language) {
 			return n.Language, true
 		}
 	}
@@ -88,25 +81,52 @@ const (
 	CallGraphNone       = "none"
 )
 
-// callGraphEnum classifies a query's call-graph resolution into the stable
-// enum a machine consumer reads. precise reports whether the project has
-// precise edges; nodes are the queried symbol's definition nodes (empty when
-// the symbol wasn't found). The worst-case wins: if any matching definition is
-// a no-name-based-call language on a non-precise index, the result is
-// "unresolved" (its callers/blast/tests are unknown, not empty).
-func callGraphEnum(precise bool, nodes []graph.Node) string {
-	if precise {
-		return CallGraphResolved
-	}
+// callGraphEnum classifies matching definition nodes from persisted per-file
+// coverage. All definitions must be covered for "resolved". Otherwise an
+// uncovered no-name-based language wins as "unresolved"; remaining parser/Go
+// definitions degrade to "name". Empty coverage is intentionally conservative
+// for legacy indexes.
+func callGraphEnum(resolvedFiles map[string]bool, nodes []graph.Node) string {
 	if len(nodes) == 0 {
 		return CallGraphNone
 	}
+	allResolved := true
 	for _, n := range nodes {
+		if resolvedFiles[n.FilePath] {
+			continue
+		}
+		allResolved = false
 		if noNameBasedCallLang(n.Language) {
 			return CallGraphUnresolved
 		}
 	}
+	if allResolved {
+		return CallGraphResolved
+	}
 	return CallGraphName
+}
+
+// callGraphStatus loads persisted coverage and classifies the queried
+// definitions. A read failure degrades conservatively to legacy/no coverage.
+func (svc *Service) callGraphStatus(g *graph.Store, pid int64, nodes []graph.Node) string {
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil {
+		resolved = nil
+	}
+	return callGraphEnum(resolved, nodes)
+}
+
+// callableNodes filters structural/file/type nodes out of a project node set so
+// project-wide confidence reports classify only definitions that can own calls.
+func callableNodes(nodes []graph.Node) []graph.Node {
+	out := make([]graph.Node, 0, len(nodes))
+	for _, n := range nodes {
+		switch n.Kind {
+		case graph.KindFunction, graph.KindMethod, graph.KindTest:
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // callGraphRank orders the enum worst→best for aggregation (a review's band is

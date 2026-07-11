@@ -1,0 +1,45 @@
+version: 1
+name: selectors
+intent: |
+    people can select one same-named definition with --at file:line, while
+    agents receive the field-compatible {file,start_line,fqn,kind} selector in
+    JSON. Exact callers/context/source/impact/risk stay scoped to that definition
+    on a precise graph instead of merging another method with the same short name.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'module example.com/selectors\n\ngo 1.25\n' > \"$P/go.mod\"; printf 'package app\n\ntype Left struct{}\n\nfunc (Left) Shared() {}\nfunc CallLeft() { Left{}.Shared() }\n' > \"$P/left.go\"; printf 'package app\n\ntype Right struct{}\n\nfunc (Right) Shared() {}\nfunc CallRight() { Right{}.Shared() }\n' > \"$P/right.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed --no-lsp --precise >/dev/null 2>&1; \"$CM\" symbol-at left.go:5 --json > \"$TMP/at.json\"; grep -q '\"selector\"' \"$TMP/at.json\" && echo SELECTOR_OK; \"$CM\" callers --at left.go:5 --json > \"$TMP/callers.json\"; grep -q 'CallLeft' \"$TMP/callers.json\" && ! grep -q 'CallRight' \"$TMP/callers.json\" && echo CALLERS_EXACT; \"$CM\" context --at left.go:5 --json > \"$TMP/context.json\"; grep -q '\"definitions\"' \"$TMP/context.json\" && ! grep -q 'right.go' \"$TMP/context.json\" && echo CONTEXT_EXACT; \"$CM\" source --at left.go:5 --json > \"$TMP/source.json\"; grep -q 'func (Left) Shared' \"$TMP/source.json\" && ! grep -q 'Right' \"$TMP/source.json\" && echo SOURCE_EXACT; \"$CM\" impact --at left.go:5 --json > \"$TMP/impact.json\"; grep -q '\"selector\"' \"$TMP/impact.json\" && ! grep -q 'CallRight' \"$TMP/impact.json\" && echo IMPACT_EXACT; \"$CM\" risk --at left.go:5 --json > \"$TMP/risk.json\"; grep -q '\"selector\"' \"$TMP/risk.json\" && echo RISK_EXACT"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 20000
+    - snapshot: selectors
+outcomes:
+    - id: selector_emitted
+      description: symbol-at JSON emits the reusable source selector
+      verify:
+        screen:
+            contains: "SELECTOR_OK"
+    - id: callers_exact
+      description: callers --at selects only the chosen same-named method
+      verify:
+        screen:
+            contains: "CALLERS_EXACT"
+    - id: context_and_source_exact
+      description: context and source stay on the selected definition
+      verify:
+        screen:
+            contains: "SOURCE_EXACT"
+    - id: impact_and_risk_exact
+      description: impact and risk carry the exact selector and exclude the other method
+      verify:
+        screen:
+            contains: "RISK_EXACT"
+contractHash: sha256:dfd078c1af1715c9becff971a87d9a240352b1091fbe388c3847f055e4d54bab

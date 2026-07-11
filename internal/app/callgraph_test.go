@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,33 +14,41 @@ import (
 // TestCallGraphEnum pins the stable machine-readable call_graph enum a consumer
 // switches on (vs the free-form Resolution sentence). The enum must be:
 //
-//	resolved   — precise edges present
+//	resolved   — every matching definition file completed precise resolution
 //	name       — name-based call graph (Go default)
 //	unresolved — no name-based call edges & not precise (TS/JS/Python/Vue)
 //	none       — no matching definitions / empty
 func TestCallGraphEnum(t *testing.T) {
 	cases := []struct {
-		precise bool
-		langs   []string
-		want    string
+		langs    []string
+		resolved []bool
+		want     string
 	}{
-		{true, []string{"go"}, CallGraphResolved},
-		{true, []string{"typescript"}, CallGraphResolved},
-		{false, nil, CallGraphNone},
-		{false, []string{"go"}, CallGraphName},
-		{false, []string{"typescript"}, CallGraphUnresolved},
-		{false, []string{"python"}, CallGraphUnresolved},
-		{false, []string{"vue"}, CallGraphUnresolved},
+		{[]string{"go"}, []bool{true}, CallGraphResolved},
+		{[]string{"typescript"}, []bool{true}, CallGraphResolved},
+		{nil, nil, CallGraphNone},
+		{[]string{"go"}, []bool{false}, CallGraphName},
+		{[]string{"typescript"}, []bool{false}, CallGraphUnresolved},
+		{[]string{"python"}, []bool{false}, CallGraphUnresolved},
+		{[]string{"vue"}, []bool{false}, CallGraphUnresolved},
 		// worst-case wins: a mixed-language symbol with an unresolved def → unresolved
-		{false, []string{"go", "typescript"}, CallGraphUnresolved},
+		{[]string{"go", "typescript"}, []bool{true, false}, CallGraphUnresolved},
+		// An uncovered Go definition keeps a mixed result name-based even when
+		// another definition is exact.
+		{[]string{"go", "go"}, []bool{true, false}, CallGraphName},
 	}
 	for _, c := range cases {
 		nodes := make([]graph.Node, len(c.langs))
+		resolvedFiles := map[string]bool{}
 		for i, l := range c.langs {
-			nodes[i] = graph.Node{Language: l}
+			file := fmt.Sprintf("file-%d", i)
+			nodes[i] = graph.Node{Language: l, FilePath: file}
+			if c.resolved[i] {
+				resolvedFiles[file] = true
+			}
 		}
-		if got := callGraphEnum(c.precise, nodes); got != c.want {
-			t.Errorf("callGraphEnum(precise=%v, langs=%v) = %q, want %q", c.precise, c.langs, got, c.want)
+		if got := callGraphEnum(resolvedFiles, nodes); got != c.want {
+			t.Errorf("callGraphEnum(langs=%v, resolved=%v) = %q, want %q", c.langs, c.resolved, got, c.want)
 		}
 	}
 }
@@ -61,8 +70,8 @@ func TestWorstCallGraph(t *testing.T) {
 }
 
 // TestImpactCallGraphNameBased pins that a Go (name-based) index reports
-// call_graph="name", flips to "resolved" once a precise edge exists, and stays
-// "none" for a symbol that isn't in the graph.
+// call_graph="name", flips to "resolved" once its file has precise coverage,
+// and stays "none" for a symbol that isn't in the graph.
 func TestImpactCallGraphNameBased(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
@@ -98,8 +107,8 @@ func TestImpactCallGraphNameBased(t *testing.T) {
 		t.Errorf("unknown symbol call_graph = %q, want %q", miss.CallGraph, CallGraphNone)
 	}
 
-	// Inject one precise edge → the project now reports call_graph="resolved".
-	// Run calls Helper: wire that edge as precise, then impact of Helper flips.
+	// Mark the definition file successfully resolved. Coverage, not the existence
+	// of an arbitrary precise edge, is what flips Helper to resolved.
 	g, err := sess.Graph()
 	if err != nil {
 		t.Fatal(err)
@@ -108,15 +117,7 @@ func TestImpactCallGraphNameBased(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	callers, _ := g.Callers(p.ID, "Helper")
-	if len(callers) == 0 {
-		t.Fatal("expected Helper to have a caller (Run) to wire a precise edge")
-	}
-	target, _ := g.FindNodesBySymbol(p.ID, "Helper")
-	if len(target) == 0 {
-		t.Fatal("expected Helper definition")
-	}
-	if _, err := g.AddEdgeProv(callers[0].ID, target[0].ID, graph.EdgeCalls, 1.0, graph.ProvPrecise); err != nil {
+	if err := g.MarkCallGraphResolved(p.ID, "a.go", "test"); err != nil {
 		t.Fatal(err)
 	}
 	imp2, err := svc.Impact(proj, "Helper", 2)
@@ -125,6 +126,67 @@ func TestImpactCallGraphNameBased(t *testing.T) {
 	}
 	if imp2.CallGraph != CallGraphResolved {
 		t.Errorf("precise index impact call_graph = %q, want %q", imp2.CallGraph, CallGraphResolved)
+	}
+}
+
+func TestImpactCallGraphMixedUsesPerFileCoverage(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject(filepath.Base(proj), proj, "mixed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goID, err := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "worker.go", Symbol: "Shared", FQN: "app.Shared",
+		Kind: graph.KindFunction, Language: "go", SourceHash: "go",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsID, err := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "worker.ts", Symbol: "Shared", FQN: "Shared",
+		Kind: graph.KindFunction, Language: "typescript", SourceHash: "ts",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Even a real precise edge and exact Go coverage cannot upgrade the
+	// unresolved TypeScript definition sharing this query name.
+	if _, err := g.AddEdgeProv(goID, tsID, graph.EdgeCalls, 1, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(pid, "worker.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	imp, err := svc.Impact(proj, "Shared", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imp.CallGraph != CallGraphUnresolved {
+		t.Fatalf("mixed Go-resolved/TS-unresolved impact = %q, want unresolved", imp.CallGraph)
+	}
+
+	// A successful leaf callHierarchy request produces coverage even without an
+	// outgoing edge; once both definition files are covered, the union is exact.
+	if err := g.MarkCallGraphResolved(pid, "worker.ts", "lsp"); err != nil {
+		t.Fatal(err)
+	}
+	imp, err = svc.Impact(proj, "Shared", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imp.CallGraph != CallGraphResolved {
+		t.Fatalf("fully covered mixed impact = %q, want resolved", imp.CallGraph)
 	}
 }
 
@@ -175,6 +237,46 @@ func TestRelationCallGraph(t *testing.T) {
 	}
 	if blank.CallGraph != CallGraphNone {
 		t.Errorf("blank callers call_graph = %q, want %q", blank.CallGraph, CallGraphNone)
+	}
+}
+
+func TestRelationKeepsUnresolvedSignalWithPartialResults(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := g.UpsertProject(filepath.Base(proj), proj, "typescript")
+	caller, _ := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "caller.ts", Symbol: "caller", FQN: "caller",
+		Kind: graph.KindFunction, Language: "typescript", SourceHash: "caller",
+	})
+	target, _ := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "target.ts", Symbol: "target", FQN: "target",
+		Kind: graph.KindFunction, Language: "typescript", SourceHash: "target",
+	})
+	// A stale/partial precise edge may still produce a non-empty answer. Without
+	// coverage for target.ts, the report must remain unresolved so auto-upgrade
+	// can replace it rather than treating the partial result as authoritative.
+	if _, err := g.AddEdgeProv(caller, target, graph.EdgeCalls, 1, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.relation(proj, "target", (*graph.Store).Callers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 1 {
+		t.Fatalf("fixture should return one partial caller, got %+v", rep.Results)
+	}
+	if rep.CallGraph != CallGraphUnresolved || rep.Resolution == "" {
+		t.Fatalf("partial uncovered relation = %+v, want unresolved signal", rep)
 	}
 }
 

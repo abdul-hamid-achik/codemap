@@ -53,6 +53,9 @@ func TestBeginTxCommit(t *testing.T) {
 	if err := SetFileHashTx(tx, pid, "a.go", "abc"); err != nil {
 		t.Fatal(err)
 	}
+	if err := MarkCallGraphResolvedTx(tx, pid, "a.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +71,10 @@ func TestBeginTxCommit(t *testing.T) {
 	h, _ := s.FileHash(pid, "a.go")
 	if h != "abc" {
 		t.Errorf("file hash = %q, want abc", h)
+	}
+	resolved, _ := s.CallGraphResolvedFiles(pid)
+	if !resolved["a.go"] {
+		t.Error("transaction did not commit call-graph coverage")
 	}
 }
 
@@ -86,6 +93,9 @@ func TestBeginTxRollback(t *testing.T) {
 	if err := SetFileHashTx(tx, pid, "a.go", "abc"); err != nil {
 		t.Fatal(err)
 	}
+	if err := MarkCallGraphResolvedTx(tx, pid, "a.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
 	_ = tx.Rollback()
 
 	// Nothing should be visible after rollback.
@@ -96,6 +106,10 @@ func TestBeginTxRollback(t *testing.T) {
 	h, _ := s.FileHash(pid, "a.go")
 	if h != "" {
 		t.Errorf("file hash = %q, want empty after rollback", h)
+	}
+	resolved, _ := s.CallGraphResolvedFiles(pid)
+	if resolved["a.go"] {
+		t.Error("rolled-back call-graph coverage should not be visible")
 	}
 }
 
@@ -130,6 +144,32 @@ func TestDeleteNodesInFileTx(t *testing.T) {
 	nodes, _ = s.NodesInFile(pid, "b.go")
 	if len(nodes) != 1 {
 		t.Errorf("b.go nodes = %d, want 1 (unaffected)", len(nodes))
+	}
+}
+
+func TestWipeProjectTxClearsCallGraphCoverage(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	if err := s.MarkCallGraphResolved(pid, "leaf.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.BeginTx(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WipeProjectTx(tx, pid); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.CallGraphResolvedFiles(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved) != 0 {
+		t.Fatalf("transactional wipe retained coverage: %v", resolved)
 	}
 }
 

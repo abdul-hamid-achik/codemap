@@ -54,7 +54,8 @@ codemap/
 │   │   ├── service_annotations.go #   annotate / annotations / unannotate (knowledge layer)
 │   │   ├── session.go             #   open/close store + veclite + provider (lazy)
 │   │   ├── review.go              #   diff-scoped impact (git diff → symbols → blast + tests)
-│   │   ├── file_impact.go         #   file-level dependents + safe_to_delete / breaking_change
+│   │   ├── dependencies.go        #   grouped file dependency evidence + per-domain completeness
+│   │   ├── file_impact.go         #   dependency evidence + conservative delete verdict / breaking_change
 │   │   ├── risk.go                #   0..1 change-risk score
 │   │   ├── readorder.go           #   entrypoint + hub ranking
 │   │   ├── secret_impact.go       #   secret-key rotation blast radius (names only)
@@ -67,7 +68,8 @@ codemap/
 │   ├── graph/                # SQLite graph store (pure Go, modernc.org/sqlite)
 │   │   ├── store.go          #   Open/Close, CRUD for nodes/edges/projects, stats
 │   │   ├── schema.go         #   SQL schema + migrations (PRAGMA user_version); edges.provenance
-│   │   └── queries.go        #   callers/callees, blast radius, hotspots/orphans/path
+│   │   ├── queries.go        #   callers/callees, blast radius, hotspots/orphans/path
+│   │   └── dependencies.go   #   deduped inbound call/reference/import evidence
 │   ├── extract/              # code structure extraction (pluggable backends)
 │   │   ├── extractor.go      #   Extractor interface + Symbol/Reference/FileResult
 │   │   ├── gosrc/            #   stdlib go/parser backend (pure Go, default for Go)
@@ -86,7 +88,7 @@ codemap/
 │   │   ├── staleness.go      #   hash-based drift detection (status/agent trust)
 │   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
 │   │   └── import_index.go   #   fcheap cache restore (skip extract+embed)
-│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (35 tools)
+│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (36 tools)
 │   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
 │   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search)
 │   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
@@ -107,12 +109,12 @@ codemap/
 │
 │   # planned: extract/treesitter (CGO, build-tagged), extract/scip
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
-├── specs/                     # glyphrun E2E specs (*.yml, 34): version/help/index_status/query/context/
+├── specs/                     # glyphrun E2E specs (*.yml, 36): version/help/index_status/query/context/
 │                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
 │                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
 │                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/
 │                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/
-│                              #   ts_impact_note/studio_visuals/index_via_daemon
+│                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md LICENSE
@@ -209,9 +211,10 @@ task install         # go install ./cmd/codemap
 ### Storage
 - Graph: `modernc.org/sqlite` (pure Go), WAL mode, transaction-batched writes,
   `synchronous=NORMAL`, `SetMaxOpenConns(1)`. Tables: `nodes`, `edges`,
-  `projects`, `index_state`. The `edges.provenance` column records whether a
-  call edge is name-based or precise, so `--precise` can replace name-based
-  edges idempotently (see `design-rationale.md` "Storage" in the vault).
+  `projects`, `index_state`, `call_graph_coverage` (schema v5). The
+  `edges.provenance` column records whether an edge is name-based or precise;
+  `call_graph_coverage` records successful precise resolution per file, including
+  leaf files with zero call edges (see `design-rationale.md` "Storage" in the vault).
 - Vectors: `github.com/abdul-hamid-achik/veclite` (≥ v0.22.0). One collection (`codemap`),
   one vector space in v0.1. Put **filterable** fields (`project`, `path`, `lang`, `kind`,
   `node_id`) in the veclite **Payload**; put the **searchable** source text in **Content**
@@ -239,8 +242,13 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (35): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `impact`, `file_impact`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise` (gopls); `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
-- CLI mirrors these 1:1: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--lsp`), `path`, `impact` (`--depth`), `file-impact`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read-order`, `symbols`, `symbol-at`, `find`, `source`, `context` (multi-arg → batch), `related-files`, `annotate`/`annotations`, `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `daemon start`/`status`/`stop`, `docs`, `serve`, `studio` — all query commands accept `--json`.
+- Tool names are `codemap_`-prefixed. Current set (36): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise`; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
+- Exact-definition inputs use the durable source-selector projection
+  `{file,start_line,fqn,kind}`, never a SQLite node id. `source`, `context`,
+  `callers`, `callees`, `impact`, and `risk` accept `selector`; `path` accepts
+  paired `from_selector`/`to_selector`. Resolution prefers file+FQN+kind so
+  ordinary line shifts survive reindex, with start_line as tie-break/fallback.
+- CLI mirrors these 1:1: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`), `file-impact`, `dependencies`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read-order`, `symbols`, `symbol-at`, `find`, `source`, `context` (multi-arg → batch), `related-files`, `annotate`/`annotations`, `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `daemon start`/`status`/`stop`, `docs`, `serve`, `studio` — all query commands accept `--json`.
 - **Accuracy model** (be honest with users): the graph is name-based by default — intra-package
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`
@@ -250,20 +258,24 @@ task install         # go install ./cmd/codemap
   fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) is the unified
   exact-resolution pass. For Go it runs an in-process pure-Go `go/types` pass (`internal/extract/typesrc`);
   for the LSP languages (TypeScript, JavaScript, Python) it drives the language server's `callHierarchy`
-  (`Indexer.resolveLSPCallEdges`). It resolves each call to the one it invokes and writes precise call
-  edges via the `edges.provenance` column — so every query (callers/callees/impact/hotspots/path) becomes
-  exact at once, no query change. The LSP languages have **no** name-based call edges, so `--precise` is
+  (`Indexer.resolveLSPCallEdges`). It resolves each call to the one it invokes, writes precise call
+  edges via `edges.provenance`, and records successful coverage per file. Query confidence is classified
+  from the matching definition files: all covered → `resolved`; uncovered TS/JS/Python/Vue wins →
+  `unresolved`; otherwise Go/parser → `name`. One precise edge never upgrades an unrelated file, and
+  changed files lose coverage until their precise pass succeeds again. The LSP languages have **no**
+  name-based call edges, so `--precise` is
   what gives them a call graph at all (for Go it *replaces* the name-based edges; name-based stays the Go
   default). The Go pass degrades
   per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable.
-  `callers`/`callees --lsp` (`precise:true`) remains the per-query gopls path for a one-off without
+  `callers`/`callees --precise` (`precise:true` in MCP) remains the per-query language-server path for a one-off without
   reindexing.
-- **Stable machine contract**: every impact/callers/callees/review/context report carries a
+- **Stable machine contract**: every impact/callers/callees/review/context/hotspots/orphans/path report carries a
   `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) so a consumer can switch on
   confidence (resolved→high, name→medium, unresolved/none→low) without parsing the free-form
   `resolution` sentence. `codemap review` additionally folds one aggregate `risk` band
   (`level`/`score`/`factors`) from every changed symbol so a harness can gate verification on a
-  single call. The `blast_radius`/`covering_tests` elements are `ImpactNode` objects
+  single call; `level` is `unknown` when any changed symbol lacks a usable call graph, otherwise
+  `low`/`medium`/`high`. The `blast_radius`/`covering_tests` elements are `ImpactNode` objects
   (`symbol`/`fqn`/`kind`/`file`/`start_line`/`depth`; no `end_line`) — the stable element shape.
   Successful review JSON always emits `schema_version: 1` and is governed by
   `schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case; additive optional fields
@@ -273,7 +285,7 @@ task install         # go install ./cmd/codemap
 - **CLI exit-code taxonomy** (extends P2-06): `0`=answered, `1`=operational error,
   `2`=not found/not indexed, `3`=`index_missing`, `4`=`index_corrupt`, `5`=`not_a_repo`.
   Under `--json`, ANY failure prints a structured envelope to **stdout**:
-  `{"ok":false,"error":"…","code":"index_missing|index_corrupt|not_a_repo|operational","hint":"run: codemap index"}`
+  `{"ok":false,"error":"…","code":"not_found|not_indexed|index_missing|index_corrupt|not_a_repo|operational","hint":"run: codemap index"}`
   (the `code` matches the exit-code suffix). The `cmd/codemap/jsonHandler` wraps every RunE;
   hard failures are wrapped as `app.CodedError` at the `Session.Graph()` seam (`internal/app/errors.go`).
 

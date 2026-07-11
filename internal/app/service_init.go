@@ -100,6 +100,11 @@ func (svc *Service) Init(cwd string, local bool) (*InitReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	project, err := g.GetProjectByID(pid)
+	if err != nil {
+		return nil, err
+	}
+	name = project.Name // UpsertProject may disambiguate a colliding basename.
 	if local {
 		if err := os.MkdirAll(filepath.Join(root, ".codemap"), 0o755); err != nil {
 			return nil, err
@@ -124,6 +129,11 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	if err != nil {
 		return nil, err
 	}
+	project, err := g.GetProjectByID(pid)
+	if err != nil {
+		return nil, err
+	}
+	name = project.Name // canonical vector/search scope after basename collision
 
 	rep := &IndexReport{Project: name, Root: root}
 	var vec *vector.Store
@@ -148,13 +158,24 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 			}
 		}
 	}
+	// Structure-only indexing must not leave semantic records pointing at old
+	// source or deleted graph nodes. Open an existing collection for cleanup even
+	// when embeddings were explicitly disabled or the provider is unavailable.
+	// This path never creates a vector store and never inserts embeddings.
+	if emb == nil {
+		if vec, err = svc.s.VectorsForMaintenance(); err != nil {
+			return nil, err
+		}
+	}
 
 	res, indexErr := index.New(g, vec, emb, svc.s.Config.Index).IndexProject(ctx, pid, name, root, opts)
 	// The vector writer belongs to this index operation, not to the long-lived
 	// service. Release its exclusive flock on every return path so this process
 	// can reopen read-only and unrelated processes can acquire the writer lock.
 	var releaseErr error
-	if emb != nil {
+	if emb == nil {
+		releaseErr = svc.s.ReleaseMaintenanceVectors()
+	} else {
 		releaseErr = svc.s.ReleaseVectors()
 	}
 	if indexErr != nil || releaseErr != nil {
@@ -163,7 +184,7 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	// Embedding ran only if a vector store was wired AND the embed phase wasn't
 	// skipped by an embedder failure (EmbedNote) — the structural index still
 	// succeeded in that case, so report it as structure-only with the reason.
-	rep.Embedded = vec != nil && res.EmbedNote == ""
+	rep.Embedded = emb != nil && vec != nil && res.EmbedNote == ""
 	if res.EmbedNote != "" {
 		if rep.Warning != "" {
 			rep.Warning += "; " + res.EmbedNote

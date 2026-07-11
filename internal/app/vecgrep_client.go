@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -63,22 +64,24 @@ func vecgrepSearch(ctx context.Context, cfg config.VecgrepConfig, cwd, query str
 // vecgrepMemoryRecall shells vecgrep's global agent-memory store for memories
 // matching query AND carrying every tag (the scope tags ['codemap', <project_key>]
 // keep recall to this project — no cross-project leakage, per the G2 governance).
-// Returns nil — never an error — when vecgrep is disabled/absent or nothing matches.
-func vecgrepMemoryRecall(ctx context.Context, cfg config.VecgrepConfig, cwd, query string, tags []string, topK int) []MemoryNote {
+// Disabled, absent, or invalid-query states are optional-capability misses and
+// return (nil,nil). Once a vecgrep process is actually launched, execution and
+// JSON failures are returned so Context can expose them in partial_errors.
+func vecgrepMemoryRecall(ctx context.Context, cfg config.VecgrepConfig, cwd, query string, tags []string, topK int) ([]MemoryNote, error) {
 	if !cfg.Enabled {
-		return nil
+		return nil, nil
 	}
 	// Option-injection guard (P0-03): reject empty or leading-dash queries before
 	// they reach vecgrep. Tag values are already constrained by the caller.
 	if query == "" || query[0] == '-' {
-		return nil
+		return nil, nil
 	}
 	bin := cfg.Bin
 	if bin == "" {
 		bin = "vecgrep"
 	}
 	if _, err := exec.LookPath(bin); err != nil {
-		return nil
+		return nil, nil
 	}
 	cmd := exec.CommandContext(ctx, bin, "memory", "recall", query,
 		"--tags", strings.Join(tags, ","), "--min-importance", "0.3",
@@ -86,13 +89,13 @@ func vecgrepMemoryRecall(ctx context.Context, cfg config.VecgrepConfig, cwd, que
 	cmd.Dir = cwd
 	out, err := cmd.Output()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("vecgrep memory recall: %w", err)
 	}
 	var notes []MemoryNote
 	if err := json.Unmarshal(out, &notes); err != nil {
-		return nil
+		return nil, fmt.Errorf("parse vecgrep memory recall output: %w", err)
 	}
-	return notes
+	return notes, nil
 }
 
 // semanticViaVecgrep answers a semantic query through vecgrep when codemap has no

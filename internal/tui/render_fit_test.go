@@ -45,6 +45,18 @@ func seedTabs(m Model) Model {
 		{Symbol: "BlastRadius", FQN: "internal/graph.Store.BlastRadiusForProject", File: "internal/graph/queries.go", StartLine: 140, Score: 0.82,
 			Signature: "func (s *Store) BlastRadiusForProject(id int64, sym string, depth int) ([]Node, error)"},
 	}})
+	from := pathEndpoint{query: "internal/app.Service.Impact", center: graphCenter{sym: "Impact", fqn: "internal/app.Service.Impact"}}
+	to := pathEndpoint{query: "internal/graph.Store.BlastRadiusForProject", center: graphCenter{sym: "BlastRadiusForProject", fqn: "internal/graph.Store.BlastRadiusForProject"}}
+	m.pathFromInput.SetValue(from.query)
+	m.pathToInput.SetValue(to.query)
+	m, _ = applyMsg(m, pathMsg{from: from, to: to, rep: &app.PathReport{
+		From: from.query, To: to.query, Found: true, CallGraph: app.CallGraphName,
+		Path: []app.SymbolRef{
+			{Symbol: "Impact", FQN: from.query, Kind: "method", File: "internal/app/service_impact.go", StartLine: 40},
+			{Symbol: "BlastRadius", FQN: "internal/graph.Store.BlastRadius", Kind: "method", File: "internal/graph/queries.go", StartLine: 140},
+			{Symbol: "BlastRadiusForProject", FQN: to.query, Kind: "method", File: "internal/graph/queries.go", StartLine: 180},
+		},
+	}})
 	return m
 }
 
@@ -58,7 +70,7 @@ func TestRenderFitsAllWidths(t *testing.T) {
 	tabs := []struct {
 		name string
 		t    tab
-	}{{"Graph", tabGraph}, {"Metrics", tabMetrics}, {"Impact", tabImpact}, {"Search", tabSearch}}
+	}{{"Graph", tabGraph}, {"Metrics", tabMetrics}, {"Impact", tabImpact}, {"Search", tabSearch}, {"Path", tabPath}}
 	for _, sz := range sizes {
 		w, h := sz[0], sz[1]
 		for _, tb := range tabs {
@@ -89,7 +101,7 @@ func TestTabBodiesFitColumns(t *testing.T) {
 		for _, tb := range []struct {
 			name string
 			t    tab
-		}{{"Graph", tabGraph}, {"Metrics", tabMetrics}, {"Impact", tabImpact}, {"Search", tabSearch}} {
+		}{{"Graph", tabGraph}, {"Metrics", tabMetrics}, {"Impact", tabImpact}, {"Search", tabSearch}, {"Path", tabPath}} {
 			m := sized(t, w, 24)
 			m = seedTabs(m)
 			m.active = tb.t
@@ -112,7 +124,7 @@ func TestFooterCompactsWhenNarrow(t *testing.T) {
 	if !strings.Contains(wide.footer(), "ctrl+r reindex") || !strings.Contains(wide.footer(), "ctrl+c quit") {
 		t.Errorf("wide Metrics footer should show the rich hint:\n%s", wide.footer())
 	}
-	for _, tb := range []tab{tabGraph, tabMetrics, tabImpact, tabSearch} {
+	for _, tb := range []tab{tabGraph, tabMetrics, tabImpact, tabSearch, tabPath} {
 		m := seedTabs(sized(t, 80, 24))
 		m.active = tb
 		f := m.footer()

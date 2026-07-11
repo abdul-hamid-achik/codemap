@@ -16,17 +16,19 @@ import (
 )
 
 var indexCmd = &cobra.Command{
-	Use:   "index [paths...]",
+	Use:   "index [path]",
 	Short: "Index a project: extract the graph and embed nodes (incremental)",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runIndex,
 }
 
-func runIndex(cmd *cobra.Command, _ []string) error {
+func runIndex(cmd *cobra.Command, args []string) error {
+	cwd := targetDirArg(cmd, args)
 	// --via-vault re-runs this index inside `tvault run` so the language servers
 	// (gopls/pyright/tsserver) see the project's registry creds. Handle it before
 	// opening a session — the real index happens in the re-exec'd child.
 	if vault, _ := cmd.Flags().GetString("via-vault"); vault != "" {
-		if done, err := indexViaVault(cmd, vault); done {
+		if done, err := indexViaVault(cmd, vault, cwd); done {
 			return err
 		}
 	}
@@ -41,21 +43,16 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 	// daemon's own project instead of the user's cwd. Refuse to delegate
 	// when cwd is not inside the daemon's project root.
 	if info := daemon.QueryStatus(); info != nil {
-		cwd, _ := os.Getwd()
 		if ok, reason := daemon.DelegationAllowed(cwd, info); !ok {
 			return fmt.Errorf("%s", reason)
 		}
 		return indexViaDaemon(cmd, info)
 	}
-	sess, err := openSession(cmd)
+	sess, err := openSessionAt(cmd, cwd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
 	reindex, _ := cmd.Flags().GetBool("reindex")
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
 	precise, _ := cmd.Flags().GetBool("precise")
@@ -124,7 +121,7 @@ func runIndex(cmd *cobra.Command, _ []string) error {
 		// can open. Session.Close is idempotent (the deferred Close below
 		// is a safe no-op once fields are nil).
 		_ = sess.Close()
-		if dErr := startDaemonAfterIndex(cmd); dErr != nil {
+		if dErr := startDaemonAfterIndex(cmd, cwd); dErr != nil {
 			return dErr
 		}
 		envelope.Daemon = &indexDaemonInfo{Started: true, PID: os.Getpid()}
@@ -178,7 +175,7 @@ func buildIndexEnvelope(rep *app.IndexReport) *indexEnvelope {
 // through to a normal in-process index when tvault isn't installed. The ONLY tvault
 // subcommand it ever runs is `run` — no value-reading verb (`tvault get`) is
 // reachable from here, so secret VALUES can never enter codemap.
-func indexViaVault(cmd *cobra.Command, project string) (done bool, err error) {
+func indexViaVault(cmd *cobra.Command, project, target string) (done bool, err error) {
 	tvault, lookErr := exec.LookPath("tvault")
 	if lookErr != nil {
 		fmt.Fprintln(os.Stderr, "warning: --via-vault set but 'tvault' is not on PATH; indexing without injected secrets")
@@ -189,7 +186,7 @@ func indexViaVault(cmd *cobra.Command, project string) (done bool, err error) {
 		self = "codemap"
 	}
 	// Reconstruct the inner `codemap index`, dropping --via-vault (no recursion).
-	inner := []string{self, "index"}
+	inner := []string{self, "index", "--path", target}
 	for _, f := range []string{"reindex", "no-embed", "no-lsp", "precise"} {
 		if b, _ := cmd.Flags().GetBool(f); b {
 			inner = append(inner, "--"+f)
@@ -344,10 +341,6 @@ func formatDuration(ms int) string {
 // index, hand off to the daemon so the index stays fresh. This is a thin
 // alias — it reuses daemon.Start with the same config flags the index command
 // already applied. The user gets a single "index then watch" flow.
-func startDaemonAfterIndex(cmd *cobra.Command) error {
-	root, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+func startDaemonAfterIndex(cmd *cobra.Command, root string) error {
 	return startDaemonForeground(cmd, root)
 }

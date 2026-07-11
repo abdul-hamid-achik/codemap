@@ -28,24 +28,33 @@ Every query command accepts `--json` for machine-readable output.
 | Command | Description |
 |---|---|
 | `codemap callers <symbol>` | Functions/methods that call a symbol |
-| `codemap callers <symbol> --lsp` | **Precise** callers via gopls (Go) — exact, not inflated by same-named symbols |
+| `codemap callers <symbol> --precise` | **Precise one-off** callers via the language server — exact without reindexing |
+| `codemap callers --at <file>:<line>` | Callers of exactly one definition (same selector is available on `callees`) |
 | `codemap callees <symbol>` | Functions/methods a symbol calls |
-| `codemap callees <symbol> --lsp` | **Precise** callees via gopls (Go) |
+| `codemap callees <symbol> --precise` | **Precise one-off** callees via the language server |
 | `codemap path <from> <to>` | Shortest call path between two symbols |
 | `codemap symbols <file>` | Outline a file's symbols with their signatures (a structured alternative to reading it) |
-| `codemap symbol-at <file>:<line>` | Resolve a file:line position to its enclosing symbol (FQN, kind, range). The `indexed` field in `--json` distinguishes an unindexed project (`indexed:false`) from a real miss (`indexed:true`, `resolution:none`), so agents know to call `codemap index` instead of treating a cold repo as "no symbol". Also `codemap impact --at <file>:<line>` |
+| `codemap symbol-at <file>:<line>` | Resolve a file:line position to its enclosing symbol (FQN, kind, range, reusable selector). The `indexed` field in `--json` distinguishes an unindexed project (`indexed:false`) from a real miss (`indexed:true`, `resolution:none`). `callers`, `callees`, `source`, `context`, `impact`, and `risk` also accept `--at` to select that exact definition. |
 | `codemap related-files <file>` | Files related to a file via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence |
-| `codemap source <symbol>` | Print a symbol's source code (the body behind its signature) |
-| `codemap context <symbol> [<symbol>...] [--depth N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, covering tests, blast-radius size, and pinned annotations. Replaces separate `source`/`callers`/`callees`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling) — the `codemap_context_batch` MCP tool, for building a component's mental model in one round-trip |
+| `codemap source <symbol>` | Print source for matching definitions; use `--at <file>:<line>` for exactly one |
+| `codemap context <symbol> [<symbol>...] [--depth N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, covering tests, blast-radius size, and pinned annotations. Uses the indexed graph only (never launches a language server implicitly); unresolved relationships stay explicit. Replaces separate `source`/`callers`/`callees`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling). Batch source bodies share a 64 KiB budget disclosed by `source_budget`/`source_truncations`; optional component failures appear in `partial_errors` without discarding usable context. |
 
 The fast default uses the indexed graph (name-based resolution; same-named methods can over-match,
 e.g. `callers Close` lists callers of every `Close`). **The best fix is to reindex once with
 `codemap index --precise`** — the unified exact-resolution pass (a pure-Go go/types pass for Go,
-`typescript-language-server` callHierarchy for TypeScript), which makes *every* query — callers,
-callees, impact, hotspots, path — exact, with no per-query flag. (TypeScript has no name-based call
-edges, so `--precise` is what gives TS a call graph at all.) For a one-off exact Go answer without
-reindexing, `callers`/`callees` also accept `--lsp` (gopls); both `--precise` and `--lsp` degrade to
-name-based with a note when the toolchain/module isn't available — never a hard error.
+`typescript-language-server` callHierarchy for TypeScript). Successful coverage is recorded per file;
+a query is `resolved` only when all matched definition files completed the pass, while partial
+failures remain `name`/`unresolved`. (TypeScript has no name-based call edges, so `--precise` is what
+gives covered TS files a call graph.) For a one-off exact answer without
+reindexing, `callers`/`callees` accept `--precise`; it degrades to the indexed graph with a note
+when the language server isn't available — never a hard error. The old `--lsp` spelling remains a
+hidden compatibility alias, but new scripts and people should use `--precise`.
+
+Precise indexing fixes call **edges**; a bare name can still match several exact
+definitions. Use `--at <file>:<line>` to keep callers/callees/source/context/impact/risk
+on one definition. JSON/MCP consumers use the field-compatible
+`selector:{file,start_line,fqn,kind}` described in the MCP guide. The selector prefers
+file+FQN+kind, so ordinary line shifts survive reindex; moves/renames return a miss.
 
 On a name-based index the analysis commands flag their limits honestly: `callers`/`impact` note when
 a name resolves to multiple definitions, `hotspots` marks name-collision inflation, and `orphans`
@@ -58,12 +67,13 @@ callers reached via interface dispatch or reflection — treat its output as dea
 
 | Command | Description |
 |---|---|
-| `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, and covering tests |
-| `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Aggregates every symbol the file defines into the other files that depend on it, its blast radius, the covering tests, and two verdicts: `safe_to_delete` (nothing outside the file references it) and `breaking_change` (an externally-called symbol here is untested). The file-level peer of `impact` (a symbol) and `review` (a diff) — run it before a move/delete/split. |
-| `codemap review [--since <ref>] [--staged] [--depth N]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Carries an aggregate **`risk` band** (low/medium/high + factors, folded from every changed symbol so a harness can gate verification on one band) and the same `stale`/`resolution` + stable `call_graph` honesty signals as `impact`. Answers *"what did I just affect, and what should I run?"* in one call. |
-| `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). |
-| `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. |
-| `codemap risk <symbol> [--depth N]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. Triage which of several edits is riskiest, or gate a change on test/review effort. |
+| `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, and covering tests (`--at file:line` selects one definition) |
+| `codemap dependencies <file>` | Direct inbound call/reference/import evidence grouped by dependent file and edge kind. Results are bounded with totals/truncation and source→target samples, distinguish file-scoped from Go package-scoped imports, and report complete/partial/unavailable coverage for calls, references, imports, runtime wiring, and external consumers. Missing evidence never means safe. |
+| `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Returns grouped, deduplicated inbound call/reference/import evidence by dependent file, bounded source→target samples with totals/truncation, per-domain coverage, blast radius, tests, and `delete_verdict`. File-scoped calls/references prove `unsafe`; a Go import is package-scoped and remains `unknown` for the exact file. Missing evidence never proves safety while type/value uses, runtime wiring, or external consumers are incomplete; legacy `safe_to_delete` stays false. |
+| `codemap review [--since <ref>] [--staged] [--depth N]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Carries an aggregate **`risk` band** (unknown/low/medium/high + factors, folded from every changed symbol so a harness can gate verification on one band) and the same `stale`/`resolution` + stable `call_graph` honesty signals as `impact`. Answers *"what did I just affect, and what should I run?"* in one call. |
+| `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). Each request accepts at most 256 unique names, 256 bytes per name. |
+| `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. Candidate input is capped at 256 unique names, 256 bytes per name. |
+| `codemap risk <symbol> [--depth N]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. |
 | `codemap hotspots [--top N]` | Most-referenced symbols (hubs) |
 | `codemap orphans [--top N]` | Functions/methods with no callers (dead-code candidates) |
 | `codemap read-order [query] [--top N]` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/` packages, module index files, exported public API) and load-bearing hubs (call-graph in-degree) into a newcomer's reading guide, each with the reason it ranked. Optional `query` narrows by name/path. The agent-facing answer to "I just landed in this repo — what do I read first?" |
@@ -210,17 +220,18 @@ additive optional properties but does not rename or repurpose existing fields. T
 degrades gracefully (a plain changed-file list with a note) when the project isn't indexed or
 isn't a git repo; hard-failure error envelopes are separate from the success schema.
 
-**`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`review`/`context`
+**`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`review`/`context`/
+`hotspots`/`orphans`/`path`
 tells a consumer how much to trust the call graph without parsing prose: `resolved`
-(precise edges), `name` (Go name-based — same-named methods may over-match), `unresolved`
+(every matched definition file has precise coverage), `name` (Go name-based — same-named methods may over-match), `unresolved`
 (TS/JS/Python/Vue without `--precise` — callers/blast/tests are unknown, not absent),
 `none` (no matching symbol). The free-form `resolution` sentence stays for humans.
 
-**`risk`** on `review` is one band for the whole diff — `level` (low/medium/high),
+**`risk`** on `review` is one band for the whole diff — `level` (unknown/low/medium/high),
 `score` (0..1), and `factors` (`untested_changes`/`hotspot_fanin`/`cross_package`/
 `ambiguity`/`unresolved`) folded from every changed symbol — so a harness can gate
 verification on one call instead of fanning `risk` out per symbol. Absent when the diff
-maps to no indexed symbols.
+maps to no indexed symbols. `unknown` means one or more changed symbols lacks a usable call graph.
 
 ### Machine-readable errors + exit codes
 
@@ -228,7 +239,7 @@ Under `--json`, a failure prints a structured envelope to **stdout** (not stderr
 agent parsing JSON still gets it:
 
 ```json
-{"ok": false, "error": "…", "code": "index_missing|index_corrupt|not_a_repo|operational", "hint": "run: codemap index"}
+{"ok": false, "error": "…", "code": "not_found|not_indexed|index_missing|index_corrupt|not_a_repo|operational", "hint": "run: codemap index"}
 ```
 
 The non-zero exit codes follow a documented taxonomy:
@@ -237,7 +248,7 @@ The non-zero exit codes follow a documented taxonomy:
 ---|---|
 | 0 | answered (results, possibly empty-but-resolved like "no callers") |
 | 1 | operational error (bad flag, git failure, untyped runtime error) |
-| 2 | not found / not indexed (a valid query with no answer) |
+| 2 | `not_found` / `not_indexed` — a valid query with no answer |
 | 3 | `index_missing` — no index for the project |
 | 4 | `index_corrupt` — the graph DB exists but won't open |
 | 5 | `not_a_repo` — a git operation was required but cwd isn't a repo |

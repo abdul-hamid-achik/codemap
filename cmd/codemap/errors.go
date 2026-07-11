@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/spf13/cobra"
@@ -30,12 +31,16 @@ const (
 	exitIndexMissing = 3
 	exitIndexCorrupt = 4
 	exitNotARepo     = 5
+	codeNotFound     = "not_found"
+	codeNotIndexed   = "not_indexed"
 )
 
 // exitCodeFor maps a stable machine code (app.CodedError.Code) to its exit code.
 // Unknown codes fall back to the operational exit.
 func exitCodeFor(code string) int {
 	switch code {
+	case codeNotFound, codeNotIndexed:
+		return exitNotFound
 	case app.CodeMissing:
 		return exitIndexMissing
 	case app.CodeCorrupt:
@@ -44,6 +49,65 @@ func exitCodeFor(code string) int {
 		return exitNotARepo
 	}
 	return exitOperational
+}
+
+// outcomeError is a valid query dead-end rather than an operational failure.
+// It keeps a useful human message while unwrapping to one of the two exit-2
+// sentinels that main/jsonHandler classify without parsing strings.
+type outcomeError struct {
+	kind error
+	msg  string
+	hint string
+}
+
+func (e *outcomeError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.hint == "" {
+		return e.msg
+	}
+	return e.msg + "\n  hint: " + e.hint
+}
+func (e *outcomeError) Unwrap() error { return e.kind }
+
+func notFoundError(msg, hint string) error {
+	return &outcomeError{kind: errNotFound, msg: msg, hint: hint}
+}
+
+func notIndexedError(project string) error {
+	return &outcomeError{
+		kind: errNotIndexed,
+		msg:  "project " + project + " is not indexed yet",
+		hint: "run: codemap index",
+	}
+}
+
+func cliCodeOf(err error) string {
+	switch {
+	case errors.Is(err, errNotFound):
+		return codeNotFound
+	case errors.Is(err, errNotIndexed):
+		return codeNotIndexed
+	default:
+		return app.CodeOf(err)
+	}
+}
+
+func cliHintOf(err error) string {
+	var oe *outcomeError
+	if errors.As(err, &oe) && oe.hint != "" {
+		return oe.hint
+	}
+	return app.HintOf(err)
+}
+
+func cliErrorMessage(err error) string {
+	var oe *outcomeError
+	if errors.As(err, &oe) {
+		return oe.msg // JSON has a separate hint field; avoid duplicating it.
+	}
+	return err.Error()
 }
 
 // exitCoded carries the exit code chosen for a --json failure through cobra's
@@ -93,22 +157,49 @@ func jsonHandler(fn func(cmd *cobra.Command, args []string) error) func(cmd *cob
 			return nil
 		}
 		if jsonOut(cmd) {
-			code := app.CodeOf(err)
-			env := jsonEnvelope{
-				OK:    false,
-				Error: err.Error(),
-				Code:  code,
-				Hint:  app.HintOf(err),
-			}
-			if env.Hint == "" {
-				env.Hint = defaultHint(code)
-			}
-			_ = printEnvelope(env)
 			cmd.SilenceErrors = true // envelope already printed; don't let cobra echo
-			return &exitCoded{code: exitCodeFor(code), err: err}
+			return jsonFailure(err)
 		}
 		return err
 	}
+}
+
+// jsonFailure emits the common machine envelope and carries its exit code back
+// to main. It is shared by wrapped RunE handlers and Cobra failures that happen
+// earlier (unknown flags / Args validation), so those paths cannot drift.
+func jsonFailure(err error) *exitCoded {
+	code := cliCodeOf(err)
+	env := jsonEnvelope{
+		OK:    false,
+		Error: cliErrorMessage(err),
+		Code:  code,
+		Hint:  cliHintOf(err),
+	}
+	if env.Hint == "" {
+		env.Hint = defaultHint(code)
+	}
+	_ = printEnvelope(env)
+	return &exitCoded{code: exitCodeFor(code), err: err}
+}
+
+// jsonRequestedInArgs detects the persistent --json flag even when Cobra fails
+// before parsing reaches it (for example, an earlier unknown flag). A `--`
+// terminator ends flag interpretation, and an explicit --json=false preserves
+// normal text errors.
+func jsonRequestedInArgs(args []string) bool {
+	requested := false
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		switch {
+		case arg == "--json":
+			requested = true
+		case strings.HasPrefix(arg, "--json="):
+			requested = !strings.EqualFold(strings.TrimPrefix(arg, "--json="), "false")
+		}
+	}
+	return requested
 }
 
 // printEnvelope writes the JSON error envelope to stdout (indented, no HTML
@@ -123,6 +214,10 @@ func printEnvelope(env jsonEnvelope) error {
 // defaultHint is the fallback remediation when a CodedError carried none.
 func defaultHint(code string) string {
 	switch code {
+	case codeNotFound:
+		return "check the name/path and try codemap find"
+	case codeNotIndexed:
+		return "run: codemap index"
 	case app.CodeMissing:
 		return "run: codemap index"
 	case app.CodeCorrupt:

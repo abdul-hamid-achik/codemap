@@ -1,6 +1,6 @@
 // Package tui is codemap's interactive terminal UI ("studio"), built on Charm
 // v2 (charm.land/bubbletea, lipgloss, bubbles). It is a thin view over
-// internal/app: a tabbed explorer with Graph, Metrics, Impact, and Search.
+// internal/app: a tabbed explorer with Graph, Metrics, Impact, Search, and Path.
 package tui
 
 import (
@@ -26,6 +26,7 @@ const (
 	tabMetrics
 	tabImpact
 	tabSearch
+	tabPath
 	tabCount
 )
 
@@ -39,6 +40,8 @@ func (t tab) String() string {
 		return "Impact"
 	case tabSearch:
 		return "Search"
+	case tabPath:
+		return "Path"
 	}
 	return ""
 }
@@ -61,6 +64,12 @@ type impactMsg struct {
 	symbol string
 	rep    *app.ImpactReport
 	err    error
+}
+type pathMsg struct {
+	from pathEndpoint
+	to   pathEndpoint
+	rep  *app.PathReport
+	err  error
 }
 type graphHubsMsg struct {
 	hubs []app.HotspotRef
@@ -128,6 +137,20 @@ type Model struct {
 	impactSymbol string
 	impactSel    int
 
+	// path tab: two endpoint editors plus an ordered shortest-path result. Each
+	// endpoint retains the full graphCenter when it came from a selection, so the
+	// async query seam can move to selector-aware app.Path without redesigning the
+	// TUI. A manually edited value intentionally degrades to its exact text/FQN.
+	pathFromInput textinput.Model
+	pathToInput   textinput.Model
+	pathFrom      pathEndpoint
+	pathTo        pathEndpoint
+	pathFocus     pathFocus
+	pathRep       *app.PathReport
+	pathSel       int
+	pathLoading   bool
+	pathErr       string
+
 	// graph tab (call-graph explorer)
 	graphLoaded      bool
 	graphHubs        []app.HotspotRef
@@ -186,7 +209,7 @@ type Model struct {
 // command whose status ends in "…" (searching/analyzing/indexing/resolving). Drives
 // the footer spinner and keeps the animation frame loop running until it clears.
 func (m Model) busy() bool {
-	return m.loading || strings.HasSuffix(m.statusMsg, "…")
+	return m.loading || m.pathLoading || strings.HasSuffix(m.statusMsg, "…")
 }
 
 // graphFocus is which pane of the Graph tab has keyboard focus.
@@ -200,16 +223,54 @@ const (
 // graphCenter is the node the Graph detail pane is centered on. It carries
 // enough to re-fetch relations (by name) and resolve precisely (file:line).
 type graphCenter struct {
-	sym, fqn, file string
-	line           int
+	sym, fqn, kind, file string
+	line                 int
 }
 
+// pathEndpoint is a source/target chosen for a path query. query is the exact
+// text shown in the editor; center carries selector-ready identity when the
+// endpoint came from a graph/search/impact/metrics/path selection.
+type pathEndpoint struct {
+	query  string
+	center graphCenter
+}
+
+func endpointFromCenter(c graphCenter) pathEndpoint {
+	return pathEndpoint{query: displayName(c.fqn, c.sym), center: c}
+}
+
+func (e pathEndpoint) serviceQuery() string {
+	if e.center.fqn != "" {
+		return e.center.fqn
+	}
+	if e.center.sym != "" {
+		return e.center.sym
+	}
+	return strings.TrimSpace(e.query)
+}
+
+// pathFocus identifies the editable source/target field or the returned path.
+type pathFocus int
+
+const (
+	focusPathFrom pathFocus = iota
+	focusPathTo
+	focusPathResult
+)
+
 func centerOfHub(h app.HotspotRef) graphCenter {
-	return graphCenter{sym: h.Symbol, fqn: h.FQN, file: h.File, line: h.StartLine}
+	return graphCenter{sym: h.Symbol, fqn: h.FQN, kind: h.Kind, file: h.File, line: h.StartLine}
 }
 
 func centerOfRef(r app.SymbolRef) graphCenter {
-	return graphCenter{sym: r.Symbol, fqn: r.FQN, file: r.File, line: r.StartLine}
+	return graphCenter{sym: r.Symbol, fqn: r.FQN, kind: r.Kind, file: r.File, line: r.StartLine}
+}
+
+func (c graphCenter) selector() (app.SymbolSelector, bool) {
+	if c.file == "" || c.line <= 0 {
+		return app.SymbolSelector{}, false
+	}
+	return app.SymbolSelector{File: c.file, StartLine: c.line, FQN: c.fqn, Kind: c.kind}, true
 }
 
 // navState is a snapshot of the whole studio view for the global back/forward
@@ -223,6 +284,12 @@ type navState struct {
 	impactBar, impactSymbol string
 	impactRep               *app.ImpactReport
 	impactSel               int
+	pathFromBar, pathToBar  string
+	pathFrom, pathTo        pathEndpoint
+	pathFocus               pathFocus
+	pathRep                 *app.PathReport
+	pathSel                 int
+	pathErr                 string
 	graphSym                string
 	graphCenter             graphCenter
 	graphStack              []graphCenter
@@ -244,6 +311,8 @@ func (m Model) snapshot() navState {
 		active:      m.active,
 		searchQuery: m.search.Value(), searchMode: m.searchMode, searchHits: m.searchHits, searchSel: m.searchSel,
 		impactBar: m.impact.Value(), impactSymbol: m.impactSymbol, impactRep: m.impactRep, impactSel: m.impactSel,
+		pathFromBar: m.pathFromInput.Value(), pathToBar: m.pathToInput.Value(),
+		pathFrom: m.pathFrom, pathTo: m.pathTo, pathFocus: m.pathFocus, pathRep: m.pathRep, pathSel: m.pathSel, pathErr: m.pathErr,
 		graphSym: m.graphSym, graphCenter: m.graphCenter,
 		graphStack: append([]graphCenter(nil), m.graphStack...), // graphStack is mutated in place — copy it
 		graphFocus: m.graphFocus, graphRefSel: m.graphRefSel, graphSel: m.graphSel,
@@ -260,6 +329,9 @@ func (m *Model) restore(s navState) {
 	m.searchQuery, m.searchMode, m.searchHits, m.searchSel = s.searchQuery, s.searchMode, s.searchHits, s.searchSel
 	m.impact.SetValue(s.impactBar)
 	m.impactSymbol, m.impactRep, m.impactSel = s.impactSymbol, s.impactRep, s.impactSel
+	m.pathFromInput.SetValue(s.pathFromBar)
+	m.pathToInput.SetValue(s.pathToBar)
+	m.pathFrom, m.pathTo, m.pathFocus, m.pathRep, m.pathSel, m.pathErr = s.pathFrom, s.pathTo, s.pathFocus, s.pathRep, s.pathSel, s.pathErr
 	m.graphSym, m.graphCenter, m.graphStack = s.graphSym, s.graphCenter, s.graphStack
 	m.graphFocus, m.graphRefSel, m.graphSel = s.graphFocus, s.graphRefSel, s.graphSel
 	m.graphCallers, m.graphCallees, m.graphAnnotations = s.graphCallers, s.graphCallees, s.graphAnnotations
@@ -317,6 +389,13 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 	i := textinput.New()
 	i.Placeholder = "symbol name, e.g. Authenticate"
 
+	pf := textinput.New()
+	pf.Placeholder = "source symbol or FQN, e.g. api.Handle"
+	pf.SetWidth(56)
+	pt := textinput.New()
+	pt.Placeholder = "target symbol or FQN, e.g. store.Save"
+	pt.SetWidth(56)
+
 	return Model{
 		ctx:           ctx,
 		service:       app.NewService(sess),
@@ -325,6 +404,9 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 		loading:       true,
 		search:        s,
 		impact:        i,
+		pathFromInput: pf,
+		pathToInput:   pt,
+		pathFocus:     focusPathFrom,
 		revealSpring:  newRevealSpring(),
 		metricsReveal: 1, // fully shown until a tab activation triggers the grow-in
 		mapReveal:     1, // fully shown until the map toggle triggers the grow-in
@@ -453,21 +535,25 @@ func (m Model) selectedCenter() (graphCenter, bool) {
 		if m.impactRep != nil {
 			if m.impactSel < len(m.impactRep.BlastRadius) {
 				n := m.impactRep.BlastRadius[m.impactSel]
-				return graphCenter{sym: n.Symbol, fqn: n.FQN, file: n.File, line: n.StartLine}, true
+				return graphCenter{sym: n.Symbol, fqn: n.FQN, kind: n.Kind, file: n.File, line: n.StartLine}, true
 			}
 			if len(m.impactRep.Locations) > 0 {
 				l := m.impactRep.Locations[0]
-				return graphCenter{sym: l.Symbol, fqn: l.FQN, file: l.File, line: l.StartLine}, true
+				return graphCenter{sym: l.Symbol, fqn: l.FQN, kind: l.Kind, file: l.File, line: l.StartLine}, true
 			}
 		}
 	case tabSearch:
 		if m.searchSel < len(m.searchHits) {
 			h := m.searchHits[m.searchSel]
-			return graphCenter{sym: h.Symbol, fqn: h.FQN, file: h.File, line: h.StartLine}, true
+			return graphCenter{sym: h.Symbol, fqn: h.FQN, kind: h.Kind, file: h.File, line: h.StartLine}, true
 		}
 	case tabMetrics:
-		if sym, fqn, file, line, ok := m.metricsItem(m.metricsSel); ok {
-			return graphCenter{sym: sym, fqn: fqn, file: file, line: line}, true
+		if sym, fqn, kind, file, line, ok := m.metricsItem(m.metricsSel); ok {
+			return graphCenter{sym: sym, fqn: fqn, kind: kind, file: file, line: line}, true
+		}
+	case tabPath:
+		if m.pathRep != nil && m.pathSel >= 0 && m.pathSel < len(m.pathRep.Path) {
+			return centerOfRef(m.pathRep.Path[m.pathSel]), true
 		}
 	}
 	return graphCenter{}, false
@@ -688,12 +774,55 @@ func (m Model) impactCmd(sym string) tea.Cmd {
 	}
 }
 
+// pathCmd is the single async boundary for Studio path lookup. Rich endpoints
+// use exact source selectors; manually typed text/FQNs retain the legacy lookup
+// fallback until the person chooses a concrete indexed symbol.
+func (m Model) pathCmd(from, to pathEndpoint) tea.Cmd {
+	svc, dir := m.service, m.startDir
+	return func() tea.Msg {
+		fromSelector, toSelector, exact := exactPathSelectors(from, to)
+		var (
+			r   *app.PathReport
+			err error
+		)
+		if exact {
+			r, err = svc.PathBySelectors(dir, fromSelector, toSelector)
+		} else {
+			r, err = svc.Path(dir, from.serviceQuery(), to.serviceQuery())
+		}
+		return pathMsg{from: from, to: to, rep: r, err: err}
+	}
+}
+
+func exactPathSelectors(from, to pathEndpoint) (app.SymbolSelector, app.SymbolSelector, bool) {
+	fromSelector, fromExact := from.center.selector()
+	toSelector, toExact := to.center.selector()
+	return fromSelector, toSelector, fromExact && toExact
+}
+
+// pathEndpointForInput preserves a rich center only while its displayed text is
+// unchanged. Once a person edits the field, the exact text becomes the endpoint
+// identity (and may itself be an FQN).
+func pathEndpointForInput(value string, bound pathEndpoint) pathEndpoint {
+	value = strings.TrimSpace(value)
+	if value == bound.query {
+		return bound
+	}
+	return pathEndpoint{query: value, center: graphCenter{sym: value}}
+}
+
+func (m *Model) bindPathFrom(c graphCenter) {
+	m.pathFrom = endpointFromCenter(c)
+	m.pathFromInput.SetValue(m.pathFrom.query)
+}
+
 // ---- update ----
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.resizePathInputs()
 		return m, nil
 
 	case statusMsg:
@@ -851,6 +980,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case pathMsg:
+		m.pathLoading = false
+		if msg.err != nil {
+			m.pathErr = msg.err.Error()
+			m.errMsg = msg.err.Error()
+			m.statusMsg = ""
+			m.pathRep = nil
+			m.pathFocus = focusPathTo
+			m.syncFocus()
+			return m, nil
+		}
+		m.errMsg = ""
+		m.pathErr = ""
+		m.pathFrom, m.pathTo = msg.from, msg.to
+		m.pathRep = msg.rep
+		m.pathSel = 0
+		if msg.rep == nil {
+			m.pathErr = "path query returned no report"
+			m.errMsg = m.pathErr
+			m.statusMsg = ""
+			m.pathFocus = focusPathTo
+			m.syncFocus()
+			return m, nil
+		}
+		// Selector-aware app reports retain exact endpoint identity even when the
+		// two real nodes are disconnected and Path is empty.
+		if sel := msg.rep.FromSelector; sel != nil {
+			m.pathFrom.center = graphCenter{sym: msg.rep.From, fqn: sel.FQN, kind: sel.Kind, file: sel.File, line: sel.StartLine}
+		}
+		if sel := msg.rep.ToSelector; sel != nil {
+			m.pathTo.center = graphCenter{sym: msg.rep.To, fqn: sel.FQN, kind: sel.Kind, file: sel.File, line: sel.StartLine}
+		}
+		if len(msg.rep.Path) > 0 {
+			// Upgrade typed endpoints with exact selector-ready locations returned by
+			// app.Path, while preserving the text the person entered.
+			m.pathFrom.center = centerOfRef(msg.rep.Path[0])
+			m.pathTo.center = centerOfRef(msg.rep.Path[len(msg.rep.Path)-1])
+			m.pathFocus = focusPathResult
+			hops := len(msg.rep.Path) - 1
+			m.statusMsg = fmt.Sprintf("path found · %d hops · call graph %s", hops, msg.rep.CallGraph)
+		} else {
+			m.pathFocus = focusPathTo
+			switch msg.rep.CallGraph {
+			case app.CallGraphUnresolved:
+				m.statusMsg = "path unresolved · call graph incomplete"
+			case app.CallGraphNone:
+				m.statusMsg = "endpoint not found"
+			default:
+				m.statusMsg = "no path · call graph " + msg.rep.CallGraph
+			}
+		}
+		m.syncFocus()
+		return m, nil
+
 	case tea.KeyPressMsg:
 		model, cmd := m.handleKey(msg)
 		// If the key kicked off an async op (status ends in "…"), spin the footer.
@@ -920,33 +1103,26 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.graphLoaded = false
 		return m, m.reindexCmd()
 	case "tab":
-		m.active = (m.active + 1) % tabCount
-		m.syncFocus()
-		return m, m.onTabActivate()
+		return m, m.switchTab((m.active + 1) % tabCount)
 	case "shift+tab":
-		m.active = (m.active + tabCount - 1) % tabCount
-		m.syncFocus()
-		return m, m.onTabActivate()
+		return m, m.switchTab((m.active + tabCount - 1) % tabCount)
 	}
 
-	// alt+1..4 switch tabs from ANY tab — including Search/Impact, where a bare
+	// alt+1..5 switch tabs from ANY tab — including Search/Impact/Path, where a bare
 	// digit is intentionally typed into the query/symbol input instead (so e.g.
 	// "sha256"/"oauth2" still work). Mirrors the alt+←/→ global-nav modifiers.
 	if after, ok := strings.CutPrefix(key, "alt+"); ok {
 		if d := digitToTab(after); d >= 0 {
-			m.active = tab(d)
-			m.syncFocus()
-			return m, m.onTabActivate()
+			return m, m.switchTab(tab(d))
 		}
 	}
 
 	// Bare number keys switch tabs too, but only when the focused tab isn't a text
-	// input (on Search/Impact the digit goes into the query — use alt+# to switch).
-	if m.active != tabSearch && m.active != tabImpact {
+	// input (on Search/Impact/Path the digit goes into the query — use alt+# to switch).
+	pathEditing := m.active == tabPath && m.pathFocus != focusPathResult
+	if m.active != tabSearch && m.active != tabImpact && !pathEditing {
 		if d := digitToTab(key); d >= 0 {
-			m.active = tab(d)
-			m.syncFocus()
-			return m, m.onTabActivate()
+			return m, m.switchTab(tab(d))
 		}
 	}
 
@@ -1035,9 +1211,113 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case tabGraph:
 		return m.handleGraphKey(key)
 
+	case tabPath:
+		return m.handlePathKey(msg)
+
 	default: // metrics
 		return m.handleMetricsKey(key)
 	}
+}
+
+// handlePathKey drives the two-stage human workflow: edit FROM/TO, run the
+// asynchronous app.Path query, then inspect/walk the ordered result. Arrow keys
+// move between editors; once a result is focused both arrows and vim j/k navigate.
+func (m Model) handlePathKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if m.pathLoading {
+		return m, nil // one lookup at a time; global tab/quit keys were handled above
+	}
+
+	if m.pathFocus == focusPathResult {
+		switch key {
+		case "q":
+			return m, tea.Quit
+		case "up", "k":
+			m.pathSel = clampIdx(m.pathSel-1, m.pathLen())
+		case "down", "j":
+			m.pathSel = clampIdx(m.pathSel+1, m.pathLen())
+		case "pgup":
+			m.pathSel = clampIdx(m.pathSel-m.pageStep(), m.pathLen())
+		case "pgdown":
+			m.pathSel = clampIdx(m.pathSel+m.pageStep(), m.pathLen())
+		case "home", "g":
+			m.pathSel = 0
+		case "end", "G":
+			m.pathSel = clampIdx(m.pathLen()-1, m.pathLen())
+		case "f", "e", "i":
+			m.pathFocus = focusPathFrom
+			m.syncFocus()
+		case "t":
+			m.pathFocus = focusPathTo
+			m.syncFocus()
+		case "r":
+			return m.startPathLookup()
+		case "enter":
+			return m.openInGraph()
+		}
+		return m, nil
+	}
+
+	switch key {
+	case "up":
+		m.pathFocus = focusPathFrom
+		m.syncFocus()
+		return m, nil
+	case "down":
+		m.pathFocus = focusPathTo
+		m.syncFocus()
+		return m, nil
+	case "enter":
+		if m.pathFocus == focusPathFrom {
+			m.pathFocus = focusPathTo
+			m.syncFocus()
+			return m, nil
+		}
+		return m.startPathLookup()
+	}
+
+	var cmd tea.Cmd
+	if m.pathFocus == focusPathFrom {
+		m.pathFromInput, cmd = m.pathFromInput.Update(msg)
+	} else {
+		m.pathToInput, cmd = m.pathToInput.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m Model) startPathLookup() (tea.Model, tea.Cmd) {
+	from := pathEndpointForInput(m.pathFromInput.Value(), m.pathFrom)
+	to := pathEndpointForInput(m.pathToInput.Value(), m.pathTo)
+	if from.serviceQuery() == "" {
+		m.pathErr = "choose a source symbol"
+		m.errMsg = ""
+		m.statusMsg = ""
+		m.pathFocus = focusPathFrom
+		m.syncFocus()
+		return m, nil
+	}
+	if to.serviceQuery() == "" {
+		m.pathErr = "choose a target symbol"
+		m.errMsg = ""
+		m.statusMsg = ""
+		m.pathFocus = focusPathTo
+		m.syncFocus()
+		return m, nil
+	}
+	m.pathFrom, m.pathTo = from, to
+	m.pathErr = ""
+	m.errMsg = ""
+	m.pathLoading = true
+	m.statusMsg = "finding path…"
+	m.syncFocus()
+	return m, m.pathCmd(from, to)
+}
+
+func (m Model) pathLen() int {
+	if m.pathRep == nil {
+		return 0
+	}
+	return len(m.pathRep.Path)
 }
 
 // metricsCount is the number of selectable rows in the Metrics right column
@@ -1046,19 +1326,19 @@ func (m Model) metricsCount() int { return len(m.graphHubs) + len(m.orphans) }
 
 // metricsItem resolves a combined-list index to its symbol (hubs first, then
 // orphans).
-func (m Model) metricsItem(i int) (sym, fqn, file string, line int, ok bool) {
+func (m Model) metricsItem(i int) (sym, fqn, kind, file string, line int, ok bool) {
 	if i < 0 {
-		return "", "", "", 0, false
+		return "", "", "", "", 0, false
 	}
 	if i < len(m.graphHubs) {
 		h := m.graphHubs[i]
-		return h.Symbol, h.FQN, h.File, h.StartLine, true
+		return h.Symbol, h.FQN, h.Kind, h.File, h.StartLine, true
 	}
 	if j := i - len(m.graphHubs); j < len(m.orphans) {
 		o := m.orphans[j]
-		return o.Symbol, o.FQN, o.File, o.StartLine, true
+		return o.Symbol, o.FQN, o.Kind, o.File, o.StartLine, true
 	}
-	return "", "", "", 0, false
+	return "", "", "", "", 0, false
 }
 
 // handleMetricsKey navigates the dashboard's hubs/dead-code lists and drills the
@@ -1083,7 +1363,7 @@ func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
 	case "end":
 		m.metricsSel = clampIdx(m.metricsCount()-1, m.metricsCount())
 	case "enter":
-		if sym, _, _, _, ok := m.metricsItem(m.metricsSel); ok {
+		if sym, _, _, _, _, ok := m.metricsItem(m.metricsSel); ok {
 			m.pushNav() // so back returns to the Metrics dashboard with this row selected
 			m.active = tabImpact
 			m.impact.SetValue(sym)
@@ -1316,6 +1596,24 @@ func (m *Model) onTabActivate() tea.Cmd {
 	return cmd
 }
 
+// switchTab centralizes focus changes and gives Path a task-oriented entry:
+// when its FROM field is empty, carry the current rich selection across as the
+// source endpoint and put the cursor directly in TO.
+func (m *Model) switchTab(next tab) tea.Cmd {
+	selected, hasSelection := m.selectedCenter()
+	m.active = next
+	if next == tabPath && m.pathFromInput.Value() == "" {
+		if hasSelection && selected.sym != "" {
+			m.bindPathFrom(selected)
+			m.pathFocus = focusPathTo
+		} else {
+			m.pathFocus = focusPathFrom
+		}
+	}
+	m.syncFocus()
+	return m.onTabActivate()
+}
+
 func digitToTab(key string) int {
 	switch key {
 	case "1":
@@ -1326,21 +1624,41 @@ func digitToTab(key string) int {
 		return int(tabImpact)
 	case "4":
 		return int(tabSearch)
+	case "5":
+		return int(tabPath)
 	}
 	return -1
 }
 
 // syncFocus focuses the active tab's input and blurs the others.
 func (m *Model) syncFocus() {
+	m.search.Blur()
+	m.impact.Blur()
+	m.pathFromInput.Blur()
+	m.pathToInput.Blur()
 	switch m.active {
 	case tabSearch:
 		m.search.Focus()
-		m.impact.Blur()
 	case tabImpact:
 		m.impact.Focus()
-		m.search.Blur()
-	default:
-		m.search.Blur()
-		m.impact.Blur()
+	case tabPath:
+		switch m.pathFocus {
+		case focusPathFrom:
+			m.pathFromInput.Focus()
+		case focusPathTo:
+			m.pathToInput.Focus()
+		}
 	}
+}
+
+func (m *Model) resizePathInputs() {
+	w := m.width - 11 // label + indent; stacked fields use the remaining width
+	if w < 1 {
+		w = 1
+	}
+	if w > 100 {
+		w = 100
+	}
+	m.pathFromInput.SetWidth(w)
+	m.pathToInput.SetWidth(w)
 }

@@ -19,18 +19,20 @@ type RiskFactor struct {
 // agent can decide how much care (tests, review) a change warrants. It synthesizes
 // the honesty signals already on ImpactReport — untested coverage, fan-in, the
 // spread of callers across packages, and name ambiguity — into a 0..1 score and a
-// low/medium/high level, each backed by the factors that produced it.
+// low/medium/high level, each backed by the factors that produced it. A symbol
+// whose call graph is unavailable is "unknown", never a reassuring "low".
 type RiskReport struct {
-	Symbol  string       `json:"symbol"`
-	Project string       `json:"project"`
-	Found   bool         `json:"found"`
-	Score   float64      `json:"score"` // 0..1, probabilistic-OR of the factor severities
-	Level   string       `json:"level"` // low | medium | high
-	Callers int          `json:"callers"`
-	Tests   int          `json:"covering_tests_count"`
-	Factors []RiskFactor `json:"factors"`
-	Note    string       `json:"note,omitempty"`
-	Next    []NextAction `json:"next,omitempty"`
+	Symbol   string          `json:"symbol"`
+	Selector *SymbolSelector `json:"selector,omitempty"`
+	Project  string          `json:"project"`
+	Found    bool            `json:"found"`
+	Score    float64         `json:"score"` // 0..1, probabilistic-OR of the factor severities
+	Level    string          `json:"level"` // unknown | low | medium | high
+	Callers  int             `json:"callers"`
+	Tests    int             `json:"covering_tests_count"`
+	Factors  []RiskFactor    `json:"factors"`
+	Note     string          `json:"note,omitempty"`
+	Next     []NextAction    `json:"next,omitempty"`
 }
 
 // Risk computes a change-risk score for a symbol from its impact analysis. Reuses
@@ -40,9 +42,23 @@ func (svc *Service) Risk(cwd, symbol string, depth int) (*RiskReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep := &RiskReport{Symbol: imp.Symbol, Project: imp.Project, Found: imp.Found, Factors: []RiskFactor{}}
+	return riskFromImpact(cwd, symbol, depth, imp), nil
+}
+
+// RiskBySelector scores one exact definition and therefore never adds the
+// ambiguity factor solely because another definition shares its short name.
+func (svc *Service) RiskBySelector(cwd string, selector SymbolSelector, depth int) (*RiskReport, error) {
+	imp, err := svc.ImpactBySelector(cwd, selector, depth)
+	if err != nil {
+		return nil, err
+	}
+	return riskFromImpact(cwd, imp.Symbol, depth, imp), nil
+}
+
+func riskFromImpact(cwd, symbol string, depth int, imp *ImpactReport) *RiskReport {
+	rep := &RiskReport{Symbol: imp.Symbol, Selector: imp.Selector, Project: imp.Project, Found: imp.Found, Factors: []RiskFactor{}}
 	if !imp.Found {
-		return rep, nil
+		return rep
 	}
 	rep.Callers = len(imp.DirectCallers)
 	rep.Tests = len(imp.Tests)
@@ -52,17 +68,22 @@ func (svc *Service) Risk(cwd, symbol string, depth int) (*RiskReport, error) {
 	}
 	rep.Score = round3(combineRisk(rep.Factors))
 	rep.Level = riskLevel(rep.Score)
-	if imp.Resolution != "" {
+	if impactRiskUnknown(imp) {
+		rep.Level = "unknown"
 		rep.Next = append(rep.Next, nextAction("codemap_index",
 			"risk is uncertain because the call graph is unresolved",
 			map[string]any{"path": cwd, "precise": true}))
 	}
 	if rep.Level == "high" {
+		args := map[string]any{"path": cwd, "symbol": symbol, "depth": depth}
+		if imp.Selector != nil {
+			args = map[string]any{"path": cwd, "selector": imp.Selector, "depth": depth}
+		}
 		rep.Next = append(rep.Next, nextAction("codemap_impact",
 			"high-risk symbols need callers, blast radius, and covering tests reviewed before change",
-			map[string]any{"path": cwd, "symbol": symbol, "depth": depth}))
+			args))
 	}
-	return rep, nil
+	return rep
 }
 
 // riskFactorsFromImpact computes the per-symbol change-risk factors from one
@@ -77,7 +98,7 @@ func riskFactorsFromImpact(imp *ImpactReport) []RiskFactor {
 	add := func(factor string, sev float64, detail string) {
 		factors = append(factors, RiskFactor{Factor: factor, Severity: sev, Detail: detail})
 	}
-	if imp.Resolution != "" {
+	if impactRiskUnknown(imp) {
 		// No call graph (TS/JS/Python without --precise): the other signals are
 		// unresolved, so risk is uncertain rather than computable. Surface that.
 		add("unresolved", 0.3, "call graph unavailable without --precise — fan-in and coverage are unknown")
@@ -115,7 +136,7 @@ func riskFactorsFromImpact(imp *ImpactReport) []RiskFactor {
 // Each factor's severity is the MAX across changed symbols (the strongest
 // signal wins), and the factors combine with probabilistic OR into one score.
 type ReviewRisk struct {
-	Level   string       `json:"level"`   // low | medium | high
+	Level   string       `json:"level"`   // unknown | low | medium | high
 	Score   float64      `json:"score"`   // 0..1, probabilistic-OR of the factor severities
 	Factors []RiskFactor `json:"factors"` // review-level categories (max severity across changed symbols)
 }
@@ -181,11 +202,19 @@ func aggregateReviewRisk(imps []*ImpactReport) *ReviewRisk {
 		factors = append(factors, RiskFactor{Factor: cat, Severity: round3(a.sev), Detail: reviewRiskDetail(cat, a.count)})
 	}
 	score := round3(combineRisk(factors))
+	level := riskLevel(score)
+	if cats["unresolved"].count > 0 {
+		level = "unknown"
+	}
 	return &ReviewRisk{
-		Level:   riskLevel(score),
+		Level:   level,
 		Score:   score,
 		Factors: factors,
 	}
+}
+
+func impactRiskUnknown(imp *ImpactReport) bool {
+	return imp != nil && (imp.CallGraph == CallGraphUnresolved || imp.Resolution != "")
 }
 
 // reviewRiskDetail renders a short, human-readable reason for a review-level

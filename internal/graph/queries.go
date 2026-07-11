@@ -138,12 +138,40 @@ func (s *Store) SymbolInfoIndex(projectID int64) (map[string]SymInfo, error) {
 // cycle-safe (a visited map keyed by node id), so recursive call graphs do not
 // loop forever. The query symbol's own node(s) are excluded from the result.
 func (s *Store) BlastRadius(projectID int64, symbol string, maxDepth int) ([]NodeDepth, error) {
-	if maxDepth <= 0 {
-		maxDepth = 3
-	}
 	starts, err := s.startNodeIDs(projectID, symbol)
 	if err != nil {
 		return nil, err
+	}
+	return s.blastRadiusFromNodes(projectID, starts, maxDepth)
+}
+
+// BlastRadiusFromNode is the exact-node variant of BlastRadius. It follows
+// incoming call edges from one current graph node rather than unioning every
+// definition that shares a symbol name. The node id is deliberately an
+// internal traversal key; public callers should resolve a source selector and
+// never persist graph ids across reindexes.
+func (s *Store) BlastRadiusFromNode(projectID, nodeID int64, maxDepth int) ([]NodeDepth, error) {
+	return s.blastRadiusFromNodes(projectID, []int64{nodeID}, maxDepth)
+}
+
+func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth int) ([]NodeDepth, error) {
+	if maxDepth <= 0 {
+		maxDepth = 3
+	}
+	if len(starts) == 0 {
+		return nil, nil
+	}
+	// Refuse a node id from another project. IDs are process-local storage
+	// details, so accepting a cross-project id here would silently violate the
+	// query's project scope.
+	for _, id := range starts {
+		n, err := s.GetNode(id)
+		if errors.Is(err, ErrNotFound) || (err == nil && n.ProjectID != projectID) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	visited := make(map[int64]int, len(starts)) // node id -> min depth
 	type item struct {
@@ -228,6 +256,19 @@ func (s *Store) Callers(projectID int64, symbol string) ([]Node, error) {
 	return s.queryNodes(q, projectID, symbol, EdgeCalls, EdgeCalls)
 }
 
+// CallersOfNode returns callers of one exact definition node. Unlike Callers,
+// it never unions same-named targets. On a name-provenance graph the incoming
+// edges may still be heuristic; consumers distinguish that via call_graph.
+func (s *Store) CallersOfNode(projectID, nodeID int64) ([]Node, error) {
+	q := "SELECT DISTINCT " + nodeColsAs("src") + " FROM edges e " +
+		"JOIN nodes tgt ON e.target_id = tgt.id " +
+		"JOIN nodes src ON e.source_id = src.id " +
+		"WHERE tgt.project_id = ? AND tgt.id = ? AND e.edge_type = ? " +
+		"ORDER BY (SELECT COUNT(*) FROM edges e2 WHERE e2.target_id = src.id AND e2.edge_type = ?) DESC, " +
+		"src.file_path, src.start_line"
+	return s.queryNodes(q, projectID, nodeID, EdgeCalls, EdgeCalls)
+}
+
 // Callees returns the distinct nodes called by any node named symbol (outgoing
 // `calls` edges), ranked by the callee's own in-degree (hubs first) with
 // location as a stable tiebreak — see Callers for the rationale.
@@ -239,6 +280,18 @@ func (s *Store) Callees(projectID int64, symbol string) ([]Node, error) {
 		"ORDER BY (SELECT COUNT(*) FROM edges e3 WHERE e3.target_id = tgt.id AND e3.edge_type = ?) DESC, " +
 		"tgt.file_path, tgt.start_line"
 	return s.queryNodes(q, projectID, symbol, EdgeCalls, EdgeCalls)
+}
+
+// CalleesOfNode returns callees of one exact definition node. It is the
+// selector-safe counterpart of the name-unioning Callees query.
+func (s *Store) CalleesOfNode(projectID, nodeID int64) ([]Node, error) {
+	q := "SELECT DISTINCT " + nodeColsAs("tgt") + " FROM edges e " +
+		"JOIN nodes src ON e.source_id = src.id " +
+		"JOIN nodes tgt ON e.target_id = tgt.id " +
+		"WHERE src.project_id = ? AND src.id = ? AND e.edge_type = ? " +
+		"ORDER BY (SELECT COUNT(*) FROM edges e3 WHERE e3.target_id = tgt.id AND e3.edge_type = ?) DESC, " +
+		"tgt.file_path, tgt.start_line"
+	return s.queryNodes(q, projectID, nodeID, EdgeCalls, EdgeCalls)
 }
 
 func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {
@@ -318,6 +371,48 @@ func (s *Store) NodeAtLine(projectID int64, file string, line int) (Node, bool, 
 		}
 	}
 	return best, found, nil
+}
+
+// NodesAtSource returns definition nodes in file that can match a durable
+// source selector. When fqn is present it is the primary identity and the
+// recorded start line is only a disambiguator/fallback, so a reindex after
+// inserting lines above a declaration still resolves the same symbol. Without
+// an FQN, startLine is required. kind is an optional guard in either mode.
+func (s *Store) NodesAtSource(projectID int64, file string, startLine int, fqn, kind string) ([]Node, error) {
+	nodes, err := s.NodesInFile(projectID, file)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Node, 0, 1)
+	for _, n := range nodes {
+		if n.Kind == KindFile || (kind != "" && n.Kind != kind) {
+			continue
+		}
+		if fqn != "" {
+			if n.FQN == fqn {
+				out = append(out, n)
+			}
+			continue
+		}
+		if startLine > 0 && n.StartLine == startLine {
+			out = append(out, n)
+		}
+	}
+	// A duplicated FQN can occur in invalid/incomplete code. Preserve exactness
+	// by using the old declaration line only as a tie-break; never pick an
+	// arbitrary current node.
+	if len(out) > 1 && startLine > 0 {
+		lineMatches := out[:0]
+		for _, n := range out {
+			if n.StartLine == startLine {
+				lineMatches = append(lineMatches, n)
+			}
+		}
+		if len(lineMatches) > 0 {
+			out = lineMatches
+		}
+	}
+	return out, nil
 }
 
 // Hotspot is a node with its incoming-usage count (hub detection).
@@ -496,11 +591,9 @@ func (s *Store) Orphans(projectID int64, limit int) ([]Node, error) {
 }
 
 // Path returns the shortest call path from one symbol to another (following
-// outgoing `calls` edges), or nil if none exists within maxDepth. Cycle-safe.
+// outgoing `calls` edges), or nil if none exists within maxDepth. A non-positive
+// maxDepth is unbounded. Cycle-safe.
 func (s *Store) Path(projectID int64, from, to string, maxDepth int) ([]Node, error) {
-	if maxDepth <= 0 {
-		maxDepth = 10
-	}
 	starts, err := s.startNodeIDs(projectID, from)
 	if err != nil {
 		return nil, err
@@ -509,8 +602,28 @@ func (s *Store) Path(projectID int64, from, to string, maxDepth int) ([]Node, er
 	if err != nil {
 		return nil, err
 	}
+	return s.pathFromNodes(projectID, starts, targets, maxDepth)
+}
+
+// PathFromNodes returns the shortest path between two exact current nodes.
+// Public APIs resolve durable source selectors into these ephemeral ids before
+// calling it, so duplicate symbol names cannot change either endpoint.
+func (s *Store) PathFromNodes(projectID, fromID, toID int64, maxDepth int) ([]Node, error) {
+	return s.pathFromNodes(projectID, []int64{fromID}, []int64{toID}, maxDepth)
+}
+
+func (s *Store) pathFromNodes(projectID int64, starts, targets []int64, maxDepth int) ([]Node, error) {
 	if len(starts) == 0 || len(targets) == 0 {
 		return nil, nil
+	}
+	for _, id := range append(append([]int64(nil), starts...), targets...) {
+		n, err := s.GetNode(id)
+		if errors.Is(err, ErrNotFound) || (err == nil && n.ProjectID != projectID) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	targetSet := make(map[int64]bool, len(targets))
 	for _, t := range targets {
@@ -532,7 +645,7 @@ func (s *Store) Path(projectID int64, from, to string, maxDepth int) ([]Node, er
 		if targetSet[cur] {
 			return s.reconstructPath(cur, parent)
 		}
-		if depth[cur] >= maxDepth {
+		if maxDepth > 0 && depth[cur] >= maxDepth {
 			continue
 		}
 		callees, err := s.calleeIDs(cur)

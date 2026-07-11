@@ -2,12 +2,14 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
@@ -298,6 +300,14 @@ func TestPreciseIdempotent(t *testing.T) {
 	if _, err := ix.IndexProject(context.Background(), pid, "fix", dir, Options{Precise: true}); err != nil {
 		t.Fatal(err)
 	}
+	// Repeat --precise deliberately re-extracts previously resolved Go files so
+	// a newly type-failing package can downgrade cleanly; refresh the target id.
+	nodes, _ = g.FindNodesBySymbol(pid, "Run")
+	for _, n := range nodes {
+		if n.FQN == "fix.T1.Run" {
+			t1 = n.ID
+		}
+	}
 	var secondPrecise int
 	if err := g.DB().QueryRow(
 		"SELECT COUNT(*) FROM edges WHERE target_id=? AND edge_type='calls' AND provenance='precise'", t1,
@@ -306,5 +316,210 @@ func TestPreciseIdempotent(t *testing.T) {
 	}
 	if secondPrecise != firstPrecise {
 		t.Errorf("P0-05 regression: precise-edge count after 2nd --precise = %d, want %d (delete-first missing)", secondPrecise, firstPrecise)
+	}
+}
+
+func TestPreciseCoverageIncludesGoLeafFile(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/leaf\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "leaf.go"), []byte("package leaf\n\nfunc Leaf() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("leaf", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "leaf", dir, Options{Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved["leaf.go"] {
+		t.Fatalf("go/types successfully checked leaf.go but coverage is missing: %v", resolved)
+	}
+	if n, err := g.CountEdgesByProvenance(pid, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatalf("leaf fixture unexpectedly produced %d precise edges", n)
+	}
+}
+
+func TestPreciseCoverageExcludesGoFilesWithTypeErrors(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/mixed\n\ngo 1.25\n")
+	writeFile(t, dir, "good/good.go", "package good\n\nfunc Good() {}\n")
+	writeFile(t, dir, "bad/bad.go", "package bad\n\nvar _ int = \"not an int\"\nfunc Bad() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("mixed", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	res, err := ix.IndexProject(context.Background(), pid, "mixed", dir, Options{Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.PreciseNote == "" {
+		t.Fatal("type-error package should produce a precise degradation note")
+	}
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved[filepath.Join("good", "good.go")] {
+		t.Errorf("clean package file missing precise coverage: %v", resolved)
+	}
+	if resolved[filepath.Join("bad", "bad.go")] {
+		t.Errorf("type-error package file incorrectly marked resolved: %v", resolved)
+	}
+}
+
+func TestPreciseDowngradeRebuildsNameEdgesAfterNewTypeError(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/downgrade\n\ngo 1.25\n")
+	writeFile(t, dir, "calls.go", "package downgrade\n\nfunc A() { B() }\nfunc B() {}\n")
+	writeFile(t, dir, "state.go", "package downgrade\n\nvar State = 1\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("downgrade", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "downgrade", dir, Options{Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, _ := g.CallGraphResolvedFiles(pid)
+	if !resolved["calls.go"] || !resolved["state.go"] {
+		t.Fatalf("initial precise pass did not cover both files: %v", resolved)
+	}
+	if n, _ := g.CountEdgesByProvenance(pid, graph.ProvPrecise); n == 0 {
+		t.Fatal("initial precise pass produced no precise A→B edge")
+	}
+
+	// Only state.go changes, but its type error poisons the whole package.
+	// calls.go must be forced through parser extraction so A→B degrades to a
+	// fresh name edge rather than retaining the old precise edge.
+	writeFile(t, dir, "state.go", "package downgrade\n\nvar State int = \"bad\"\n")
+	if _, err := ix.IndexProject(context.Background(), pid, "downgrade", dir, Options{Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, _ = g.CallGraphResolvedFiles(pid)
+	if resolved["calls.go"] || resolved["state.go"] {
+		t.Fatalf("type-error package retained precise coverage: %v", resolved)
+	}
+	if n, _ := g.CountEdgesByProvenance(pid, graph.ProvPrecise); n != 0 {
+		t.Fatalf("type-error package retained %d stale precise edges", n)
+	}
+	callees, err := g.Callees(pid, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(callees) != 1 || callees[0].Symbol != "B" {
+		t.Fatalf("downgraded parser graph lost A→B: %+v", callees)
+	}
+	var nameEdges int
+	if err := g.DB().QueryRow(`
+		SELECT COUNT(*) FROM edges e
+		JOIN nodes src ON src.id=e.source_id
+		WHERE src.project_id=? AND src.symbol='A' AND e.edge_type=? AND e.provenance=?`,
+		pid, graph.EdgeCalls, graph.ProvName).Scan(&nameEdges); err != nil {
+		t.Fatal(err)
+	}
+	if nameEdges != 1 {
+		t.Fatalf("downgraded A→B name edges = %d, want 1", nameEdges)
+	}
+}
+
+func TestIncrementalExtractionClearsOnlyChangedCoverage(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.go", "package app\n\nfunc A() {}\n")
+	writeFile(t, dir, "b.go", "package app\n\nfunc B() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"a.go", "b.go"} {
+		if err := g.MarkCallGraphResolved(pid, file, preciseResolverGoTypes); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeFile(t, dir, "a.go", "package app\n\nfunc A() { _ = 1 }\n")
+	if _, err := ix.IndexFiles(context.Background(), pid, "app", dir, []string{"a.go"}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved["a.go"] {
+		t.Errorf("changed a.go retained stale precise coverage: %v", resolved)
+	}
+	if !resolved["b.go"] {
+		t.Errorf("unchanged b.go lost precise coverage: %v", resolved)
+	}
+}
+
+type coverageCallResolver struct {
+	fail map[string]bool
+}
+
+func (coverageCallResolver) Language() string { return "typescript" }
+
+func (coverageCallResolver) ExtractFile(path string, _ []byte) (*extract.FileResult, error) {
+	return &extract.FileResult{
+		Path: path, Language: "typescript",
+		Symbols: []extract.Symbol{{
+			Name: "leaf", FQN: path + ".leaf", Kind: extract.KindFunction,
+			Language: "typescript", StartLine: 1, EndLine: 1, Source: "function leaf() {}",
+		}},
+	}, nil
+}
+
+func (r coverageCallResolver) CallEdges(_ context.Context, path string) ([]extract.CallEdge, error) {
+	if r.fail[path] {
+		return nil, fmt.Errorf("simulated call hierarchy failure")
+	}
+	return nil, nil // successful leaf file: precise with zero edges
+}
+
+func TestLSPPreciseCoverageMarksSuccessAndClearsFailure(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "good.ts", "export function good() {}\n")
+	writeFile(t, dir, "bad.ts", "export function bad() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("ts", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix.Register(coverageCallResolver{fail: map[string]bool{"bad.ts": true}})
+	if _, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate coverage from an earlier successful pass. The next precise pass
+	// must retain/re-mark good.ts and remove bad.ts when its request fails.
+	for _, file := range []string{"good.ts", "bad.ts"} {
+		if err := g.MarkCallGraphResolved(pid, file, preciseResolverLSP); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{Precise: true}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved["good.ts"] {
+		t.Errorf("successful leaf callHierarchy request was not marked resolved: %v", resolved)
+	}
+	if resolved["bad.ts"] {
+		t.Errorf("failed callHierarchy request retained stale coverage: %v", resolved)
 	}
 }

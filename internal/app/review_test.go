@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -133,6 +134,116 @@ func TestReviewWorking(t *testing.T) {
 	if !foundTerminalNext {
 		t.Errorf("review next actions should point directly at the selected test command, got %+v", rep.Next)
 	}
+}
+
+func TestReviewKeepsSameNamedMethodsExact(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	src := `package app
+
+type A struct{}
+func (A) Close() {}
+
+type B struct{}
+func (B) Close() {}
+
+func CallA(a A) { a.Close() }
+func CallB(b B) { b.Close() }
+`
+	mustWrite(t, proj, "same.go", src)
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "init")
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _, indexed, err := svc.project(proj)
+	if err != nil || !indexed {
+		t.Fatalf("project lookup = pid:%d indexed:%v err:%v", pid, indexed, err)
+	}
+	nodes, err := g.NodesInFile(pid, "same.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byFQN := map[string]int64{}
+	for _, n := range nodes {
+		byFQN[n.FQN] = n.ID
+	}
+	ids := func(suffix string) int64 {
+		t.Helper()
+		for fqn, id := range byFQN {
+			if strings.HasSuffix(fqn, suffix) {
+				return id
+			}
+		}
+		t.Fatalf("no node ending in %q: %+v", suffix, byFQN)
+		return 0
+	}
+	callA, callB := ids(".CallA"), ids(".CallB")
+	closeA, closeB := ids(".A.Close"), ids(".B.Close")
+	if err := g.DeleteCallEdgesBySource([]int64{callA, callB}, graph.ProvName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.AddEdgeProv(callA, closeA, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.AddEdgeProv(callB, closeB, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+
+	edited := strings.Replace(src, "func (A) Close() {}", "func (A) Close() { _ = 1 }", 1)
+	mustWrite(t, proj, "same.go", edited)
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSymbol(rep.ChangedSymbols, "Close") {
+		t.Fatalf("changed A.Close not found: %+v", rep.ChangedSymbols)
+	}
+	if !hasSymbolRefByFQN(rep.ChangedSymbols, ".A.Close") {
+		t.Fatalf("review selected the wrong Close definition: %+v", rep.ChangedSymbols)
+	}
+	if !hasImpactSymbol(rep.BlastRadius, "CallA") {
+		t.Fatalf("A.Close blast radius should contain CallA: %+v", rep.BlastRadius)
+	}
+	if hasImpactSymbol(rep.BlastRadius, "CallB") {
+		t.Fatalf("A.Close review merged B.Close's caller: %+v", rep.BlastRadius)
+	}
+}
+
+func hasSymbolRefByFQN(refs []SymbolRef, suffix string) bool {
+	for _, ref := range refs {
+		if strings.HasSuffix(ref.FQN, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasImpactSymbol(nodes []ImpactNode, symbol string) bool {
+	for _, node := range nodes {
+		if node.Symbol == symbol {
+			return true
+		}
+	}
+	return false
 }
 
 func TestTestCommandsFallsBackToPackageForLargeGoSelection(t *testing.T) {
