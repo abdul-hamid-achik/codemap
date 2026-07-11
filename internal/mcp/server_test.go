@@ -712,14 +712,16 @@ func TestMCPIndexProgressNotifications(t *testing.T) {
 	if txt := textOf(res); !strings.Contains(txt, `"nodes":`) {
 		t.Errorf("index result should carry a node count: %s", txt)
 	}
-	close(progressCh)
+	// Notifications and responses travel through independent SDK handlers, so a
+	// final progress notification may be dispatched just after CallTool returns.
+	// Never close the handler's channel here: that races a legitimate late send
+	// and used to panic under coverage scheduling. Wait for the first bounded
+	// notification instead; the buffered channel remains valid until the client
+	// session is torn down by the deferred Close.
 	var got *sdkmcp.ProgressNotificationParams
-	for n := range progressCh {
-		if got == nil {
-			got = n
-		}
-	}
-	if got == nil {
+	select {
+	case got = <-progressCh:
+	case <-time.After(2 * time.Second):
 		t.Fatal("P2-02 (O42): codemap_index produced no progress notifications when the client supplied a progress token — a multi-minute reindex will look hung")
 	}
 	if got.ProgressToken != "p2-02-test" {
