@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -78,6 +79,11 @@ local toolchain) — useful when wiring codemap into a harness.`
 type Server struct {
 	svc *app.Service
 	srv *sdkmcp.Server
+
+	// operationMu lets ordinary tool calls run concurrently, but gives index
+	// exclusive ownership of Session's graph/vector handles for its full
+	// lifetime. The veclite flock still enforces exclusion across processes.
+	operationMu sync.RWMutex
 }
 
 // NewServer builds an MCP server backed by the given session.
@@ -87,8 +93,30 @@ func NewServer(sess *app.Session) *Server {
 		&sdkmcp.Implementation{Name: "codemap", Version: version.Version},
 		&sdkmcp.ServerOptions{Instructions: instructions},
 	)
+	s.srv.AddReceivingMiddleware(s.coordinateToolOperations)
 	s.register()
 	return s
+}
+
+// coordinateToolOperations serializes codemap_index against every other tool
+// call made through this server. In-process coordination is deliberately based
+// on object ownership, not PID lock bypass: unrelated processes must still win
+// or lose through veclite's filesystem lock.
+func (s *Server) coordinateToolOperations(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
+	return func(ctx context.Context, method string, req sdkmcp.Request) (sdkmcp.Result, error) {
+		call, ok := req.(*sdkmcp.CallToolRequest)
+		if method != "tools/call" || !ok {
+			return next(ctx, method, req)
+		}
+		if call.Params.Name == "codemap_index" {
+			s.operationMu.Lock()
+			defer s.operationMu.Unlock()
+		} else {
+			s.operationMu.RLock()
+			defer s.operationMu.RUnlock()
+		}
+		return next(ctx, method, req)
+	}
 }
 
 // Run serves over stdio until the context is cancelled.

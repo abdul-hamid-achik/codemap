@@ -149,9 +149,16 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 		}
 	}
 
-	res, err := index.New(g, vec, emb, svc.s.Config.Index).IndexProject(ctx, pid, name, root, opts)
-	if err != nil {
-		return rep, err
+	res, indexErr := index.New(g, vec, emb, svc.s.Config.Index).IndexProject(ctx, pid, name, root, opts)
+	// The vector writer belongs to this index operation, not to the long-lived
+	// service. Release its exclusive flock on every return path so this process
+	// can reopen read-only and unrelated processes can acquire the writer lock.
+	var releaseErr error
+	if emb != nil {
+		releaseErr = svc.s.ReleaseVectors()
+	}
+	if indexErr != nil || releaseErr != nil {
+		return rep, errors.Join(indexErr, releaseErr)
 	}
 	// Embedding ran only if a vector store was wired AND the embed phase wasn't
 	// skipped by an embedder failure (EmbedNote) — the structural index still

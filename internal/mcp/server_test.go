@@ -16,6 +16,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
@@ -630,5 +631,192 @@ func TestMCPIndexProgressNotifications(t *testing.T) {
 	}
 	if got.Message == "" {
 		t.Errorf("progress notification should carry a human-readable message")
+	}
+}
+
+type coordinatingEmbedder struct {
+	started chan struct{}
+	release <-chan struct{}
+}
+
+func (e coordinatingEmbedder) Profile() embed.EmbeddingProfile {
+	return embed.EmbeddingProfile{
+		Provider: "coordinator-test", Model: "deterministic", Dimensions: 4, Distance: "cosine",
+	}
+}
+
+func (e coordinatingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if e.started != nil {
+		select {
+		case e.started <- struct{}{}:
+		default:
+		}
+	}
+	if e.release != nil {
+		select {
+		case <-e.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		out[i] = []float32{1, 0, 0, 0}
+	}
+	return out, nil
+}
+
+func TestMCPIndexCoordinatesSessionOwnership(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.SetEmbedder(coordinatingEmbedder{started: started, release: release})
+
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+
+	indexDone := make(chan *sdkmcp.CallToolResult, 1)
+	indexErr := make(chan error, 1)
+	go func() {
+		res, callErr := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+			Name: "codemap_index", Arguments: map[string]any{"path": proj},
+		})
+		if callErr != nil {
+			indexErr <- callErr
+			return
+		}
+		indexDone <- res
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("index never reached the embedding phase")
+	}
+
+	// A second owner must still be rejected while the serving process actively
+	// owns the writer. This is intentionally not bypassed merely because both
+	// sessions happen to share the test process PID.
+	external, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer external.Close()
+	external.SetEmbedder(coordinatingEmbedder{})
+	if _, err := external.Vectors(); err == nil {
+		_ = external.ReleaseVectors()
+		t.Fatal("independent writer acquired the database during active MCP index")
+	} else if !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("independent writer error = %v, want lock contention", err)
+	}
+
+	// An ordinary request arriving concurrently must wait rather than touch
+	// Session's graph/vector resources while index owns them.
+	findDone := make(chan *sdkmcp.CallToolResult, 1)
+	findErr := make(chan error, 1)
+	go func() {
+		res, callErr := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+			Name: "codemap_find", Arguments: map[string]any{"path": proj, "query": "Run"},
+		})
+		if callErr != nil {
+			findErr <- callErr
+			return
+		}
+		findDone <- res
+	}()
+	select {
+	case <-findDone:
+		t.Fatal("concurrent read completed while index still owned the session")
+	case err := <-findErr:
+		t.Fatalf("concurrent read failed instead of waiting: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case err := <-indexErr:
+		t.Fatal(err)
+	case res := <-indexDone:
+		if res.IsError {
+			t.Fatalf("index tool error: %s", textOf(res))
+		}
+	case <-ctx.Done():
+		t.Fatal("index did not finish after releasing embedder")
+	}
+	select {
+	case err := <-findErr:
+		t.Fatal(err)
+	case res := <-findDone:
+		if res.IsError {
+			t.Fatalf("queued read error: %s", textOf(res))
+		}
+	case <-ctx.Done():
+		t.Fatal("queued read did not resume after index")
+	}
+
+	// The writer lock is operation-scoped: an independent owner can acquire it
+	// immediately while the MCP server and its Session remain alive.
+	if _, err := external.Vectors(); err != nil {
+		t.Fatalf("independent writer blocked after MCP index completed: %v", err)
+	}
+	if err := external.ReleaseVectors(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Open the server's shared read handle, then index again through that same
+	// server. This is the original self-lock sequence.
+	semantic, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_semantic", Arguments: map[string]any{"path": proj, "query": "run helper"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if semantic.IsError {
+		t.Fatalf("semantic read error: %s", textOf(semantic))
+	}
+	second, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_index", Arguments: map[string]any{"path": proj, "reindex": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.IsError {
+		t.Fatalf("same-server reindex after read error: %s", textOf(second))
+	}
+	after, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_find", Arguments: map[string]any{"path": proj, "query": "Helper"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.IsError {
+		t.Fatalf("read after same-server reindex error: %s", textOf(after))
 	}
 }

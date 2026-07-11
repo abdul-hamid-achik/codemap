@@ -97,16 +97,55 @@ func (s *Session) Vectors() (*vector.Store, error) {
 	if s.vectors != nil {
 		return s.vectors, nil
 	}
+	// ReadWrite closes vecSession's cached RO database before acquiring the
+	// exclusive handle. Drop the Store wrapper too: it otherwise retains a
+	// pointer to the closed database and may be returned by VectorsReadOnly.
+	if s.vectorsRO != nil {
+		_ = s.vectorsRO.Close()
+		s.vectorsRO = nil
+	}
 	db, err := s.vecSess().ReadWrite()
 	if err != nil {
 		return nil, err
 	}
 	v, err := vector.OpenFromDB(db, s.Embedder().Profile())
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, s.closeVectorSession())
 	}
 	s.vectors = v
 	return s.vectors, nil
+}
+
+// ReleaseVectors closes the profile-validated writer acquired by Vectors and
+// releases its exclusive flock. Long-lived processes must call this after each
+// index operation so subsequent reads reopen a fresh shared handle and unrelated
+// processes are not excluded after the write has completed.
+func (s *Session) ReleaseVectors() error {
+	if s.vectors == nil {
+		return nil
+	}
+	var err error
+	err = errors.Join(err, s.vectors.Close())
+	s.vectors = nil
+	if s.vectorsRO != nil {
+		err = errors.Join(err, s.vectorsRO.Close())
+		s.vectorsRO = nil
+	}
+	if s.vecSession != nil {
+		err = errors.Join(err, s.closeVectorSession())
+	}
+	return err
+}
+
+// closeVectorSession releases all veclite DB handles and resets the manager so
+// the next vector operation reopens lazily.
+func (s *Session) closeVectorSession() error {
+	if s.vecSession == nil {
+		return nil
+	}
+	err := s.vecSession.Close()
+	s.vecSession = nil
+	return err
 }
 
 // VectorsReadOnly opens (once) the vector store in read-only mode with a shared
