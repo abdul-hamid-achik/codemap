@@ -1,0 +1,59 @@
+version: 1
+name: cache_export
+intent: |
+    `codemap cache export <file.tar.gz>` / `codemap cache import <file.tar.gz>` package the
+    project's current index (graph + vectors) into a self-contained, team/CI-shareable tarball —
+    the portable answer to "a CI job that just built a full index has no way to hand it to the
+    next job/runner". Unlike `cache save`/`restore` (fcheap-backed, same-machine only), export/
+    import need no shared store: this spec indexes a tiny project, exports it, drops the local
+    index entirely (a fresh CODEMAP_DATA dir, simulating the next runner with nothing cached),
+    imports the tarball, and proves a graph query (`callers`) answers identically post-import —
+    with no re-indexing in between.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\n\\nfunc Helper() {}\\n\\nfunc Caller() { Helper() }\\n' > \"$P/a.go\"; cd \"$P\"; \"$ROOT/bin/codemap\" index --no-embed --cache=false >/dev/null 2>&1; echo '== callers before export =='; \"$ROOT/bin/codemap\" callers Helper; echo '== cache export =='; \"$ROOT/bin/codemap\" cache export \"$TMP/index.tar.gz\"; export CODEMAP_DATA=\"$TMP/data2\"; echo '== callers before import (fresh data dir, unindexed) =='; \"$ROOT/bin/codemap\" callers Helper 2>&1; echo '== cache import =='; \"$ROOT/bin/codemap\" cache import \"$TMP/index.tar.gz\"; echo '== callers after import =='; \"$ROOT/bin/codemap\" callers Helper"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 20000
+    - snapshot: cache_export_output
+outcomes:
+    - id: callers_resolve_before_export
+      description: the freshly-indexed project answers callers before any export/import round trip
+      verify:
+        screen:
+            contains: "app.Caller"
+    - id: export_writes_tarball
+      description: cache export reports a written tarball with node/edge counts
+      verify:
+        screen:
+            contains: "exported index to"
+    - id: fresh_runner_has_no_index
+      description: a fresh CODEMAP_DATA dir (simulating the next CI runner) has nothing to answer callers with
+      verify:
+        screen:
+            contains: "not indexed yet"
+    - id: import_restores_the_index
+      description: cache import reports a restored index with node/edge counts, no re-indexing
+      verify:
+        screen:
+            contains: "imported index from"
+    - id: callers_resolve_after_import
+      description: callers answers identically after the export -> fresh-runner -> import round trip, with no reindex
+      verify:
+        screen:
+            contains: "app.Caller"
+    - id: clean_exit
+      description: the whole round trip exits 0
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:61e6127a3d75cdecd2d6f2c7ff2fe470d72ecfed9a722544f26dc6c5ef52836c

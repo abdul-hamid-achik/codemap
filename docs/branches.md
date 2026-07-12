@@ -79,6 +79,30 @@ codemap index --reindex --precise        # restore only if the cache entry alrea
 codemap index --cache=false              # disable auto-cache/restore for this run
 ```
 
+### Portable tarballs (team/CI-shareable, no fcheap required)
+
+`cache save`/`restore` are **same-machine only** — fcheap's stash vault is a local content-
+addressed store. `cache export`/`import` package the exact same snapshot (graph + vectors) into
+a self-contained `tar.gz`, so a CI job that just built a full (`--precise`) index can hand it to
+the next job or runner with no shared store and no re-indexing:
+
+```bash
+codemap cache export index.tar.gz          # write the current index to a portable tarball
+codemap cache import index.tar.gz          # restore it (registers the project if unindexed)
+codemap cache import index.tar.gz --force  # ...even if the working tree hash doesn't match
+```
+
+`import` validates, in order, before touching anything: the tarball's own wrapper schema, then
+the **embedding profile** (a mismatched local model is always refused — force does not override
+this, never mix embedding spaces), then the **working tree hash** against the tarball's recorded
+one. A tree-hash mismatch is refused by default — a portable archive promises "this exact tree",
+so silently importing a divergent one would answer queries against code that isn't actually
+checked out. `--force` downgrades that refusal to a warning, for a deliberate case like seeding a
+PR branch's cache from its base branch ahead of an incremental catch-up reindex.
+
+See [codemap in CI](/ci) for a workflow snippet that caches the tarball between CI runs with
+`actions/cache`.
+
 ## Where the data lives
 
 - **Branch snapshots** are keyed `repo:<repoHash> branch:<branch>` in fcheap, tracked
