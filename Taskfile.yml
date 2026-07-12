@@ -20,6 +20,11 @@ vars:
 env:
   CGO_ENABLED: "0"
 
+includes:
+  action:
+    taskfile: integrations/github-action/Taskfile.yml
+    dir: integrations/github-action
+
 tasks:
   default:
     desc: List available tasks
@@ -145,10 +150,6 @@ tasks:
     cmds:
       - glyph run specs/*.yml --format md --progress auto
 
-  action-test:
-    desc: Run the GitHub Action's render/gate/install test suite (bash+jq, no API keys)
-    cmds:
-      - make -C integrations/github-action test
 
   bench:
     desc: "Agent benchmark A/B (LOCAL ONLY — needs claude, gopls, ANTHROPIC_API_KEY; not in CI, like flows). Costs API $$ (~$5-15 on sonnet)."

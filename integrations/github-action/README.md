@@ -133,8 +133,8 @@ definition and variable list.
 ## Development
 
 ```
-./test/test.sh    # or: make test
-make lint         # shellcheck + yamllint, best-effort locally; both run in CI regardless
+task action:test   # from the repo root (or ./test/test.sh from this dir)
+task action:lint  # shellcheck + yamllint, best-effort locally; both run in CI regardless
 ```
 
 `test/test.sh` is a plain-bash harness (no `bats-core` dependency assumed) that exercises

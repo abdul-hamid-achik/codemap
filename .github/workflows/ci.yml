@@ -62,3 +62,29 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
+
+  action:
+    # The GitHub Action's own suite (integrations/github-action): bash+jq
+    # render/gate/install tests + shellcheck/yamllint. No Go, no API keys.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Set up Task
+        run: go install github.com/go-task/task/v3/cmd/task@${TASK_VERSION}
+
+      - name: Install yamllint
+        run: pipx install yamllint
+
+      - name: Action test suite
+        run: task action:test
+
+      - name: Action lint (shellcheck + yamllint)
+        run: task action:lint

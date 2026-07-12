@@ -1,0 +1,29 @@
+version: "3"
+
+# Included from the repo root as the `action:` namespace:
+#   task action:test · task action:lint
+# (root Taskfile.yml `includes` sets dir to this folder, so paths are local)
+
+tasks:
+  test:
+    desc: Run the action's render/gate/install test suite (bash+jq, no API keys)
+    cmds:
+      - ./test/test.sh
+
+  lint:
+    desc: shellcheck + yamllint (best-effort locally; CI always runs both)
+    cmds:
+      - cmd: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck scripts/*.sh test/test.sh
+          else
+            echo "shellcheck not installed locally — skipping (CI runs it)"
+          fi
+        silent: true
+      - cmd: |
+          if command -v yamllint >/dev/null 2>&1; then
+            yamllint action.yml gitlab/codemap-review.yml examples/dogfood-workflow.yml
+          else
+            echo "yamllint not installed locally — skipping (CI runs it)"
+          fi
+        silent: true
