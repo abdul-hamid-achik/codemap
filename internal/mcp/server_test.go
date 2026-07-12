@@ -30,16 +30,21 @@ func textOf(res *sdkmcp.CallToolResult) string {
 	return b.String()
 }
 
-// result() serializes tool payloads without HTML escaping, so <, >, & stay
-// literal — agents (and humans reading the JSON) see "A -> B", not "A -> B",
-// and TypeScript generics like Array<string> read cleanly.
-func TestResultJSONNotHTMLEscaped(t *testing.T) {
-	res, _, _ := result(map[string]string{"target": "A -> B & Array<string>"}, nil)
+// result() serializes compact tool payloads without HTML escaping, so agents do
+// not spend tokens on indentation and <, >, & stay literal.
+func TestResultJSONIsCompactAndNotHTMLEscaped(t *testing.T) {
+	res, _, _ := result(map[string]any{
+		"target": "A -> B & Array<string>",
+		"nested": map[string]bool{"ok": true},
+	}, nil)
 	txt := textOf(res)
 	// With HTML escaping on, this would read "A -<esc> B ..." with the angle
 	// brackets/ampersand turned into \u00xx, and the literal check below would fail.
 	if !strings.Contains(txt, "A -> B & Array<string>") {
 		t.Errorf("result JSON should keep <, >, & literal (no HTML escaping): %s", txt)
+	}
+	if strings.ContainsAny(txt, "\n\r\t") || strings.Contains(txt, "  ") {
+		t.Errorf("result JSON should be compact for token-efficient MCP responses: %q", txt)
 	}
 }
 
@@ -71,6 +76,7 @@ func TestInstructionsCoverKeyCapabilities(t *testing.T) {
 	for _, want := range []string{"codemap_index", "codemap_impact", "codemap_semantic",
 		"codemap_source", "codemap_projects", "precise:true", "name-based",
 		"selector", "start_line", "volatile database ids",
+		"confirmed", "candidate", "deletion_analysis",
 		`"indexed": false`, "degrades to name-based",
 		// precise:true spans engines — agents on an LSP-language project must know
 		// it's the only way to get a call graph (callHierarchy), not just a Go fix.
@@ -207,7 +213,7 @@ func TestMCPServer(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("status tool error: %s", textOf(res))
 	}
-	if txt := textOf(res); !strings.Contains(txt, `"registered": true`) || !strings.Contains(txt, `"nodes":`) {
+	if txt := textOf(res); !strings.Contains(txt, `"registered":true`) || !strings.Contains(txt, `"nodes":`) {
 		t.Errorf("unexpected status payload: %s", txt)
 	} else if !strings.Contains(txt, `"stale"`) {
 		// Agents are told (codemap_docs) to check freshness before trusting results,
@@ -223,7 +229,7 @@ func TestMCPServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(res2); !strings.Contains(txt, "Run") || !strings.Contains(txt, `"found": true`) {
+	if txt := textOf(res2); !strings.Contains(txt, "Run") || !strings.Contains(txt, `"found":true`) {
 		t.Errorf("callers of Helper should include Run and found:true: %s", txt)
 	}
 
@@ -237,8 +243,10 @@ func TestMCPServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(deps); deps.IsError || !strings.Contains(txt, `"evidence_total": 1`) ||
-		!strings.Contains(txt, `"file": "other.go"`) || !strings.Contains(txt, `"coverage"`) ||
+	if txt := textOf(deps); deps.IsError || !strings.Contains(txt, `"evidence_total":1`) ||
+		!strings.Contains(txt, `"file":"other.go"`) || !strings.Contains(txt, `"coverage"`) ||
+		!strings.Contains(txt, `"confirmed_total":1`) || !strings.Contains(txt, `"candidate_total":0`) ||
+		!strings.Contains(txt, `"confidence":"confirmed"`) || !strings.Contains(txt, `"confidence_reason":"same_package"`) ||
 		strings.Contains(txt, `"id":`) {
 		t.Fatalf("dependencies transport payload is incomplete or leaked an id: %s", txt)
 	}
@@ -252,7 +260,7 @@ func TestMCPServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(res3); !strings.Contains(txt, `"found": false`) {
+	if txt := textOf(res3); !strings.Contains(txt, `"found":false`) {
 		t.Errorf("callers of a nonexistent symbol should report found:false: %s", txt)
 	}
 
@@ -326,7 +334,7 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 			t.Fatalf("%s: %v", tc.tool, err)
 		}
 		txt := textOf(res)
-		if !strings.Contains(txt, `"indexed": false`) || !strings.Contains(txt, "codemap_index") {
+		if !strings.Contains(txt, `"indexed":false`) || !strings.Contains(txt, "codemap_index") {
 			t.Errorf("%s on an unindexed project should signal not-indexed, got: %s", tc.tool, txt)
 		}
 	}
@@ -372,7 +380,7 @@ func TestMCPAnnotateUnknownTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(real); !strings.Contains(txt, `"matched": true`) {
+	if txt := textOf(real); !strings.Contains(txt, `"matched":true`) {
 		t.Errorf("annotating an indexed symbol should report matched true: %s", txt)
 	}
 	// Ghost symbol → matched false + an explanatory note so the agent doesn't
@@ -382,7 +390,7 @@ func TestMCPAnnotateUnknownTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(ghost); !strings.Contains(txt, `"matched": false`) || !strings.Contains(txt, "won't surface") {
+	if txt := textOf(ghost); !strings.Contains(txt, `"matched":false`) || !strings.Contains(txt, "won't surface") {
 		t.Errorf("annotating an unknown symbol should warn via matched false + note: %s", txt)
 	}
 }
@@ -443,7 +451,7 @@ func TestMCPUnannotate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(rm); !strings.Contains(txt, `"removed": true`) {
+	if txt := textOf(rm); !strings.Contains(txt, `"removed":true`) {
 		t.Errorf("unannotate should report removed true: %s", txt)
 	}
 
@@ -463,7 +471,7 @@ func TestMCPUnannotate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if txt := textOf(again); !strings.Contains(txt, `"removed": false`) {
+	if txt := textOf(again); !strings.Contains(txt, `"removed":false`) {
 		t.Errorf("removing a missing annotation should report removed false, not error: %s", txt)
 	}
 }

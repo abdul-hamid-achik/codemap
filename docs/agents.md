@@ -26,10 +26,10 @@ A typical "understand or change this code" loop, and the one-call tool for each 
 | **Model a component** | `codemap_context_batch` | the bundle for several symbols at once, plus the callers they share (coupling) |
 | **Go deeper** | `codemap_impact` · `codemap_source` | full blast radius · the implementation body |
 | **How careful?** | `codemap_risk` | a 0..1 change-risk score (untested + fan-in + cross-package spread + ambiguity) + the factors |
-| **Need file dependencies?** | `codemap_dependencies` | bounded inbound call/reference/import evidence with source→target samples and explicit domain coverage |
-| **Touch a whole file?** | `codemap_file_impact` | the same dependency evidence plus blast radius, tests, and conservative `delete_verdict` |
+| **Need file dependencies?** | `codemap_dependencies` | bounded inbound evidence split into confirmed vs candidate, with source→target samples and explicit domain coverage |
+| **Touch a whole file?** | `codemap_file_impact` | confidence-aware evidence plus blast radius, tests, and conservative `delete_verdict` |
 | **Trace flow** | `codemap_path` | the shortest call chain between two symbols |
-| **AFTER you edit** | `codemap_review` | your git diff → the changed symbols, their union blast radius, and the **tests to run** (regression test selection) |
+| **AFTER you edit** | `codemap_review` | your git diff (including retained deleted definitions) → changed symbols, blast radius, and the **tests to run** |
 | **Survey** | `codemap_hotspots` · `codemap_orphans` | hubs · dead-code candidates |
 
 The two queries built specifically for the edit loop are **`codemap_review`** ("what
@@ -41,18 +41,22 @@ I be?"). Run `read_order` on first contact with a repo; run `review` after every
 codemap never silently guesses. Every report carries the signals an agent needs to
 calibrate its confidence:
 
-- **`stale`** — files changed/new/deleted since the last index. If non-zero, reindex
-  before trusting results (queries read the snapshot, not live files). `codemap_status`
-  surfaces it too.
+- **`stale`** — files changed/new/deleted since the last index. Normally reindex
+  before trusting results (queries read the snapshot, not live files). For a deletion,
+  `codemap_review` intentionally uses retained definitions from the last index and emits
+  `deletion_analysis`; run its selected tests **before** reindexing prunes that evidence.
+  `codemap_status` surfaces freshness too.
 - **`resolution`** — set when a call graph is *unavailable* (TypeScript/JavaScript/
   Python without `--precise`): callers/blast/tests are **unresolved, not absent**.
   `codemap_review`/`codemap_risk` will not assert "no tests" in that state;
-  `codemap_file_impact` reports deletion as `unsafe` only from positive inbound
-  evidence and `unknown` otherwise — never "safe" from an empty call result.
+  `codemap_file_impact` reports deletion as `unsafe` only from fresh confirmed
+  file-scoped evidence and `unknown` otherwise — never "safe" from a candidate or empty result.
 - **`dependency_evidence.coverage`** — `complete`/`partial`/`unavailable` by
   calls, references, imports, runtime wiring, and external consumers. Evidence is
-  grouped by dependent file/kind with totals and bounded source→target samples.
-  Go imports are package-scoped hints, not proof that the representative file is required.
+  grouped by dependent file/kind with totals and bounded source→target samples. Every
+  sample is `confirmed` or `candidate` with a reason; additive confirmed/candidate totals
+  survive list caps. Go imports are package-scoped candidates, not proof that the
+  representative file is required.
 - **`note` / `shared_name`** — the name resolves to several definitions, so a count
   merges them. Precise indexing fixes the edges; pass an exact source selector to
   choose one definition.

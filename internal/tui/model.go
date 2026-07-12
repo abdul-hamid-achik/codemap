@@ -84,6 +84,9 @@ type graphDetailMsg struct {
 	callers     []app.SymbolRef
 	callees     []app.SymbolRef
 	annotations []graph.Annotation
+	callGraph   string
+	resolution  string
+	note        string
 	err         error
 }
 type indexedMsg struct {
@@ -159,7 +162,10 @@ type Model struct {
 	graphCallers     []app.SymbolRef
 	graphCallees     []app.SymbolRef
 	graphAnnotations []graph.Annotation // annotations pinned to the centered node
-	graphPrecise     bool               // hub detail is showing gopls-precise relations
+	graphCallGraph   string             // trust evidence for this selected node, never project-wide inference
+	graphResolution  string             // why this selected node's graph is unavailable/incomplete
+	graphNote        string             // relation-specific qualification (ambiguity/on-demand resolution)
+	graphPrecise     bool               // hub detail is showing one-off gopls-precise relations
 	graphMap         bool               // render the centered node's neighborhood as a map (toggle: m)
 
 	showHelp bool // a full-screen keybinding overlay, toggled with `?`
@@ -221,7 +227,8 @@ const (
 )
 
 // graphCenter is the node the Graph detail pane is centered on. It carries
-// enough to re-fetch relations (by name) and resolve precisely (file:line).
+// enough to keep ordinary relation/source/context reads exact via a selector,
+// and to resolve one-off precise relations at file:line.
 type graphCenter struct {
 	sym, fqn, kind, file string
 	line                 int
@@ -298,6 +305,9 @@ type navState struct {
 	graphCallers            []app.SymbolRef
 	graphCallees            []app.SymbolRef
 	graphAnnotations        []graph.Annotation
+	graphCallGraph          string
+	graphResolution         string
+	graphNote               string
 	graphPrecise            bool
 	srcView, srcGutter      bool
 	srcTitle                string
@@ -317,6 +327,7 @@ func (m Model) snapshot() navState {
 		graphStack: append([]graphCenter(nil), m.graphStack...), // graphStack is mutated in place — copy it
 		graphFocus: m.graphFocus, graphRefSel: m.graphRefSel, graphSel: m.graphSel,
 		graphCallers: m.graphCallers, graphCallees: m.graphCallees, graphAnnotations: m.graphAnnotations,
+		graphCallGraph: m.graphCallGraph, graphResolution: m.graphResolution, graphNote: m.graphNote,
 		graphPrecise: m.graphPrecise,
 		srcView:      m.srcView, srcGutter: m.srcGutter, srcTitle: m.srcTitle, srcLines: m.srcLines, srcScroll: m.srcScroll,
 	}
@@ -335,6 +346,7 @@ func (m *Model) restore(s navState) {
 	m.graphSym, m.graphCenter, m.graphStack = s.graphSym, s.graphCenter, s.graphStack
 	m.graphFocus, m.graphRefSel, m.graphSel = s.graphFocus, s.graphRefSel, s.graphSel
 	m.graphCallers, m.graphCallees, m.graphAnnotations = s.graphCallers, s.graphCallees, s.graphAnnotations
+	m.graphCallGraph, m.graphResolution, m.graphNote = s.graphCallGraph, s.graphResolution, s.graphNote
 	m.graphPrecise = s.graphPrecise
 	m.srcView, m.srcGutter, m.srcTitle, m.srcLines, m.srcScroll = s.srcView, s.srcGutter, s.srcTitle, s.srcLines, s.srcScroll
 	m.syncFocus()
@@ -480,20 +492,40 @@ func (m Model) orphansCmd() tea.Cmd {
 	}
 }
 
-func (m Model) detailCmd(sym string) tea.Cmd {
+// detailCmd loads the centered node's stored relations. A selector-ready center
+// stays on one definition; only centers without source identity use the legacy
+// short-name union. The relation report's own trust evidence travels with the
+// results so Studio never guesses this node's precision from project totals.
+func (m Model) detailCmd(c graphCenter) tea.Cmd {
 	svc, dir := m.service, m.startDir
 	return func() tea.Msg {
-		ca, err := svc.Callers(dir, sym)
-		if err != nil {
-			return graphDetailMsg{symbol: sym, err: err}
+		var (
+			ca  *app.RelationReport
+			ce  *app.RelationReport
+			err error
+		)
+		if selector, exact := c.selector(); exact {
+			ca, err = svc.CallersBySelector(dir, selector)
+		} else {
+			ca, err = svc.Callers(dir, c.sym)
 		}
-		ce, err := svc.Callees(dir, sym)
 		if err != nil {
-			return graphDetailMsg{symbol: sym, err: err}
+			return graphDetailMsg{symbol: c.sym, err: err}
+		}
+		if selector, exact := c.selector(); exact {
+			ce, err = svc.CalleesBySelector(dir, selector)
+		} else {
+			ce, err = svc.Callees(dir, c.sym)
+		}
+		if err != nil {
+			return graphDetailMsg{symbol: c.sym, err: err}
 		}
 		// ca.Annotations is the queried symbol's pinned notes/data (free — already
 		// gathered by Callers), so the Graph detail shows them with no extra query.
-		return graphDetailMsg{symbol: sym, callers: ca.Results, callees: ce.Results, annotations: ca.Annotations}
+		return graphDetailMsg{
+			symbol: c.sym, callers: ca.Results, callees: ce.Results, annotations: ca.Annotations,
+			callGraph: ca.CallGraph, resolution: ca.Resolution, note: ca.Note,
+		}
 	}
 }
 
@@ -569,7 +601,7 @@ func (m Model) sourceTarget() (sym, file string, line int, ok bool) {
 // viewSource opens the source overlay for the current selection, if any.
 func (m Model) viewSource() tea.Cmd {
 	if c, ok := m.selectedCenter(); ok {
-		return m.sourceViewCmd(c.sym, c.file, c.line)
+		return m.sourceViewCmd(c)
 	}
 	return nil
 }
@@ -592,20 +624,28 @@ func (m Model) openInGraph() (tea.Model, tea.Cmd) {
 	m.graphRefSel = 0
 	m.syncFocus()
 	m.statusMsg = "graph: " + displayName(c.fqn, c.sym)
-	return m, m.detailCmd(c.sym)
+	return m, m.detailCmd(c)
 }
 
-func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
+func (m Model) sourceViewCmd(c graphCenter) tea.Cmd {
 	svc, dir := m.service, m.startDir
 	return func() tea.Msg {
-		rep, err := svc.Source(dir, sym)
+		var (
+			rep *app.SourceReport
+			err error
+		)
+		if selector, exact := c.selector(); exact {
+			rep, err = svc.SourceBySelector(dir, selector)
+		} else {
+			rep, err = svc.Source(dir, c.sym)
+		}
 		if err != nil {
 			return sourceMsg{err: err}
 		}
 		// Prefer the match at the exact file:line; fall back to the first.
 		var mch *app.SourceMatch
 		for i := range rep.Matches {
-			if rep.Matches[i].File == file && rep.Matches[i].StartLine == line {
+			if rep.Matches[i].File == c.file && rep.Matches[i].StartLine == c.line {
 				mch = &rep.Matches[i]
 				break
 			}
@@ -614,7 +654,7 @@ func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
 			mch = &rep.Matches[0]
 		}
 		if mch == nil {
-			return sourceMsg{err: fmt.Errorf("no source for %q", sym)}
+			return sourceMsg{err: fmt.Errorf("no source for %q", c.sym)}
 		}
 		title := fmt.Sprintf("%s  %s:%d-%d", displayName(mch.FQN, mch.Symbol), mch.File, mch.StartLine, mch.EndLine)
 		// Syntax-highlight by the file's language; fall back to plain on an
@@ -634,20 +674,28 @@ func (m Model) sourceViewCmd(sym, file string, line int) tea.Cmd {
 // has the flagship orientation view the CLI and MCP already expose.
 func (m Model) viewContext() tea.Cmd {
 	if c, ok := m.selectedCenter(); ok && c.sym != "" {
-		return m.contextViewCmd(c.sym)
+		return m.contextViewCmd(c)
 	}
 	return nil
 }
 
-func (m Model) contextViewCmd(sym string) tea.Cmd {
-	svc, dir := m.service, m.startDir
+func (m Model) contextViewCmd(c graphCenter) tea.Cmd {
+	ctx, svc, dir := m.ctx, m.service, m.startDir
 	return func() tea.Msg {
-		rep, err := svc.Context(dir, sym, 0)
+		var (
+			rep *app.ContextReport
+			err error
+		)
+		if selector, exact := c.selector(); exact {
+			rep, err = svc.ContextBySelectorWithContext(ctx, dir, selector, 0)
+		} else {
+			rep, err = svc.ContextWithContext(ctx, dir, c.sym, 0)
+		}
 		if err != nil {
 			return sourceMsg{err: err}
 		}
 		if rep == nil || !rep.Found {
-			return sourceMsg{err: fmt.Errorf("no context for %q", sym)}
+			return sourceMsg{err: fmt.Errorf("no context for %q", c.sym)}
 		}
 		title, lines := contextCard(rep)
 		return sourceMsg{title: title, lines: lines, gutter: false}
@@ -869,7 +917,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphStack = nil
 		if len(msg.hubs) > 0 {
 			m.graphCenter = centerOfHub(msg.hubs[0])
-			return m, m.detailCmd(msg.hubs[0].Symbol)
+			return m, m.detailCmd(m.graphCenter)
 		}
 		return m, nil
 
@@ -906,6 +954,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphCallers = msg.callers
 		m.graphCallees = msg.callees
 		m.graphAnnotations = msg.annotations
+		m.graphCallGraph = msg.callGraph
+		m.graphResolution = msg.resolution
+		m.graphNote = msg.note
 		m.graphPrecise = false
 		m.graphRefSel = 0
 		return m, nil
@@ -920,6 +971,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.graphSym = msg.symbol
 		m.graphCallers = msg.callers
 		m.graphCallees = msg.callees
+		m.graphCallGraph = app.CallGraphResolved
+		m.graphResolution = ""
+		m.graphNote = "resolved on demand via gopls"
 		m.graphPrecise = true
 		m.graphRefSel = 0
 		m.statusMsg = fmt.Sprintf("precise via gopls: %d callers, %d callees", len(msg.callers), len(msg.callees))
@@ -1407,7 +1461,7 @@ func (m Model) selectHub(idx int) (tea.Model, tea.Cmd) {
 	m.graphSel = idx
 	m.graphPrecise = false
 	m.graphCenter = centerOfHub(m.graphHubs[idx])
-	return m, m.detailCmd(m.graphHubs[idx].Symbol)
+	return m, m.detailCmd(m.graphCenter)
 }
 
 // handleGraphKey drives the call-graph explorer. The left pane (focusHubs)
@@ -1419,11 +1473,12 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "p":
 		// recompute the centered node's relations precisely via gopls — but on a
-		// project indexed with --precise the stored edges are already exact, so the
-		// gopls round-trip is redundant; say so instead of spawning it.
+		// selected node whose relation report is resolved, the stored edges are
+		// already exact, so the gopls round-trip is redundant. Project-wide precise
+		// edge totals are not evidence for a partially covered selected file.
 		if m.graphCenter.sym != "" {
-			if m.status != nil && m.status.PreciseEdges > 0 {
-				m.statusMsg = "already precise — these relations are from the --precise index"
+			if m.graphCallGraph == app.CallGraphResolved {
+				m.statusMsg = "already precise — the selected relations are resolved"
 				return m, nil
 			}
 			m.statusMsg = "resolving precise (gopls)…"
@@ -1464,7 +1519,7 @@ func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 			m.graphCenter = prev
 			m.graphPrecise = false
 			m.statusMsg = "← " + displayName(prev.fqn, prev.sym)
-			return m, m.detailCmd(prev.sym)
+			return m, m.detailCmd(prev)
 		}
 		return m, nil
 	}
@@ -1528,7 +1583,7 @@ func (m Model) handleGraphRefsKey(key string) (tea.Model, tea.Cmd) {
 			m.graphPrecise = false
 			m.graphRefSel = 0
 			m.statusMsg = "→ " + displayName(r.FQN, r.Symbol)
-			return m, m.detailCmd(r.Symbol)
+			return m, m.detailCmd(m.graphCenter)
 		}
 	}
 	return m, nil

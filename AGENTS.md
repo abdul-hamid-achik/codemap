@@ -109,12 +109,13 @@ codemap/
 │
 │   # planned: extract/treesitter (CGO, build-tagged), extract/scip
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
-├── specs/                     # glyphrun E2E specs (*.yml, 36): version/help/index_status/query/context/
+├── specs/                     # glyphrun E2E specs (*.yml, 37): version/help/index_status/query/context/
 │                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
 │                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
 │                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/
 │                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/
-│                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies
+│                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies/
+│                              #   review_deletion
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md LICENSE
@@ -279,9 +280,18 @@ task install         # go install ./cmd/codemap
   (`symbol`/`fqn`/`kind`/`file`/`start_line`/`depth`; no `end_line`) — the stable element shape.
   Successful review JSON always emits `schema_version: 1` and is governed by
   `schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case; additive optional fields
+  include `deletion_analysis` (`files`/`analyzed`/`missing`/`source:last_index`/`complete`) when a
+  diff deletes files, so consumers know whether retained pre-delete definitions were available, and
   are compatible within v1. Renames, removals, required-field additions, enum narrowing, or
   nested shape changes require a new schema major and a consumer dual-read window. Keep the hard
   CLI error envelope outside the success schema.
+- **Dependency confidence contract**: `dependencies` and embedded `file_impact.dependency_evidence`
+  preserve legacy totals and add `confirmed_total`/`candidate_total` at report, dependent-file,
+  and evidence-kind levels. Samples carry `confidence` (`confirmed|candidate`) and a stable reason.
+  Only fresh confirmed file-scoped evidence may produce `delete_verdict:"unsafe"`; name fan-out,
+  package-scoped imports, stale snapshots, and missing domains remain `unknown`.
+- MCP text results use compact JSON (the structured payload is unchanged) so agents do not spend
+  context tokens on indentation. HTML escaping remains disabled for readable code/FQNs.
 - **CLI exit-code taxonomy** (extends P2-06): `0`=answered, `1`=operational error,
   `2`=not found/not indexed, `3`=`index_missing`, `4`=`index_corrupt`, `5`=`not_a_repo`.
   Under `--json`, ANY failure prints a structured envelope to **stdout**:

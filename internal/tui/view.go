@@ -332,11 +332,7 @@ func (m Model) hubDetail(w, h int) string {
 	hdr := symStyle.Render(displayName(m.graphCenter.fqn, m.graphCenter.sym))
 	mark := ""
 	if m.graphPrecise {
-		hdr += "  " + countStyle.Render("precise · gopls")
 		mark = " · gopls"
-	} else if m.status != nil && m.status.PreciseEdges > 0 {
-		// Relations come from the --precise (go/types) index, so they're already exact.
-		hdr += "  " + countStyle.Render("precise · index")
 	}
 	if len(m.graphStack) > 0 {
 		hdr += "  " + mutedStyle.Render(fmt.Sprintf("· depth %d (⌫ back)", len(m.graphStack)))
@@ -344,9 +340,14 @@ func (m Model) hubDetail(w, h int) string {
 	if n := len(m.graphAnnotations); n > 0 { // at-a-glance: this node has pinned knowledge
 		hdr += "  " + countStyle.Render(fmt.Sprintf("· ⟐ %d", n))
 	}
-	b.WriteString(hdr + "\n\n")
+	b.WriteString(hdr + "\n")
+	trust := m.graphTrustLines(w)
+	for _, line := range trust {
+		b.WriteString(line + "\n")
+	}
+	b.WriteByte('\n')
 	annShown := clamp(len(m.graphAnnotations), 0, 3)
-	budget := (h - 9 - annShown) / 2
+	budget := (h - 9 - annShown - len(trust)) / 2
 	if budget < 1 {
 		budget = 1
 	}
@@ -388,23 +389,22 @@ func (m Model) hubMap(w, h int) string {
 		return mutedStyle.Render("select a hub")
 	}
 	hdr := title("Neighborhood map")
-	switch {
-	case m.graphPrecise:
-		hdr += "  " + countStyle.Render("precise · gopls")
-	case m.status != nil && m.status.PreciseEdges > 0:
-		hdr += "  " + countStyle.Render("precise · index")
-	}
 	if len(m.graphStack) > 0 {
 		hdr += "  " + mutedStyle.Render(fmt.Sprintf("· depth %d (⌫ back)", len(m.graphStack)))
 	}
 
-	budget := (h - 12) / 2
+	trust := m.graphTrustLines(w)
+	budget := (h - 12 - len(trust)) / 2
 	if budget < 1 {
 		budget = 1
 	}
 
 	var b strings.Builder
-	b.WriteString(hdr + "\n\n") // already styled; the frame's MaxWidth clamps any overflow
+	b.WriteString(hdr + "\n") // already styled; the frame's MaxWidth clamps any overflow
+	for _, line := range trust {
+		b.WriteString(line + "\n")
+	}
+	b.WriteByte('\n')
 
 	// Callers flow down into the node.
 	b.WriteString(mutedStyle.Render(truncate(fmt.Sprintf("  ┌ called by (%d)", len(m.graphCallers)), w)) + "\n")
@@ -437,6 +437,39 @@ func (m Model) hubMap(w, h int) string {
 
 	b.WriteString("\n" + mutedStyle.Render(truncate("  m: list · ↑↓→ walk · enter: re-center", w)))
 	return b.String()
+}
+
+// graphTrustLines renders trust evidence for the currently selected node. The
+// source is the node's RelationReport, not project-wide precise-edge totals: a
+// partially precise project can therefore show an uncovered file honestly.
+func (m Model) graphTrustLines(w int) []string {
+	if m.graphCallGraph == "" {
+		return nil
+	}
+	label, confidence := m.graphCallGraph, "unknown"
+	style := mutedStyle
+	switch m.graphCallGraph {
+	case app.CallGraphResolved:
+		confidence, style = "high", countStyle
+	case app.CallGraphName:
+		confidence, style = "medium", warnStyle
+	case app.CallGraphUnresolved:
+		confidence, style = "low", errorStyle
+	case app.CallGraphNone:
+		label = app.CallGraphNone
+	}
+	via := ""
+	if m.graphCallGraph == app.CallGraphResolved && m.graphPrecise {
+		via = " · gopls"
+	}
+	lines := []string{style.Render(truncate(fmt.Sprintf("call_graph: %s · confidence: %s%s", label, confidence, via), w))}
+	if m.graphResolution != "" {
+		lines = append(lines, errorStyle.Render(truncate("⚠ "+m.graphResolution, w)))
+	}
+	if m.graphNote != "" && m.graphNote != m.graphResolution {
+		lines = append(lines, mutedStyle.Render(truncate("note: "+m.graphNote, w)))
+	}
+	return lines
 }
 
 // writeMapRefs renders a relation branch of the neighborhood map — one "│ name"

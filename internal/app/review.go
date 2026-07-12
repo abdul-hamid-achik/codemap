@@ -38,6 +38,18 @@ type ReviewFile struct {
 	Symbols int    `json:"symbols"`
 }
 
+// ReviewDeletionAnalysis explains whether deleted files could be analyzed from
+// the last indexed graph. Deleted files have no post-image hunks, so review must
+// intentionally use the retained index snapshot; after a reindex those nodes are
+// pruned and the historical impact is no longer available.
+type ReviewDeletionAnalysis struct {
+	Files    int    `json:"files"`
+	Analyzed int    `json:"analyzed"`
+	Missing  int    `json:"missing"`
+	Source   string `json:"source"` // last_index
+	Complete bool   `json:"complete"`
+}
+
 // ReviewReport is the diff-scoped intelligence bundle: the symbols a changeset
 // touches, the union of their blast radius, the tests that cover them (regression
 // test selection), the changed symbols that are untested or load-bearing, and the
@@ -66,10 +78,14 @@ type ReviewReport struct {
 	// per-symbol risk signals over every changed symbol so a harness can gate
 	// verification on ONE band (instead of fanning `risk` out per symbol). Absent
 	// when the diff maps to no indexed symbols.
-	Risk         *ReviewRisk  `json:"risk,omitempty"`
-	Note         string       `json:"note,omitempty"`
-	TestCommands []string     `json:"test_commands,omitempty"`
-	Next         []NextAction `json:"next,omitempty"`
+	Risk *ReviewRisk `json:"risk,omitempty"`
+	// DeletionAnalysis is present only when the diff deletes files. It lets a
+	// harness distinguish a deletion whose prior definitions were analyzed from
+	// one whose nodes were already pruned from the index.
+	DeletionAnalysis *ReviewDeletionAnalysis `json:"deletion_analysis,omitempty"`
+	Note             string                  `json:"note,omitempty"`
+	TestCommands     []string                `json:"test_commands,omitempty"`
+	Next             []NextAction            `json:"next,omitempty"`
 }
 
 // Review computes diff-scoped impact + test selection for the working tree. It
@@ -153,23 +169,42 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	seenSym := map[string]bool{}
 	for _, cf := range changed {
 		rf := ReviewFile{Path: cf.Path, Status: cf.Status}
-		if cf.Status != "D" {
-			if syms := svc.symbolsForChangedFile(cwd, root, cf.Path); syms != nil {
-				for _, s := range syms {
-					if !symbolTouched(s, cf.Hunks) {
-						continue
-					}
-					key := symKey(s.FQN, s.File, s.StartLine)
-					if seenSym[key] {
-						continue
-					}
-					seenSym[key] = true
-					rep.ChangedSymbols = append(rep.ChangedSymbols, s)
-					rf.Symbols++
-				}
+		syms := svc.symbolsForChangedFile(cwd, root, cf.Path)
+		if cf.Status == "D" {
+			if rep.DeletionAnalysis == nil {
+				rep.DeletionAnalysis = &ReviewDeletionAnalysis{Source: "last_index"}
+			}
+			rep.DeletionAnalysis.Files++
+			if len(syms) == 0 {
+				rep.DeletionAnalysis.Missing++
+			} else {
+				rep.DeletionAnalysis.Analyzed++
 			}
 		}
+		for _, s := range syms {
+			// A deleted file has no post-image line ranges. Treat every retained
+			// definition as changed; modified/added files still use exact hunks.
+			if cf.Status != "D" && !symbolTouched(s, cf.Hunks) {
+				continue
+			}
+			key := symKey(s.FQN, s.File, s.StartLine)
+			if seenSym[key] {
+				continue
+			}
+			seenSym[key] = true
+			rep.ChangedSymbols = append(rep.ChangedSymbols, s)
+			rf.Symbols++
+		}
 		rep.ChangedFiles = append(rep.ChangedFiles, rf)
+	}
+	if rep.DeletionAnalysis != nil {
+		rep.DeletionAnalysis.Complete = rep.DeletionAnalysis.Missing == 0
+		if rep.DeletionAnalysis.Analyzed > 0 {
+			rep.Note = joinNote(rep.Note, "deleted-file impact uses definitions retained in the last indexed snapshot — run selected tests before reindexing, then refresh the index")
+		}
+		if rep.DeletionAnalysis.Missing > 0 {
+			rep.Note = joinNote(rep.Note, fmt.Sprintf("%d deleted file(s) no longer have indexed definitions; their prior impact is unavailable", rep.DeletionAnalysis.Missing))
+		}
 	}
 
 	truncated := 0
@@ -241,9 +276,21 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 		rep.Note = joinNote(rep.Note, "changed lines don't map to indexed symbols (comments, imports, or unindexed/untracked files) — nothing to analyze")
 	}
 	rep.TestCommands = testCommands(rep.CoveringTests)
+	// For deletions, run the selected regressions while the last-index snapshot
+	// still carries the removed definitions. Reindexing first would prune the
+	// exact evidence review just used.
+	if rep.DeletionAnalysis != nil && rep.DeletionAnalysis.Analyzed > 0 && len(rep.TestCommands) > 0 {
+		rep.Next = append(rep.Next, nextAction("terminal",
+			"run the selected regression tests before reindexing removes deleted-file graph evidence",
+			map[string]any{"command": rep.TestCommands[0]}))
+	}
 	if rep.Stale {
+		why := "the index is stale; refresh it before trusting diff-scoped impact"
+		if rep.DeletionAnalysis != nil && rep.DeletionAnalysis.Analyzed > 0 {
+			why = "after reviewing deleted-file impact, refresh the index to remove deleted definitions"
+		}
 		rep.Next = append(rep.Next, nextAction("codemap_index",
-			"the index is stale; refresh it before trusting diff-scoped impact",
+			why,
 			map[string]any{"path": cwd}))
 	}
 	if len(rep.TestCommands) > 0 && len(rep.Next) < 2 {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
+	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/spf13/cobra"
 )
 
@@ -361,5 +362,49 @@ func TestPathReportAnsweredDistinguishesMissingEndpoints(t *testing.T) {
 	err := pathMissError(&app.PathReport{From: "A", To: "Missing", Note: `"Missing" is not a symbol`})
 	if !errors.Is(err, errNotFound) || !strings.Contains(err.Error(), "not a symbol") {
 		t.Fatalf("missing endpoint must remain an exit-2 outcome, got %v", err)
+	}
+}
+
+func TestAtSelectorRejectsPositionalSymbols(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args func(*cobra.Command, []string) error
+	}{
+		{name: "single symbol commands", args: symbolOrAtArgs},
+		{name: "context", args: contextOrAtArgs},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := &cobra.Command{Use: "query"}
+			cmd.Flags().String("at", "", "")
+			if err := cmd.Flags().Set("at", "main.go:4"); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.args(cmd, nil); err != nil {
+				t.Fatalf("--at without a positional symbol should be valid: %v", err)
+			}
+			err := tc.args(cmd, []string{"Helper"})
+			if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+				t.Fatalf("--at plus positional symbol error = %v, want mutual-exclusion guidance", err)
+			}
+		})
+	}
+}
+
+func TestReviewDeletionGuidanceRunsTestsBeforeReindex(t *testing.T) {
+	staleness := &index.Staleness{Changed: 1, New: 2, Deleted: 3}
+	ordinary := reviewStalenessLine(&app.ReviewReport{Stale: true, Staleness: staleness})
+	if !strings.Contains(ordinary, "reindex for accurate impact") {
+		t.Fatalf("ordinary stale review wording changed: %q", ordinary)
+	}
+
+	analysis := &app.ReviewDeletionAnalysis{Files: 3, Analyzed: 2, Missing: 1, Source: "last_index"}
+	deleted := reviewStalenessLine(&app.ReviewReport{
+		Stale: true, Staleness: staleness, DeletionAnalysis: analysis,
+	})
+	if !strings.Contains(deleted, "run selected tests before reindexing") || strings.Contains(deleted, "reindex for accurate impact") {
+		t.Fatalf("deleted-file stale guidance = %q", deleted)
+	}
+	if got, want := reviewDeletionAnalysisLine(analysis), "  deleted analysis: 2/3 analyzed from last index · 1 missing"; got != want {
+		t.Fatalf("deletion analysis line = %q, want %q", got, want)
 	}
 }

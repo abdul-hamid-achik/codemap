@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,6 +21,82 @@ import (
 func testModel() Model {
 	sess := &app.Session{Config: config.DefaultConfig()}
 	return NewModel(context.Background(), sess, "")
+}
+
+// studioSelectorFixture builds two same-named methods with exact edges. Only
+// Left.Shared's file has precise-coverage evidence; the project still contains
+// precise edges for both sides, which lets tests prove selected-node badges do
+// not inherit project-wide precision.
+func studioSelectorFixture(t *testing.T) (Model, graphCenter, graphCenter) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	proj := t.TempDir()
+	files := map[string]string{
+		"left.go":  "package app\n\ntype Left struct{}\nfunc (Left) Shared() { leftOnly() }\nfunc leftOnly() {}\nfunc CallLeft() { Left{}.Shared() }\n",
+		"right.go": "package app\n\ntype Right struct{}\nfunc (Right) Shared() { rightOnly() }\nfunc rightOnly() {}\nfunc CallRight() { Right{}.Shared() }\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(proj, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	sess.Config.Vecgrep.Enabled = false
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject(config.DeriveProjectName(proj), proj, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(file, symbol, fqn, kind string, line int, signature string) int64 {
+		t.Helper()
+		id, addErr := g.AddNode(&graph.Node{
+			ProjectID: pid, FilePath: file, Symbol: symbol, FQN: fqn, Kind: kind,
+			Language: "go", StartLine: line, EndLine: line, Signature: signature, SourceHash: fqn,
+		})
+		if addErr != nil {
+			t.Fatal(addErr)
+		}
+		return id
+	}
+	leftID := add("left.go", "Shared", "app.Left.Shared", graph.KindMethod, 4, "func (Left) Shared()")
+	rightID := add("right.go", "Shared", "app.Right.Shared", graph.KindMethod, 4, "func (Right) Shared()")
+	leftOnlyID := add("left.go", "leftOnly", "app.leftOnly", graph.KindFunction, 5, "func leftOnly()")
+	rightOnlyID := add("right.go", "rightOnly", "app.rightOnly", graph.KindFunction, 5, "func rightOnly()")
+	callLeftID := add("left.go", "CallLeft", "app.CallLeft", graph.KindFunction, 6, "func CallLeft()")
+	callRightID := add("right.go", "CallRight", "app.CallRight", graph.KindFunction, 6, "func CallRight()")
+	for _, edge := range [][2]int64{
+		{callLeftID, leftID}, {callRightID, rightID},
+		{leftID, leftOnlyID}, {rightID, rightOnlyID},
+	} {
+		if _, err := g.AddEdgeProv(edge[0], edge[1], graph.EdgeCalls, 1, graph.ProvPrecise); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.MarkCallGraphResolved(pid, "left.go", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewModel(context.Background(), sess, proj)
+	m.width, m.height = 120, 40
+	m.status = &app.StatusReport{Registered: true, PreciseEdges: 4}
+	left := graphCenter{sym: "Shared", fqn: "app.Left.Shared", kind: graph.KindMethod, file: "left.go", line: 4}
+	right := graphCenter{sym: "Shared", fqn: "app.Right.Shared", kind: graph.KindMethod, file: "right.go", line: 4}
+	return m, left, right
 }
 
 func sized(t *testing.T, w, h int) Model {
@@ -512,11 +590,14 @@ func TestGraphPreciseIndexAware(t *testing.T) {
 	m := sized(t, 120, 40) // default tab is Graph
 	m, _ = applyMsg(m, statusMsg{st: &app.StatusReport{Registered: true, PreciseEdges: 50}})
 	m, _ = applyMsg(m, graphHubsMsg{hubs: []app.HotspotRef{{Symbol: "Close", FQN: "graph.Store.Close", File: "x.go", StartLine: 95, InDegree: 45}}})
-	m, _ = applyMsg(m, graphDetailMsg{symbol: "Close", callers: []app.SymbolRef{{Symbol: "X"}}})
+	m, _ = applyMsg(m, graphDetailMsg{symbol: "Close", callers: []app.SymbolRef{{Symbol: "X"}}, callGraph: app.CallGraphResolved})
 
-	// The detail signals the relations are already exact (from the --precise index).
-	if !strings.Contains(m.render(), "precise · index") {
-		t.Errorf("graph detail should show 'precise · index' on a --precise index:\n%s", m.render())
+	// The selected relation report, rather than the project total, says these
+	// relations are exact and safe to treat as high-confidence.
+	for _, want := range []string{"call_graph: resolved", "confidence: high"} {
+		if !strings.Contains(m.render(), want) {
+			t.Errorf("graph detail should show selected-node evidence %q:\n%s", want, m.render())
+		}
 	}
 	// Pressing p must NOT spawn the redundant gopls recompute; it informs instead.
 	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "p", Code: 'p'}))
@@ -525,6 +606,105 @@ func TestGraphPreciseIndexAware(t *testing.T) {
 	}
 	if !strings.Contains(u.(Model).statusMsg, "already precise") {
 		t.Errorf("p status = %q, want an 'already precise' note", u.(Model).statusMsg)
+	}
+}
+
+func TestStudioExactSelectorKeepsSameNamedMethodsSeparate(t *testing.T) {
+	m, left, _ := studioSelectorFixture(t)
+	m.graphCenter = left
+
+	detail, ok := m.detailCmd(left)().(graphDetailMsg)
+	if !ok {
+		t.Fatal("detail command returned the wrong message type")
+	}
+	if detail.err != nil {
+		t.Fatal(detail.err)
+	}
+	if detail.callGraph != app.CallGraphResolved {
+		t.Fatalf("Left.Shared call_graph = %q, want resolved", detail.callGraph)
+	}
+	if len(detail.callers) != 1 || detail.callers[0].Symbol != "CallLeft" {
+		t.Fatalf("Left.Shared callers merged Right.Shared: %+v", detail.callers)
+	}
+	if len(detail.callees) != 1 || detail.callees[0].Symbol != "leftOnly" {
+		t.Fatalf("Left.Shared callees merged Right.Shared: %+v", detail.callees)
+	}
+
+	contextMsg, ok := m.contextViewCmd(left)().(sourceMsg)
+	if !ok {
+		t.Fatal("context command returned the wrong message type")
+	}
+	if contextMsg.err != nil {
+		t.Fatal(contextMsg.err)
+	}
+	contextBody := contextMsg.title + "\n" + strings.Join(contextMsg.lines, "\n")
+	for _, want := range []string{"app.Left.Shared", "CallLeft", "leftOnly"} {
+		if !strings.Contains(contextBody, want) {
+			t.Errorf("Left.Shared context missing %q:\n%s", want, contextBody)
+		}
+	}
+	for _, unwanted := range []string{"app.Right.Shared", "CallRight", "rightOnly"} {
+		if strings.Contains(contextBody, unwanted) {
+			t.Errorf("Left.Shared context merged %q from Right.Shared:\n%s", unwanted, contextBody)
+		}
+	}
+
+	source, ok := m.sourceViewCmd(left)().(sourceMsg)
+	if !ok {
+		t.Fatal("source command returned the wrong message type")
+	}
+	if source.err != nil {
+		t.Fatal(source.err)
+	}
+	sourceBody := strings.Join(source.lines, "\n")
+	if !strings.Contains(sourceBody, "leftOnly") || strings.Contains(sourceBody, "rightOnly") {
+		t.Fatalf("Left.Shared source was not exact:\n%s", sourceBody)
+	}
+}
+
+func TestGraphBadgeUsesSelectedNodeCoverageInPartiallyPreciseProject(t *testing.T) {
+	m, _, right := studioSelectorFixture(t)
+	m.graphCenter = right
+
+	detail, ok := m.detailCmd(right)().(graphDetailMsg)
+	if !ok {
+		t.Fatal("detail command returned the wrong message type")
+	}
+	if detail.err != nil {
+		t.Fatal(detail.err)
+	}
+	if detail.callGraph != app.CallGraphName {
+		t.Fatalf("uncovered Right.Shared call_graph = %q, want name", detail.callGraph)
+	}
+	m, _ = applyMsg(m, detail)
+	out := m.hubDetail(100, 30)
+	for _, want := range []string{"call_graph: name", "confidence: medium"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("uncovered selected node should show %q despite project precise edges:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "confidence: high") {
+		t.Errorf("uncovered selected node inherited project-wide precision:\n%s", out)
+	}
+
+	// A partially covered project must still allow a one-off precise lookup for
+	// an uncovered selected file; the global PreciseEdges count cannot suppress p.
+	u, cmd := m.Update(tea.KeyPressMsg(tea.Key{Text: "p", Code: 'p'}))
+	if cmd == nil || !strings.Contains(u.(Model).statusMsg, "resolving precise") {
+		t.Fatalf("p should resolve the uncovered selection, cmd=%v status=%q", cmd != nil, u.(Model).statusMsg)
+	}
+
+	// Resolution and note are relation evidence too, and must survive the async
+	// message seam into the detail view instead of being silently discarded.
+	m, _ = applyMsg(m, graphDetailMsg{
+		symbol: "Shared", callGraph: app.CallGraphUnresolved,
+		resolution: "typescript coverage missing", note: "selected file was skipped",
+	})
+	out = m.hubDetail(100, 30)
+	for _, want := range []string{"call_graph: unresolved", "confidence: low", "typescript coverage missing", "selected file was skipped"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("selected relation evidence missing %q:\n%s", want, out)
+		}
 	}
 }
 

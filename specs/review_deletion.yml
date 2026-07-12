@@ -1,0 +1,47 @@
+version: 1
+name: review-deletion
+intent: |
+    `codemap review` must analyze a deleted file before the index is refreshed,
+    using the file's definitions retained in the last indexed graph. The report
+    makes that evidence source and its completeness explicit, selects callers and
+    regression tests for the removed definitions, and orders tests before the
+    reindex action that will prune the historical nodes. If the nodes were already
+    pruned, deletion_analysis reports the gap rather than claiming nothing changed.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\n\\nfunc Target() {}\\n' > \"$P/target.go\"; printf 'package app\\n\\nfunc Caller() { Target() }\\n' > \"$P/caller.go\"; printf 'package app\\nimport \"testing\"\\nfunc TestTarget(t *testing.T) { Target() }\\n' > \"$P/target_test.go\"; cd \"$P\"; git init -q; git config user.email t@t; git config user.name t; git config commit.gpgsign false; git add -A; git commit -qm init >/dev/null 2>&1; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed --no-tips >/dev/null 2>&1; rm target.go; \"$CM\" review; \"$CM\" review --json > \"$TMP/review.json\"; grep -q '\"status\": \"D\"' \"$TMP/review.json\" && grep -q '\"symbol\": \"Target\"' \"$TMP/review.json\" && grep -q '\"source\": \"last_index\"' \"$TMP/review.json\" && grep -q '\"complete\": true' \"$TMP/review.json\" && grep -q '\"tool\": \"terminal\"' \"$TMP/review.json\" && echo DELETION_CONTRACT_OK"
+    cwd: "."
+terminal:
+    cols: 105
+    rows: 34
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: review-deletion
+outcomes:
+    - id: deleted_symbol_analyzed
+      description: the removed Target definition is included in diff-scoped analysis
+      verify:
+        screen:
+            contains: "Target"
+    - id: regression_selected
+      description: the retained graph selects TestTarget before the index is refreshed
+      verify:
+        screen:
+            contains: "tests to run:"
+    - id: deletion_contract
+      description: JSON identifies complete last-index deletion evidence and test-first next actions
+      verify:
+        screen:
+            contains: "DELETION_CONTRACT_OK"
+    - id: clean_exit
+      description: deleted-file review exits cleanly
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:b9ab08c08dc6c4e87b20cbcb23ff451e87e368176a1c18143cd94262a291fc0e

@@ -27,7 +27,7 @@ type FileImpactReport struct {
 	UntestedSymbols    []SymbolRef             `json:"untested_symbols"` // externally-called symbols with no covering test
 	DependencyEvidence *FileDependenciesReport `json:"dependency_evidence,omitempty"`
 	CallGraph          string                  `json:"call_graph"`      // resolved|name|unresolved|none across the analyzed symbols
-	DeleteVerdict      string                  `json:"delete_verdict"`  // unsafe when file-scoped dependency evidence exists; otherwise unknown
+	DeleteVerdict      string                  `json:"delete_verdict"`  // unsafe only for fresh confirmed file-scoped evidence; otherwise unknown
 	SafeToDelete       bool                    `json:"safe_to_delete"`  // legacy compatibility field; conservatively false until dependency evidence is complete
 	BreakingChange     bool                    `json:"breaking_change"` // an externally-called symbol is untested
 	Stale              bool                    `json:"stale"`
@@ -99,6 +99,7 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 	seenTest := map[string]bool{}
 	skipped := 0
 	externalUntested := false
+	candidateUntested := false
 
 	for _, s := range defined {
 		imp, ierr := svc.ImpactBySelector(cwd, SymbolSelector{
@@ -119,10 +120,14 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 				externalCallers++
 			}
 		}
-		if externalCallers > 0 {
-			if imp.Untested && imp.Resolution == "" {
+		if externalCallers > 0 && imp.Untested && imp.Resolution == "" {
+			targetKey := symKey(s.FQN, s.File, s.StartLine)
+			switch {
+			case deps.confirmedCallTargets[targetKey]:
 				externalUntested = true
 				rep.UntestedSymbols = append(rep.UntestedSymbols, s)
+			case deps.candidateCallTargets[targetKey]:
+				candidateUntested = true
 			}
 		}
 		for _, b := range imp.BlastRadius {
@@ -162,14 +167,28 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 	} else if rep.Resolution != "" {
 		rep.Note = joinNote(rep.Note, "breaking_change is unavailable without a resolved call graph — reindex with --precise")
 	}
-	if rep.Resolution != "" {
+	if !externalUntested && candidateUntested {
+		rep.BreakingChange = false
+		rep.Note = joinNote(rep.Note, "breaking_change withheld — untested external callers are name-based candidates, not confirmed call dependencies")
+	}
+	needsReindex := rep.Resolution != "" || deps.CandidateFileScopedTotal > 0 || deps.Stale
+	if needsReindex {
+		why := "refresh the stale dependency snapshot before assessing file-level change risk"
+		args := map[string]any{"path": cwd}
+		if rep.Resolution != "" || deps.CandidateFileScopedTotal > 0 {
+			why = "resolve candidate dependency evidence before assessing file-level change risk"
+			args["precise"] = true
+		}
 		rep.Next = append(rep.Next, nextAction("codemap_index",
-			"resolve the call graph before assessing call-based change risk",
-			map[string]any{"path": cwd, "precise": true}))
+			why, args))
 	}
 	if rep.DeleteVerdict == DeleteVerdictUnsafe || rep.BreakingChange {
+		why := "review the real diff and selected regressions before changing a file with externally-called untested symbols"
+		if rep.DeleteVerdict == DeleteVerdictUnsafe {
+			why = "review the real diff and selected regressions before changing a file with confirmed inbound dependencies"
+		}
 		rep.Next = append(rep.Next, nextAction("codemap_review",
-			"review the real diff and selected regressions before changing a file with proven inbound dependencies",
+			why,
 			map[string]any{"path": cwd, "depth": depth}))
 	} else if len(rep.Next) < 2 {
 		rep.Next = append(rep.Next, nextAction("codemap_related_files",
@@ -180,21 +199,38 @@ func (svc *Service) FileImpact(cwd, file string, depth int) (*FileImpactReport, 
 }
 
 func applyFileDependencyVerdict(rep *FileImpactReport, deps *FileDependenciesReport) {
-	// The legacy bool remains conservative. Calls/references (and future
-	// file-specific imports) can prove an exact file unsafe. A Go import targets a
-	// representative package file, so it is useful package evidence but cannot by
-	// itself prove that deleting this exact file is unsafe.
+	// The legacy bool remains conservative. Only fresh, confirmed file-scoped
+	// evidence can prove an exact file unsafe. Name-fanout candidates, stale
+	// snapshots, and Go's representative-file import edge remain unknown.
 	rep.SafeToDelete = false
-	if deps.FileScopedEvidenceTotal > 0 {
+	if !deps.Stale && deps.ConfirmedFileScopedTotal > 0 {
 		rep.DeleteVerdict = DeleteVerdictUnsafe
-		kinds := dependencyEvidenceKinds(deps, true)
+		kinds := dependencyEvidenceKindsForConfidence(deps, DependencyConfidenceConfirmed)
 		rep.Note = joinNote(rep.Note, fmt.Sprintf(
-			"delete verdict is unsafe — %s evidence enters this file from %d dependent file(s)",
-			strings.Join(kinds, "/"), deps.DependentsTotal))
+			"delete verdict is unsafe — %d confirmed %s relationship(s) enter this file in the current index snapshot",
+			deps.ConfirmedFileScopedTotal, strings.Join(kinds, "/")))
+		if deps.CandidateFileScopedTotal > 0 {
+			rep.Note = joinNote(rep.Note, fmt.Sprintf(
+				"%d additional file-scoped relationship(s) are candidates and are not part of the unsafe proof",
+				deps.CandidateFileScopedTotal))
+		}
 		return
 	}
 	rep.DeleteVerdict = DeleteVerdictUnknown
 	coverage := dependencyCoverageSummary(deps.Coverage)
+	if deps.CandidateFileScopedTotal > 0 {
+		if deps.Stale {
+			rep.Note = joinNote(rep.Note, fmt.Sprintf(
+				"delete verdict is unknown — %d inbound relationship(s) come from a stale index snapshot and must be refreshed before they can be confirmed; incomplete domains: %s",
+				deps.CandidateFileScopedTotal, coverage))
+			return
+		}
+		kinds := dependencyEvidenceKindsForConfidence(deps, DependencyConfidenceCandidate)
+		rep.Note = joinNote(rep.Note, fmt.Sprintf(
+			"delete verdict is unknown — %d %s relationship(s) are name-based candidates, not confirmed exact-file dependencies; reindex with --precise; incomplete domains: %s",
+			deps.CandidateFileScopedTotal, strings.Join(kinds, "/"), coverage))
+		return
+	}
 	if deps.PackageScopedEvidenceTotal > 0 {
 		rep.Note = joinNote(rep.Note, fmt.Sprintf(
 			"delete verdict is unknown — %d package-scoped import relationship(s) show package use but do not prove this exact file is required; incomplete domains: %s",

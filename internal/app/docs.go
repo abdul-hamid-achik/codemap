@@ -42,9 +42,11 @@ store, and the project registry — so other tools can inspect the same store.`}
   9. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
 
 Stay fresh: codemap_status returns a "stale" object (files changed/new/deleted
-since the last index) — if any are non-zero, codemap_index before trusting query
-results, which come from the indexed snapshot, not live files. (A registered-but-
-never-indexed project reports indexed:false — codemap_index first.)
+since the last index) — normally codemap_index before trusting snapshot-based
+results. Deletion review is the exception: codemap_review uses retained old
+definitions when available, emits deletion_analysis, and orders selected tests
+before the reindex that prunes them. (A registered-but-never-indexed project
+reports indexed:false — codemap_index first.)
 
 Every query takes an optional "path" (project dir; defaults to cwd) and returns
 JSON. Results carry each symbol's signature and docstring, so you rarely open
@@ -61,10 +63,10 @@ file+fqn+kind still resolves after declaration lines shift.`},
   doctor                             check toolchains, language servers, embeddings (with install hints)
   callers / callees [--precise|--at] who calls X / what X calls (exact definition with --at file:line)
   impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests
-  review [--since R] [--staged]      diff-scoped: changed symbols, blast radius, tests to run, risk band
+  review [--since R] [--staged]      diff-scoped: changed/deleted symbols, blast radius, tests to run, risk band
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
-  dependencies <file>                bounded inbound calls/references/imports + domain coverage
-  file-impact <file>                 file-level impact: grouped call/reference/import evidence + coverage + delete verdict
+  dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage
+  file-impact <file>                 file impact: confidence-aware evidence + coverage + conservative delete verdict
   risk <sym> [--at file:line]        change-risk: unknown when graph coverage is missing; otherwise low/medium/high
   context <sym> [<sym>...] [--at]    one-call bundle; pass several symbols for a batch + shared callers
   path <from> <to>                   shortest call path between two symbols
@@ -80,17 +82,17 @@ file+fqn+kind still resolves after declaration lines shift.`},
   serve                              run the MCP server (stdio)
   studio                             the interactive TUI
 
-MCP tools mirror these as codemap_<name> (init, index, status, projects, semantic,
-find, callers, callees, impact, review, read_order, dependencies, file_impact, risk, path, symbols,
-source, context, context_batch, hotspots, orphans, annotate, annotations,
-related_files, symbol_at, branch_status, branch_switch, cache_save,
-cache_restore, cache_list, cache_drop, doctor, unannotate,
-required_keys).
+MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
+callers, callees, impact, file_impact, dependencies, review, secret_impact,
+required_keys, risk, hotspots, orphans, read_order, path, related_files, symbols,
+symbol_at, find, source, context, context_batch, projects, docs, annotate,
+annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
+cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
 
 codemap_context bundles a symbol's definition+callers+callees+tests in one graph-only call
 (no implicit language-server spawn); context_batch budgets aggregate source bodies and both
 surfaces report optional component failures in partial_errors;
-codemap_review is the post-edit query (diff → impact + tests to run + one aggregate risk band);
+codemap_review is the post-edit query (diff, including retained deleted definitions → impact + tests to run + one aggregate risk band);
 callers/callees accept precise:true. Agent-facing source/context/callers/callees/
 impact/risk accept selector:{file,start_line,fqn,kind}; path accepts from_selector
 and to_selector. codemap_docs returns this guide.`},
@@ -155,11 +157,11 @@ node ids are never part of the public contract.
 
 File dependency evidence is deliberately broader and more conservative than the call graph:
 file-impact groups inbound calls, Go function-value references, and imports by dependent file,
-with per-domain complete/partial/unavailable coverage and bounded source→target samples. Calls
-and references into this file can prove delete_verdict=unsafe. Go imports are package-scoped
-(they target one representative package file), so import-only evidence remains unknown for an
-exact file. General type/value uses, runtime wiring/reflection, and external consumers are not
-complete; missing evidence therefore never means safe_to_delete.`},
+with per-domain complete/partial/unavailable coverage and bounded source→target samples. Every
+relationship is confirmed or candidate with a reason. Only fresh confirmed file-scoped evidence
+can prove delete_verdict=unsafe; qualified name fan-out, stale snapshots, and package-scoped Go
+imports remain unknown for an exact file. General type/value uses, runtime wiring/reflection, and
+external consumers are incomplete; missing evidence therefore never means safe_to_delete.`},
 
 	{"ecosystem", `codemap is one tool in a local, XDG-stored toolchain for analyzing and fixing
 code. A harness can chain them:

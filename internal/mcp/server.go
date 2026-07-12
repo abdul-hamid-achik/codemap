@@ -49,11 +49,15 @@ After you edit: codemap_review — diff-scoped impact + test selection. It reads
 (working tree by default; staged:true, or since:<ref>), finds the changed symbols, and returns
 their union blast radius, the covering_tests to RUN, and which changes are untested or hit a
 hotspot. Run it after making changes to learn what you affected and what to test — one call
-instead of diffing by hand and chaining codemap_impact per symbol.
+instead of diffing by hand and chaining codemap_impact per symbol. Deleted files are analyzed
+from definitions retained in the last index when available; deletion_analysis states completeness,
+and its selected tests come before the reindex action that will prune those old definitions.
 
 Before touching a whole file (move/delete/split): codemap_dependencies returns bounded inbound
-call/reference/import evidence plus explicit domain coverage; codemap_file_impact adds blast radius,
-covering tests, and conservative delete_verdict (file-scoped evidence → unsafe; otherwise unknown).
+call/reference/import evidence plus explicit domain coverage. Samples and totals distinguish
+confirmed evidence from name-fanout/package/stale candidates. codemap_file_impact adds blast radius,
+covering tests, and conservative delete_verdict: only fresh confirmed file-scoped evidence can be
+unsafe; candidate-only, package-only, stale, or missing evidence stays unknown.
 
 How careful to be: codemap_risk — a symbol's change-risk as one score + level
 (unknown/low/medium/high) from untested coverage, fan-in, cross-package spread, and name ambiguity.
@@ -982,12 +986,12 @@ func result(v any, err error) (*sdkmcp.CallToolResult, any, error) {
 	if err != nil {
 		return codedErrResult(err), nil, nil
 	}
-	// Indented JSON without HTML escaping — the inner result has no HTML context,
-	// so <, >, & stay literal (e.g. a path target "A -> B", generics Array<T>);
-	// the go-sdk re-escapes this string correctly in the JSON-RPC envelope.
+	// Compact JSON without HTML escaping keeps agent responses token-efficient.
+	// The inner result has no HTML context, so <, >, & stay literal (e.g. a path
+	// target "A -> B", generics Array<T>); the go-sdk re-escapes this string
+	// correctly in the JSON-RPC envelope.
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	if mErr := enc.Encode(v); mErr != nil {
 		return errResult(mErr.Error()), nil, nil

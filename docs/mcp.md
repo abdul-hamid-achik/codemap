@@ -2,6 +2,8 @@
 
 codemap is a stdio [Model Context Protocol](https://modelcontextprotocol.io) server, so AI
 agents can query your code graph directly instead of reading dozens of files.
+Tool text payloads use compact JSON to avoid spending context tokens on indentation; the
+structured result fields are identical to CLI `--json` reports.
 
 ## Register it
 
@@ -56,9 +58,9 @@ directory) and return JSON.
 | `codemap_callers` | Functions/methods that call a symbol (`precise: true` → language-server resolution; `selector` → one exact definition). Carries a stable `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) |
 | `codemap_callees` | Functions/methods a symbol calls; accepts the same `precise` and exact `selector` inputs. Same `call_graph` enum |
 | `codemap_impact` | Callers + blast radius + covering tests (`depth`). `selector` scopes all traversal to one definition. Carries `call_graph` alongside the human `resolution` note — `unresolved` means the callers/blast/tests are unknown (not absent) on a TS/JS/Python/Vue symbol without `--precise` |
-| `codemap_review` | **Diff-scoped impact + test selection** — the query to run *after* editing. Maps your git diff (working tree by default; `staged: true`; or `since` a ref) to the changed symbols, then returns their union `blast_radius`, `covering_tests`, copy/paste-ready `test_commands`, and changed symbols that are `untested` or `hotspots` — plus aggregate `risk`, freshness, `call_graph`, and bounded `next` actions |
-| `codemap_dependencies` | Direct inbound dependency evidence for a `file`, grouped and capped by dependent file and calls/references/imports. Returns source→target samples, file-vs-package scope, totals/truncation, freshness/`call_graph`, and complete/partial/unavailable coverage for static calls, references, imports, runtime wiring, and external consumers. Use this when you need evidence without `file_impact`'s blast/test analysis. |
-| `codemap_file_impact` | **File-level impact** — returns `dependency_evidence` grouped by dependent file and edge kind (calls/references/imports), bounded source→target samples plus totals/truncation, domain coverage, blast/tests, and conservative `delete_verdict`. File-scoped evidence proves `unsafe`; Go imports are package-scoped hints and remain `unknown` for the exact file. Missing evidence never proves safety; legacy `safe_to_delete` stays false. |
+| `codemap_review` | **Diff-scoped impact + test selection** — maps a working/staged/`since` diff to changed symbols, `blast_radius`, `covering_tests`, `test_commands`, aggregate `risk`, confidence, and bounded `next` actions. Deleted files are analyzed from retained last-index definitions when available; `deletion_analysis` reports completeness and test actions precede reindexing. |
+| `codemap_dependencies` | Direct inbound dependency evidence for a `file`, grouped and capped by dependent file and calls/references/imports. Every sample carries `confidence`/`confidence_reason`; confirmed/candidate totals, file-vs-package scope, truncation, freshness/`call_graph`, and domain coverage stay explicit. |
+| `codemap_file_impact` | **File-level impact** — returns confidence-aware `dependency_evidence`, blast/tests, and a conservative `delete_verdict`. Only fresh confirmed file-scoped evidence proves `unsafe`; name-fanout candidates, stale snapshots, Go package imports, and missing evidence remain `unknown`. Legacy `safe_to_delete` stays false. |
 | `codemap_required_keys` | **Least-privilege key set** — for an `entrypoint`, the candidate secret key NAMES its transitive call tree actually reads. Supply `keys` directly or use `via_vault` plus optional `prefix`; operates on names only, never values. Candidate input is capped at 256 unique names, 256 bytes per name |
 | `codemap_secret_impact` | **Secret-key rotation blast radius** — for each key NAME, the symbols that read it (`os.Getenv`/`os.environ`/`process.env`), the transitive callers affected, and covering tests (`untested:true` warns a key no test reaches). Operates on key NAMES only — never reads/returns values. Pairs with [tinyvault](/ecosystem); `via_vault` fetches names from it. Each request is capped at 256 unique names, 256 bytes per name. Name-based unless the index is `--precise` |
 | `codemap_hotspots` | Most-referenced symbols (`top`), with project-wide `call_graph`/`resolution` so incomplete rankings are explicit |
@@ -134,7 +136,8 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
 
   The free-form `resolution` sentence stays for humans. Map resolved→high, name→medium, unresolved/none→low confidence.
 - **`risk` on `codemap_review`** — one band for the whole diff (`level` unknown/low/medium/high, `score` 0..1, `factors`), folded from every changed symbol so a harness can gate verification on a single call instead of fanning `codemap_risk` out per symbol. `unknown` means at least one changed symbol lacks a usable call graph; absent when the diff maps to no indexed symbols.
-- **`stale` / `staleness`** on `codemap_review` (and `codemap_status`) — index drift since the last index; surface a "reindex before trusting the blast radius" warning when set. The blast radius is computed from the snapshot, so a stale index can miss/misattribute — honest by design.
+- **`stale` / `staleness`** on `codemap_review` (and `codemap_status`) — index drift since the last index. Normally refresh before trusting snapshot-based impact. A deleted file is the intentional exception: when its old nodes remain, `deletion_analysis` identifies `source:"last_index"` and selected tests come before the reindex action that will prune those nodes.
+- **`confidence` on dependency samples** — `confirmed` means fresh precise or exact same-package evidence; `candidate` covers qualified name fan-out, package-scoped imports, and stale snapshots. Additive `confirmed_total`/`candidate_total` fields remain available when samples are capped.
 - **`blast_radius` / `covering_tests` element shape** — both are `ImpactNode` objects (`symbol`, `fqn`, `kind`, `file`, `start_line`, `depth`, …; no `end_line`). `depth` is the blast-radius hop distance. This is the stable element contract.
 - **`schema_version` on `codemap_review`** — every successful review emits version `1` and
   conforms to `schemas/codemap.review.v1.schema.json` (Draft 2020-12,

@@ -12,7 +12,7 @@
 ---
 
 ## Current state — what's shipped
-Released through **v0.36.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
+Released through **v0.39.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
 5 cross-compiled targets. Three surfaces over one store: **CLI**, **MCP** (`codemap serve`, 36 tools),
 **studio** TUI (Graph/Metrics/Impact/Search/Path + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
@@ -23,6 +23,12 @@ surfaces on every surface). Flagship one-call **`context`** bundle (def + caller
 radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `hotspots`, `orphans`, `path`.
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
+
+**v0.39.0:** exact source selectors across CLI/MCP queries, grouped dependency evidence,
+conservative file deletion analysis, and Studio's fifth Path tab are released. Current trust-polish
+work classifies dependency edges as confirmed/candidate, prevents name-fanout candidates from proving
+an unsafe deletion, preserves deleted-file impact in `review` before reindex, keeps Studio selections
+exact, and compacts MCP JSON to reduce agent response tokens.
 
 ## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
 All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see

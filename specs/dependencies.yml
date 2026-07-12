@@ -3,19 +3,20 @@ name: dependencies
 intent: |
     `codemap dependencies <file>` is the evidence-only file-refactor query for
     people and agents. It groups inbound calls, value references, and imports by
-    dependent file, bounds samples while retaining totals, and states which
-    dependency domains are complete, partial, or unavailable. Positive evidence
+    dependent file, classifies each relationship as confirmed or candidate with
+    a reason, bounds samples while retaining totals, and states which dependency
+    domains are complete, partial, or unavailable. Positive confirmed evidence
     is actionable; an empty result is never promoted into a safe-delete claim.
     The `codemap_dependencies` MCP tool returns the same report.
 target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\n\nfunc Target() {}\n' > \"$P/target.go\"; printf 'package app\n\nfunc Use() { Target() }\n\nvar Hooks = []func(){Target}\n' > \"$P/wire.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed --no-tips >/dev/null 2>&1; \"$CM\" dependencies target.go; \"$CM\" dependencies target.go --json > \"$TMP/deps.json\"; grep -q '\"evidence_total\": 2' \"$TMP/deps.json\" && grep -q '\"domain\": \"references\"' \"$TMP/deps.json\" && ! grep -q '\"id\":' \"$TMP/deps.json\" && echo JSON_CONTRACT_OK"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\n\nfunc Target() {}\n' > \"$P/target.go\"; printf 'package app\n\nfunc Use() { Target() }\n\nvar Hooks = []func(){Target}\n' > \"$P/wire.go\"; printf 'package app\n\nfunc Independent() {}\n' > \"$P/empty.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed --no-tips >/dev/null 2>&1; \"$CM\" dependencies target.go; echo '== empty evidence =='; \"$CM\" dependencies empty.go; \"$CM\" dependencies target.go --json > \"$TMP/deps.json\"; \"$CM\" dependencies empty.go --json > \"$TMP/empty.json\"; grep -q '\"evidence_total\": 2' \"$TMP/deps.json\" && grep -q '\"domain\": \"references\"' \"$TMP/deps.json\" && ! grep -q '\"id\":' \"$TMP/deps.json\" && echo JSON_CONTRACT_OK && grep -q 'missing evidence does not prove this file is independent' \"$TMP/empty.json\" && echo EMPTY_CAVEAT_OK && grep -q '\"confirmed_total\": 2' \"$TMP/deps.json\" && grep -q '\"candidate_total\": 0' \"$TMP/deps.json\" && grep -q '\"confidence\": \"confirmed\"' \"$TMP/deps.json\" && grep -q '\"confirmed_total\": 0' \"$TMP/empty.json\" && echo CONFIDENCE_TOTALS_OK"
     cwd: "."
 terminal:
     cols: 110
-    rows: 30
+    rows: 42
     profile: xterm-256color
 steps:
     - wait:
@@ -28,20 +29,35 @@ outcomes:
       description: the dependent file carries both call and value-reference evidence
       verify:
         screen:
-            contains: "wire.go  calls:1 · references:1"
+            contains: "wire.go  calls:1 (1 confirmed) · references:1 (1 confirmed)"
+    - id: confidence_visible
+      description: the human report separates confirmed evidence from candidates and labels sample confidence
+      verify:
+        screen:
+            contains: "confidence: confirmed (same package)"
+    - id: empty_is_not_safe
+      description: a file with no inbound rows remains an explicitly incomplete evidence result
+      verify:
+        screen:
+            contains: "no inbound evidence found"
+    - id: empty_caveat
+      description: empty evidence never becomes an independence or safe-delete claim
+      verify:
+        screen:
+            contains: "EMPTY_CAVEAT_OK"
     - id: explicit_coverage
       description: the human report says dependency coverage is incomplete
       verify:
         screen:
             contains: "coverage:      incomplete"
     - id: stable_json
-      description: JSON contains totals and coverage without leaking graph row ids
+      description: JSON contains confidence totals and coverage without leaking graph row ids
       verify:
         screen:
-            contains: "JSON_CONTRACT_OK"
+            contains: "CONFIDENCE_TOTALS_OK"
     - id: clean_exit
       description: dependencies exits cleanly
       verify:
         process:
             exitCode: 0
-contractHash: sha256:01f4559c1ca8d18cb31f87aaf58348c66776aad9586cba2d9fbd2c5b2110bd2a
+contractHash: sha256:4b762a9e78fe09118e0387da3e6d68f90e80d0327a17e941b9902211867cf097

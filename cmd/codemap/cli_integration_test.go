@@ -46,6 +46,9 @@ func TestCLIContracts(t *testing.T) {
 	}
 	writeTestFile(t, filepath.Join(project, "go.mod"), "module example.com/sample\n\ngo 1.25\n")
 	writeTestFile(t, filepath.Join(project, "main.go"), "package main\n\nfunc Main() { Helper() }\nfunc Helper() {}\n")
+	writeTestFile(t, filepath.Join(project, "wire.go"), "package main\n\nfunc Wire() { Helper() }\n")
+	writeTestFile(t, filepath.Join(project, "model.go"), "package main\n\ntype Item struct{}\nfunc (Item) Touch() {}\n")
+	writeTestFile(t, filepath.Join(project, "candidate.go"), "package main\n\nfunc Candidate() { Item{}.Touch() }\n")
 	// A project-local value proves that -C affects config discovery too, not only
 	// the final service call.
 	writeTestFile(t, filepath.Join(project, "codemap.yaml"), "embedding:\n  dimensions: 321\n")
@@ -82,6 +85,17 @@ func TestCLIContracts(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "callers", "--json=false")
 		if res.exit != exitOperational || res.stdout != "" || !strings.Contains(res.stderr, "Error:") {
 			t.Fatalf("--json=false must preserve text errors: exit=%d stdout=%q stderr=%q", res.exit, res.stdout, res.stderr)
+		}
+
+		for _, args := range [][]string{
+			{"source", "Helper", "--at", "main.go:4", "--json"},
+			{"context", "Helper", "--at", "main.go:4", "--json"},
+		} {
+			res = runCLI(t, bin, runner, env, args...)
+			assertCLIEnvelope(t, res, exitOperational, "operational")
+			if !strings.Contains(res.stdout, "mutually exclusive") || res.stderr != "" {
+				t.Fatalf("--at conflict must be an actionable JSON envelope for %v: stdout=%q stderr=%q", args, res.stdout, res.stderr)
+			}
 		}
 	})
 
@@ -171,6 +185,11 @@ func TestCLIContracts(t *testing.T) {
 			res = runCLI(t, bin, runner, env, "callers", "DoesNotExist", flag, "-C", project, "--json")
 			assertCLIEnvelope(t, res, exitNotFound, codeNotFound)
 		}
+
+		res = runCLI(t, bin, runner, env, "path", "--help")
+		if res.exit != 0 || !strings.Contains(res.stdout, "app.Controller.Run app.Store.Save") || !strings.Contains(res.stdout, "call-graph") {
+			t.Fatalf("path help must explain exact FQNs and confidence: exit=%d stderr=%q\n%s", res.exit, res.stderr, res.stdout)
+		}
 	})
 
 	t.Run("source position selects one definition without a name argument", func(t *testing.T) {
@@ -197,8 +216,40 @@ func TestCLIContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("dependency confidence is visible in human reports", func(t *testing.T) {
+		res := runCLI(t, bin, runner, env, "dependencies", "main.go", "-C", project)
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("dependencies exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		for _, want := range []string{
+			"confidence:    1 confirmed · 0 candidate",
+			"calls:1 (1 confirmed)",
+			"confidence: confirmed (same package)",
+		} {
+			if !strings.Contains(res.stdout, want) {
+				t.Fatalf("dependencies text missing %q:\n%s", want, res.stdout)
+			}
+		}
+
+		res = runCLI(t, bin, runner, env, "file-impact", "main.go", "-C", project)
+		if res.exit != 0 || !strings.Contains(res.stdout, "confirmed indexed dependency evidence") {
+			t.Fatalf("file-impact must identify its unsafe proof: exit=%d stderr=%q stdout=%q", res.exit, res.stderr, res.stdout)
+		}
+
+		res = runCLI(t, bin, runner, env, "dependencies", "model.go", "-C", project)
+		if res.exit != 0 || !strings.Contains(res.stdout, "confidence:    0 confirmed · 1 candidate") ||
+			!strings.Contains(res.stdout, "confidence: candidate (name fanout)") {
+			t.Fatalf("candidate dependency must stay visibly non-confirmed: exit=%d stderr=%q stdout=%q", res.exit, res.stderr, res.stdout)
+		}
+	})
+
 	t.Run("disconnected path is an answered json report", func(t *testing.T) {
-		res := runCLI(t, bin, runner, env, "path", "Helper", "Main", "-C", project, "--json")
+		res := runCLI(t, bin, runner, env, "path", "Main", "Helper", "-C", project)
+		if res.exit != 0 || res.stderr != "" || !strings.Contains(res.stdout, "Main → Helper") || !strings.Contains(res.stdout, "call graph: name") {
+			t.Fatalf("found text path must disclose confidence: exit=%d stderr=%q stdout=%q", res.exit, res.stderr, res.stdout)
+		}
+
+		res = runCLI(t, bin, runner, env, "path", "Helper", "Main", "-C", project, "--json")
 		if res.exit != 0 || res.stderr != "" {
 			t.Fatalf("valid no-path query exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
 		}
@@ -214,6 +265,12 @@ func TestCLIContracts(t *testing.T) {
 
 		res = runCLI(t, bin, runner, env, "path", "Helper", "DoesNotExist", "-C", project, "--json")
 		assertCLIEnvelope(t, res, exitNotFound, codeNotFound)
+
+		writeTestFile(t, filepath.Join(project, "main.go"), "package main\n\nfunc Main() { Helper() }\nfunc Helper() {}\n// drift\n")
+		res = runCLI(t, bin, runner, env, "path", "Main", "Helper", "-C", project)
+		if res.exit != 0 || !strings.Contains(res.stdout, "index is stale") {
+			t.Fatalf("found stale path must disclose drift: exit=%d stderr=%q stdout=%q", res.exit, res.stderr, res.stdout)
+		}
 	})
 
 	t.Run("query misses and cold projects use exit two envelopes", func(t *testing.T) {

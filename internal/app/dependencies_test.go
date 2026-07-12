@@ -46,9 +46,13 @@ func TestDependenciesGroupsEvidenceAndExposesCoverage(t *testing.T) {
 		if kinds[kind].Total != 1 || len(kinds[kind].Samples) != 1 {
 			t.Errorf("%s evidence = %+v, want one bounded source→target sample", kind, kinds[kind])
 		}
-		if sample := kinds[kind].Samples[0]; sample.Source.File != "wire.go" || sample.Target.File != "target.go" || sample.Target.Symbol != "Target" || sample.TargetScope != DependencyTargetFile {
+		if sample := kinds[kind].Samples[0]; sample.Source.File != "wire.go" || sample.Target.File != "target.go" || sample.Target.Symbol != "Target" || sample.TargetScope != DependencyTargetFile || sample.Confidence != DependencyConfidenceConfirmed || sample.ConfidenceReason != DependencyReasonSamePackage {
 			t.Errorf("%s sample = %+v", kind, sample)
 		}
+	}
+	assertDependencyTotals(t, rep)
+	if rep.ConfirmedTotal != 2 || rep.CandidateTotal != 0 || rep.ConfirmedFileScopedTotal != 2 || rep.CandidateFileScopedTotal != 0 {
+		t.Fatalf("same-package confidence totals = %+v", rep)
 	}
 	if rep.CallGraph != CallGraphName || rep.Coverage.Complete {
 		t.Fatalf("coverage = %+v call_graph=%q, want explicit incomplete name/reference/import coverage", rep.Coverage, rep.CallGraph)
@@ -105,9 +109,10 @@ func TestDependenciesGoImportIsPackageScopedAndIncremental(t *testing.T) {
 		t.Fatalf("Go import evidence = %+v, want one package-scoped relationship", rep)
 	}
 	sample := rep.Dependents[0].Kinds[0].Samples[0]
-	if sample.TargetScope != DependencyTargetPackage || sample.Source.File != "b/b.go" {
+	if sample.TargetScope != DependencyTargetPackage || sample.Source.File != "b/b.go" || sample.Confidence != DependencyConfidenceCandidate || sample.ConfidenceReason != DependencyReasonPackageScope {
 		t.Fatalf("Go import sample = %+v, want package-scoped b/b.go→a/a.go", sample)
 	}
+	assertDependencyTotals(t, rep)
 	impact, err := svc.FileImpact(proj, "a/a.go", 3)
 	if err != nil {
 		t.Fatal(err)
@@ -154,6 +159,9 @@ func TestFileImpactReferenceOnlyEvidenceIsUnsafe(t *testing.T) {
 	}
 	if impact.DependencyEvidence == nil || impact.DependencyEvidence.FileScopedEvidenceTotal != 1 {
 		t.Fatalf("FileImpact did not embed reusable dependency evidence: %+v", impact.DependencyEvidence)
+	}
+	if impact.DependencyEvidence.ConfirmedFileScopedTotal != 1 || impact.DependencyEvidence.CandidateFileScopedTotal != 0 {
+		t.Fatalf("same-package reference confidence = %+v", impact.DependencyEvidence)
 	}
 	if kinds := dependencyEvidenceKinds(impact.DependencyEvidence, true); len(kinds) != 1 || kinds[0] != graph.EdgeReferences {
 		t.Fatalf("unsafe evidence kinds = %v, want references", kinds)
@@ -215,10 +223,179 @@ func TestDependenciesCapsDependentsAndSamplesWithTotals(t *testing.T) {
 	if rep.EvidenceTotal != wantEvidence || rep.SamplesTotal > dependencyGlobalSampleCap || rep.SamplesTruncated != wantEvidence-rep.SamplesTotal {
 		t.Fatalf("sample cap metadata = evidence:%d samples:%d truncated:%d, want evidence:%d", rep.EvidenceTotal, rep.SamplesTotal, rep.SamplesTruncated, wantEvidence)
 	}
+	assertDependencyTotals(t, rep)
+	if rep.ConfirmedTotal != wantEvidence || rep.CandidateTotal != 0 {
+		t.Fatalf("same-package capped confidence totals = confirmed:%d candidate:%d", rep.ConfirmedTotal, rep.CandidateTotal)
+	}
 	first := rep.Dependents[0].Kinds[0]
 	if first.Total != dependencySampleCap+4 || len(first.Samples) != dependencySampleCap || first.SamplesTruncated != 4 {
 		t.Fatalf("per-kind sample cap = %+v", first)
 	}
+}
+
+func TestDependenciesQualifiedCrossPackageNameFanoutIsCandidate(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "go.mod", "module example.test/confidence\n\ngo 1.25\n")
+	mustWrite(t, proj, "app/service.go", "package app\n\ntype Service struct{}\nfunc (Service) Context() {}\n")
+	mustWrite(t, proj, "cli/command.go", "package cli\n\ntype Command struct{}\nfunc (Command) Context() {}\nfunc Run(cmd Command) { cmd.Context() }\n")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Dependencies(proj, "app/service.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDependencyTotals(t, rep)
+	if rep.ConfirmedTotal != 0 || rep.CandidateTotal != 1 || rep.ConfirmedFileScopedTotal != 0 || rep.CandidateFileScopedTotal != 1 {
+		t.Fatalf("qualified same-name fanout confidence = %+v", rep)
+	}
+	sample := rep.Dependents[0].Kinds[0].Samples[0]
+	if sample.Confidence != DependencyConfidenceCandidate || sample.ConfidenceReason != DependencyReasonNameFanout || sample.Weight != graph.WeightTreeSitter {
+		t.Fatalf("qualified same-name fanout sample = %+v", sample)
+	}
+	impact, err := svc.FileImpact(proj, "app/service.go", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if impact.DeleteVerdict != DeleteVerdictUnknown || impact.SafeToDelete || impact.BreakingChange {
+		t.Fatalf("candidate fanout must not prove the exact file unsafe: %+v", impact)
+	}
+	if !strings.Contains(impact.Note, "breaking_change withheld") {
+		t.Fatalf("candidate-only breaking-change evidence must be explicit: %q", impact.Note)
+	}
+	if !hasNextAction(impact.Next, "codemap_index", true) {
+		t.Fatalf("candidate evidence should recommend a precise reindex: %+v", impact.Next)
+	}
+}
+
+func TestDependenciesStaleEvidenceIsCandidate(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "target.go", "package app\n\nfunc Target() {}\n")
+	mustWrite(t, proj, "wire.go", "package app\n\nfunc Use() { Target() }\n")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// The stored same-package edge was confirmed when indexed, but any positive
+	// claim from a stale snapshot must be treated as a candidate until refreshed.
+	mustWrite(t, proj, "wire.go", "package app\n\nfunc Use() { Target(); Target() }\n")
+
+	rep, err := svc.Dependencies(proj, "target.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDependencyTotals(t, rep)
+	if !rep.Stale || rep.ConfirmedTotal != 0 || rep.CandidateTotal != 1 || rep.CandidateFileScopedTotal != 1 {
+		t.Fatalf("stale confidence totals = %+v", rep)
+	}
+	sample := rep.Dependents[0].Kinds[0].Samples[0]
+	if sample.Confidence != DependencyConfidenceCandidate || sample.ConfidenceReason != DependencyReasonStale {
+		t.Fatalf("stale sample confidence = %+v", sample)
+	}
+	impact, err := svc.FileImpact(proj, "target.go", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if impact.DeleteVerdict != DeleteVerdictUnknown || impact.SafeToDelete {
+		t.Fatalf("stale evidence must keep deletion unknown: %+v", impact)
+	}
+	if !hasNextAction(impact.Next, "codemap_index", true) {
+		t.Fatalf("stale call evidence should recommend a precise refresh: %+v", impact.Next)
+	}
+}
+
+func TestDependenciesSortsConfirmedEvidenceBeforeCandidates(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject(config.DeriveProjectName(proj), proj, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(file, symbol string) int64 {
+		t.Helper()
+		id, addErr := g.AddNode(&graph.Node{ProjectID: pid, FilePath: file, Symbol: symbol, FQN: "app." + symbol, Kind: graph.KindFunction, Language: "go", StartLine: 1, EndLine: 1, SourceHash: "h"})
+		if addErr != nil {
+			t.Fatal(addErr)
+		}
+		return id
+	}
+	target := add("target.go", "Target")
+	candidate := add("a/candidate.go", "Candidate")
+	confirmed := add("z_confirmed.go", "Confirmed")
+	if _, err := g.AddEdge(candidate, target, graph.EdgeCalls, graph.WeightTreeSitter); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.AddEdgeProv(confirmed, target, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := NewService(sess).Dependencies(proj, "target.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDependencyTotals(t, rep)
+	if len(rep.Dependents) != 2 || rep.Dependents[0].File != "z_confirmed.go" || rep.Dependents[0].ConfirmedTotal != 1 || rep.Dependents[1].File != "a/candidate.go" {
+		t.Fatalf("confirmed evidence should sort before candidates: %+v", rep.Dependents)
+	}
+	if rep.Dependents[0].Kinds[0].Samples[0].ConfidenceReason != DependencyReasonPrecise {
+		t.Fatalf("precise sample = %+v", rep.Dependents[0].Kinds[0].Samples[0])
+	}
+}
+
+func assertDependencyTotals(t *testing.T, rep *FileDependenciesReport) {
+	t.Helper()
+	if rep.ConfirmedTotal+rep.CandidateTotal != rep.EvidenceTotal {
+		t.Errorf("report confidence totals do not partition evidence: confirmed=%d candidate=%d total=%d", rep.ConfirmedTotal, rep.CandidateTotal, rep.EvidenceTotal)
+	}
+	if rep.ConfirmedFileScopedTotal+rep.CandidateFileScopedTotal != rep.FileScopedEvidenceTotal {
+		t.Errorf("file-scoped confidence totals do not partition evidence: confirmed=%d candidate=%d total=%d", rep.ConfirmedFileScopedTotal, rep.CandidateFileScopedTotal, rep.FileScopedEvidenceTotal)
+	}
+	for _, dependent := range rep.Dependents {
+		if dependent.ConfirmedTotal+dependent.CandidateTotal != dependent.EvidenceTotal {
+			t.Errorf("dependent %s confidence totals do not partition evidence: %+v", dependent.File, dependent)
+		}
+		for _, kind := range dependent.Kinds {
+			if kind.ConfirmedTotal+kind.CandidateTotal != kind.Total {
+				t.Errorf("dependent %s kind %s confidence totals do not partition evidence: %+v", dependent.File, kind.Kind, kind)
+			}
+		}
+	}
+}
+
+func hasNextAction(actions []NextAction, tool string, precise bool) bool {
+	for _, action := range actions {
+		if action.Tool != tool {
+			continue
+		}
+		got, _ := action.Args["precise"].(bool)
+		if got == precise {
+			return true
+		}
+	}
+	return false
 }
 
 func dependencyDomainStatus(coverage FileDependencyCoverage, domain string) string {

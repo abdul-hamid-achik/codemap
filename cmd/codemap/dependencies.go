@@ -13,8 +13,14 @@ import (
 var dependenciesCmd = &cobra.Command{
 	Use:   "dependencies <file>",
 	Short: "Inbound call, reference, and import evidence for a file, with coverage",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runDependencies,
+	Long: `Report indexed inbound call, reference, and import evidence for a file.
+
+Confirmed relationships are usable exact-file evidence; candidates require
+verification because they come from name fan-out, package scope, or a stale
+snapshot. Missing evidence never proves that a file is independent or safe to
+delete while any coverage domain remains incomplete.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDependencies,
 }
 
 func runDependencies(cmd *cobra.Command, args []string) error {
@@ -42,8 +48,11 @@ func runDependencies(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Dependencies entering %s (%s)\n", rep.File, rep.Project)
-	fmt.Printf("  evidence:      %d total (%d file-scoped, %d package-scoped)\n",
-		rep.EvidenceTotal, rep.FileScopedEvidenceTotal, rep.PackageScopedEvidenceTotal)
+	fmt.Printf("  evidence:      %d total\n", rep.EvidenceTotal)
+	fmt.Printf("  confidence:    %d confirmed · %d candidate\n", rep.ConfirmedTotal, rep.CandidateTotal)
+	fmt.Printf("  scope:         %d file-scoped (%d confirmed · %d candidate) · %d package-scoped\n",
+		rep.FileScopedEvidenceTotal, rep.ConfirmedFileScopedTotal, rep.CandidateFileScopedTotal,
+		rep.PackageScopedEvidenceTotal)
 	fmt.Printf("  dependents:    %d", rep.DependentsTotal)
 	if rep.DependentsTruncated > 0 {
 		fmt.Printf(" (%d shown, %d omitted)", len(rep.Dependents), rep.DependentsTruncated)
@@ -67,21 +76,40 @@ func runDependencies(cmd *cobra.Command, args []string) error {
 			kinds := make([]string, 0, len(dependent.Kinds))
 			for _, evidence := range dependent.Kinds {
 				label := fmt.Sprintf("%s:%d", evidence.Kind, evidence.Total)
+				confidence := make([]string, 0, 2)
+				if evidence.ConfirmedTotal > 0 {
+					confidence = append(confidence, fmt.Sprintf("%d confirmed", evidence.ConfirmedTotal))
+				}
+				if evidence.CandidateTotal > 0 {
+					confidence = append(confidence, fmt.Sprintf("%d candidate", evidence.CandidateTotal))
+				}
+				if len(confidence) > 0 {
+					label += " (" + strings.Join(confidence, ", ") + ")"
+				}
 				if evidence.PackageScopedTotal > 0 {
 					label += fmt.Sprintf(" (package:%d)", evidence.PackageScopedTotal)
 				}
 				kinds = append(kinds, label)
 			}
-			fmt.Printf("     %s  %s\n", dependent.File, strings.Join(kinds, " · "))
+			fmt.Printf("     %s  %s  [%d confirmed · %d candidate]\n",
+				dependent.File, strings.Join(kinds, " · "), dependent.ConfirmedTotal, dependent.CandidateTotal)
 			for _, evidence := range dependent.Kinds {
 				if len(evidence.Samples) == 0 {
 					continue
 				}
 				sample := evidence.Samples[0]
-				fmt.Printf("       ↳ %s:%d → %s:%d  [%s, %s]\n",
+				confidence := sample.Confidence
+				if confidence == "" {
+					confidence = "unclassified"
+				}
+				reason := strings.ReplaceAll(sample.ConfidenceReason, "_", " ")
+				if reason != "" {
+					confidence += " (" + reason + ")"
+				}
+				fmt.Printf("       ↳ %s:%d → %s:%d  [%s, %s; confidence: %s]\n",
 					sample.Source.File, sample.Source.StartLine,
 					sample.Target.File, sample.Target.StartLine,
-					evidence.Kind, sample.TargetScope)
+					evidence.Kind, sample.TargetScope, confidence)
 			}
 		}
 	}

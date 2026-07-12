@@ -115,6 +115,9 @@
     "risk": {
       "$ref": "#/$defs/risk"
     },
+    "deletion_analysis": {
+      "$ref": "#/$defs/deletion_analysis"
+    },
     "note": {
       "type": "string",
       "minLength": 1
@@ -254,6 +257,32 @@
         "deleted": {
           "type": "integer",
           "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "deletion_analysis": {
+      "type": "object",
+      "required": ["files", "analyzed", "missing", "source", "complete"],
+      "properties": {
+        "files": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "analyzed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "type": "string",
+          "const": "last_index"
+        },
+        "complete": {
+          "type": "boolean"
         }
       },
       "additionalProperties": true

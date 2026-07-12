@@ -31,6 +31,10 @@ frame loop that stops the instant the work completes, so an idle studio costs no
   the graph and read the implementation without leaving studio. Press `m` to toggle a
   **neighborhood map**: the centered node drawn as a boxed focal point with its callers flowing
   down into it and its callees flowing out — a "you are here" diagram of the local call graph.
+  Re-centering retains the selected file/FQN/line identity, so same-named methods never merge
+  in relations, source, or context. The pane shows the selected relation report's own
+  `call_graph` and high/medium/low confidence; project-wide precise-edge counts never upgrade
+  an uncovered selected file.
 - **Metrics** — an overview dashboard: node/edge/file counts and bar charts by kind and
   language on the left, with a one-line `shape` **sparkline** of the kind distribution beneath
   them; on the right, the two ends of the call graph — the **top hubs**
@@ -78,7 +82,7 @@ frame loop that stops the instant the work completes, so an idle studio costs no
 | `ctrl+r` | Reindex the project and refresh, without leaving studio — keeps the project's precision (re-runs `--precise` when it already has a precise call graph, so the graph isn't dropped). The header shows `⚠ stale C/N/D` (changed/new/deleted) when your files have drifted from the index since it was built, so you know when to press it |
 | `alt+←` / `alt+→` (any tab) | **Global back / forward** — browser-style history across tabs and drills. Drilling a search hit into Impact, opening it in the Graph walker, etc. records where you came from; `alt+←` returns to the *exact* prior view **with the text you'd typed still in the bar** and the prior selection highlighted. `alt+→` re-walks forward; a new search/drill clears the forward stack. (This is a layer above the Graph's own `⌫` walk.) |
 | `esc` | Step back one global level (when no overlay/help is open); also closes the help/source/context overlay |
-| `ctrl+c` | Quit (`q` also quits on Graph and Metrics) |
+| `ctrl+c` | Quit (`q` also quits on Graph, Metrics, and Path result focus) |
 
 When a [background daemon](/cli#background-daemon) is keeping the index fresh, the header shows a
 live green `● daemon <branch>` indicator (polled every few seconds) so you can tell at a glance

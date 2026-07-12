@@ -55,7 +55,7 @@ steps:
     - press: "p"
     - wait:
         screen:
-            contains: "precise · gopls"
+            contains: "call_graph: resolved · confidence: high · gopls"
         timeoutMs: 15000
     - snapshot: graph_precise
     - press: "2"

@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,6 +184,13 @@ func TestFileImpactUsesExactDefinitionSelectors(t *testing.T) {
 	}
 	for _, file := range []string{"a.go", "b.go", "use.go"} {
 		add(file, "", "", graph.KindFile, 1)
+		content, readErr := os.ReadFile(filepath.Join(proj, file))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err := g.SetFileHash(pid, file, fmt.Sprintf("%x", sha256.Sum256(content))); err != nil {
+			t.Fatal(err)
+		}
 		if err := g.MarkCallGraphResolved(pid, file, "test"); err != nil {
 			t.Fatal(err)
 		}
@@ -206,6 +215,13 @@ func TestFileImpactUsesExactDefinitionSelectors(t *testing.T) {
 	}
 	if aImpact.DeleteVerdict != DeleteVerdictUnsafe || !contains(aImpact.DependentFiles, "use.go") {
 		t.Fatalf("A.Close exact impact = %+v, want use.go dependency", aImpact)
+	}
+	if aImpact.DependencyEvidence.ConfirmedFileScopedTotal != 1 || aImpact.DependencyEvidence.CandidateFileScopedTotal != 0 {
+		t.Fatalf("precise edge confidence = %+v", aImpact.DependencyEvidence)
+	}
+	preciseSample := aImpact.DependencyEvidence.Dependents[0].Kinds[0].Samples[0]
+	if preciseSample.Confidence != DependencyConfidenceConfirmed || preciseSample.ConfidenceReason != DependencyReasonPrecise {
+		t.Fatalf("precise sample confidence = %+v", preciseSample)
 	}
 	if bImpact.DeleteVerdict != DeleteVerdictUnknown || bImpact.BreakingChange || bImpact.BlastRadius != 0 || len(bImpact.DependentFiles) != 0 {
 		t.Fatalf("B.Close must not inherit A.Close callers from the shared short name: %+v", bImpact)

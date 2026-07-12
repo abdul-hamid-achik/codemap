@@ -245,7 +245,8 @@ complete set.
 | Project | `doctor` | check the environment — toolchains, language servers, embeddings — with install hints |
 | Project | `projects` | list all registered projects and their index sizes |
 | Project | `config path` / `config show` | resolved config file path and values (`--json`) |
-| Navigate | `callers` / `callees` / `path` | call-graph navigation (`--at file:line` selects one definition; `--precise` resolves on demand) |
+| Navigate | `callers` / `callees` | call-graph navigation (`--at file:line` selects one definition; `--precise` resolves on demand) |
+| Navigate | `path` | shortest call path; unique FQNs select exact endpoints and every result states call-graph confidence |
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, tests, blast radius |
@@ -303,6 +304,13 @@ file:line`, or pass MCP `selector:{file,start_line,fqn,kind}` projected from any
 Selectors prefer file+FQN+kind, so ordinary line shifts survive reindex; moves/renames return a
 miss instead of silently selecting another node. Raw SQLite node IDs are never a public contract.
 
+File dependency evidence is confidence-aware. Exact same-package or precise relationships are
+`confirmed`; qualified name fan-out, package-scoped imports, and stale snapshots are `candidate`.
+`file-impact` reports `delete_verdict:"unsafe"` only for fresh confirmed file-scoped evidence;
+candidate-only or incomplete evidence remains `unknown`. `review` analyzes deleted definitions from
+the last indexed snapshot when available and tells an agent to run selected tests before reindexing
+prunes that historical evidence.
+
 `orphans` finds call-graph dead ends. It follows functions wired by *value* — handlers in a
 table like cobra's `RunE: runInit`, callbacks passed to a registrar — and excludes methods that
 implement well-known stdlib interfaces (`error`, `fmt.Stringer`, `Unwrap`, the JSON/text
@@ -332,11 +340,14 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-Tools (20): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
-`codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_hotspots`,
-`codemap_orphans`, `codemap_path`, `codemap_symbols`, `codemap_find`, `codemap_source`,
-`codemap_context`, `codemap_projects`, `codemap_docs`, `codemap_annotate`, `codemap_annotations`,
-`codemap_unannotate`. Each takes an
+Tools (36): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+`codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_file_impact`,
+`codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
+`codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_read_order`, `codemap_path`,
+`codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_source`,
+`codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
+`codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,
+`codemap_cache_save`, `codemap_cache_restore`, `codemap_cache_list`, `codemap_cache_drop`. Each takes an
 optional `path` (the project directory) and returns JSON. The two an agent reaches for first:
 **`codemap_context <symbol>`** bundles a symbol's definition, callers, callees, covering tests and
 blast radius in **one call** (instead of four), and **`codemap_status`** reports index *freshness* —

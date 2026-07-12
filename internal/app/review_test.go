@@ -136,6 +136,67 @@ func TestReviewWorking(t *testing.T) {
 	}
 }
 
+func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	if err := os.Remove(filepath.Join(proj, "a.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReviewSchemaVersion(t, rep)
+	if rep.DeletionAnalysis == nil {
+		t.Fatal("deleted file should emit deletion_analysis")
+	}
+	if got := *rep.DeletionAnalysis; got.Files != 1 || got.Analyzed != 1 || got.Missing != 0 || !got.Complete || got.Source != "last_index" {
+		t.Fatalf("deletion analysis = %+v", got)
+	}
+	if !hasSymbol(rep.ChangedSymbols, "Run") || !hasSymbol(rep.ChangedSymbols, "Helper") {
+		t.Fatalf("deleted definitions were not analyzed: %+v", rep.ChangedSymbols)
+	}
+	var deleted ReviewFile
+	for _, file := range rep.ChangedFiles {
+		if file.Path == "a.go" {
+			deleted = file
+		}
+	}
+	if deleted.Status != "D" || deleted.Symbols < 2 {
+		t.Fatalf("deleted file coverage = %+v", deleted)
+	}
+	if !hasImpactSymbol(rep.BlastRadius, "Other") || len(rep.CoveringTests) == 0 || len(rep.TestCommands) == 0 {
+		t.Fatalf("deleted-file impact/tests missing: blast=%+v tests=%+v commands=%+v", rep.BlastRadius, rep.CoveringTests, rep.TestCommands)
+	}
+	if !strings.Contains(rep.Note, "last indexed snapshot") {
+		t.Fatalf("deleted-file note must explain evidence source: %q", rep.Note)
+	}
+	if len(rep.Next) < 2 || rep.Next[0].Tool != "terminal" || rep.Next[1].Tool != "codemap_index" {
+		t.Fatalf("deletion next actions must test before reindex: %+v", rep.Next)
+	}
+}
+
+func TestReviewDeletedFileReportsMissingAfterReindex(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	if err := os.Remove(filepath.Join(proj, "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.DeletionAnalysis == nil || rep.DeletionAnalysis.Files != 1 || rep.DeletionAnalysis.Analyzed != 0 || rep.DeletionAnalysis.Missing != 1 || rep.DeletionAnalysis.Complete {
+		t.Fatalf("pruned deletion analysis = %+v", rep.DeletionAnalysis)
+	}
+	if !strings.Contains(rep.Note, "prior impact is unavailable") {
+		t.Fatalf("missing deletion evidence must be explicit: %q", rep.Note)
+	}
+}
+
 func TestReviewKeepsSameNamedMethodsExact(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

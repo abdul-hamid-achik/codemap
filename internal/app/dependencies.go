@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,6 +16,15 @@ const (
 
 	DependencyTargetFile    = "file"
 	DependencyTargetPackage = "package"
+
+	DependencyConfidenceConfirmed = "confirmed"
+	DependencyConfidenceCandidate = "candidate"
+
+	DependencyReasonPrecise      = "precise"
+	DependencyReasonSamePackage  = "same_package"
+	DependencyReasonNameFanout   = "name_fanout"
+	DependencyReasonPackageScope = "package_scope"
+	DependencyReasonStale        = "stale_snapshot"
 
 	dependencyFileCap         = 25
 	dependencySampleCap       = 3
@@ -38,18 +48,22 @@ type DependencyLocation struct {
 // import edge, which targets one representative file but cannot prove that exact
 // file is required.
 type DependencySample struct {
-	Source      DependencyLocation `json:"source"`
-	Target      DependencyLocation `json:"target"`
-	TargetScope string             `json:"target_scope"` // file|package
-	Provenance  string             `json:"provenance"`
-	Weight      float64            `json:"weight"`
+	Source           DependencyLocation `json:"source"`
+	Target           DependencyLocation `json:"target"`
+	TargetScope      string             `json:"target_scope"` // file|package
+	Provenance       string             `json:"provenance"`
+	Weight           float64            `json:"weight"`
+	Confidence       string             `json:"confidence"`        // confirmed|candidate
+	ConfidenceReason string             `json:"confidence_reason"` // precise|same_package|name_fanout|package_scope|stale_snapshot
 }
 
 // DependencyKindEvidence groups one dependent file's logical relationships by
-// edge kind. Total counts every deduplicated relationship; Samples is capped.
+// edge kind. ConfirmedTotal+CandidateTotal always equals Total; Samples is capped.
 type DependencyKindEvidence struct {
 	Kind               string             `json:"kind"` // calls|references|imports
 	Total              int                `json:"total"`
+	ConfirmedTotal     int                `json:"confirmed_total"`
+	CandidateTotal     int                `json:"candidate_total"`
 	FileScopedTotal    int                `json:"file_scoped_total"`
 	PackageScopedTotal int                `json:"package_scoped_total"`
 	Samples            []DependencySample `json:"samples"`
@@ -57,9 +71,12 @@ type DependencyKindEvidence struct {
 }
 
 // DependentFileEvidence aggregates every inbound evidence kind from one file.
+// Its confidence totals partition EvidenceTotal even when samples are capped.
 type DependentFileEvidence struct {
 	File               string                   `json:"file"`
 	EvidenceTotal      int                      `json:"evidence_total"`
+	ConfirmedTotal     int                      `json:"confirmed_total"`
+	CandidateTotal     int                      `json:"candidate_total"`
 	FileScopedTotal    int                      `json:"file_scoped_total"`
 	PackageScopedTotal int                      `json:"package_scoped_total"`
 	Kinds              []DependencyKindEvidence `json:"kinds"`
@@ -94,9 +111,13 @@ type FileDependenciesReport struct {
 	Stale                      bool                    `json:"stale,omitempty"`
 	CallGraph                  string                  `json:"call_graph"`
 	EvidenceTotal              int                     `json:"evidence_total"`
+	ConfirmedTotal             int                     `json:"confirmed_total"`
+	CandidateTotal             int                     `json:"candidate_total"`
 	SamplesTotal               int                     `json:"samples_total"`
 	SamplesTruncated           int                     `json:"samples_truncated,omitempty"`
 	FileScopedEvidenceTotal    int                     `json:"file_scoped_evidence_total"`
+	ConfirmedFileScopedTotal   int                     `json:"confirmed_file_scoped_total"`
+	CandidateFileScopedTotal   int                     `json:"candidate_file_scoped_total"`
 	PackageScopedEvidenceTotal int                     `json:"package_scoped_evidence_total"`
 	DependentsTotal            int                     `json:"dependents_total"`
 	DependentsTruncated        int                     `json:"dependents_truncated,omitempty"`
@@ -104,14 +125,19 @@ type FileDependenciesReport struct {
 	Coverage                   FileDependencyCoverage  `json:"coverage"`
 	Note                       string                  `json:"note,omitempty"`
 
-	allDependentFiles []string
-	fileScopedKinds   map[string]bool
+	allDependentFiles        []string
+	fileScopedKinds          map[string]bool
+	confirmedFileScopedKinds map[string]bool
+	candidateFileScopedKinds map[string]bool
+	confirmedCallTargets     map[string]bool
+	candidateCallTargets     map[string]bool
 }
 
 // Dependencies returns direct inbound call/reference/import evidence for file,
 // grouped by dependent file and edge kind, plus explicit extraction coverage.
-// Positive file-scoped evidence is actionable; absence is never proof of safety
-// while any relevant domain remains partial or unavailable.
+// Confirmed file-scoped evidence can prove a dependency; candidate evidence is a
+// prompt to inspect or reindex precisely. Absence is never proof of safety while
+// any relevant domain remains partial or unavailable.
 func (svc *Service) Dependencies(cwd, file string) (*FileDependenciesReport, error) {
 	pid, name, indexed, err := svc.project(cwd)
 	if err != nil {
@@ -158,9 +184,17 @@ func (svc *Service) Dependencies(cwd, file string) (*FileDependenciesReport, err
 	if err != nil {
 		return nil, err
 	}
-	rep.groupDependencyEdges(edges)
-	if !rep.Coverage.Complete {
+	rep.groupDependencyEdges(edges, rep.Stale)
+	switch {
+	case rep.Stale && rep.EvidenceTotal > 0:
+		rep.Note = "dependency evidence comes from a stale index snapshot and is candidate-only until reindexing confirms it"
+	case rep.CandidateFileScopedTotal > 0:
+		rep.Note = "some inbound file relationships are name-based candidates, not confirmed dependencies — reindex with --precise before treating them as exact"
+	case !rep.Coverage.Complete:
 		rep.Note = "dependency coverage is incomplete — positive evidence is actionable, but missing evidence does not prove this file is independent"
+	}
+	if !rep.Coverage.Complete && rep.Note != "" && !strings.Contains(rep.Note, "missing evidence") {
+		rep.Note = joinNote(rep.Note, "missing evidence still does not prove this file is independent because dependency coverage is incomplete")
 	}
 	if rep.DependentsTruncated > 0 {
 		rep.Note = joinNote(rep.Note, fmt.Sprintf("%d dependent file(s) omitted from the bounded response", rep.DependentsTruncated))
@@ -168,38 +202,80 @@ func (svc *Service) Dependencies(cwd, file string) (*FileDependenciesReport, err
 	return rep, nil
 }
 
-func (rep *FileDependenciesReport) groupDependencyEdges(edges []graph.FileDependencyEdge) {
-	type kindGroup struct {
-		edges []graph.FileDependencyEdge
-	}
-	grouped := map[string]map[string]*kindGroup{}
+type classifiedDependencyEdge struct {
+	edge       graph.FileDependencyEdge
+	scope      string
+	confidence string
+	reason     string
+}
+
+type dependencyKindGroup struct {
+	edges []classifiedDependencyEdge
+}
+
+func (rep *FileDependenciesReport) groupDependencyEdges(edges []graph.FileDependencyEdge, stale bool) {
+	grouped := map[string]map[string]*dependencyKindGroup{}
 	rep.EvidenceTotal = len(edges)
 	rep.fileScopedKinds = map[string]bool{}
+	rep.confirmedFileScopedKinds = map[string]bool{}
+	rep.candidateFileScopedKinds = map[string]bool{}
+	rep.confirmedCallTargets = map[string]bool{}
+	rep.candidateCallTargets = map[string]bool{}
 	for _, edge := range edges {
-		if dependencyTargetScope(edge) == DependencyTargetFile {
+		scope := dependencyTargetScope(edge)
+		confidence, reason := dependencyConfidence(edge, scope, stale)
+		classified := classifiedDependencyEdge{edge: edge, scope: scope, confidence: confidence, reason: reason}
+		if confidence == DependencyConfidenceConfirmed {
+			rep.ConfirmedTotal++
+		} else {
+			rep.CandidateTotal++
+		}
+		if edge.EdgeType == graph.EdgeCalls {
+			targetKey := symKey(edge.Target.FQN, edge.Target.File, edge.Target.StartLine)
+			if confidence == DependencyConfidenceConfirmed {
+				rep.confirmedCallTargets[targetKey] = true
+			} else {
+				rep.candidateCallTargets[targetKey] = true
+			}
+		}
+		if scope == DependencyTargetFile {
 			rep.FileScopedEvidenceTotal++
 			rep.fileScopedKinds[edge.EdgeType] = true
+			if confidence == DependencyConfidenceConfirmed {
+				rep.ConfirmedFileScopedTotal++
+				rep.confirmedFileScopedKinds[edge.EdgeType] = true
+			} else {
+				rep.CandidateFileScopedTotal++
+				rep.candidateFileScopedKinds[edge.EdgeType] = true
+			}
 		} else {
 			rep.PackageScopedEvidenceTotal++
 		}
 		byKind := grouped[edge.Source.File]
 		if byKind == nil {
-			byKind = map[string]*kindGroup{}
+			byKind = map[string]*dependencyKindGroup{}
 			grouped[edge.Source.File] = byKind
 		}
 		kg := byKind[edge.EdgeType]
 		if kg == nil {
-			kg = &kindGroup{}
+			kg = &dependencyKindGroup{}
 			byKind[edge.EdgeType] = kg
 		}
-		kg.edges = append(kg.edges, edge)
+		kg.edges = append(kg.edges, classified)
 	}
 
 	files := make([]string, 0, len(grouped))
 	for file := range grouped {
 		files = append(files, file)
 	}
-	sort.Strings(files)
+	sort.Slice(files, func(i, j int) bool {
+		iConfirmed := dependencyGroupsHaveConfirmed(grouped[files[i]])
+		jConfirmed := dependencyGroupsHaveConfirmed(grouped[files[j]])
+		if iConfirmed != jConfirmed {
+			return iConfirmed
+		}
+		return files[i] < files[j]
+	})
 	rep.allDependentFiles = append([]string(nil), files...)
 	rep.DependentsTotal = len(files)
 	if len(files) > dependencyFileCap {
@@ -214,13 +290,29 @@ func (rep *FileDependenciesReport) groupDependencyEdges(edges []graph.FileDepend
 		for kind := range grouped[file] {
 			kinds = append(kinds, kind)
 		}
-		sort.Strings(kinds)
+		sort.Slice(kinds, func(i, j int) bool {
+			iConfirmed := dependencyEdgesHaveConfirmed(grouped[file][kinds[i]].edges)
+			jConfirmed := dependencyEdgesHaveConfirmed(grouped[file][kinds[j]].edges)
+			if iConfirmed != jConfirmed {
+				return iConfirmed
+			}
+			return kinds[i] < kinds[j]
+		})
 		for _, kind := range kinds {
 			edges := grouped[file][kind].edges
+			sort.SliceStable(edges, func(i, j int) bool {
+				return edges[i].confidence == DependencyConfidenceConfirmed && edges[j].confidence != DependencyConfidenceConfirmed
+			})
 			kg := DependencyKindEvidence{Kind: kind, Total: len(edges), Samples: []DependencySample{}}
-			for i, edge := range edges {
-				scope := dependencyTargetScope(edge)
-				if scope == DependencyTargetFile {
+			for i, classified := range edges {
+				if classified.confidence == DependencyConfidenceConfirmed {
+					kg.ConfirmedTotal++
+					dep.ConfirmedTotal++
+				} else {
+					kg.CandidateTotal++
+					dep.CandidateTotal++
+				}
+				if classified.scope == DependencyTargetFile {
 					kg.FileScopedTotal++
 					dep.FileScopedTotal++
 				} else {
@@ -228,7 +320,7 @@ func (rep *FileDependenciesReport) groupDependencyEdges(edges []graph.FileDepend
 					dep.PackageScopedTotal++
 				}
 				if i < dependencySampleCap && sampleBudget > 0 {
-					kg.Samples = append(kg.Samples, dependencySample(edge, scope))
+					kg.Samples = append(kg.Samples, dependencySample(classified))
 					sampleBudget--
 					rep.SamplesTotal++
 				}
@@ -242,14 +334,56 @@ func (rep *FileDependenciesReport) groupDependencyEdges(edges []graph.FileDepend
 	rep.SamplesTruncated = rep.EvidenceTotal - rep.SamplesTotal
 }
 
-func dependencySample(edge graph.FileDependencyEdge, scope string) DependencySample {
+func dependencySample(classified classifiedDependencyEdge) DependencySample {
+	edge := classified.edge
 	return DependencySample{
-		Source:      dependencyLocation(edge.Source),
-		Target:      dependencyLocation(edge.Target),
-		TargetScope: scope,
-		Provenance:  edge.Provenance,
-		Weight:      edge.Weight,
+		Source:           dependencyLocation(edge.Source),
+		Target:           dependencyLocation(edge.Target),
+		TargetScope:      classified.scope,
+		Provenance:       edge.Provenance,
+		Weight:           edge.Weight,
+		Confidence:       classified.confidence,
+		ConfidenceReason: classified.reason,
 	}
+}
+
+func dependencyConfidence(edge graph.FileDependencyEdge, scope string, stale bool) (string, string) {
+	if stale {
+		return DependencyConfidenceCandidate, DependencyReasonStale
+	}
+	if scope == DependencyTargetPackage {
+		return DependencyConfidenceCandidate, DependencyReasonPackageScope
+	}
+	if edge.Provenance == graph.ProvPrecise {
+		return DependencyConfidenceConfirmed, DependencyReasonPrecise
+	}
+	// The Go parser marks unqualified same-package references at full weight after
+	// narrowing them to the caller's directory. Qualified calls retain the lower
+	// syntactic weight because their receiver type is unknown and they fan out to
+	// every same-named definition across packages.
+	if edge.Source.Language == "go" && edge.Target.Language == "go" &&
+		edge.Weight >= graph.WeightLSP && filepath.Dir(edge.Source.File) == filepath.Dir(edge.Target.File) {
+		return DependencyConfidenceConfirmed, DependencyReasonSamePackage
+	}
+	return DependencyConfidenceCandidate, DependencyReasonNameFanout
+}
+
+func dependencyEdgesHaveConfirmed(edges []classifiedDependencyEdge) bool {
+	for _, edge := range edges {
+		if edge.confidence == DependencyConfidenceConfirmed {
+			return true
+		}
+	}
+	return false
+}
+
+func dependencyGroupsHaveConfirmed(groups map[string]*dependencyKindGroup) bool {
+	for _, group := range groups {
+		if dependencyEdgesHaveConfirmed(group.edges) {
+			return true
+		}
+	}
+	return false
 }
 
 func dependencyLocation(n graph.FileDependencyNode) DependencyLocation {
@@ -354,6 +488,22 @@ func dependencyEvidenceKinds(rep *FileDependenciesReport, fileScopedOnly bool) [
 	}
 	out := make([]string, 0, len(seen))
 	for kind := range seen {
+		out = append(out, kind)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func dependencyEvidenceKindsForConfidence(rep *FileDependenciesReport, confidence string) []string {
+	var source map[string]bool
+	switch confidence {
+	case DependencyConfidenceConfirmed:
+		source = rep.confirmedFileScopedKinds
+	case DependencyConfidenceCandidate:
+		source = rep.candidateFileScopedKinds
+	}
+	out := make([]string, 0, len(source))
+	for kind := range source {
 		out = append(out, kind)
 	}
 	sort.Strings(out)

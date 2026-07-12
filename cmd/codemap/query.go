@@ -103,8 +103,16 @@ var (
 	pathCmd = &cobra.Command{
 		Use:   "path <from> <to>",
 		Short: "Shortest call path between two symbols",
-		Args:  cobra.ExactArgs(2),
-		RunE:  runPath,
+		Long: `Find the shortest indexed call path between two symbols.
+
+Bare names may match several definitions. Use unique fully qualified names to
+select exact endpoints. Human-readable results always state call-graph
+confidence. Run 'codemap index --precise' when a name-based or unresolved
+result is not strong enough for the decision you are making.`,
+		Example: `  codemap path app.Main app.Helper
+  codemap path app.Controller.Run app.Store.Save`,
+		Args: cobra.ExactArgs(2),
+		RunE: runPath,
 	}
 	symbolsCmd = &cobra.Command{
 		Use:   "symbols <file>",
@@ -147,7 +155,10 @@ var (
 func symbolOrAtArgs(cmd *cobra.Command, args []string) error {
 	at, _ := cmd.Flags().GetString("at")
 	if at != "" {
-		return cobra.MaximumNArgs(1)(cmd, args)
+		if len(args) > 0 {
+			return fmt.Errorf("--at and positional symbol arguments are mutually exclusive")
+		}
+		return nil
 	}
 	return cobra.ExactArgs(1)(cmd, args)
 }
@@ -155,7 +166,10 @@ func symbolOrAtArgs(cmd *cobra.Command, args []string) error {
 func contextOrAtArgs(cmd *cobra.Command, args []string) error {
 	at, _ := cmd.Flags().GetString("at")
 	if at != "" {
-		return cobra.MaximumNArgs(1)(cmd, args)
+		if len(args) > 0 {
+			return fmt.Errorf("--at and positional symbol arguments are mutually exclusive")
+		}
+		return nil
 	}
 	return cobra.MinimumNArgs(1)(cmd, args)
 }
@@ -405,11 +419,13 @@ func runReview(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	if rep.Stale && rep.Staleness != nil {
-		fmt.Printf("  ⚠ index is stale: %d changed, %d new, %d deleted — reindex for accurate impact\n",
-			rep.Staleness.Changed, rep.Staleness.New, rep.Staleness.Deleted)
+	if line := reviewStalenessLine(rep); line != "" {
+		fmt.Println(line)
 	}
 	fmt.Printf("  changed files:   %d\n", len(rep.ChangedFiles))
+	if line := reviewDeletionAnalysisLine(rep.DeletionAnalysis); line != "" {
+		fmt.Println(line)
+	}
 	fmt.Printf("  changed symbols: %d\n", len(rep.ChangedSymbols))
 	fmt.Printf("  blast radius:    %d (depth ≤ %d)\n", len(rep.BlastRadius), rep.Depth)
 	fmt.Printf("  covering tests:  %d\n", len(rep.CoveringTests))
@@ -458,6 +474,30 @@ func runReview(cmd *cobra.Command, args []string) error {
 		fmt.Println("  ⚠ no tests cover these changes")
 	}
 	return nil
+}
+
+func reviewStalenessLine(rep *app.ReviewReport) string {
+	if rep == nil || !rep.Stale || rep.Staleness == nil {
+		return ""
+	}
+	if rep.DeletionAnalysis != nil && rep.DeletionAnalysis.Analyzed > 0 {
+		return fmt.Sprintf("  ⚠ index is stale: %d changed, %d new, %d deleted — run selected tests before reindexing; deleted-file impact uses the last index",
+			rep.Staleness.Changed, rep.Staleness.New, rep.Staleness.Deleted)
+	}
+	return fmt.Sprintf("  ⚠ index is stale: %d changed, %d new, %d deleted — reindex for accurate impact",
+		rep.Staleness.Changed, rep.Staleness.New, rep.Staleness.Deleted)
+}
+
+func reviewDeletionAnalysisLine(analysis *app.ReviewDeletionAnalysis) string {
+	if analysis == nil {
+		return ""
+	}
+	source := strings.ReplaceAll(strings.TrimSpace(analysis.Source), "_", " ")
+	if source == "" {
+		source = "last index"
+	}
+	return fmt.Sprintf("  deleted analysis: %d/%d analyzed from %s · %d missing",
+		analysis.Analyzed, analysis.Files, source, analysis.Missing)
 }
 
 // runRisk renders a symbol's change-risk: one score + level, the caller/test
@@ -647,7 +687,7 @@ func runFileImpact(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  covering tests:   %d\n", len(rep.CoveringTests))
 	switch rep.DeleteVerdict {
 	case app.DeleteVerdictUnsafe:
-		fmt.Println("  ⚠ delete verdict: unsafe — indexed calls prove external dependencies")
+		fmt.Println("  ⚠ delete verdict: unsafe — confirmed indexed dependency evidence proves external dependencies")
 	default:
 		fmt.Println("  ? delete verdict: unknown — dependency evidence is not complete enough to prove safety")
 	}
@@ -973,10 +1013,7 @@ func runPath(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("No call path from %s to %s\n", rep.From, rep.To)
 		}
-		renderCallGraphReliability(rep.CallGraph, rep.Resolution, rep.Note)
-		if rep.Stale {
-			fmt.Println("  ⚠ index is stale — reindex before trusting this path result")
-		}
+		renderPathReliability(rep)
 		renderAnnotations(rep.Annotations)
 		return nil
 	}
@@ -988,8 +1025,19 @@ func runPath(cmd *cobra.Command, args []string) error {
 	for _, p := range rep.Path {
 		fmt.Printf("  %-30s %s:%d\n", p.Symbol, p.File, p.StartLine)
 	}
+	renderPathReliability(rep)
 	renderAnnotations(rep.Annotations)
 	return nil
+}
+
+func renderPathReliability(rep *app.PathReport) {
+	if rep == nil {
+		return
+	}
+	renderCallGraphReliability(rep.CallGraph, rep.Resolution, rep.Note)
+	if rep.Stale {
+		fmt.Println("  ⚠ index is stale — reindex before trusting this path result")
+	}
 }
 
 func pathReportAnswered(rep *app.PathReport) bool {
