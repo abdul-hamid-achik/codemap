@@ -144,10 +144,77 @@ var cacheDropCmd = &cobra.Command{
 	},
 }
 
+var cacheExportCmd = &cobra.Command{
+	Use:   "export <file.tar.gz>",
+	Short: "Export the current index to a portable, team/CI-shareable tarball",
+	Long: `Export the project's current index (graph + vectors, when present) to a
+self-contained tar.gz — the same snapshot codemap's fcheap-backed cache uses,
+but portable: no shared fcheap store, no same-machine requirement. Hand the
+file to another runner (or teammate) and 'codemap cache import' restores it
+with no re-indexing.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sess, err := openSession(cmd)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = sess.Close() }()
+		svc := app.NewService(sess)
+		rep, err := svc.CacheExport(context.Background(), targetDir(cmd), args[0])
+		if err != nil {
+			return err
+		}
+		if jsonOut(cmd) {
+			return printJSON(rep)
+		}
+		fmt.Printf("exported index to %s (tree %s, %d nodes, %d edges, %d vectors)\n",
+			rep.Path, shortHash(rep.TreeHash, 12), rep.Nodes, rep.Edges, rep.Vectors)
+		return nil
+	},
+}
+
+var cacheImportCmd = &cobra.Command{
+	Use:   "import <file.tar.gz>",
+	Short: "Import a portable index tarball produced by 'cache export'",
+	Long: `Import a tarball produced by 'codemap cache export' into the project at the
+current (or --path) directory, registering it first if it isn't indexed yet —
+the common CI case: a fresh checkout with no prior 'codemap init'/'index'.
+
+Refuses (exit 1) when: the tarball's wrapper schema is unsupported, its
+embedding profile disagrees with the current provider/model (never mixes
+embedding spaces, force or not), or its tree hash doesn't match the current
+working tree (pass --force to import anyway — e.g. seeding a PR branch's
+index from its base branch ahead of an incremental catch-up reindex).`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sess, err := openSession(cmd)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = sess.Close() }()
+		svc := app.NewService(sess)
+		force, _ := cmd.Flags().GetBool("force")
+		rep, err := svc.CacheImport(context.Background(), targetDir(cmd), args[0], force)
+		if err != nil {
+			return err
+		}
+		if jsonOut(cmd) {
+			return printJSON(rep)
+		}
+		if rep.Warning != "" {
+			fmt.Println("warning:", rep.Warning)
+		}
+		fmt.Printf("imported index from %s (project %s, %d nodes, %d edges, %d vectors)\n",
+			rep.Path, rep.Project, rep.Nodes, rep.Edges, rep.Vectors)
+		return nil
+	},
+}
+
 func init() {
 	cacheListCmd.Flags().Bool("rebuild", false, "reconstruct the list from fcheap (use if the local pointer file is lost)")
 	cacheDropCmd.Flags().String("tree", "", "tree hash of the cache entry to drop")
 	cacheDropCmd.Flags().Bool("all", false, "drop ALL cached indexes for this repo")
-	cacheCmd.AddCommand(cacheSaveCmd, cacheRestoreCmd, cacheListCmd, cacheDropCmd)
+	cacheImportCmd.Flags().Bool("force", false, "import even if the archive's tree hash doesn't match the current working tree")
+	cacheCmd.AddCommand(cacheSaveCmd, cacheRestoreCmd, cacheListCmd, cacheDropCmd, cacheExportCmd, cacheImportCmd)
 	rootCmd.AddCommand(cacheCmd)
 }

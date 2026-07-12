@@ -121,10 +121,10 @@ codemap/
 │                              #   .github/workflows/codemap-review.yml via `uses: ./integrations/github-action`;
 │                              #   consumers: `uses: abdul-hamid-achik/codemap/integrations/github-action@main`)
 ├── .claude-plugin/            # marketplace.json (repo-root plugin marketplace entry)
-├── specs/                     # glyphrun E2E specs (*.yml, 42): version/help/index_status/query/context/
+├── specs/                     # glyphrun E2E specs (*.yml, 43): version/help/index_status/query/context/
 │                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
 │                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
-│                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/grep/
+│                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/cache_export/grep/
 │                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/coverage/
 │                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies/
 │                              #   review_deletion/references/studio_annotations/agent_setup
@@ -265,7 +265,8 @@ task install         # go install ./cmd/codemap
   `callers`, `callees`, `impact`, and `risk` accept `selector`; `path` accepts
   paired `from_selector`/`to_selector`. Resolution prefers file+FQN+kind so
   ordinary line shifts survive reindex, with start_line as tie-break/fallback.
-- CLI mirrors these 1:1: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`), `file-impact`, `dependencies`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read-order`, `symbols`, `symbol-at`, `find`, `grep` (`--regex`/`-i`), `source`, `context` (multi-arg → batch), `related-files`, `annotate`/`annotations`, `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `daemon start`/`status`/`stop`, `agent setup`/`list`/`playbook` (register codemap with an AI coding harness — CLI-only, no MCP tool), `docs`, `serve`, `studio` — all query commands accept `--json`.
+- CLI mirrors these 1:1: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`), `file-impact`, `dependencies`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read-order`, `symbols`, `symbol-at`, `find`, `grep` (`--regex`/`-i`), `source`, `context` (multi-arg → batch), `related-files`, `annotate`/`annotations`, `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `cache export`/`import` (`--force`; portable team/CI-shareable
+index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start`/`status`/`stop`, `agent setup`/`list`/`playbook` (register codemap with an AI coding harness — CLI-only, no MCP tool), `docs`, `serve`, `studio` — all query commands accept `--json`.
 - **Accuracy model** (be honest with users): the graph is name-based by default — intra-package
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`

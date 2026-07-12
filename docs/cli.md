@@ -149,6 +149,8 @@ stash vault, and both degrade to a normal index when `fcheap` isn't on `$PATH`. 
 | `codemap cache restore` | Restore the cached index matching the current working tree (skips extraction + embedding entirely); a miss is a no-op |
 | `codemap cache list [--rebuild]` | List cached indexes for this repo (stash IDs, tree hashes, node/vector counts, age). `--rebuild` reconstructs from fcheap if the local pointer file is lost |
 | `codemap cache drop --tree <hash> \| --all` | Drop one cached index by tree hash, or every cached index for this repo |
+| `codemap cache export <file.tar.gz>` | Package the current index into a self-contained, portable tarball — no fcheap/shared store needed, so a CI job can hand it to the next runner |
+| `codemap cache import <file.tar.gz> [--force]` | Restore a tarball from `cache export` (registers the project first if unindexed). Refuses a schema/embedding-profile mismatch outright; refuses a working-tree hash mismatch unless `--force` |
 
 `codemap index` wraps cache for you behind `--cache` (on by default): it **auto-restores**
 from a matching cache entry before a `--reindex` (skipping the full wipe+extract+embed
