@@ -1,0 +1,6 @@
+{
+  "callees": [
+    "context.Background",
+    "git.PlainCloneContext"
+  ]
+}

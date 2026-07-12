@@ -1,0 +1,15 @@
+{
+  "_comment": "The exact fixture symbols each task points at. Auditable + committed so a reviewer can re-derive the truth. Regenerate truth after any change here or a fixture SHA bump: go run ./bench/tasks/truth/gen. Pkg is the Go package NAME (root go-git package is 'git'). Recv is a receiver type without the pointer star. Targets are chosen for tractable answer-set sizes.",
+  "blast_depth": 2,
+  "find_def": { "pkg": "plumbing", "name": "NewHash" },
+  "callers": { "pkg": "plumbing", "name": "ComputeHash" },
+  "callees": { "pkg": "git", "name": "PlainClone" },
+  "blast_radius": { "pkg": "plumbing", "name": "NewTagReferenceName" },
+  "covering_tests": { "pkg": "plumbing", "name": "NewTagReferenceName" },
+  "dead_code": { "pkg": "plumbing", "name": "NewHasher" },
+  "call_path_from": { "pkg": "plumbing", "name": "ComputeHash" },
+  "call_path_to": { "pkg": "plumbing", "name": "NewHasher" },
+  "file_outline": "plumbing/hash.go",
+  "rename_impact": { "pkg": "plumbing", "recv": "ObjectType", "name": "String" },
+  "callers_method": { "pkg": "plumbing", "recv": "ReferenceName", "name": "Short" }
+}

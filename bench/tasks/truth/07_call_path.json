@@ -1,0 +1,46 @@
+{
+  "edges": [
+    [
+      "hash.New",
+      "fmt.Sprintf"
+    ],
+    [
+      "plumbing.ComputeHash",
+      "io.Writer.Write"
+    ],
+    [
+      "plumbing.ComputeHash",
+      "plumbing.Hasher.Sum"
+    ],
+    [
+      "plumbing.ComputeHash",
+      "plumbing.NewHasher"
+    ],
+    [
+      "plumbing.Hasher.Sum",
+      "hash.Hash.Sum"
+    ],
+    [
+      "plumbing.NewHasher",
+      "hash.New"
+    ],
+    [
+      "plumbing.NewHasher",
+      "io.Writer.Write"
+    ],
+    [
+      "plumbing.NewHasher",
+      "plumbing.ObjectType.Bytes"
+    ],
+    [
+      "plumbing.NewHasher",
+      "strconv.FormatInt"
+    ],
+    [
+      "plumbing.ObjectType.Bytes",
+      "plumbing.ObjectType.String"
+    ]
+  ],
+  "from": "plumbing.ComputeHash",
+  "to": "plumbing.NewHasher"
+}

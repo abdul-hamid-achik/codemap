@@ -1,0 +1,8 @@
+{
+  "id": "06_dead_code",
+  "category": "verify",
+  "grader": "exact",
+  "answer_key": "alive",
+  "truth": "truth/06_dead_code.json",
+  "prompt": "In this repository, is the function `NewHasher` in package `plumbing` called anywhere (is it live code)? Answer ONLY as a json fenced block: {\"alive\": true} or {\"alive\": false}."
+}

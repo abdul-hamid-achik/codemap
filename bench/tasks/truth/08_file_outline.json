@@ -1,0 +1,9 @@
+{
+  "functions": [
+    "ComputeHash",
+    "HashesSort",
+    "IsHash",
+    "NewHash",
+    "NewHasher"
+  ]
+}

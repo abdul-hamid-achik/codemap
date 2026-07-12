@@ -1,0 +1,8 @@
+{
+  "id": "07_call_path",
+  "category": "understand",
+  "grader": "contains_path",
+  "answer_key": "path",
+  "truth": "truth/07_call_path.json",
+  "prompt": "In this repository, find a call path from `ComputeHash` (package `plumbing`) to `NewHasher` (package `plumbing`) \u2014 a sequence where each function calls the next. Use fully-qualified names: `package.Function` for package-level functions and `package.ReceiverType.Method` for methods (receiver type WITHOUT any pointer `*`). `package` is the Go package NAME (the root go-git package is `git`). Test-suite methods count too and are named like `git.RepositorySuite.TestFoo`. Answer ONLY as a json fenced block: {\"path\": [\"plumbing.ComputeHash\", ..., \"plumbing.NewHasher\"]}."
+}

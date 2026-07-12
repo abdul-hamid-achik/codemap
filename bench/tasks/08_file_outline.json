@@ -1,0 +1,8 @@
+{
+  "id": "08_file_outline",
+  "category": "orient",
+  "grader": "set_equal",
+  "answer_key": "functions",
+  "truth": "truth/08_file_outline.json",
+  "prompt": "In this repository, list the exported PACKAGE-LEVEL functions defined in the file `plumbing/hash.go` (bare names; exclude methods that have a receiver, and exclude unexported functions). Answer ONLY as a json fenced block: {\"functions\": [\"Name\", ...]}."
+}

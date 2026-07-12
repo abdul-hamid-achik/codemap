@@ -1,0 +1,6 @@
+# Pinned benchmark fixture. Bump = regenerate + re-verify ALL ground truth
+# (bench/tasks/truth/*.json), because tasks and truth are frozen to this SHA.
+# Treat a SHA change as a deliberate, reviewed change — not a casual update.
+repo=https://github.com/go-git/go-git
+sha=48a1ae05eec4fff4dd0343744a00bf8d6a7a0b4b
+tag=v5.16.5

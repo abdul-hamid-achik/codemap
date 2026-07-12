@@ -1,0 +1,8 @@
+{
+  "id": "05_covering_tests",
+  "category": "verify",
+  "grader": "set_equal",
+  "answer_key": "tests",
+  "truth": "truth/05_covering_tests.json",
+  "prompt": "In this repository, which test functions COVER the function `NewTagReferenceName` in package `plumbing` (i.e. transitively call it)? Include gocheck suite test methods. Answer BARE test names (e.g. `TestFoo`, not a receiver-qualified name). Answer ONLY as a json fenced block: {\"tests\": [\"TestFoo\", ...]}."
+}

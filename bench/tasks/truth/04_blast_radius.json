@@ -1,0 +1,18 @@
+{
+  "symbols": [
+    "git.RemoteSuite.TestPushFollowTags",
+    "git.Repository.CreateTag",
+    "git.RepositorySuite.TestCreateTagAnnotated",
+    "git.RepositorySuite.TestCreateTagAnnotatedBadHash",
+    "git.RepositorySuite.TestCreateTagAnnotatedBadOpts",
+    "git.RepositorySuite.TestCreateTagCanonicalize",
+    "git.RepositorySuite.TestCreateTagLightweight",
+    "git.RepositorySuite.TestCreateTagLightweightExists",
+    "git.RepositorySuite.TestCreateTagSigned",
+    "git.RepositorySuite.TestCreateTagSignedBadKey",
+    "git.RepositorySuite.TestDeleteTagAnnotatedUnpacked",
+    "git.RepositorySuite.TestInvalidTagName",
+    "plumbing.ReferenceSuite.TestNewTagReferenceName",
+    "serverinfo.ServerInfoSuite.TestUpdateServerInfoBasicChange"
+  ]
+}

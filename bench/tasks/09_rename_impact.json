@@ -1,0 +1,8 @@
+{
+  "id": "09_rename_impact",
+  "category": "verify",
+  "grader": "numeric",
+  "answer_key": "count",
+  "truth": "truth/09_rename_impact.json",
+  "prompt": "In this repository, if the method `String` on type `ObjectType` in package `plumbing` is renamed, how many DISTINCT functions call it (count call sites at function granularity)? Answer ONLY as a json fenced block: {\"count\": <int>}."
+}

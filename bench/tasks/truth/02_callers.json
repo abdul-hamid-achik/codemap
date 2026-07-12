@@ -1,0 +1,8 @@
+{
+  "callers": [
+    "diff.testFile.Hash",
+    "plumbing.HashSuite.TestComputeHash",
+    "plumbing.HashSuite.TestNewHash",
+    "plumbing.MemoryObject.Hash"
+  ]
+}
