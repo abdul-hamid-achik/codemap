@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/git"
@@ -303,65 +301,6 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 			map[string]any{"path": cwd, "symbol": rep.UntestedSymbols[0].Symbol, "depth": opts.Depth}))
 	}
 	return rep, nil
-}
-
-// testCommands turns covering-test nodes into copy/paste-ready commands. It
-// deliberately emits a small bounded set and groups Go tests by package so a
-// weaker model doesn't have to infer tool syntax from file names.
-func testCommands(tests []ImpactNode) []string {
-	goTests := map[string][]string{}
-	other := map[string]bool{}
-	for _, t := range tests {
-		ext := strings.ToLower(filepath.Ext(t.File))
-		switch ext {
-		case ".go":
-			dir := filepath.Dir(t.File)
-			if dir == "." {
-				dir = ""
-			}
-			if t.Symbol != "" {
-				goTests[dir] = append(goTests[dir], regexp.QuoteMeta(t.Symbol))
-			}
-		case ".ts", ".tsx", ".js", ".jsx":
-			other["bun test "+t.File] = true
-		case ".py":
-			cmd := "pytest " + t.File
-			if t.Symbol != "" {
-				cmd += "::" + t.Symbol
-			}
-			other[cmd] = true
-		}
-	}
-	cmds := make([]string, 0, len(goTests)+len(other))
-	dirs := make([]string, 0, len(goTests))
-	for dir := range goTests {
-		dirs = append(dirs, dir)
-	}
-	sort.Strings(dirs)
-	for _, dir := range dirs {
-		names := dedupStrings(goTests[dir])
-		sort.Strings(names)
-		pkg := "./"
-		if dir != "" {
-			pkg += filepath.ToSlash(dir)
-		}
-		// A giant -run regex is worse than the inference work it saves: it floods
-		// context, hits shell limits, and is fragile when a changed test file maps
-		// to many subtests. Above the small focused threshold, run the package.
-		if len(names) > 12 {
-			cmds = append(cmds, "go test "+pkg)
-		} else {
-			cmds = append(cmds, fmt.Sprintf("go test %s -run '^(%s)$'", pkg, strings.Join(names, "|")))
-		}
-	}
-	for cmd := range other {
-		cmds = append(cmds, cmd)
-	}
-	sort.Strings(cmds)
-	if len(cmds) > 10 {
-		cmds = cmds[:10]
-	}
-	return cmds
 }
 
 // symbolsForChangedFile resolves a diff path (relative to the git root) to its

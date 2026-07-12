@@ -25,6 +25,11 @@ type ContextReport struct {
 	Callees     []SymbolRef     `json:"callees"`     // what it calls (capped — see callees_total)
 	References  []ReferenceSite `json:"references"`  // enclosing scopes that use it as a value (capped)
 	Tests       []ImpactNode    `json:"tests"`       // tests covering it (capped — see tests_total)
+	// TestCommands is the FULL (uncapped) Tests list turned into copy/paste-ready
+	// runner invocations via the same testCommands helper codemap_review and
+	// codemap_impact use, so a symbol yields identical commands across all three
+	// surfaces even when Tests itself is capped for display.
+	TestCommands []string `json:"test_commands,omitempty"`
 	// *Total are the true counts before capping, so an agent knows when a list was
 	// truncated and can call codemap_callers/codemap_callees/codemap_references/
 	// codemap_impact for the
@@ -369,6 +374,10 @@ func applyContextImpact(rep *ContextReport, imp *ImpactReport, err error) {
 	}
 	rep.TestsTotal = len(imp.Tests)
 	rep.Tests = capSlice(imp.Tests, contextListCap)
+	// Derive from the full (uncapped) imp.Tests, not the capped rep.Tests, so
+	// context's test_commands matches what codemap_impact would produce for the
+	// same symbol even when there are more than contextListCap covering tests.
+	rep.TestCommands = imp.TestCommands
 	rep.BlastRadius = len(imp.BlastRadius)
 	if rep.Note == "" {
 		rep.Note = imp.Note
