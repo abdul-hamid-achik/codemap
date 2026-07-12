@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 400" width="520" height="400" role="img" aria-labelledby="cm-hero-title">
+  <title id="cm-hero-title">codemap_impact query returning a cited answer in a studio terminal pane</title>
+
+  <rect x="1.5" y="1.5" width="517" height="397" rx="14" fill="#1a1d23" stroke="#3a3f4b" stroke-width="1.5"/>
+
+  <!-- title bar -->
+  <line x1="1.5" y1="52" x2="518.5" y2="52" stroke="#3a3f4b" stroke-width="1"/>
+  <text x="28" y="32" font-family="Menlo, Consolas, 'SF Mono', monospace" font-size="13" font-weight="600" letter-spacing="2" fill="#8a8f98">CODEMAP &#183; STUDIO</text>
+  <text x="492" y="32" text-anchor="end" font-family="Menlo, Consolas, 'SF Mono', monospace" font-size="13" font-weight="700" letter-spacing="2" fill="#a6e22e">CITED</text>
+
+  <!-- transcript -->
+  <text font-family="Menlo, Consolas, 'SF Mono', monospace" font-size="17" xml:space="preserve">
+    <tspan x="28" y="140"><tspan fill="#8a8f98">&#9679; </tspan><tspan fill="#66d9ef">codemap_impact</tspan><tspan fill="#e6e6e6">(</tspan><tspan fill="#e6db74">"Store.NodeAtLine"</tspan><tspan fill="#e6e6e6">)</tspan></tspan>
+    <tspan x="28" y="172" fill="#e6e6e6">{</tspan>
+    <tspan x="52" y="204"><tspan fill="#a6e22e">"direct_callers"</tspan><tspan fill="#e6e6e6">: 7,</tspan></tspan>
+    <tspan x="52" y="236"><tspan fill="#a6e22e">"blast_radius"</tspan><tspan fill="#e6e6e6">: 23,</tspan></tspan>
+    <tspan x="52" y="268"><tspan fill="#a6e22e">"covering_tests"</tspan><tspan fill="#e6e6e6">: </tspan><tspan fill="#e6db74">13</tspan></tspan>
+    <tspan x="28" y="300" fill="#e6e6e6">}</tspan>
+  </text>
+</svg>

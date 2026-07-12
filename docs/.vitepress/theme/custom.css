@@ -51,31 +51,94 @@
   max-width: 42em;
 }
 
+/* hero image: the studio terminal card. Desktop-only — a stacked 320px
+   circle-cropped preview above the fold reads as clutter on mobile, so we
+   skip VitePress's default image treatment entirely below 960px. */
+.VPHero .image,
+.VPHero .image-bg {
+  display: none;
+}
+
+@media (min-width: 960px) {
+  .VPHero .image {
+    display: block;
+  }
+
+  .VPHero.has-image .image-container {
+    width: 100%;
+    height: 100%;
+    max-width: 520px;
+    transform: none;
+  }
+
+  .VPHero .image .image-container .image-src {
+    max-width: 520px;
+    max-height: 400px;
+    width: 100%;
+    height: auto;
+    border-radius: 14px;
+    box-shadow:
+      0 0 0 1px var(--vp-c-divider),
+      0 24px 64px -28px color-mix(in srgb, var(--vp-c-brand-1) 30%, transparent);
+  }
+}
+
 .VPFeature h2 {
   font-family: 'Space Grotesk', var(--vp-font-family-base);
   letter-spacing: -0.01em;
 }
 
+/* quiet polish: a real border (default is border-color == background,
+   i.e. invisible), a mono accent, and a restrained hover lift */
+.VPFeatures .items .VPFeature {
+  border-color: var(--vp-c-divider);
+}
+
+.VPFeatures .items .VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .VPFeatures .items .VPFeature {
+    transition: border-color 150ms ease, transform 150ms ease;
+  }
+  .VPFeatures .items .VPFeature:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* one accent, same color on all six cards — not a rainbow */
+.VPFeature h2.title::before {
+  content: '\25b8\a0';
+  font-family: var(--vp-font-family-mono);
+  color: var(--vp-c-brand-1);
+}
+
 /* ---------- custom landing sections ---------- */
 
 .cm-section {
-  margin: 48px 0 0;
+  margin: 88px 0 0;
+  padding-top: 40px;
+  border-top: 1px solid var(--vp-c-divider);
 }
 
-.cm-section > h2 {
+/* kicker + heading form one lockup: kill vp-doc's default h2 gap */
+.vp-doc .cm-section h2 {
   font-family: 'Space Grotesk', var(--vp-font-family-base);
   letter-spacing: -0.01em;
   border-top: none;
+  margin: 0 0 16px;
+  padding-top: 0;
 }
 
-.cm-kicker {
+.vp-doc .cm-kicker {
   font-family: var(--vp-font-family-mono);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--vp-c-brand-1);
-  margin: 0 0 4px;
+  margin: 0 0 10px;
 }
 
 /* the signature: two agent transcripts, same question ------------------- */
@@ -159,7 +222,7 @@
 
 /* harness chips ---------------------------------------------------------- */
 
-.cm-chips {
+.vp-doc .cm-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -168,7 +231,7 @@
   list-style: none;
 }
 
-.cm-chips li {
+.vp-doc .cm-chips li {
   margin: 0;
   font-family: var(--vp-font-family-mono);
   font-size: 12.5px;
@@ -177,6 +240,11 @@
   background: var(--vp-c-bg-soft);
   border: 1px solid var(--vp-c-divider);
   color: var(--vp-c-text-2);
+  list-style: none;
+}
+
+.vp-doc .cm-chips li::marker {
+  content: none;
 }
 
 .cm-chips li.on {
@@ -184,11 +252,60 @@
   color: var(--vp-c-brand-1);
 }
 
+/* a single subtle ring on load to say "this one's live" — once, then quiet */
+@media (prefers-reduced-motion: no-preference) {
+  .cm-chips li.on {
+    animation: cm-chip-pulse 2s ease-out 1;
+  }
+}
+
+@keyframes cm-chip-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--vp-c-brand-1) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--vp-c-brand-1) 0%, transparent);
+  }
+}
+
 /* quiet footnote */
 .cm-note {
   color: var(--vp-c-text-3);
   font-size: 13px;
   margin-top: 8px;
+}
+
+.cm-note-center {
+  text-align: center;
+}
+
+/* install section: two commands, side by side once there's room ---------- */
+
+.cm-install-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  margin: 24px 0 8px;
+}
+
+@media (min-width: 720px) {
+  .cm-install-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.vp-doc .cm-install-label {
+  font-family: var(--vp-font-family-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cm-muted);
+  margin: 0 0 8px;
+}
+
+.vp-doc .cm-install-cell div[class*='language-'] {
+  margin: 0;
 }
 
 @media (max-width: 480px) {

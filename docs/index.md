@@ -4,6 +4,9 @@ hero:
   name: codemap
   text: Your agent greps. codemap knows.
   tagline: A local-first code graph + semantic search your coding agent calls over MCP — who calls this, what breaks, which tests cover it. One pure-Go binary, fully offline, 39 tools.
+  image:
+    src: /hero-card.svg
+    alt: "codemap_impact(\"Store.NodeAtLine\") returning a cited answer in a studio terminal pane"
   actions:
     - theme: brand
       text: Set up your agent
@@ -64,7 +67,7 @@ features:
   </div>
 </div>
 
-<p class="cm-note">Real shape, real repo — this is codemap answering about its own source. The structure is precomputed once at index time; queries are milliseconds and work offline. In a 60-session directional A/B on go-git, the codemap arm used <strong>59% fewer tool calls</strong> at <strong>43% lower cost</strong> with correctness tied (wall-clock ran higher in that run) — full table and methodology in <a href="https://github.com/abdul-hamid-achik/codemap/tree/main/bench">bench/</a>.</p>
+<p class="cm-note">Real shape, real repo — this is codemap answering about its own source. The structure is precomputed once at index time; queries are milliseconds and work offline. In a hermetic 60-session A/B on go-git, the codemap arm used <strong>26% fewer tool calls</strong> and ran <strong>23% faster</strong> at equal cost — directional, warts included (it spends more input tokens on tool schemas and dropped one task) — full tables and methodology in <a href="https://github.com/abdul-hamid-achik/codemap/tree/main/bench">bench/</a>.</p>
 
 </div>
 
@@ -118,11 +121,27 @@ jobs:
 
 ## Two ways in
 
+<div class="cm-install-grid">
+<div class="cm-install-cell">
+
+<p class="cm-install-label">brew</p>
+
 ```bash
-brew install abdul-hamid-achik/tap/codemap   # macOS / Linux
+brew install abdul-hamid-achik/tap/codemap
+```
+
+</div>
+<div class="cm-install-cell">
+
+<p class="cm-install-label">go</p>
+
+```bash
 go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 ```
 
-<p class="cm-note">Then: <code>codemap init && codemap index</code> in any repo. Go, TypeScript, JavaScript, Python, and Vue out of the box — <code>--precise</code> upgrades the call graph to exact resolution.</p>
+</div>
+</div>
+
+<p class="cm-note cm-note-center">Then: <code>codemap init && codemap index</code> in any repo. Go, TypeScript, JavaScript, Python, and Vue out of the box — <code>--precise</code> upgrades the call graph to exact resolution.</p>
 
 </div>

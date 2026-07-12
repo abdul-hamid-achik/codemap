@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>codemap</title>
+  <!-- node-graph glyph: 3 dots + 3 edges, studio cyan -->
+  <g transform="translate(2,2)">
+    <line x1="30" y1="5" x2="5" y2="55" stroke="#66d9ef" stroke-width="3" stroke-linecap="round"/>
+    <line x1="30" y1="5" x2="55" y2="55" stroke="#66d9ef" stroke-width="3" stroke-linecap="round"/>
+    <line x1="5" y1="55" x2="55" y2="55" stroke="#66d9ef" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="30" cy="5" r="7.5" fill="#66d9ef"/>
+    <circle cx="5" cy="55" r="7.5" fill="#66d9ef"/>
+    <circle cx="55" cy="55" r="7.5" fill="none" stroke="#a6e22e" stroke-width="3"/>
+  </g>
+</svg>
