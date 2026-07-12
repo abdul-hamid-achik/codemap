@@ -64,7 +64,7 @@ features:
   </div>
 </div>
 
-<p class="cm-note">Real shape, real repo — this is codemap answering about its own source. The structure is precomputed once at index time; queries are milliseconds and work offline.</p>
+<p class="cm-note">Real shape, real repo — this is codemap answering about its own source. The structure is precomputed once at index time; queries are milliseconds and work offline. In a 60-session directional A/B on go-git, the codemap arm used <strong>59% fewer tool calls</strong> at <strong>43% lower cost</strong> with correctness tied (wall-clock ran higher in that run) — full table and methodology in <a href="https://github.com/abdul-hamid-achik/codemap/tree/main/bench">bench/</a>.</p>
 
 </div>
 
