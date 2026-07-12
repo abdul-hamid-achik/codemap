@@ -44,7 +44,12 @@ type ImpactReport struct {
 	Resolution    string               `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (e.g. TS/JS/Python without --precise) — direct_callers/blast_radius/tests are unavailable, not empty
 	CallGraph     string               `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none (keep Resolution for the human sentence)
 	Annotations   []graph.Annotation   `json:"annotations,omitempty"` // notes/data pinned to this symbol
-	Next          []NextAction         `json:"next,omitempty"`
+	// TestCommands is Tests turned into copy/paste-ready runner invocations (see
+	// testCommands) — the same derivation codemap_review applies to its
+	// covering_tests, so a pre-edit orientation call is just as actionable as the
+	// post-edit one.
+	TestCommands []string     `json:"test_commands,omitempty"`
+	Next         []NextAction `json:"next,omitempty"`
 }
 
 // Impact computes impact analysis for a symbol: its definition site(s), direct
@@ -206,6 +211,9 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 		rep.Untested = false
 		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang)
 	}
+	// Same derivation codemap_review applies to covering_tests, so impact — the
+	// more common pre-edit path — is just as runnable as the post-edit review.
+	rep.TestCommands = testCommands(rep.Tests)
 
 	// Surface any annotations pinned to this symbol — by the query name or by a
 	// resolved FQN/symbol of its definition sites — so analysis shows pinned
@@ -428,4 +436,69 @@ func nodeAnnotationsFor(g *graph.Store, projectID int64, candidates ...string) [
 		}
 	}
 	return out
+}
+
+// testCommands turns covering-test nodes into copy/paste-ready commands. It
+// deliberately emits a small bounded set and groups Go tests by package so a
+// weaker model doesn't have to infer tool syntax from file names. Shared by
+// every surface that carries a Tests/covering_tests list — codemap_review's
+// covering_tests, codemap_impact/context's tests, and context_batch's
+// per-symbol bundles — so the same symbol always yields the same commands
+// regardless of which report produced the Tests list (a Heuristic:true node
+// is treated the same as a call-graph-confirmed one; it still names a real
+// test file worth running).
+func testCommands(tests []ImpactNode) []string {
+	goTests := map[string][]string{}
+	other := map[string]bool{}
+	for _, t := range tests {
+		ext := strings.ToLower(filepath.Ext(t.File))
+		switch ext {
+		case ".go":
+			dir := filepath.Dir(t.File)
+			if dir == "." {
+				dir = ""
+			}
+			if t.Symbol != "" {
+				goTests[dir] = append(goTests[dir], regexp.QuoteMeta(t.Symbol))
+			}
+		case ".ts", ".tsx", ".js", ".jsx":
+			other["bun test "+t.File] = true
+		case ".py":
+			cmd := "pytest " + t.File
+			if t.Symbol != "" {
+				cmd += "::" + t.Symbol
+			}
+			other[cmd] = true
+		}
+	}
+	cmds := make([]string, 0, len(goTests)+len(other))
+	dirs := make([]string, 0, len(goTests))
+	for dir := range goTests {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	for _, dir := range dirs {
+		names := dedupStrings(goTests[dir])
+		sort.Strings(names)
+		pkg := "./"
+		if dir != "" {
+			pkg += filepath.ToSlash(dir)
+		}
+		// A giant -run regex is worse than the inference work it saves: it floods
+		// context, hits shell limits, and is fragile when a changed test file maps
+		// to many subtests. Above the small focused threshold, run the package.
+		if len(names) > 12 {
+			cmds = append(cmds, "go test "+pkg)
+		} else {
+			cmds = append(cmds, fmt.Sprintf("go test %s -run '^(%s)$'", pkg, strings.Join(names, "|")))
+		}
+	}
+	for cmd := range other {
+		cmds = append(cmds, cmd)
+	}
+	sort.Strings(cmds)
+	if len(cmds) > 10 {
+		cmds = cmds[:10]
+	}
+	return cmds
 }

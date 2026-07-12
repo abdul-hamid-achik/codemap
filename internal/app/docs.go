@@ -32,9 +32,9 @@ store, and the project registry — so other tools can inspect the same store.`}
   2. where to start            # codemap_read_order  (entrypoints + hubs ranked — orient on a new repo)
   3. find the entry point      # codemap_semantic "<intent>" OR codemap_find <name>
                                # OR codemap_grep "<exact text>" (string literal, error message, route, env-var)
-  4. orient on a symbol        # codemap_context <sym>  (def + callers + callees + tests, ONE call)
+  4. orient on a symbol        # codemap_context <sym>  (def + callers + callees + tests + test_commands, ONE call)
                                # codemap_context_batch <s1> <s2> …  (several symbols at once + shared callers)
-  5. go deeper                 # codemap_impact (blast radius) · codemap_source (full body)
+  5. go deeper                 # codemap_impact (blast radius + runnable test_commands) · codemap_source (full body)
                                # codemap_callers / codemap_callees (add precise:true on Go)
                                # codemap_references (callback/RunE/registration value wiring; not callers)
   6. before a risky change     # codemap_risk <sym>  (how careful?)
@@ -68,7 +68,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   doctor                             check toolchains, language servers, embeddings (with install hints)
   callers / callees [--precise|--at] who calls X / what X calls (exact definition with --at file:line)
   references <sym> [--at file:line]  enclosing scopes that use X as a callback/value (not callers)
-  impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests
+  impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests + runnable test_commands
   review [--since R] [--staged]      diff-scoped: changed/deleted symbols, blast radius, tests to run, risk band
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
   dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage

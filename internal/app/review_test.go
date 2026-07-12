@@ -733,3 +733,138 @@ func TestReviewContractV1(t *testing.T) {
 		t.Fatalf("v1 schema rejected additive optional fields: %v", err)
 	}
 }
+
+// TestImpactEmitsTestCommands is the pre-edit counterpart of TestReviewWorking:
+// codemap_impact on a symbol with a covering Go test must emit the same kind of
+// copy/paste-ready `go test -run` command review already does, so orientation
+// (pre-edit) is just as actionable as review (post-edit).
+func TestImpactEmitsTestCommands(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	rep, err := svc.Impact(proj, "Run", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatalf("expected Run to be found, got %+v", rep)
+	}
+	if len(rep.TestCommands) == 0 || !strings.Contains(rep.TestCommands[0], "go test") || !strings.Contains(rep.TestCommands[0], "TestRun") {
+		t.Errorf("impact should emit a runnable Go regression command, got %+v", rep.TestCommands)
+	}
+}
+
+// TestImpactNoTestsEmitsEmptyTestCommands asserts test_commands is empty (not
+// present as a populated-but-nonsensical slice) when a symbol has no covering
+// tests at all.
+func TestImpactNoTestsEmitsEmptyTestCommands(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "go.mod"), []byte("module example.com/m\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "foo.go"), []byte("package m\n\nfunc Lonely() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Impact(proj, "Lonely", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatalf("expected Lonely to be found, got %+v", rep)
+	}
+	if len(rep.Tests) != 0 {
+		t.Fatalf("Lonely should have no covering tests, got %+v", rep.Tests)
+	}
+	if len(rep.TestCommands) != 0 {
+		t.Errorf("test_commands should be empty when there are no covering tests, got %+v", rep.TestCommands)
+	}
+}
+
+// TestContextEmitsTestCommands mirrors TestImpactEmitsTestCommands for
+// codemap_context — the one-call orientation bundle carries the same runnable
+// commands as impact/review for the tests it bundles.
+func TestContextEmitsTestCommands(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	rep, err := svc.Context(proj, "Run", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatalf("expected Run to be found, got %+v", rep)
+	}
+	if len(rep.TestCommands) == 0 || !strings.Contains(rep.TestCommands[0], "go test") || !strings.Contains(rep.TestCommands[0], "TestRun") {
+		t.Errorf("context should emit a runnable Go regression command, got %+v", rep.TestCommands)
+	}
+}
+
+// TestContextBatchEmitsTestCommands asserts each per-symbol ContextReport in a
+// context_batch response carries its own test_commands, not just the aggregate.
+func TestContextBatchEmitsTestCommands(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	rep, err := svc.ContextBatch(proj, []string{"Run"}, nil, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 1 {
+		t.Fatalf("expected 1 batch result, got %+v", rep.Results)
+	}
+	got := rep.Results[0].TestCommands
+	if len(got) == 0 || !strings.Contains(got[0], "go test") || !strings.Contains(got[0], "TestRun") {
+		t.Errorf("context_batch per-symbol entry should carry test_commands, got %+v", got)
+	}
+}
+
+// TestReviewImpactTestCommandsParity is the explicit parity assertion the I06
+// panel idea calls for: review and impact must produce IDENTICAL test_commands
+// for the same symbol, since both derive from the same testCommands helper
+// over each report's own Tests/covering_tests list.
+func TestReviewImpactTestCommandsParity(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	edited := "package app\n\nfunc Helper() {}\n\nfunc Run() {\n\tHelper() // touched\n}\n"
+	if err := os.WriteFile(filepath.Join(proj, "a.go"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewRep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	impactRep, err := svc.Impact(proj, "Run", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextRep, err := svc.Context(proj, "Run", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewRep.TestCommands) == 0 {
+		t.Fatalf("expected review to select at least one test command, got %+v", reviewRep)
+	}
+	if !equalStringSlices(reviewRep.TestCommands, impactRep.TestCommands) {
+		t.Errorf("review.test_commands = %+v, impact.test_commands = %+v, want identical for the same symbol",
+			reviewRep.TestCommands, impactRep.TestCommands)
+	}
+	if !equalStringSlices(reviewRep.TestCommands, contextRep.TestCommands) {
+		t.Errorf("review.test_commands = %+v, context.test_commands = %+v, want identical for the same symbol",
+			reviewRep.TestCommands, contextRep.TestCommands)
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
