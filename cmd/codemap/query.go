@@ -138,6 +138,27 @@ result is not strong enough for the decision you are making.`,
 		Args:  cobra.MinimumNArgs(1),
 		RunE:  runFind,
 	}
+	grepCmd = &cobra.Command{
+		Use:   "grep <pattern>",
+		Short: "Search indexed file content for a literal or regex pattern, joined onto its enclosing symbol",
+		Long: `Search the content of every indexed file for pattern and resolve each hit to its
+enclosing symbol (FQN, kind, source range) via the same machinery as 'codemap symbol-at' — so a
+text hit is immediately chainable into codemap_context/callers/source without a manual re-join.
+
+Only searches the indexed file set (files codemap extracted structure from, same excludes as
+'codemap index'), not the whole repo — files with no registered extractor (e.g. plain YAML/
+Markdown with no codemap language support) are invisible to it, same as 'codemap find'. Reads
+are live from disk at query time; a file added since the last index is not yet in that set (see
+the "stale" field). Literal substring match by default; --regex for RE2 syntax.
+
+Distinct from 'codemap semantic' (meaning/similarity search over embeddings) and 'codemap find'
+(name/FQN search) — this is exact text content search.`,
+		Example: `  codemap grep "TODO(security)"
+  codemap grep --regex 'STRIPE_[A-Z_]+'
+  codemap grep --ignore-case "not implemented"`,
+		Args: cobra.ExactArgs(1),
+		RunE: runGrep,
+	}
 	sourceCmd = &cobra.Command{
 		Use:   "source [<symbol>]",
 		Short: "Print a symbol's source code (the body behind its signature)",
@@ -1225,6 +1246,46 @@ func runFind(cmd *cobra.Command, args []string) error {
 	for _, h := range rep.Hits {
 		fmt.Printf("%s%-9s %-26s %s\n", annMark(h.Annotations), h.Kind, fmt.Sprintf("%s:%d", h.File, h.StartLine),
 			sigOrName(h.Signature, h.FQN, h.Symbol))
+	}
+	return nil
+}
+
+func runGrep(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sess.Close() }()
+	cwd := targetDir(cmd)
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	regex, _ := cmd.Flags().GetBool("regex")
+	ignoreCase, _ := cmd.Flags().GetBool("ignore-case")
+	top, _ := cmd.Flags().GetInt("top")
+	rep, err := svc.Grep(cwd, args[0], app.GrepOptions{Regex: regex, IgnoreCase: ignoreCase, Top: top})
+	if err != nil {
+		return err
+	}
+	if rep.Stale {
+		fmt.Println("⚠ index is stale — files added since the last index are not in the searched set (run codemap index)")
+	}
+	if len(rep.Hits) == 0 {
+		return notFoundError(fmt.Sprintf("no matches for %q", rep.Pattern), "try --regex, --ignore-case, or a broader pattern")
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	for _, h := range rep.Hits {
+		sym := h.Symbol
+		if sym == "" {
+			sym = "(none)"
+		}
+		fmt.Printf("%-9s %-26s %-30s %s\n", h.Kind, fmt.Sprintf("%s:%d", h.File, h.Line), sym, h.MatchedLine)
+	}
+	if rep.Truncated {
+		fmt.Printf("… %d more matches (top %d shown; raise --top)\n", rep.Total-len(rep.Hits), len(rep.Hits))
 	}
 	return nil
 }

@@ -22,6 +22,7 @@ A typical "understand or change this code" loop, and the one-call tool for each 
 | **Index once** | `codemap_index` | build the graph (+ embeddings if Ollama is up) |
 | **Where do I start?** | `codemap_read_order` | entrypoints (`main`, `cmd/`, exported API) + load-bearing hubs, ranked with a reason — a reading guide for an unfamiliar repo |
 | **Find the entry point** | `codemap_semantic` / `codemap_find` | by meaning, or by name (offline) |
+| **Find exact text** | `codemap_grep` | a string literal, error message, route, or env-var name, joined onto its enclosing symbol (offline) |
 | **Orient on a symbol** | `codemap_context` | def + callers + callees + value-reference wiring + covering tests + blast size + notes, in ONE call |
 | **Model a component** | `codemap_context_batch` | the bundle for several symbols at once, plus the callers they share (coupling) |
 | **Go deeper** | `codemap_impact` · `codemap_source` | full blast radius · the implementation body |

@@ -31,6 +31,8 @@ Every tool takes an optional "path" (project dir; defaults to cwd) and returns J
 Find code:
 - codemap_semantic — by meaning ("jwt validation middleware"); needs an embedded index.
 - codemap_find — by name; fast and offline (no embeddings).
+- codemap_grep — by exact text content (a string literal, error message, route, env-var
+  name); fast and offline, joins each hit onto its enclosing symbol.
 
 Understand a symbol:
 - codemap_impact (flagship) — definition sites, direct callers, the transitive blast radius
@@ -288,6 +290,14 @@ type findInput struct {
 	Top   int    `json:"top,omitempty" jsonschema:"maximum results"`
 }
 
+type grepInput struct {
+	Pattern    string `json:"pattern" jsonschema:"literal substring or (with regex:true) RE2 regular expression to search indexed file content for"`
+	Path       string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Regex      bool   `json:"regex,omitempty" jsonschema:"interpret pattern as a Go RE2 regex instead of a literal substring"`
+	IgnoreCase bool   `json:"ignore_case,omitempty" jsonschema:"case-insensitive match"`
+	Top        int    `json:"top,omitempty" jsonschema:"maximum results (default 100, capped at 1000)"`
+}
+
 type sourceInput struct {
 	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol whose source code to return; omit when selector is provided"`
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
@@ -456,6 +466,10 @@ func (s *Server) register() {
 		Name:        "codemap_find",
 		Description: "Find symbols by name (case-insensitive substring over names/FQNs). Fast and offline — no embeddings needed, unlike codemap_semantic.",
 	}, s.handleFind)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_grep",
+		Description: "Search the content of every indexed file for a literal substring (or, with regex:true, a Go RE2 pattern) and resolve each hit to its enclosing symbol — file, line, matched_line, symbol, fqn, kind, and a chainable selector. Distinct from codemap_semantic (meaning search) and codemap_find (name search): this is exact text content search. Only covers the indexed file set (same scope as the index, not every file in the repo); reads are live from disk. Capped results carry total/truncated.",
+	}, s.handleGrep)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_source",
 		Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition, plus candidates:[{selector,signature,file,start_line}] (redundant with matches, present for uniformity with impact/context/callers/callees/risk).",
@@ -907,6 +921,14 @@ func (s *Server) handleFind(_ context.Context, _ *sdkmcp.CallToolRequest, in fin
 		return r, v, nil
 	}
 	rep, err := s.svc.FindSymbols(cwdOf(in.Path), in.Query, in.Top)
+	return result(rep, err)
+}
+
+func (s *Server) handleGrep(_ context.Context, _ *sdkmcp.CallToolRequest, in grepInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Grep(cwdOf(in.Path), in.Pattern, app.GrepOptions{Regex: in.Regex, IgnoreCase: in.IgnoreCase, Top: in.Top})
 	return result(rep, err)
 }
 

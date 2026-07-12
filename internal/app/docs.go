@@ -31,6 +31,7 @@ store, and the project registry — so other tools can inspect the same store.`}
   1. codemap index             # build the graph (+ embeddings if Ollama is up)
   2. where to start            # codemap_read_order  (entrypoints + hubs ranked — orient on a new repo)
   3. find the entry point      # codemap_semantic "<intent>" OR codemap_find <name>
+                               # OR codemap_grep "<exact text>" (string literal, error message, route, env-var)
   4. orient on a symbol        # codemap_context <sym>  (def + callers + callees + tests, ONE call)
                                # codemap_context_batch <s1> <s2> …  (several symbols at once + shared callers)
   5. go deeper                 # codemap_impact (blast radius) · codemap_source (full body)
@@ -77,6 +78,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   path <from> <to>                   shortest call path between two symbols
   symbols <file>                     a file's outline (signatures)
   find <query>                       name search (offline, no embeddings)
+  grep <pattern> [--regex] [-i]      exact text search over indexed content, joined to symbol
   semantic <query>                   meaning-based search (needs an embedded index;
                                      on a structure-only project it returns mode
                                      "none" with a note — use find instead)
@@ -93,7 +95,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
 callers, callees, references, impact, file_impact, dependencies, review, secret_impact,
 required_keys, risk, hotspots, orphans, coverage, read_order, path, related_files, symbols,
-symbol_at, find, source, context, context_batch, projects, docs, annotate,
+symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
 

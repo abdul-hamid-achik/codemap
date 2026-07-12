@@ -1,0 +1,45 @@
+version: 1
+name: grep
+intent: |
+    after indexing a small project, `codemap grep` finds a literal string inside a
+    function body and resolves the hit to its enclosing symbol (not a bare
+    file:line); --regex opts into RE2 syntax and also resolves; --json emits a
+    resolution field an agent can parse without a full schema file.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s\\n' 'package app' '' 'func Helper() { x := \"needle-marker-xyz\"; _ = x }' '' 'func Run() { Helper() }' > \"$P/a.go\"; printf '%s' 'package app; func Other() {}' > \"$P/b.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== grep literal =='; \"$CM\" grep needle-marker-xyz; echo '== grep regex =='; \"$CM\" grep --regex 'Helper\\(\\)'; echo '== grep json =='; \"$CM\" grep needle-marker-xyz --json | grep -o '\"resolution\": \"exact\"'"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: grep
+outcomes:
+    - id: literal_hit_resolves_to_symbol
+      description: a literal match inside Helper's body is joined onto Helper, not left as a bare file:line
+      verify:
+        screen:
+            contains: "Helper"
+    - id: literal_hit_shows_kind_and_file
+      description: the human output shows the resolved kind and the file it matched in
+      verify:
+        screen:
+            contains: "function"
+    - id: regex_hit_resolves
+      description: --regex opts into RE2 syntax and also resolves its hit onto a symbol
+      verify:
+        screen:
+            contains: "Run"
+    - id: json_resolution_field
+      description: --json emits a parseable resolution field for the exact-match hit
+      verify:
+        screen:
+            contains: "\"resolution\": \"exact\""
+contractHash: sha256:b7bb75d96a4ed9ba77d6d3fb0d65ea99bd56aa289c04ad8f23c2212346a9ca89

@@ -87,11 +87,23 @@ callers reached via interface dispatch or reflection — treat its output as dea
 |---|---|
 | `codemap semantic <query> [--top N] [--fusion auto\|balanced]` | Meaning-based search across the indexed graph (alias: `codemap search`) |
 | `codemap find <query> [--top N]` | Find symbols by name, with signatures (offline; no embeddings needed) |
+| `codemap grep <pattern> [--regex] [-i] [--top N]` | Exact text search over indexed file content, each hit resolved to its enclosing symbol (offline, no embeddings) |
 
 On a structure-only project (indexed with `--no-embed`, or before Ollama was available), `codemap semantic`
 returns no hits with a short note explaining there are no embeddings — and the JSON carries `"mode": "none"`
 plus that `"note"` — so you know to embed the index or fall back to `codemap find`. It never calls the
 embedder or creates an empty vector store in that case.
+
+`codemap grep` searches only the **indexed file set** — the files codemap extracted structure from
+(same excludes as `codemap index`) — not every byte in the repo; a config/YAML/README file with no
+registered extractor is invisible to it, exactly as it already is to `codemap find`/`codemap symbols`.
+Reads happen live from disk at query time, so a file edited since the last index is searched at its
+current content; a file *added* since the last index is not yet in that set (the `stale` field on the
+report discloses this — it describes file-set completeness, not staleness of a matched line). Matching
+is a literal substring by default; pass `--regex` for Go RE2 syntax and `-i`/`--ignore-case` for
+case-insensitive matching in either mode. This is deliberately not a ripgrep reimplementation: no
+context lines, no glob/language filters — use `codemap semantic` for meaning search and `codemap find`
+for name search instead.
 
 `codemap semantic` adaptively balances the vector/BM25 hybrid-search fusion by the shape of your query:
 an identifier-looking query (`ParseSelector`, `graph.Store.NodeAtLine`) leans toward the exact-name/BM25

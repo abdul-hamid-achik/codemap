@@ -196,6 +196,9 @@ func init() {
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
 	findCmd.Flags().Int("top", 50, "maximum results")
+	grepCmd.Flags().Bool("regex", false, "interpret <pattern> as a Go RE2 regular expression instead of a literal substring")
+	grepCmd.Flags().BoolP("ignore-case", "i", false, "case-insensitive match")
+	grepCmd.Flags().Int("top", app.DefaultGrepTop, "maximum results")
 	sourceCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	annotateCmd.Flags().String("source", "note", "annotation producer (ecosystem convention): note, vecgrep, tinyvault, fcheap, vidtrace, cairntrace, glyphrun, mongosh, postgres")
 	annotateCmd.Flags().String("note", "", "free-form note text")
@@ -217,7 +220,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, configCmd, daemonCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured

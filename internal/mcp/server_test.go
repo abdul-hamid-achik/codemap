@@ -149,7 +149,7 @@ func TestMCPServer(t *testing.T) {
 		got[tool.Name] = true
 		toolsByName[tool.Name] = tool
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_references", "codemap_find", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_coverage", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_references", "codemap_find", "codemap_grep", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_coverage", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}
@@ -244,6 +244,20 @@ func TestMCPServer(t *testing.T) {
 	}
 	if txt := textOf(res2); !strings.Contains(txt, "Run") || !strings.Contains(txt, `"found":true`) {
 		t.Errorf("callers of Helper should include Run and found:true: %s", txt)
+	}
+
+	// codemap_grep — exact text search joined onto its enclosing symbol. "Helper()"
+	// appears inside both Run's and Other's bodies, so both hits resolve to an
+	// enclosing symbol (not "none").
+	grepRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_grep",
+		Arguments: map[string]any{"path": proj, "pattern": "Helper()"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(grepRes); !strings.Contains(txt, `"symbol":"Run"`) || strings.Contains(txt, `"resolution":"none"`) {
+		t.Errorf("grep for Helper() should resolve a hit onto Run without any resolution:none: %s", txt)
 	}
 
 	// codemap_references is callback/value wiring, not callers. It returns the
@@ -388,6 +402,7 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 		{"codemap_context", map[string]any{"path": proj, "symbol": "Run"}},
 		{"codemap_dependencies", map[string]any{"path": proj, "file": "main.go"}},
 		{"codemap_find", map[string]any{"path": proj, "query": "Run"}},
+		{"codemap_grep", map[string]any{"path": proj, "pattern": "Run"}},
 		{"codemap_semantic", map[string]any{"path": proj, "query": "run"}},
 		{"codemap_hotspots", map[string]any{"path": proj}},
 	} {

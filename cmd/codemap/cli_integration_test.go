@@ -261,6 +261,81 @@ func TestCLIContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("grep resolves text hits to their enclosing symbol", func(t *testing.T) {
+		res := runCLI(t, bin, runner, env, "grep", "Helper()", "-C", project, "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("grep exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var rep struct {
+			Total int `json:"total"`
+			Hits  []struct {
+				File       string `json:"file"`
+				Line       int    `json:"line"`
+				Symbol     string `json:"symbol"`
+				Resolution string `json:"resolution"`
+				Selector   *struct {
+					File string `json:"file"`
+					FQN  string `json:"fqn"`
+				} `json:"selector"`
+			} `json:"hits"`
+		}
+		mustJSON(t, res.stdout, &rep)
+		if rep.Total == 0 || len(rep.Hits) == 0 {
+			t.Fatalf("grep report = %+v, want at least one hit", rep)
+		}
+		var sawMain bool
+		for _, h := range rep.Hits {
+			if h.Resolution == "none" {
+				t.Fatalf("grep hit %+v should resolve onto a symbol", h)
+			}
+			if h.Symbol == "Main" {
+				sawMain = true
+				if h.Selector == nil || h.Selector.FQN == "" {
+					t.Fatalf("grep hit for Main should carry a populated selector: %+v", h)
+				}
+			}
+		}
+		if !sawMain {
+			t.Fatalf("grep for Helper() should resolve a hit onto Main's call site: %+v", rep.Hits)
+		}
+
+		// --regex opts into RE2 syntax a literal search would not match.
+		res = runCLI(t, bin, runner, env, "grep", "--regex", `Help\w+\(\)`, "-C", project, "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("grep --regex exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var regexRep struct {
+			Total int  `json:"total"`
+			Regex bool `json:"regex"`
+		}
+		mustJSON(t, res.stdout, &regexRep)
+		if !regexRep.Regex || regexRep.Total == 0 {
+			t.Fatalf("grep --regex report = %+v, want regex:true and at least one hit", regexRep)
+		}
+
+		// --ignore-case matches a differently-cased query.
+		res = runCLI(t, bin, runner, env, "grep", "-i", "HELPER()", "-C", project, "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("grep -i exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var ciRep struct {
+			Total      int  `json:"total"`
+			IgnoreCase bool `json:"ignore_case"`
+		}
+		mustJSON(t, res.stdout, &ciRep)
+		if !ciRep.IgnoreCase || ciRep.Total == 0 {
+			t.Fatalf("grep -i report = %+v, want ignore_case:true and at least one hit", ciRep)
+		}
+
+		// A pattern with zero matches is a not-found exit, same taxonomy as find.
+		res = runCLI(t, bin, runner, env, "grep", "definitely-not-present-xyz", "-C", project, "--json")
+		assertCLIEnvelope(t, res, exitNotFound, codeNotFound)
+
+		// Invalid regex syntax is an operational error, not a not-found miss.
+		res = runCLI(t, bin, runner, env, "grep", "--regex", "(unterminated[", "-C", project, "--json")
+		assertCLIEnvelope(t, res, exitOperational, "operational")
+	})
+
 	t.Run("value references are distinct, bounded, and selector-aware", func(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "references", "Handler", "-C", project)
 		if res.exit != 0 || res.stderr != "" {
