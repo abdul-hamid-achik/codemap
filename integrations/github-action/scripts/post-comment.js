@@ -1,6 +1,8 @@
 // Create-or-update the ONE sticky codemap review comment on a pull request.
 //
-// Used from actions/github-script@v9 (action.yml), which invokes this file's
+// Called by: action.yml step id=post-comment ONLY (GitHub Action only — the
+// GitLab template uses post-comment-gitlab.sh instead), via
+// actions/github-script@v9, which invokes this file's
 // default export with { github, context, core } already bound to the
 // workflow's octokit client / event context / logger — see
 // https://github.com/actions/github-script (verified current usage: v9,
@@ -16,6 +18,12 @@ const fs = require('fs');
 const MARKER = '<!-- codemap-review-action:marker -->';
 
 module.exports = async ({ github, context, core }) => {
+  // Default to 'false' up front so the action's `comment-posted` output is
+  // always defined for this step, even on every early-return branch below
+  // (missing env, unreadable file, non-pull_request event) — flipped to
+  // 'true' only after a comment is actually created or updated.
+  core.setOutput('comment-posted', 'false');
+
   const commentPath = process.env.REVIEW_COMMENT_PATH;
   if (!commentPath) {
     core.setFailed('REVIEW_COMMENT_PATH is not set — render-comment.sh must run before post-comment.js and export its comment-path output into this step\'s env.');
@@ -55,4 +63,5 @@ module.exports = async ({ github, context, core }) => {
     const created = await github.rest.issues.createComment({ owner, repo, issue_number, body });
     core.info(`codemap-action: created sticky comment #${created.data.id} on PR #${issue_number}`);
   }
+  core.setOutput('comment-posted', 'true');
 };

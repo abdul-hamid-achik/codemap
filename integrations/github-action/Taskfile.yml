@@ -22,7 +22,10 @@ tasks:
         silent: true
       - cmd: |
           if command -v yamllint >/dev/null 2>&1; then
-            yamllint action.yml gitlab/codemap-review.yml examples/dogfood-workflow.yml
+            yamllint action.yml gitlab/codemap-review.yml examples/basic-review.yml \
+              examples/semantic-index-with-ollama.yml \
+              ../../.github/workflows/codemap-review-reusable.yml \
+              ../../.github/workflows/codemap-review.yml
           else
             echo "yamllint not installed locally — skipping (CI runs it)"
           fi

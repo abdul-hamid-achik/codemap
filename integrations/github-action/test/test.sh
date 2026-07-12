@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Plain-bash test harness for codemap-action's scripts (bats-core isn't
 # assumed to be installed; this runs anywhere bash+jq do). Exercises
-# render-comment.sh and gate.sh against every fixture in testdata/, the
-# gate.sh ordinal table explicitly, resolve-version.sh's archive-name
-# construction for linux/amd64, darwin/arm64, and windows/amd64 (+ the
-# windows/arm64 rejection), and install-codemap.sh's checksum verification
-# (both the real happy path, network permitting, and a mocked mismatch).
+# render-comment.sh and gate.sh against every fixture in testdata/, gate.sh's
+# outputs (risk-level/risk-score/untested-count/changed-symbols-count) and
+# ordinal table explicitly, write-summary.sh's $GITHUB_STEP_SUMMARY fallback
+# path, resolve-version.sh's archive-name construction for linux/amd64,
+# darwin/arm64, and windows/amd64 (+ the windows/arm64 rejection), and
+# install-codemap.sh's checksum verification (both the real happy path,
+# network permitting, and a mocked mismatch).
 #
-# Run: ./test/test.sh   (or: make test)
+# Run: ./test/test.sh   (or: task action:test)
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -205,6 +207,51 @@ echo "== gate.sh: outputs =="
 gate real-since-untested-high-risk true ""
 assert_contains "$GATE_OUT" "risk-level=high" "gate.sh sets the risk-level output even when the gate trips"
 assert_contains "$GATE_OUT" "untested-count=1" "gate.sh sets the untested-count output even when the gate trips"
+assert_contains "$GATE_OUT" "risk-score=0.9" "gate.sh sets the risk-score output (0.9 from the fixture's risk.score) even when the gate trips"
+assert_contains "$GATE_OUT" "changed-symbols-count=1" "gate.sh sets the changed-symbols-count output even when the gate trips"
+
+gate risk-absent false ""
+assert_contains "$GATE_OUT" "risk-score=0" "gate.sh: risk-score is '0' when the diff has no risk object at all"
+assert_contains "$GATE_OUT" "changed-symbols-count=1" "gate.sh: changed-symbols-count is still populated when risk is absent"
+
+gate unknown-schema-version false ""
+assert_contains "$GATE_OUT" "risk-score=0" "gate.sh: unrecognized schema_version still sets risk-score (fail-soft default '0')"
+assert_contains "$GATE_OUT" "changed-symbols-count=0" "gate.sh: unrecognized schema_version still sets changed-symbols-count (fail-soft default '0')"
+
+echo
+echo "== write-summary.sh: \$GITHUB_STEP_SUMMARY fallback path =="
+
+write_summary() {
+  # write_summary(comment_path, set_step_summary) -> sets $WS_EXIT, $WS_SUMMARY (file contents or "")
+  local comment_path="$1" set_summary="$2"
+  local summary_file="${WORK}/step-summary-$$-${RANDOM}"
+  : > "$summary_file"
+  if [[ "$set_summary" == "true" ]]; then
+    COMMENT_PATH="$comment_path" GITHUB_STEP_SUMMARY="$summary_file" \
+      bash "${SCRIPTS}/write-summary.sh" >/dev/null 2>&1
+  else
+    COMMENT_PATH="$comment_path" GITHUB_STEP_SUMMARY="" \
+      bash "${SCRIPTS}/write-summary.sh" >/dev/null 2>&1
+  fi
+  WS_EXIT=$?
+  WS_SUMMARY="$(cat "$summary_file" 2>/dev/null)"
+}
+
+rendered_comment="$(render golden-contract)"
+comment_file="${WORK}/summary-source-comment.md"
+printf '%s\n' "$rendered_comment" > "$comment_file"
+
+write_summary "$comment_file" true
+assert_eq "$WS_EXIT" "0" "write-summary.sh exits 0 when \$GITHUB_STEP_SUMMARY is set and the comment file exists"
+assert_contains "$WS_SUMMARY" '<!-- codemap-review-action:marker -->' "write-summary.sh: appends the SAME rendered Markdown (sticky marker present) to the job summary"
+assert_contains "$WS_SUMMARY" '🟢 `low`' "write-summary.sh: the job summary carries the same risk rendering as the PR comment (single rendering path)"
+
+write_summary "${WORK}/does-not-exist.md" true
+assert_eq "$WS_EXIT" "0" "write-summary.sh degrades gracefully (exit 0) when the rendered comment file is missing"
+assert_eq "$WS_SUMMARY" "" "write-summary.sh: does not touch \$GITHUB_STEP_SUMMARY when there is nothing to write"
+
+write_summary "$comment_file" false
+assert_eq "$WS_EXIT" "0" "write-summary.sh exits 0 when \$GITHUB_STEP_SUMMARY is unset (e.g. not running in GitHub Actions)"
 
 echo
 echo "== resolve-version.sh: archive-name construction (no network needed for a pinned version) =="

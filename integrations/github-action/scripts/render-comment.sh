@@ -2,6 +2,11 @@
 # Renders a codemap review v1 JSON report (schemas/codemap.review.v1.schema.json
 # in the codemap repo) into a sticky-comment-ready Markdown body.
 #
+# Called by: action.yml step id=render; gitlab/codemap-review.yml (curled
+# down and invoked unmodified). Its output (comment-path) also feeds
+# write-summary.sh (action.yml only) — the job-summary and sticky-PR-comment
+# surfaces intentionally share this one rendering pass.
+#
 # Deliberately plain bash + jq (no Node) so the exact same script runs
 # unmodified from the GitLab CI mirror (gitlab/codemap-review.yml).
 #

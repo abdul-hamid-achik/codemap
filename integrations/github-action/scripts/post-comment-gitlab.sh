@@ -3,6 +3,9 @@
 # on a merge request, keyed by the same hidden HTML marker, via curl + the
 # Notes API (https://docs.gitlab.com/api/notes/) instead of Octokit.
 #
+# Called by: gitlab/codemap-review.yml ONLY (curled down and invoked
+# unmodified) — the GitHub Action uses post-comment.js instead.
+#
 # VERIFIED (WebSearch, 2026-07): $CI_JOB_TOKEN can only GET
 # /projects/:id/merge_requests/:iid/notes in current GitLab — creating or
 # updating a note needs a token with write access (a project/personal access

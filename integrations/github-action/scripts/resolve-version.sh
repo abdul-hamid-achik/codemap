@@ -4,6 +4,10 @@
 # $GITHUB_ENV so the cache step (actions/cache, action.yml) and
 # install-codemap.sh (next step) can use them without re-deriving anything.
 #
+# Called by: action.yml step id=resolve; gitlab/codemap-review.yml (curled
+# down and invoked unmodified, with RUNNER_OS/RUNNER_ARCH/$GITHUB_ENV mapped
+# onto GitLab's predefined variables — see that file's script: block).
+#
 # "latest" is resolved to an EXACT tag here, once, at job start — never left to
 # float mid-job (a long job could otherwise install a different "latest" than
 # what it started with if a release ships mid-run).

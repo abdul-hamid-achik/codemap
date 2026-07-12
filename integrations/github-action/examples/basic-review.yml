@@ -1,7 +1,12 @@
-# Example workflow for CONSUMER repos: post a codemap review comment on every
-# pull request. The codemap repo itself dogfoods the action via
+# Example workflow for CONSUMER repos: the "direct action" adoption path —
+# post a codemap review comment on every pull request. This is the
+# more-control alternative to the one-line reusable workflow
+# (../../.github/workflows/codemap-review-reusable.yml at the repo root); see
+# integrations/github-action/README.md's "GitHub usage" section for when to
+# pick which. The codemap repo itself dogfoods the action via
 # .github/workflows/codemap-review.yml (which uses the local path form
-# `uses: ./integrations/github-action` instead of the remote ref below).
+# `uses: ./integrations/github-action` instead of the remote ref below, so a
+# PR's in-flight action changes are exercised by the same PR).
 #
 # Informational-only on purpose for the first few weeks (fail-on-untested:
 # false, no fail-on-risk) — flip both once the action has proven quiet/
@@ -25,8 +30,23 @@ jobs:
           fetch-depth: 0  # required — codemap review --since needs merge-base history
 
       - uses: abdul-hamid-achik/codemap/integrations/github-action@main
+        id: codemap
         with:
           # codemap indexes its own Go source with --precise (default); no
           # language-server inputs needed for a Go-only repo like codemap.
           fail-on-untested: 'false'  # informational only until the action has run quietly for a while
           fail-on-risk: ''  # disabled during the trial period
+
+      # Downstream-step example: this is the "more control" payoff of the
+      # direct action over the reusable workflow — react to the action's
+      # outputs however this repo wants (label the PR here; other repos might
+      # post to Slack, block a deploy, etc). See README.md's Outputs table for
+      # the full list (risk-level, risk-score, untested-count,
+      # changed-symbols-count, comment-posted, review-json-path).
+      - name: Label PR by risk level
+        if: github.event_name == 'pull_request' && steps.codemap.outputs.risk-level != 'absent'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" \
+            --add-label "codemap-risk:${{ steps.codemap.outputs.risk-level }}"

@@ -4,6 +4,10 @@
 # binary on PATH. Skips the network entirely when actions/cache already
 # restored the binary for this exact tag+os+arch (see action.yml's cache step,
 # keyed on the same coordinates this script reads).
+#
+# Called by: action.yml step "Install codemap"; gitlab/codemap-review.yml
+# (curled down and invoked unmodified — GitLab has no actions/cache-equivalent
+# step wired up here today, so it always downloads).
 set -euo pipefail
 
 : "${CODEMAP_TAG:?resolve-version.sh must run before install-codemap.sh}"

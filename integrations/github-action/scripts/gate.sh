@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# Reads FAIL_ON_UNTESTED / FAIL_ON_RISK and the review JSON body directly.
+# Reads FAIL_ON_UNTESTED / FAIL_ON_RISK and the review JSON body directly, and
+# is also the action's one source for the risk-level/risk-score/
+# untested-count/changed-symbols-count outputs (set even when the gate trips,
+# via `>> $GITHUB_OUTPUT` before `exit 1` — see set_output below).
+#
+# Called by: action.yml step id=gate; gitlab/codemap-review.yml (unmodified —
+# only $GITHUB_OUTPUT-writing has no GitLab consumer today since the CI
+# template doesn't surface job outputs, but the script still runs there for
+# its pass/fail exit code).
 #
 # codemap review's own process exit code is NEVER the failure signal here —
 # see run-review.sh's header comment and the codemap-action README. This
@@ -43,16 +51,21 @@ schema_version="$(jq -r '.schema_version // "absent"' "$REVIEW_JSON")"
 if [[ "$schema_version" != "1" ]]; then
   echo "codemap-action: unrecognized schema_version '${schema_version}' — skipping gate checks (fail-soft; see render-comment.sh for the same fallback)"
   set_output "risk-level" "unknown"
+  set_output "risk-score" "0"
   set_output "untested-count" "0"
+  set_output "changed-symbols-count" "0"
   exit 0
 fi
 
 untested_count="$(jq -r '(.untested_symbols // []) | length' "$REVIEW_JSON")"
+changed_symbols_count="$(jq -r '(.changed_symbols // []) | length' "$REVIEW_JSON")"
 risk_present="$(jq -r 'if has("risk") then "true" else "false" end' "$REVIEW_JSON")"
 if [[ "$risk_present" == "true" ]]; then
   risk_level="$(jq -r '.risk.level' "$REVIEW_JSON")"
+  risk_score="$(jq -r '.risk.score' "$REVIEW_JSON")"
 else
   risk_level="absent"
+  risk_score="0"
 fi
 
 tripped=0
@@ -75,7 +88,9 @@ if [[ -n "$FAIL_ON_RISK" ]]; then
 fi
 
 set_output "risk-level" "$risk_level"
+set_output "risk-score" "$risk_score"
 set_output "untested-count" "$untested_count"
+set_output "changed-symbols-count" "$changed_symbols_count"
 
 if [[ "$tripped" -eq 1 ]]; then
   echo "codemap-action: gate FAILED"

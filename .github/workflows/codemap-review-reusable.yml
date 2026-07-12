@@ -1,0 +1,113 @@
+# Reusable workflow: the ONE-LINE adoption path for the codemap review
+# action (integrations/github-action). A consumer repo wires this in with:
+#
+#   jobs:
+#     review:
+#       uses: abdul-hamid-achik/codemap/.github/workflows/codemap-review-reusable.yml@main
+#       with:
+#         fail-on-untested: 'true'
+#         fail-on-risk: 'high'
+#
+# This wraps the checkout (with the mandatory fetch-depth: 0 — see
+# integrations/github-action/README.md) and the action call so a consumer
+# doesn't have to hand-write either. For custom triggers, extra steps
+# before/after the review, a matrix build, or a non-default checkout, use the
+# action directly instead — see integrations/github-action/README.md's
+# "Adoption" section for both paths side by side.
+#
+# `base-sha` and `github-token` are deliberately NOT passed through as
+# workflow_call inputs below: action.yml's own defaults for both
+# (`github.event.pull_request.base.sha || github.event.before`, and
+# `github.token`) are expressions evaluated in the CALLING workflow run's
+# context — which, for a reusable workflow invoked via `uses:`, is THIS
+# workflow's own run, with its own `github` context and its own
+# GITHUB_TOKEN. Passing an explicit (possibly empty) override here would
+# just short-circuit that default resolution instead of improving on it, so
+# this workflow lets the action's own defaults fire unmodified.
+name: codemap review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "codemap release version to install; default 'latest' resolves and pins the exact tag at run start"
+        type: string
+        default: 'latest'
+      precise:
+        description: "run 'codemap index --precise' (exact call edges; degrades honestly without the right toolchain/LSP)"
+        type: string
+        default: 'true'
+      depth:
+        description: 'blast-radius depth passed to codemap review --depth'
+        type: string
+        default: '3'
+      install-ts-language-server:
+        description: 'npm install -g typescript-language-server typescript before indexing'
+        type: string
+        default: 'false'
+      install-pyright:
+        description: 'npm install -g pyright before indexing'
+        type: string
+        default: 'false'
+      fail-on-untested:
+        description: 'fail the check if any changed symbol has no covering test'
+        type: string
+        default: 'false'
+      fail-on-risk:
+        description: 'fail the check if the aggregate risk.level is at or above this band (low|medium|high); empty disables the risk gate'
+        type: string
+        default: ''
+      skip-comment:
+        description: "compute the review and gate on it, but skip posting a PR comment (the job summary still gets written regardless)"
+        type: string
+        default: 'false'
+    outputs:
+      risk-level:
+        description: 'the aggregate risk.level (unknown|low|medium|high), or "absent" when the diff touched no indexed symbols'
+        value: ${{ jobs.review.outputs.risk-level }}
+      risk-score:
+        description: 'the aggregate risk.score (0..1), or "0" when risk was not computed'
+        value: ${{ jobs.review.outputs.risk-score }}
+      untested-count:
+        description: 'count of untested_symbols'
+        value: ${{ jobs.review.outputs.untested-count }}
+      changed-symbols-count:
+        description: 'count of changed_symbols'
+        value: ${{ jobs.review.outputs.changed-symbols-count }}
+      comment-posted:
+        description: '"true" if the sticky PR comment was created/updated this run, "false" otherwise'
+        value: ${{ jobs.review.outputs.comment-posted }}
+      review-json-path:
+        description: 'path to the raw codemap review --json output (only meaningful to same-job downstream steps — a path on THIS workflow''s runner, not the caller''s)'
+        value: ${{ jobs.review.outputs.review-json-path }}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    outputs:
+      risk-level: ${{ steps.codemap.outputs.risk-level }}
+      risk-score: ${{ steps.codemap.outputs.risk-score }}
+      untested-count: ${{ steps.codemap.outputs.untested-count }}
+      changed-symbols-count: ${{ steps.codemap.outputs.changed-symbols-count }}
+      comment-posted: ${{ steps.codemap.outputs.comment-posted }}
+      review-json-path: ${{ steps.codemap.outputs.review-json-path }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # required — codemap review --since needs merge-base history
+
+      - uses: abdul-hamid-achik/codemap/integrations/github-action@main
+        id: codemap
+        with:
+          version: ${{ inputs.version }}
+          precise: ${{ inputs.precise }}
+          depth: ${{ inputs.depth }}
+          install-ts-language-server: ${{ inputs.install-ts-language-server }}
+          install-pyright: ${{ inputs.install-pyright }}
+          fail-on-untested: ${{ inputs.fail-on-untested }}
+          fail-on-risk: ${{ inputs.fail-on-risk }}
+          skip-comment: ${{ inputs.skip-comment }}

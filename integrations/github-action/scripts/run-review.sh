@@ -3,6 +3,9 @@
 # its path as a step output (review-json-path) and $GITHUB_ENV
 # (REVIEW_JSON_PATH) for the render/gate steps.
 #
+# Called by: action.yml step id=review; gitlab/codemap-review.yml (curled
+# down and invoked unmodified).
+#
 # IMPORTANT: codemap review's own process exit code is NOT a gate signal.
 # Review() (internal/app/review.go in the codemap repo) is explicitly
 # documented to degrade gracefully and return ok:true even for a high-risk,

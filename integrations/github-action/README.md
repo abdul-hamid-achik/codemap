@@ -3,13 +3,14 @@
 A composite GitHub Action (+ a thin GitLab CI mirror) that runs
 [`codemap review`](https://github.com/abdul-hamid-achik/codemap) against a pull request's diff
 and posts the result — changed symbols, blast radius, untested symbols, hotspots, and an
-aggregate risk band — as a single sticky PR comment. Optional inputs can fail the check on
-untested changes or on a risk threshold.
+aggregate risk band — as a single sticky PR comment **and** a job summary. Optional inputs can
+fail the check on untested changes or on a risk threshold, and every run exposes machine-readable
+outputs for downstream steps (label a PR by risk, gate a deploy, post to Slack, ...).
 
 This is an **adoption/distribution play**, not a new analysis engine: all the intelligence comes
 from `codemap review --json` (see `schemas/codemap.review.v1.schema.json` in the codemap repo);
 this repo only installs the binary, runs it, renders its JSON to Markdown, posts/updates the
-comment, and optionally gates the check on the JSON body.
+comment, writes the job summary, and optionally gates the check on the JSON body.
 
 ## What it does, in order
 
@@ -22,7 +23,8 @@ comment, and optionally gates the check on the JSON body.
    Ollama in CI; `--precise` needs the go toolchain for Go and/or
    `typescript-language-server`/`pyright-langserver` for TS/JS/Python — opt into installing those
    with `install-ts-language-server`/`install-pyright`, or let codemap degrade to a name-based
-   call graph and say so in the comment).
+   call graph and say so in the comment). Want semantic search too? See
+   [`examples/semantic-index-with-ollama.yml`](examples/semantic-index-with-ollama.yml).
 3. **Review** — `codemap review --since <base-sha> --depth <depth> --json`.
 4. **Render** — a bash+jq script (`scripts/render-comment.sh`) turns the JSON into Markdown,
    capped under GitHub's 65 536-character comment limit (default soft budget 60 000; sections are
@@ -30,11 +32,33 @@ comment, and optionally gates the check on the JSON body.
    needed; the risk band and untested-symbols headline are never truncated).
 5. **Post** — creates or updates **one** sticky comment, keyed by a hidden HTML marker
    (`<!-- codemap-review-action:marker -->`), via `actions/github-script`.
-6. **Gate** (optional) — `fail-on-untested`/`fail-on-risk` fail the *Action's own step* by reading
+6. **Summarize** — appends the *same* rendered Markdown to `$GITHUB_STEP_SUMMARY`
+   (`scripts/write-summary.sh`), unconditionally (`if: always()`). This is the surface that still
+   works when step 5 doesn't apply: push events (no PR to comment on), forks without PR-write
+   permission, or `skip-comment: true`. It reuses step 4's rendered file rather than re-deriving
+   Markdown from the JSON, so there is exactly one rendering code path for both surfaces.
+7. **Gate** (optional) — `fail-on-untested`/`fail-on-risk` fail the *Action's own step* by reading
    the JSON body directly. **This does not use `codemap review`'s process exit code** — see
    [Gotcha](#gotcha-codemap-reviews-exit-code-is-not-a-gate-signal) below.
 
-## GitHub usage
+## Adoption: reusable workflow vs. direct action
+
+Two ways to wire this into a consumer repo — pick based on how much control you need.
+
+**Reusable workflow (simplest — one line)**: the whole job — checkout, `fetch-depth: 0`, and the
+action — is already wired up for you.
+
+```yaml
+jobs:
+  review:
+    uses: abdul-hamid-achik/codemap/.github/workflows/codemap-review-reusable.yml@main
+    with:
+      fail-on-untested: 'true'
+      fail-on-risk: 'high'
+```
+
+**Direct action (more control)**: write your own job when you need custom triggers, extra steps
+before/after the review, a matrix build, or a different checkout configuration.
 
 ```yaml
 - uses: actions/checkout@v7
@@ -47,9 +71,16 @@ comment, and optionally gates the check on the JSON body.
     fail-on-risk: 'high'
 ```
 
-`fetch-depth: 0` is **mandatory**. `codemap review --since <base-sha>` needs the merge-base
-history; a composite action step cannot deepen a shallow checkout after the fact. This action
-fails fast with a clear message (rather than a cryptic git error) if the checkout is shallow.
+`fetch-depth: 0` is **mandatory** either way. `codemap review --since <base-sha>` needs the
+merge-base history; a composite action step cannot deepen a shallow checkout after the fact. This
+action fails fast with a clear message (rather than a cryptic git error) if the checkout is
+shallow. See [`examples/basic-review.yml`](examples/basic-review.yml) for a complete direct-action
+workflow, and
+[`.github/workflows/codemap-review-reusable.yml`](../../.github/workflows/codemap-review-reusable.yml)
+(repo root) for the reusable workflow's source — it's a thin wrapper around the same action, so
+both paths run identical logic and expose identical outputs.
+
+## GitHub usage (direct action, in detail)
 
 ### Inputs
 
@@ -71,11 +102,35 @@ fails fast with a clear message (rather than a cryptic git error) if the checkou
 | Output | Description |
 |---|---|
 | `risk-level` | the aggregate `risk.level` (`unknown`\|`low`\|`medium`\|`high`), or `absent` when the diff touched no indexed symbols |
+| `risk-score` | the aggregate `risk.score` (`0`..`1`), or `0` when risk was not computed |
 | `untested-count` | count of `untested_symbols` |
+| `changed-symbols-count` | count of `changed_symbols` |
+| `comment-posted` | `"true"` if the sticky PR comment was created/updated this run, `"false"` if skipped (`skip-comment: true`, a non-`pull_request` event, or the render/post step failed before posting) |
 | `review-json-path` | path to the raw `codemap review --json` output, for downstream steps |
 
-Gate outputs are set **even when the gate step fails** (`>> $GITHUB_OUTPUT` runs before `exit 1`),
-so a downstream step in the same job can still read them.
+`risk-level`/`risk-score`/`untested-count`/`changed-symbols-count` are set **even when the gate
+step fails** (`>> $GITHUB_OUTPUT` runs before `exit 1` in `gate.sh`), so a downstream step in the
+same job can still read them regardless of `fail-on-untested`/`fail-on-risk`.
+
+Downstream-step example — label a PR by risk level instead of (or alongside) failing the check:
+
+```yaml
+- uses: abdul-hamid-achik/codemap/integrations/github-action@main
+  id: codemap
+  with:
+    fail-on-risk: '' # don't fail the check — just label
+
+- name: Label PR by risk level
+  if: github.event_name == 'pull_request' && steps.codemap.outputs.risk-level != 'absent'
+  env:
+    GH_TOKEN: ${{ github.token }}
+  run: |
+    gh pr edit "${{ github.event.pull_request.number }}" \
+      --add-label "codemap-risk:${{ steps.codemap.outputs.risk-level }}"
+```
+
+(See [`examples/basic-review.yml`](examples/basic-review.yml) for this wired into a full
+workflow.)
 
 ### `--no-embed` is intentional, not an oversight
 
@@ -123,12 +178,14 @@ GitLab's CI/CD job token docs, 2026-07: the job token can only `GET` notes, not 
 them) — `scripts/post-comment-gitlab.sh` requires `CODEMAP_GITLAB_TOKEN` explicitly rather than
 silently falling back to a token that would just 403.
 
-The GitLab template reuses `install-codemap.sh`, `run-review.sh`, `render-comment.sh`, and
-`gate.sh` **completely unmodified** — that's the entire reason they're bash+jq instead of
-`actions/github-script`-flavored JS. Only the comment-posting call differs
+The GitLab template reuses `resolve-version.sh`, `install-codemap.sh`, `run-review.sh`,
+`render-comment.sh`, and `gate.sh` **completely unmodified** — that's the entire reason they're
+bash+jq instead of `actions/github-script`-flavored JS. Only the comment-posting call differs
 (`post-comment-gitlab.sh`, curl + GitLab's [Notes API](https://docs.gitlab.com/api/notes/), vs.
 `post-comment.js` + Octokit on GitHub). See `gitlab/codemap-review.yml` for the full job
-definition and variable list.
+definition and variable list. `install-language-servers.sh` and `write-summary.sh` are GitHub-only
+today — the GitLab template doesn't install language servers or write a job summary (GitLab has no
+`$GITHUB_STEP_SUMMARY` equivalent; a merge-request note is its only report surface).
 
 ## Development
 
@@ -143,7 +200,9 @@ task action:lint  # shellcheck + yamllint, best-effort locally; both run in CI r
 a scratch git repo (`testdata/real-since-untested-high-risk.json`) and the project's own golden
 contract fixture (`testdata/golden-contract.json`, copied from
 `internal/app/testdata/contracts/codemap.review.v1.json` in the codemap repo) — plus the `gate.sh`
-ordinal table, `resolve-version.sh`'s archive-name construction for `linux/amd64`,
+ordinal table (now including its `risk-score`/`changed-symbols-count` outputs),
+`write-summary.sh`'s `$GITHUB_STEP_SUMMARY` fallback path (present file, missing file, and unset
+`$GITHUB_STEP_SUMMARY`), `resolve-version.sh`'s archive-name construction for `linux/amd64`,
 `darwin/arm64`, and `windows/amd64` (+ the `windows/arm64` rejection), and
 `install-codemap.sh`'s checksum verification (a forced mismatch, a cache-hit skip, and — network
 permitting — a real end-to-end download against the live `v0.40.0` release).
@@ -169,3 +228,22 @@ Per the source plan's instruction to verify rather than trust memory:
   of the inline YAML `script:` block is the documented approach for that action.
 - **GitLab's `$CI_JOB_TOKEN` Notes API scope** — confirmed via GitLab's CI/CD job token docs that
   it's read-only on the Notes API; write access needs a project/personal access token.
+- **`ollama/ollama`'s Docker image** (used by `examples/semantic-index-with-ollama.yml`) — the
+  official image serves on port `11434` (`OLLAMA_HOST=0.0.0.0:11434`), and models default to
+  `/root/.ollama` inside the container. Confirmed via [Ollama's Docker
+  docs](https://docs.ollama.com/docker) and the [Docker Hub
+  listing](https://hub.docker.com/r/ollama/ollama).
+- **The official `ollama/ollama` image ships without `curl`** — a known gap
+  ([ollama/ollama#9781](https://github.com/ollama/ollama/issues/9781)), which breaks Docker-native
+  `HEALTHCHECK`/`--health-cmd` (those exec *inside* the container). The example workflow polls
+  readiness from the **job** instead (`curl` runs fine on the `ubuntu-latest` runner, hitting the
+  service's port-mapped `localhost:11434`), which sidesteps the missing binary entirely.
+- **`POST /api/pull` accepts `{"model": "<name>", "stream": false}`** and returns one blocking JSON
+  response instead of an NDJSON progress stream when `stream: false` — confirmed via [Ollama's API
+  docs](https://docs.ollama.com/api/pull). This is what the example workflow uses to pull
+  `nomic-embed-text` without parsing a stream.
+- **`CODEMAP_OLLAMA_API_KEY`** is already implemented (`internal/config/config.go`'s `applyEnv`,
+  alongside `CODEMAP_OLLAMA_URL`) — confirmed by reading the codemap source directly, not assumed.
+  It authenticates against a hosted/authenticated Ollama endpoint (e.g. Ollama Cloud) as an
+  alternative to running Ollama as a CI service container; see
+  `examples/semantic-index-with-ollama.yml`'s closing comment block.

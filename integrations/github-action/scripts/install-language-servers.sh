@@ -3,6 +3,11 @@
 # honestly without these (name-based call graph for TS/JS, `unresolved` for
 # Python) and the render script surfaces that degradation in the comment, so a
 # consuming repo pays this cost only if it asks for it.
+#
+# Called by: action.yml step "Install optional language servers" ONLY — the
+# GitLab template (gitlab/codemap-review.yml) does not curl or invoke this
+# script today, so `install-ts-language-server`/`install-pyright` have no
+# GitLab-side equivalent yet.
 set -euo pipefail
 
 : "${INSTALL_TS_LANGUAGE_SERVER:=false}"

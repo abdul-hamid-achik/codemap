@@ -1,0 +1,156 @@
+# Example workflow: build a FULL semantic index (structural graph + vector
+# embeddings) in CI by running Ollama as a job service container. This is
+# NOT what the main action (integrations/github-action) does by default —
+# action.yml always passes `--no-embed` to `codemap index` (see this repo's
+# README, "--no-embed is intentional, not an oversight") because there's
+# normally no Ollama available in CI. This example is for repos that
+# specifically want `codemap semantic`/hybrid search to work from CI (e.g. a
+# scheduled job that refreshes a shared semantic index, or a CI-driven
+# "find related code" step) and are willing to pay Ollama's setup cost to
+# get it. It is a teaching artifact — every non-obvious line below is
+# commented — not a drop-in step for the main review action.
+#
+# Trade-off, stated up front: pulling `nomic-embed-text` is a real download
+# (~300MB) and costs low minutes on a cold cache. The actions/cache step
+# below (keyed on the model name) makes every run AFTER the first on a given
+# runner/cache-scope nearly free — the model blobs are restored from cache
+# and Ollama's pull call returns quickly once it sees them already on disk.
+#
+# Alternative to running Ollama in CI at all: point codemap at a
+# hosted/authenticated Ollama endpoint (e.g. Ollama Cloud, or a shared
+# internal instance) instead of standing one up per-run — see the closing
+# comment block at the bottom of this file for `CODEMAP_OLLAMA_URL` /
+# `CODEMAP_OLLAMA_API_KEY`.
+#
+# Verified against real sources (not trusted from memory), 2026-07:
+#   - ollama/ollama serves on port 11434 (OLLAMA_HOST=0.0.0.0:11434) and
+#     stores models under /root/.ollama by default:
+#     https://docs.ollama.com/docker · https://hub.docker.com/r/ollama/ollama
+#   - the official image ships WITHOUT curl (a known gap —
+#     https://github.com/ollama/ollama/issues/9781), which is why this
+#     workflow does NOT use a Docker `--health-cmd` (that execs curl INSIDE
+#     the container) and instead polls readiness from the job itself.
+#   - `POST /api/pull` with `"stream": false` returns one blocking JSON
+#     response instead of an NDJSON progress stream:
+#     https://docs.ollama.com/api/pull
+name: semantic index (with Ollama)
+
+on:
+  workflow_dispatch:  # demo trigger — wire this to schedule/push/pull_request in your own repo
+
+jobs:
+  semantic:
+    runs-on: ubuntu-latest
+
+    services:
+      # A job service container: Docker starts this BEFORE actions/checkout,
+      # keeps it running for the whole job, and the job's own steps reach it
+      # over localhost at the mapped port (there is no container-name DNS
+      # here — that only applies when the JOB itself also runs inside a
+      # container, which this one doesn't).
+      ollama:
+        image: ollama/ollama:latest
+        ports:
+          - 11434:11434
+        volumes:
+          # Bind-mount a host path into the container's model directory.
+          # This matters because actions/cache only ever sees the RUNNER's
+          # filesystem, never a service container's internal one — the bind
+          # mount is what makes the cached directory below and the
+          # container's /root/.ollama the SAME files. Service containers can
+          # declare bind mounts precisely because they start before
+          # checkout; see GitHub's docs on `jobs.<id>.services.<id>.volumes`.
+          - /home/runner/ollama-models:/root/.ollama
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # same requirement as the main action's README — codemap review --since needs merge-base history
+
+      - name: Cache the Ollama model directory
+        # Keyed on the model name only (not a date/run id), so this entry is
+        # reused across every run and branch for as long as the model
+        # doesn't change — only a genuinely cold cache re-downloads.
+        uses: actions/cache@v6
+        with:
+          path: /home/runner/ollama-models
+          key: ollama-models-nomic-embed-text
+
+      - name: Wait for Ollama to accept requests
+        # Polling from the JOB (not a Docker HEALTHCHECK) sidesteps the
+        # missing-curl-in-the-image problem entirely: this curl runs on the
+        # ubuntu-latest runner, hitting the service's port-mapped
+        # localhost:11434, not execing inside the ollama container.
+        # /api/tags is a cheap, read-only endpoint that only succeeds once
+        # the server is actually up.
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:11434/api/tags >/dev/null; then
+              echo "ollama ready after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::ollama did not become ready within 30s" >&2
+          exit 1
+
+      - name: Pull nomic-embed-text (768-dim; codemap's default embedding model)
+        # `"stream": false` collapses Ollama's normally-streamed NDJSON pull
+        # progress into ONE blocking JSON response — simpler to script, at
+        # the cost of no visible per-layer progress until the whole request
+        # returns. On a cache hit this is fast (Ollama sees the blobs
+        # already on disk via the bind mount); on a cold cache, budget a
+        # couple of minutes for the ~300MB download.
+        run: |
+          curl -sf -X POST http://localhost:11434/api/pull \
+            -H 'Content-Type: application/json' \
+            -d '{"model": "nomic-embed-text", "stream": false}'
+
+      - name: Resolve + install codemap
+        # Reuses the SAME install scripts the main action uses (curled from
+        # this repo, exactly like gitlab/codemap-review.yml does for its
+        # non-GitHub-Actions runner) rather than duplicating install logic
+        # here. RUNNER_OS/RUNNER_ARCH/$GITHUB_ENV/$GITHUB_PATH are already
+        # native GitHub Actions facts in this job (unlike the GitLab
+        # template, no env-shimming is needed).
+        env:
+          CODEMAP_VERSION: latest
+        run: |
+          curl -sSL --fail -o resolve-version.sh \
+            https://raw.githubusercontent.com/abdul-hamid-achik/codemap/main/integrations/github-action/scripts/resolve-version.sh
+          curl -sSL --fail -o install-codemap.sh \
+            https://raw.githubusercontent.com/abdul-hamid-achik/codemap/main/integrations/github-action/scripts/install-codemap.sh
+          chmod +x resolve-version.sh install-codemap.sh
+          ./resolve-version.sh
+          ./install-codemap.sh
+
+      - name: codemap init + index --precise (WITH embeddings)
+        # No --no-embed here — this is the whole point of this example.
+        # codemap's default Ollama URL (http://localhost:11434, see
+        # internal/config/config.go) already matches this service's
+        # port-mapped address, so no CODEMAP_OLLAMA_URL override is needed.
+        run: |
+          codemap init
+          codemap index --precise
+
+      - name: codemap semantic --json (demo query)
+        # Hybrid (vector + BM25) search over the index just built above.
+        # Swap the query for whatever's meaningful in your own repo.
+        run: codemap semantic "authentication and session handling" --json
+
+# --- Alternative: skip running Ollama in CI entirely -------------------
+#
+# If your org already runs a shared or hosted Ollama (e.g. Ollama Cloud, or
+# an internal instance reachable from CI runners), point codemap at it
+# instead of standing one up per workflow run:
+#
+#   env:
+#     CODEMAP_OLLAMA_URL: https://your-ollama-host.example.com
+#     CODEMAP_OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+#
+# Both are read directly by codemap (internal/config/config.go's applyEnv) —
+# CODEMAP_OLLAMA_API_KEY is already implemented today (verified by reading
+# the source, not assumed), not a future/planned flag. This trades the
+# service-container/cache machinery above for a shared, already-warm model
+# store, at the cost of depending on network reachability from your runners
+# to that endpoint.
