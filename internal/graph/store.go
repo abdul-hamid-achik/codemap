@@ -818,6 +818,53 @@ func (s *Store) CallGraphResolvedFiles(projectID int64) (map[string]bool, error)
 	return files, nil
 }
 
+// FileCoverage is one indexed file's precise call-graph coverage state plus the
+// content hash it was last indexed at (index_state.file_hash), for the
+// `coverage` query. Resolver/ResolvedAt are "" when the file has no
+// call_graph_coverage row — either it was never precisely resolved, or a later
+// extraction cleared it (ClearCallGraphResolvedTx fires on every re-extraction,
+// precise or not). Language is "" when the file lacks a file-kind node, which
+// should not happen for a normally-indexed file (see indexer.go's fileNode
+// write) but degrades gracefully rather than erroring.
+type FileCoverage struct {
+	FilePath   string
+	Language   string
+	Resolver   string
+	ResolvedAt string
+	IndexHash  string
+}
+
+// ProjectFileCoverage returns one row per index_state file (unlike
+// ProjectCallGraphCoverage, which returns only covered files), left-joined
+// against its file-kind node (for language) and call_graph_coverage (for
+// resolver/resolved_at). It is the read behind `codemap coverage`: the
+// per-file signal underneath the project-wide CallGraphResolvedFiles map.
+func (s *Store) ProjectFileCoverage(projectID int64) ([]FileCoverage, error) {
+	rows, err := s.db.Query(`
+		SELECT i.file_path, COALESCE(f.language, ''), COALESCE(c.resolver, ''),
+		       COALESCE(c.resolved_at, ''), i.file_hash
+		FROM index_state i
+		LEFT JOIN nodes f ON f.project_id = i.project_id AND f.file_path = i.file_path
+			AND f.kind = ?
+		LEFT JOIN call_graph_coverage c ON c.project_id = i.project_id
+			AND c.file_path = i.file_path
+		WHERE i.project_id = ?
+		ORDER BY i.file_path`, KindFile, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []FileCoverage
+	for rows.Next() {
+		var fc FileCoverage
+		if err := rows.Scan(&fc.FilePath, &fc.Language, &fc.Resolver, &fc.ResolvedAt, &fc.IndexHash); err != nil {
+			return nil, err
+		}
+		out = append(out, fc)
+	}
+	return out, rows.Err()
+}
+
 // ---- project wipe ----
 
 // WipeProject deletes all nodes (edges cascade) and index state for a project.

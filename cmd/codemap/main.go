@@ -207,12 +207,17 @@ func init() {
 	branchSwitchCmd.Flags().Bool("install-hook", false, "install a git post-checkout hook that auto-switches the index on every branch checkout")
 	branchSnapshotCmd.Flags().String("branch", "", "branch to snapshot (default: the current git branch)")
 	branchSnapshotCmd.Flags().String("root", "", "repository root (default: cwd)")
+	coverageCmd.Flags().String("prefix", "", "only include files whose project-relative path starts with this prefix")
+	coverageCmd.Flags().String("lang", "", "only include files of this language (e.g. go, typescript, python)")
+	coverageCmd.Flags().Bool("uncovered", false, "only include files without precise call-graph coverage")
+	coverageCmd.Flags().Bool("files", false, "include the bounded per-file list even without a filter")
+	coverageCmd.Flags().Int("top", 200, "cap on by_directory rows and per-file detail rows (max 2000)")
 
 	// Per-setting override flags (config file < env < flag) for every tunable.
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, configCmd, daemonCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured

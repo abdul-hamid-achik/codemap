@@ -82,6 +82,9 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      "none" with a note — use find instead)
   source <sym> [--at file:line]      source for all same-named definitions, or one exact definition
   hotspots / orphans [--top N]       hubs / dead-code candidates
+  coverage [--prefix P] [--lang L] [--uncovered] [--files] [--top N]
+                                     per-file precise call-graph coverage: rollups by
+                                     language/directory + bounded per-file detail
   annotate <sym> | <from> <to>       pin a note/data to a symbol or call path
   annotations [sym] | [from] [to]    list annotations (--rm <id> to remove)
   serve                              run the MCP server (stdio)
@@ -89,7 +92,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
 callers, callees, references, impact, file_impact, dependencies, review, secret_impact,
-required_keys, risk, hotspots, orphans, read_order, path, related_files, symbols,
+required_keys, risk, hotspots, orphans, coverage, read_order, path, related_files, symbols,
 symbol_at, find, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
@@ -173,6 +176,12 @@ general value references; an empty result is therefore not proof of no wiring.
 The stored source location is the enclosing declaration (or file scope), not the
 exact expression line. 'index --precise' resolves call edges and does not upgrade
 reference confidence; use the report's own coverage/stale/confidence fields.
+
+codemap_coverage exposes the per-file signal behind that enum directly: which files have
+a persisted precise-resolution row, its resolver and timestamp, and whether that file has
+drifted on disk since (independent of codemap_status's project-wide drift count). Query it
+once per package/directory to calibrate trust locally instead of assuming the whole
+project's single worst-file call_graph.
 
 File dependency evidence is deliberately broader and more conservative than the call graph:
 file-impact groups inbound calls, Go function-value references, and imports by dependent file,

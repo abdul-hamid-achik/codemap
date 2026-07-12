@@ -91,7 +91,7 @@ codemap/
 │   │   ├── staleness.go      #   hash-based drift detection (status/agent trust)
 │   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
 │   │   └── import_index.go   #   fcheap cache restore (skip extract+embed)
-│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (37 tools)
+│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (38 tools)
 │   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
 │   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search)
 │   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
@@ -246,7 +246,7 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (37): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
+- Tool names are `codemap_`-prefixed. Current set (38): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `coverage`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path; `coverage` returns per-file precise call-graph coverage rolled up by language/directory — the project-wide, per-file signal behind the per-query `call_graph` enum.
 - Exact-definition inputs use the durable source-selector projection
   `{file,start_line,fqn,kind}`, never a SQLite node id. `source`, `context`,
   `callers`, `callees`, `impact`, and `risk` accept `selector`; `path` accepts

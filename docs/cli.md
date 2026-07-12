@@ -78,6 +78,7 @@ callers reached via interface dispatch or reflection — treat its output as dea
 | `codemap risk <symbol> [--depth N]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. |
 | `codemap hotspots [--top N]` | Most-referenced symbols (hubs) |
 | `codemap orphans [--top N]` | Functions/methods with no callers (dead-code candidates) |
+| `codemap coverage [--prefix P] [--lang L] [--uncovered] [--files] [--top N]` | Per-file precise call-graph coverage: rollups by language and by directory (worst-covered first), plus a bounded per-file list (`--files`, or any filter, includes it; capped at `--top`, default 200) showing each file's `resolver`, `resolved_at`, and whether it's gone `stale` since the last index. Complements, does not replace, the per-query `call_graph` enum. |
 | `codemap read-order [query] [--top N]` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/` packages, module index files, exported public API) and load-bearing hubs (call-graph in-degree) into a newcomer's reading guide, each with the reason it ranked. Optional `query` narrows by name/path. The agent-facing answer to "I just landed in this repo — what do I read first?" |
 
 ## Semantic

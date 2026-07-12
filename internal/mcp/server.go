@@ -256,6 +256,19 @@ type limitInput struct {
 	Top  int    `json:"top,omitempty" jsonschema:"maximum results"`
 }
 
+// coverageInput is codemap_coverage's input. Rollups (by_language/by_directory)
+// are always included; the bounded per-file list is included only when Files is
+// true or any filter is set (a filter is itself a signal the caller wants rows,
+// not just the rollup).
+type coverageInput struct {
+	Path      string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Prefix    string `json:"prefix,omitempty" jsonschema:"only include files whose project-relative path starts with this prefix"`
+	Language  string `json:"language,omitempty" jsonschema:"only include files of this language (e.g. go, typescript, python)"`
+	Uncovered bool   `json:"uncovered,omitempty" jsonschema:"only include files without precise call-graph coverage"`
+	Files     bool   `json:"files,omitempty" jsonschema:"include the bounded per-file list even without a filter (rollups are always included)"`
+	Top       int    `json:"top,omitempty" jsonschema:"cap on by_directory rows and per-file detail rows (default 200, max 2000)"`
+}
+
 type pathQueryInput struct {
 	From         string              `json:"from,omitempty" jsonschema:"starting symbol; omit when from_selector is provided"`
 	To           string              `json:"to,omitempty" jsonschema:"destination symbol; omit when to_selector is provided"`
@@ -427,6 +440,10 @@ func (s *Server) register() {
 		Name:        "codemap_orphans",
 		Description: "List functions/methods with no callers (dead-code candidates). Follows functions wired by value (handlers like cobra RunE / mux.HandleFunc) and excludes methods that implement well-known stdlib interfaces (error/Stringer/Unwrap/json.Marshaler), so those aren't falsely flagged; still blind to custom-interface-dispatch/reflection callers, so treat results as candidates.",
 	}, s.handleOrphans)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_coverage",
+		Description: "Per-file precise call-graph coverage: which files have exact resolution (go/types or language-server callHierarchy) recorded, when, and whether that coverage is stale (this file's on-disk content changed since the last index — independent of codemap_status's project-wide drift count). Rollups by language and by directory (worst-covered first) are always included; pass prefix/language/uncovered filters or files:true for the bounded per-file list (default/max 200/2000 rows, files_total/files_truncated disclose the real count). Complements, does not replace, the per-query call_graph enum: use this to calibrate trust per package BEFORE asking a symbol question, instead of assuming the project's single worst-file confidence everywhere.",
+	}, s.handleCoverage)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_path",
 		Description: "Find the shortest call path between two symbols. For exact same-name-safe endpoints, pass both from_selector and to_selector as file/start_line/fqn/kind projections from prior results.",
@@ -845,6 +862,17 @@ func (s *Server) handleOrphans(_ context.Context, _ *sdkmcp.CallToolRequest, in 
 		return r, v, nil
 	}
 	rep, err := s.svc.Orphans(cwdOf(in.Path), in.Top)
+	return result(rep, err)
+}
+
+func (s *Server) handleCoverage(_ context.Context, _ *sdkmcp.CallToolRequest, in coverageInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Coverage(cwdOf(in.Path), app.CoverageOptions{
+		PathPrefix: in.Prefix, Language: in.Language, OnlyUncovered: in.Uncovered,
+		Detail: in.Files, Top: in.Top,
+	})
 	return result(rep, err)
 }
 

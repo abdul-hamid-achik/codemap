@@ -374,6 +374,9 @@ func TestCLIContracts(t *testing.T) {
 			t.Fatalf("not-indexed hint = %q", envelope.Hint)
 		}
 
+		res = runCLI(t, bin, runner, env, "coverage", "-C", cold, "--json")
+		assertCLIEnvelope(t, res, exitNotFound, codeNotIndexed)
+
 		res = runCLI(t, bin, runner, env, "callers", "DoesNotExist", "-C", project)
 		if res.exit != exitNotFound || !strings.Contains(res.stderr, "codemap find") {
 			t.Fatalf("text symbol miss must suggest find: exit=%d stderr=%q", res.exit, res.stderr)

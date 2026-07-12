@@ -67,6 +67,7 @@ directory) and return JSON.
 | `codemap_hotspots` | Most-referenced symbols (`top`), with project-wide `call_graph`/`resolution` so incomplete rankings are explicit |
 | `codemap_risk` | **Change-risk score** for a `symbol` or exact `selector` — untested coverage + fan-in + cross-package spread + name ambiguity combined into a 0..1 `score` + `level` (unknown/low/medium/high), with the `factors` behind it. An unavailable call graph is `unknown`, never a reassuring `low` |
 | `codemap_orphans` | Dead-code candidates (`top`), with project-wide `call_graph`/`resolution` so an unresolved graph never reads as proven dead code |
+| `codemap_coverage` | **Per-file precise call-graph coverage** — rollups by language/directory (worst-covered first) always included; `prefix`/`language`/`uncovered` filters or `files:true` add the bounded per-file list (`top`, default/max 200/2000; `files_total`/`files_truncated` disclose the real count). Each file reports `resolver`/`resolved_at`/`stale`. Complements the per-query `call_graph` enum — use it to calibrate trust per package before asking a symbol question. |
 | `codemap_read_order` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/`, module index files, exported API) + call-graph hubs into a reading guide, each with a reason and score. Optional `query` narrows it. Run on first contact with an unfamiliar repo, then drill the top entries with `codemap_context` |
 | `codemap_path` | Shortest call path (`from`, `to`, or paired `from_selector`/`to_selector`), with endpoint-scoped `call_graph`/`resolution` distinguishing disconnected from unresolved. Unique FQNs are exact endpoints too |
 | `codemap_related_files` | Files structurally related to a `file` via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence. Graph-accurate alternative to import-text heuristics |
@@ -136,6 +137,12 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
   - `none` — no matching symbol / nothing to classify
 
   The free-form `resolution` sentence stays for humans. Map resolved→high, name→medium, unresolved/none→low confidence.
+- **`codemap_coverage`** — the project-wide, per-file view behind `call_graph`: which files
+  have a persisted precise-resolution row, when it was recorded, and whether that file's
+  on-disk content has since drifted (independent of `codemap_status`'s aggregate
+  `stale`/`staleness` counts, which describe the whole index, not one file). Use it to find
+  out WHICH packages to trust before a `call_graph:"name"` on a broad query forces a
+  worst-file assumption.
 - **Reference honesty** — `codemap_references` and the embedded `context.references` list carry
   separate `coverage`, `confidence`, and stale signals. These describe stored callback/value wiring;
   `call_graph:"resolved"` never upgrades them, and empty partial/unavailable coverage is not proof of

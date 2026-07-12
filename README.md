@@ -260,6 +260,7 @@ complete set.
 | Navigate | `read-order` | ranked reading list for an unfamiliar repo |
 | Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact, file dependency evidence, or diff-scoped tests |
 | Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
+| Analyze | `coverage` | per-file precise call-graph coverage: rollups by language/directory + bounded per-file detail |
 | Analyze | `risk` | 0..1 change-risk score with factors |
 | Analyze | `secret-impact` / `required-keys` | key-rotation blast radius and least-privilege key sets |
 | Search | `semantic` (alias `search`) / `find` | meaning-based search, and offline name search |
@@ -347,10 +348,10 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-Tools (37): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+Tools (38): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
 `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
-`codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_read_order`, `codemap_path`,
+`codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_read_order`, `codemap_path`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_source`,
 `codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,

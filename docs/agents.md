@@ -32,6 +32,7 @@ A typical "understand or change this code" loop, and the one-call tool for each 
 | **Trace flow** | `codemap_path` | the shortest call chain between two symbols |
 | **AFTER you edit** | `codemap_review` | your git diff (including retained deleted definitions) → changed symbols, blast radius, and the **tests to run** |
 | **Survey** | `codemap_hotspots` · `codemap_orphans` | hubs · dead-code candidates |
+| **Calibrate trust per package** | `codemap_coverage` | per-file precise call-graph coverage, rolled up by language/directory (worst-covered first) |
 
 The two queries built specifically for the edit loop are **`codemap_review`** ("what
 did I just affect, and what should I run?") and **`codemap_risk`** ("how careful should
@@ -52,6 +53,11 @@ calibrate its confidence:
   `codemap_review`/`codemap_risk` will not assert "no tests" in that state;
   `codemap_file_impact` reports deletion as `unsafe` only from fresh confirmed
   file-scoped evidence and `unknown` otherwise — never "safe" from a candidate or empty result.
+- **`codemap_coverage`** — the per-file map behind every `call_graph` enum: which files have
+  recorded precise coverage, when, and whether that specific file has drifted on disk since
+  (distinct from `codemap_status`'s project-wide drift count). Check it once per area of the
+  codebase to calibrate trust per package instead of assuming the whole project's
+  worst-file confidence.
 - **`dependency_evidence.coverage`** — `complete`/`partial`/`unavailable` by
   calls, references, imports, runtime wiring, and external consumers. Evidence is
   grouped by dependent file/kind with totals and bounded source→target samples. Every

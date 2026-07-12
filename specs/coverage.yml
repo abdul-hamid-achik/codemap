@@ -1,0 +1,46 @@
+version: 1
+name: coverage
+intent: |
+    `codemap coverage` surfaces the per-file precise call-graph coverage signal
+    that sits behind the per-query `call_graph` enum: after `index --precise`
+    resolves a file via go/types, `coverage` reports it covered, with a
+    by-language and by-directory rollup. Needs the `go` toolchain (local-only;
+    CI skips flows).
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$P\"; printf 'module example.com/cov\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf 'package cov\\n\\nfunc A() { B() }\\nfunc B() {}\\n' > \"$P/main.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== name-based index: coverage before --precise =='; \"$CM\" index --no-embed >/dev/null 2>&1; \"$CM\" coverage; echo '== reindex --precise (go/types) =='; \"$CM\" index --reindex --no-embed --precise >/dev/null 2>&1; echo '== coverage after --precise =='; \"$CM\" coverage --files"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 40
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 30000
+    - snapshot: coverage
+outcomes:
+    - id: uncovered_before_precise
+      description: a name-based index has no precise call-graph coverage yet
+      verify:
+        screen:
+            contains: "1 files: 0 covered, 0 stale"
+    - id: covered_after_precise
+      description: index --precise records go/types coverage for the file
+      verify:
+        screen:
+            contains: "1 files: 1 covered, 0 stale"
+    - id: resolver_disclosed
+      description: the per-file detail names the resolver that produced coverage
+      verify:
+        screen:
+            contains: "go/types"
+    - id: directory_rollup_present
+      description: coverage always includes a by-directory rollup
+      verify:
+        screen:
+            contains: "by directory (worst-covered first)"
+contractHash: sha256:ceb5535f7ffe71f141c0c318f68b015de1c0da58d69739150ba8590d8862b2a3

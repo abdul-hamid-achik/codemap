@@ -879,7 +879,7 @@ func TestDocs(t *testing.T) {
 	}
 	// The guide must teach the agent-facing commands so an agent discovers them —
 	// keep this in sync as commands ship (a stale guide hides capabilities).
-	for _, want := range []string{"codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_context_batch", "deletion_analysis", "confirmed", "candidate", "candidates", "positions", "selectors"} {
+	for _, want := range []string{"codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_context_batch", "codemap_coverage", "deletion_analysis", "confirmed", "candidate", "candidates", "positions", "selectors"} {
 		if !strings.Contains(full, want) {
 			t.Errorf("agent guide should teach %q so agents discover it", want)
 		}

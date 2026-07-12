@@ -101,6 +101,74 @@ func TestCallGraphCoverageTracksLeafFilesAndWipe(t *testing.T) {
 	}
 }
 
+func TestProjectFileCoverage(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+
+	if err := s.SetFileHash(pid, "a.go", "hashA"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFileHash(pid, "b.go", "hashB"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Kind: KindFile, Language: "go", SourceHash: "hashA"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "b.go", Kind: KindFile, Language: "go", SourceHash: "hashB"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkCallGraphResolved(pid, "a.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := s.ProjectFileCoverage(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("ProjectFileCoverage returned %d rows, want 2: %+v", len(rows), rows)
+	}
+	byPath := make(map[string]FileCoverage, len(rows))
+	for _, r := range rows {
+		byPath[r.FilePath] = r
+	}
+	a, ok := byPath["a.go"]
+	if !ok {
+		t.Fatalf("a.go missing from coverage rows: %+v", rows)
+	}
+	if a.Resolver != "go/types" || a.ResolvedAt == "" {
+		t.Errorf("a.go = %+v, want resolver go/types + non-empty resolved_at", a)
+	}
+	if a.Language != "go" || a.IndexHash != "hashA" {
+		t.Errorf("a.go = %+v, want language go + index hash hashA", a)
+	}
+	b, ok := byPath["b.go"]
+	if !ok {
+		t.Fatalf("b.go missing from coverage rows: %+v", rows)
+	}
+	if b.Resolver != "" || b.ResolvedAt != "" {
+		t.Errorf("b.go = %+v, want empty resolver/resolved_at (never precisely resolved)", b)
+	}
+	if b.Language != "go" || b.IndexHash != "hashB" {
+		t.Errorf("b.go = %+v, want language go + index hash hashB", b)
+	}
+
+	// Clearing a.go's coverage (as a re-extraction would) drops it back to
+	// uncovered without touching its index_state row.
+	if err := s.ClearCallGraphResolved(pid, "a.go"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = s.ProjectFileCoverage(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if r.FilePath == "a.go" && r.Resolver != "" {
+			t.Errorf("a.go after clear = %+v, want empty resolver", r)
+		}
+	}
+}
+
 func TestUpsertProject(t *testing.T) {
 	s := openTest(t)
 	id1, err := s.UpsertProject("demo", "/tmp/demo", "go")
