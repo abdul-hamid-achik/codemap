@@ -33,6 +33,21 @@ exact, and compacts MCP JSON to reduce agent response tokens.
 The next usefulness slice adds first-class `references` across CLI/MCP/context and lets people create
 exact-symbol annotations directly inside Studio.
 
+**2026-07-12 — feature-plans sprint (F1–F7, unreleased on `main`):** six of the seven
+panel-derived capability plans (`~/notes/projects/codemap/feature-plans/`) landed, each
+cortex-gated (structural diff review + glyphrun receipt) before commit: **F3** ambiguity
+`candidates[]` + batch selectors/positions (25579f3) · **F4** `coverage` per-file trust map,
+38th tool (b02a457) · **F7** query-adaptive fusion weights with `fusion` field (bc847f6) ·
+**F2** `grep` with enclosing-symbol resolution, 39th tool (cbb3e36) · **F1** agent-harness
+distribution — canonical playbook, in-repo Claude Code plugin, `agent setup` for 11
+harnesses (49326ad) · **F6** `bench/` agent A/B benchmark harness, merged from worktree
+(real ground truth generated; run needs API key, ~$5–15, results stay DIRECTIONAL).
+**F5** lives outside the repo: `~/projects/codemap-action` (composite GH Action + GitLab
+mirror, 95/95 assertions, local only — publishing needs explicit authorization). New specs:
+coverage/grep/agent_setup (+ semantic extended) → 42 flows. Follow-ups: BACKLOG item for
+Cursor's ~40-tool ceiling interaction; extend specs/selectors.yml to cover `candidates[]`;
+publish plugin marketplace + codemap-action when authorized.
+
 ## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
 All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see
 `~/notes/projects/codemap/backlog/` for the per-plan files). Highlights:
