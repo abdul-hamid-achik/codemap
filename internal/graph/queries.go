@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // NodeDepth pairs a node with its distance (in hops) from the query symbol.
@@ -470,33 +471,230 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 	return out, nil
 }
 
-// SearchSymbols returns nodes whose symbol or FQN contains query, ranked
-// by match quality (exact > prefix > substring) so an exact-name match
-// survives the LIMIT even when many same-prefix symbols exist. P1-05:
-// pre-fix the query was an unescaped `LIKE "%query%"` (B13) with
-// alphabetical ordering (B77), so `do_work` also matched `doXwork`
-// (LIKE wildcards interpreted as `%`/`_`) and `find Store` truncated
-// the exact match off the end of 50 alphabetically-sorted results.
-// File nodes excluded. The query is bound twice — once for the
-// match tier derivation, once for the LIKE patterns — so the escape
-// is consistent on both sides.
-func (s *Store) SearchSymbols(projectID int64, query string, limit int) ([]Node, error) {
+// SymbolMatch pairs a SearchSymbols hit with which field satisfied the
+// query, so a no-embeddings caller (FindSymbols) can surface why a result
+// showed up (name vs docstring).
+type SymbolMatch struct {
+	Node Node
+	// MatchedIn is "symbol", "fqn", or "docstring" — whichever field the
+	// query's tokens were found in (see SearchSymbols tiering).
+	MatchedIn string
+}
+
+// tokenizeSearchQuery splits a search query into terms on whitespace and,
+// within each whitespace-delimited word, on camelCase boundaries — query
+// side only; indexed symbol/fqn/docstring text is matched via LIKE as
+// stored. This is what lets "parse selector" find both ParseSelector and
+// parse_selector: whitespace alone already splits it into ["parse",
+// "selector"], and each is a case-insensitive substring of either spelling.
+// It deliberately does NOT split on `_`/`-`/digits — do_work must stay one
+// token so the P1-05 LIKE-escape/back-compat behavior (do_work must not
+// match doXwork) is unaffected by tokenization. Empty/whitespace-only
+// queries yield zero tokens. Tokens are de-duplicated case-insensitively,
+// order preserved.
+func tokenizeSearchQuery(query string) []string {
+	var words []string
+	var cur []rune
+	flushWord := func() {
+		if len(cur) > 0 {
+			words = append(words, string(cur))
+			cur = nil
+		}
+	}
+	for _, r := range query {
+		if unicode.IsSpace(r) {
+			flushWord()
+			continue
+		}
+		cur = append(cur, r)
+	}
+	flushWord()
+
+	var tokens []string
+	for _, w := range words {
+		tokens = append(tokens, splitCamelCase(w)...)
+	}
+
+	seen := make(map[string]bool, len(tokens))
+	out := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		if t == "" {
+			continue
+		}
+		lt := strings.ToLower(t)
+		if seen[lt] {
+			continue
+		}
+		seen[lt] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+// splitCamelCase breaks a single word on case boundaries: a lower/digit
+// followed by an upper ("parseSelector" -> "parse","Selector"), and an
+// acronym run followed by a new capitalized word ("XMLParser" ->
+// "XML","Parser"). Words with no such boundary (all-lower, all-upper, or a
+// single leading capital like "Store") pass through unchanged as one token.
+func splitCamelCase(w string) []string {
+	runes := []rune(w)
+	var out []string
+	var cur []rune
+	for i, r := range runes {
+		if i > 0 && unicode.IsUpper(r) {
+			prev := runes[i-1]
+			nextIsLower := i+1 < len(runes) && unicode.IsLower(runes[i+1])
+			boundary := unicode.IsLower(prev) || unicode.IsDigit(prev) || (unicode.IsUpper(prev) && nextIsLower)
+			if boundary && len(cur) > 0 {
+				out = append(out, string(cur))
+				cur = nil
+			}
+		}
+		cur = append(cur, r)
+	}
+	if len(cur) > 0 {
+		out = append(out, string(cur))
+	}
+	return out
+}
+
+// SearchSymbols is the no-embeddings search floor: it finds nodes by name
+// and — additively — by docstring, tokenizing the query so a multi-word
+// query like "parse selector" matches a camelCase or snake_case symbol
+// without requiring a literal substring match. File nodes excluded.
+//
+// Matching: every token must LIKE-match at least one of symbol/fqn/docstring
+// (AND across tokens, OR across fields) — that's the candidate set. Ranking
+// tiers within it:
+//  1. symbol or fqn alone contains ALL tokens (name match; MatchedIn "symbol"
+//     or "fqn")
+//  2. docstring alone contains ALL tokens (MatchedIn "docstring") — ranked
+//     below name matches
+//  3. legacy back-compat: the whole, untokenized query is a literal
+//     substring of symbol or fqn (preserves pre-tokenization behavior for
+//     any query shape the tokenizer doesn't improve on)
+//
+// Within tier 1, exact name match > prefix match > substring, then shortest
+// symbol, then alphabetical, then file path — the same secondary ordering
+// SearchSymbols has always used (P1-05 / B77), so a single-term query
+// behaves exactly as before. P1-05 also fixed the LIKE-metachar escaping
+// (B13): `do_work` must not match `doXwork`, so tokens/the raw query are
+// always run through likeEscape with ESCAPE '\\'; tokenization does not
+// split on `_`, so that guarantee is unaffected by this change.
+//
+// SQLite's LIKE is case-insensitive for ASCII by default (verified by
+// TestSQLiteLikeIsASCIICaseInsensitive); this function's own tiering also
+// lower-cases both sides in Go so the ranking never depends on that
+// assumption alone.
+func (s *Store) SearchSymbols(projectID int64, query string, limit int) ([]SymbolMatch, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	q := "SELECT " + nodeColsAs("n") + " FROM nodes n " +
-		"WHERE n.project_id = ? AND n.kind != ? AND (n.symbol LIKE ? ESCAPE '\\' OR n.fqn LIKE ? ESCAPE '\\') " +
-		"ORDER BY " +
-		"CASE " +
-		"  WHEN lower(n.symbol) = lower(?) THEN 0 " +
-		"  WHEN n.symbol LIKE ? ESCAPE '\\' THEN 1 " +
-		"  ELSE 2 " +
-		"END, length(n.symbol), n.symbol, n.file_path " +
-		"LIMIT ?"
-	escaped := likeEscape(query)
-	prefix := escaped + "%"
-	like := "%" + escaped + "%"
-	return s.queryNodes(q, projectID, KindFile, like, like, query, prefix, limit)
+	tokens := tokenizeSearchQuery(query)
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+
+	args := []any{projectID, KindFile}
+	conds := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		like := "%" + likeEscape(t) + "%"
+		conds = append(conds, "(n.symbol LIKE ? ESCAPE '\\' OR n.fqn LIKE ? ESCAPE '\\' OR n.docstring LIKE ? ESCAPE '\\')")
+		args = append(args, like, like, like)
+	}
+	rawLike := "%" + likeEscape(query) + "%"
+	q := "SELECT " + nodeColsAs("n") + " FROM nodes n WHERE n.project_id = ? AND n.kind != ? AND ((" +
+		strings.Join(conds, " AND ") + ") OR n.symbol LIKE ? ESCAPE '\\' OR n.fqn LIKE ? ESCAPE '\\')"
+	args = append(args, rawLike, rawLike)
+
+	nodes, err := s.queryNodes(q, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	lowerTokens := make([]string, len(tokens))
+	for i, t := range tokens {
+		lowerTokens[i] = strings.ToLower(t)
+	}
+	lowerQuery := strings.ToLower(query)
+	allTokensIn := func(hay string) bool {
+		if hay == "" {
+			return false
+		}
+		for _, t := range lowerTokens {
+			if !strings.Contains(hay, t) {
+				return false
+			}
+		}
+		return true
+	}
+
+	type scored struct {
+		m      SymbolMatch
+		tier   int
+		exact  bool
+		prefix bool
+	}
+	out := make([]scored, 0, len(nodes))
+	for _, n := range nodes {
+		lsym := strings.ToLower(n.Symbol)
+		lfqn := strings.ToLower(n.FQN)
+		ldoc := strings.ToLower(n.Docstring)
+
+		var tier int
+		var matchedIn string
+		switch {
+		case allTokensIn(lsym):
+			tier, matchedIn = 0, "symbol"
+		case allTokensIn(lfqn):
+			tier, matchedIn = 0, "fqn"
+		case allTokensIn(ldoc):
+			tier, matchedIn = 1, "docstring"
+		case strings.Contains(lsym, lowerQuery):
+			tier, matchedIn = 2, "symbol"
+		case strings.Contains(lfqn, lowerQuery):
+			tier, matchedIn = 2, "fqn"
+		default:
+			// Belt-and-suspenders: the SQL prefilter is intentionally a
+			// touch broader than this precise Go-side check; skip rows
+			// that don't actually satisfy any tier.
+			continue
+		}
+		out = append(out, scored{
+			m:      SymbolMatch{Node: n, MatchedIn: matchedIn},
+			tier:   tier,
+			exact:  lsym == lowerQuery,
+			prefix: strings.HasPrefix(lsym, lowerQuery),
+		})
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.tier != b.tier {
+			return a.tier < b.tier
+		}
+		if a.exact != b.exact {
+			return a.exact
+		}
+		if a.prefix != b.prefix {
+			return a.prefix
+		}
+		if len(a.m.Node.Symbol) != len(b.m.Node.Symbol) {
+			return len(a.m.Node.Symbol) < len(b.m.Node.Symbol)
+		}
+		if a.m.Node.Symbol != b.m.Node.Symbol {
+			return a.m.Node.Symbol < b.m.Node.Symbol
+		}
+		return a.m.Node.FilePath < b.m.Node.FilePath
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	result := make([]SymbolMatch, len(out))
+	for i, o := range out {
+		result[i] = o.m
+	}
+	return result, nil
 }
 
 // SymbolDefCounts returns, per symbol name, how many definition nodes share it

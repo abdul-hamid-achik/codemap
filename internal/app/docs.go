@@ -77,7 +77,9 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   context <sym> [<sym>...] [--at]    one-call bundle; pass several symbols for a batch + shared callers
   path <from> <to>                   shortest call path between two symbols
   symbols <file>                     a file's outline (signatures)
-  find <query>                       name search (offline, no embeddings)
+  find <query>                       name search (offline, no embeddings); tokenizes on
+                                     whitespace/camelCase and also matches docstrings —
+                                     each hit's matched_in says symbol/fqn/docstring
   grep <pattern> [--regex] [-i]      exact text search over indexed content, joined to symbol
   semantic <query>                   meaning-based search (needs an embedded index;
                                      on a structure-only project it returns mode

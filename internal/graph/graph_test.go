@@ -811,8 +811,11 @@ func TestSearchSymbols(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[string]bool{}
-	for _, n := range res {
-		got[n.Symbol] = true
+	for _, m := range res {
+		got[m.Node.Symbol] = true
+		if m.MatchedIn != "symbol" {
+			t.Errorf("MatchedIn for %q = %q, want symbol", m.Node.Symbol, m.MatchedIn)
+		}
 	}
 	if !got["Authenticate"] || !got["authMiddleware"] {
 		t.Errorf("search 'auth' = %v, want Authenticate + authMiddleware (case-insensitive)", got)
@@ -944,8 +947,8 @@ func TestSearchSymbolsEscapesLikeMetachars(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("LIKE escape regression: SearchSymbols(%q) returned %d results, want 1 (doXwork matched the underscore as a wildcard)", "do_work", len(got))
 	}
-	if got[0].Symbol != "do_work" {
-		t.Errorf("got %q, want do_work", got[0].Symbol)
+	if got[0].Node.Symbol != "do_work" {
+		t.Errorf("got %q, want do_work", got[0].Node.Symbol)
 	}
 }
 
@@ -968,25 +971,152 @@ func TestSearchSymbolsExactMatchWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) == 0 || got[0].Symbol != "Store" {
+	if len(got) == 0 || got[0].Node.Symbol != "Store" {
 		t.Errorf("SearchSymbols(\"Store\") should rank the exact match first; got top=%q (results=%d)", first(got), len(got))
 	}
-	if len(got) < 2 || got[1].Symbol != "StoreHelper" {
+	if len(got) < 2 || got[1].Node.Symbol != "StoreHelper" {
 		t.Errorf("SearchSymbols(\"Store\") should rank prefix matches before substring; got second=%q", nth(got, 1))
 	}
 }
 
-func first(nodes []Node) string {
-	if len(nodes) == 0 {
-		return ""
+// TestSearchSymbolsMultiTermCamelCase pins panel idea I19: a multi-word
+// query must find a camelCase (and a snake_case) symbol even though neither
+// spelling contains the query as a literal substring — whitespace alone
+// tokenizes "parse selector" into ["parse","selector"], each of which is a
+// case-insensitive substring of ParseSelector / parse_selector.
+func TestSearchSymbolsMultiTermCamelCase(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(sym string) {
+		if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: sym + ".go", Symbol: sym, FQN: "p." + sym, Kind: KindFunction, Language: "go", SourceHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return nodes[0].Symbol
+	mk("ParseSelector")
+	mk("parse_selector")
+	mk("Render")
+
+	got, err := s.SearchSymbols(pid, "parse selector", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]string{}
+	for _, m := range got {
+		names[m.Node.Symbol] = m.MatchedIn
+	}
+	if names["ParseSelector"] != "symbol" {
+		t.Errorf("'parse selector' should find ParseSelector via symbol, got matched_in=%q (all=%v)", names["ParseSelector"], names)
+	}
+	if names["parse_selector"] != "symbol" {
+		t.Errorf("'parse selector' should find parse_selector via symbol, got matched_in=%q (all=%v)", names["parse_selector"], names)
+	}
+	if _, ok := names["Render"]; ok {
+		t.Error("Render should not match 'parse selector'")
+	}
 }
-func nth(nodes []Node, i int) string {
-	if i >= len(nodes) {
+
+// TestSearchSymbolsDocstringMatchRanksBelowName pins the tiering contract:
+// a docstring-only match (name doesn't contain the query at all) must rank
+// below a name match for the same query.
+func TestSearchSymbolsDocstringMatchRanksBelowName(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "Run", FQN: "p.Run",
+		Kind: KindFunction, Language: "go", Docstring: "unrelated helper.", SourceHash: "h1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "b.go", Symbol: "ValidateToken", FQN: "p.ValidateToken",
+		Kind: KindFunction, Language: "go", Docstring: "parses the request's auth selector before dispatch.", SourceHash: "h2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "c.go", Symbol: "ParseSelector", FQN: "p.ParseSelector",
+		Kind: KindFunction, Language: "go", Docstring: "", SourceHash: "h3"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.SearchSymbols(pid, "parse selector", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("SearchSymbols('parse selector') = %d hits, want 2 (ParseSelector by name, ValidateToken by docstring); got %+v", len(got), got)
+	}
+	if got[0].Node.Symbol != "ParseSelector" || got[0].MatchedIn != "symbol" {
+		t.Errorf("name match should rank first: got[0] = %+v", got[0])
+	}
+	if got[1].Node.Symbol != "ValidateToken" || got[1].MatchedIn != "docstring" {
+		t.Errorf("docstring-only match should rank second: got[1] = %+v", got[1])
+	}
+	if got[0].Node.Symbol == "Run" || got[1].Node.Symbol == "Run" {
+		t.Errorf("Run's unrelated docstring must not match: %+v", got)
+	}
+}
+
+// TestSearchSymbolsEmptyQuery asserts the degraded search floor behaves
+// gracefully on an empty/whitespace-only query: no panic, no full-table
+// dump (an empty LIKE '%%' would otherwise match everything).
+func TestSearchSymbolsEmptyQuery(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "Anything", FQN: "p.Anything", Kind: KindFunction, Language: "go", SourceHash: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"", "   ", "\t\n"} {
+		got, err := s.SearchSymbols(pid, q, 10)
+		if err != nil {
+			t.Fatalf("SearchSymbols(%q): %v", q, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("SearchSymbols(%q) = %d hits, want 0 (empty query should not match everything)", q, len(got))
+		}
+	}
+}
+
+// TestSearchSymbolsStopwordish exercises a short, common-word query to make
+// sure it behaves like any other single term (no special stopword list,
+// just ordinary substring matching) rather than erroring or panicking.
+func TestSearchSymbolsStopwordish(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: "a.go", Symbol: "TheRenderer", FQN: "p.TheRenderer", Kind: KindFunction, Language: "go", SourceHash: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SearchSymbols(pid, "the", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Node.Symbol != "TheRenderer" {
+		t.Errorf("SearchSymbols(\"the\") = %+v, want [TheRenderer]", got)
+	}
+}
+
+// TestSQLiteLikeIsASCIICaseInsensitive verifies (rather than assumes) that
+// modernc.org/sqlite's LIKE operator is case-insensitive for ASCII by
+// default — SearchSymbols' SQL prefilter relies on this to bring
+// differently-cased candidates back at all before the Go-side tiering
+// re-checks them case-insensitively too.
+func TestSQLiteLikeIsASCIICaseInsensitive(t *testing.T) {
+	s := openTest(t)
+	var matched int
+	if err := s.db.QueryRow("SELECT CASE WHEN 'ParseSelector' LIKE '%selector%' THEN 1 ELSE 0 END").Scan(&matched); err != nil {
+		t.Fatal(err)
+	}
+	if matched != 1 {
+		t.Error("SQLite LIKE did not case-insensitively match ASCII text — SearchSymbols' SQL prefilter assumption is wrong")
+	}
+}
+
+func first(matches []SymbolMatch) string {
+	if len(matches) == 0 {
 		return ""
 	}
-	return nodes[i].Symbol
+	return matches[0].Node.Symbol
+}
+func nth(matches []SymbolMatch, i int) string {
+	if i >= len(matches) {
+		return ""
+	}
+	return matches[i].Node.Symbol
 }
 
 func openStore(t *testing.T) *Store {

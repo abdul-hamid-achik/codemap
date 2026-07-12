@@ -1,0 +1,54 @@
+version: 1
+name: semantic_degraded
+intent: |
+    Panel idea I19 — the no-Ollama search floor. After indexing a project WITHOUT
+    embeddings (--no-embed, no Ollama required), `codemap find` still finds a
+    camelCase symbol from a multi-word query (tokenized on whitespace/camelCase,
+    not a single untokenized substring), a docstring-only mention still surfaces
+    (ranked below the name match), and each hit's --json output carries matched_in
+    so the caller knows which field matched. Unlike semantic.yml, this spec needs
+    NO external toolchain (no Ollama, no LSP servers) — it is meant to run
+    everywhere, including CI-adjacent local runs.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s\\n' 'package app' '' 'func ParseSelector(s string) string { return s }' '' '// ValidateInput parses the given selector before dispatch.' 'func ValidateInput() {}' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; echo '== find =='; \"$CM\" find parse selector; echo '== find-json =='; \"$CM\" find parse selector --json | grep -o '\"symbol\": *\"[A-Za-z]*\"\\|\"matched_in\": *\"[a-z]*\"'"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 20
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: semantic_degraded
+outcomes:
+    - id: camelcase_multiterm_hit
+      description: a multi-word query ("parse selector") finds the camelCase symbol ParseSelector without embeddings
+      verify:
+        screen:
+            contains: "ParseSelector"
+    - id: docstring_only_hit
+      description: a query with no shared words in the symbol name still surfaces via the docstring
+      verify:
+        screen:
+            contains: "ValidateInput"
+    - id: matched_in_symbol_json
+      description: the camelCase name match's --json hit is tagged matched_in:"symbol"
+      verify:
+        screen:
+            contains: "\"matched_in\": \"symbol\""
+    - id: matched_in_docstring_json
+      description: the docstring-only match's --json hit is tagged matched_in:"docstring"
+      verify:
+        screen:
+            contains: "\"matched_in\": \"docstring\""
+    - id: clean_exit
+      description: the find query exits cleanly with no embeddings and no Ollama involved
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:8f989f5eb1ca93619277c88616bf26c547c58e309f97c62ee582a0f25ede3065
