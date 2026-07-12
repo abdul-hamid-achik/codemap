@@ -14,20 +14,16 @@ structure once, then serves narrow, structured answers — so an agent spends a 
 instead of dozens of file reads.
 
 <!-- BENCH:START -->
-> **DIRECTIONAL** — go-git/go-git @ `48a1ae05eec4`, claude-sonnet-5, N=3 (mean ± σ), 2026-07-12. Not a controlled study; see [bench/README.md](bench/README.md).
+> **DIRECTIONAL** — go-git/go-git @ `48a1ae05eec4`, claude-sonnet-5, N=3 (mean ± σ), api-key auth, 2026-07-12. Not a controlled study; see [bench/README.md](bench/README.md).
 >
 > | metric (mean ± σ, per session) | baseline (Read/Grep/Glob) | with codemap | Δ |
 > |---|---|---|---|
-> | tool calls | 12.9 ± 22.0 | 5.2 ± 5.8 | -59% |
-> | input tokens (incl. cache reads) | 392k ± 541k | 276k ± 285k | -30% |
-> | output tokens | 2k ± 3k | 1k ± 2k | -36% |
-> | wall-clock (s) | 57.1 ± 50.3 | 94.3 ± 120.5 | +65% |
-> | cost (USD) | $0.275 ± $0.418 | $0.157 ± $0.157 | -43% |
-> | tasks correct | 8/10 | 8/10 | +0 |
->
-> ⚠ baseline: 3 of 30 sessions failed and are excluded from the stats above.
->
-> ⚠ codemap: 1 of 30 sessions failed and are excluded from the stats above.
+> | tool calls | 6.1 ± 5.7 | 4.5 ± 4.3 | -26% |
+> | input tokens (incl. cache reads) | 42k ± 58k | 82k ± 90k | +95% |
+> | output tokens | 2k ± 2k | 1k ± 1k | -33% |
+> | wall-clock (s) | 24.2 ± 25.1 | 18.6 ± 19.4 | -23% |
+> | cost (USD) | $0.054 ± $0.063 | $0.057 ± $0.059 | +6% |
+> | tasks correct | 10/10 | 9/10 | -1 |
 >
 > One-time codemap index cost (disclosed, not per-session): **6s**. codemap is modelled as pre-indexed (the daemon keeps it fresh in real use), so the codemap arm pays query time, not index time.
 <!-- BENCH:END -->

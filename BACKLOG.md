@@ -64,10 +64,11 @@ codemap.yaml (bench fixture exclude) · **first full A/B benchmark** (60 session
 DIRECTIONAL: −59% tool calls, −43% cost, correctness tied, wall-clock higher this run).
 45 specs, 39 tools.
 
-- [ ] **Cursor tool ceiling:** Cursor caps ~40 tools across all MCP servers and codemap
-  alone ships 39 — `agent setup cursor` warns at runtime, but the real fix is an MCP
-  profile (panel idea I01: `CODEMAP_MCP_PROFILE=core|full`, core ≈ the 12 workflow
-  tools) so codemap coexists with other servers in capped harnesses.
+- [ ] **MCP core profile (I01) — now evidence-backed:** Cursor caps ~40 tools and codemap
+  ships 39; and the hermetic benchmark measured the schema tax directly (+95% input
+  tokens vs baseline — 39 tool schemas ride in every session). `CODEMAP_MCP_PROFILE=
+  core|full` (core ≈ the 12 workflow tools) fixes both the Cursor ceiling and the
+  token overhead. Highest-leverage next slice.
 
 ## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
 All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see

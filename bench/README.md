@@ -53,6 +53,29 @@ go run ./bench --dry-run                # print the full plan + exact claude inv
 Opus. The harness prints the summed `total_cost_usd` at the end so spend is never a surprise.
 Subset with `--tasks` / `--reps` to iterate cheaply.
 
+## The two 2026-07-12 runs disagree — read this
+
+Both 60-session matrices are committed (`results/20260712-182434.summary.json`
+subscription auth, `results/20260712-203241.summary.json` api-key/`--bare`), and they
+tell different stories:
+
+| Δ (codemap vs baseline) | subscription | api-key (hermetic) |
+|---|---|---|
+| tool calls | −59% | −26% |
+| input tokens (incl. cache) | −30% | **+95%** |
+| wall-clock | +65% | −23% |
+| cost | −43% | +6% |
+| correctness | 8/10 both | 10/10 vs 9/10 |
+
+Lessons, honestly stated: (1) the subscription run's wall-clock penalty was plan
+throttling, not codemap — hermetically the codemap arm is *faster*; (2) the
+subscription run's big token/cost savings were inflated by ambient user config
+(hooks/CLAUDE.md) loading into both arms; (3) hermetically, codemap's input-token
+overhead is real — 39 MCP tool schemas ride in every session's context. That last
+one is direct evidence for a leaner tool profile (`core` subset) as the next
+optimization. Treat the hermetic run as the reference; it is the table in the
+repo README.
+
 ## Methodology (read before trusting a number)
 
 - **Fixture** — `github.com/go-git/go-git` pinned by SHA in `fixtures/fixture.lock`
