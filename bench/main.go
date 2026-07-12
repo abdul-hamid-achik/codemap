@@ -262,7 +262,9 @@ func resolveMCPConfig(templatePath, outDir string) (string, error) {
 	if err := os.WriteFile(out, []byte(expanded+"\n"), 0o644); err != nil {
 		return "", err
 	}
-	return out, nil
+	// claude runs with cwd=fixture, so the --mcp-config path itself must be
+	// absolute too — a relative path would resolve inside the fixture repo.
+	return filepath.Abs(out)
 }
 
 func pickDriver(c config, tasks []suite.Task) (drivers.Driver, error) {

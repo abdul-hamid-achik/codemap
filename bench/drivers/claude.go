@@ -51,17 +51,39 @@ func (d ClaudeDriver) bin() string {
 	return "claude"
 }
 
+// AuthMode reports how sessions will authenticate: "api-key" (ANTHROPIC_API_KEY
+// set → hermetic --bare sessions, the gold standard) or "subscription" (no key →
+// the operator's logged-in claude CLI). Subscription mode drops --bare but pins
+// the MCP surface with --strict-mcp-config, which preserves the fairness
+// property that actually decides the A/B (arm A cannot see codemap through
+// ambient user config). Residual leak: user-level CLAUDE.md/hooks may still
+// load — results from subscription runs are tagged and even more DIRECTIONAL.
+func AuthMode() string {
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		return "api-key"
+	}
+	return "subscription"
+}
+
 // Args builds the claude command line for an arm. Exposed for --dry-run so the
 // exact invocation can be printed without executing it.
 func (d ClaudeDriver) Args(prompt string, arm Arm) []string {
-	args := []string{
-		"--bare", // fairness: no ambient hooks/skills/plugins/MCP/CLAUDE.md leak
+	var args []string
+	if AuthMode() == "api-key" {
+		// fairness: no ambient hooks/skills/plugins/MCP/CLAUDE.md leak
+		args = append(args, "--bare")
+	} else {
+		// subscription auth cannot use --bare; pin MCP to exactly this arm's
+		// config (none for the baseline arm) so ambient servers never leak in.
+		args = append(args, "--strict-mcp-config")
+	}
+	args = append(args,
 		"-p", prompt,
 		"--output-format", "stream-json",
 		"--verbose", // required by stream-json
 		"--model", arm.Model,
 		"--allowedTools", arm.AllowedTools,
-	}
+	)
 	if arm.MCPConfig != "" {
 		args = append(args, "--mcp-config", arm.MCPConfig)
 	}
@@ -72,8 +94,8 @@ func (d ClaudeDriver) Args(prompt string, arm Arm) []string {
 // folding events into Metrics, measures wall-clock externally, and asserts the
 // arm's MCP server actually loaded.
 func (d ClaudeDriver) Run(ctx context.Context, prompt string, arm Arm, transcriptPath string) (Metrics, error) {
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		return Metrics{}, fmt.Errorf("ANTHROPIC_API_KEY is not set (required by --bare auth); export it to run the benchmark")
+	if AuthMode() == "subscription" {
+		fmt.Fprintf(os.Stderr, "bench: auth=subscription (no ANTHROPIC_API_KEY): --bare dropped, MCP pinned via --strict-mcp-config; sessions bill the logged-in plan\n")
 	}
 	cmd := exec.CommandContext(ctx, d.bin(), d.Args(prompt, arm)...)
 	cmd.Dir = arm.WorkDir

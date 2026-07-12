@@ -158,7 +158,8 @@ tasks:
       - |
         set -euo pipefail
         if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-          echo "task bench: ANTHROPIC_API_KEY is not set (required by claude --bare)"; exit 1
+          echo "task bench: no ANTHROPIC_API_KEY — using the logged-in claude CLI (subscription auth;"
+          echo "  --bare replaced by --strict-mcp-config, sessions bill your plan; see bench/README.md)"
         fi
         # 1. fetch the pinned fixture by SHA (gitignored)
         bench/fixtures/fetch.sh

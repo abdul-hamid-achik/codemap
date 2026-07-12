@@ -27,9 +27,17 @@ truth. Results aggregate to **mean ± σ** over N repetitions.
 
 ## Running it
 
-Local only (like `task flows`) — never in CI. Needs `claude` (Claude Code CLI), `gopls`
-(only to *regenerate* truth), and `ANTHROPIC_API_KEY` in the environment (keys are never
-committed; `--bare` takes auth from the env).
+Local only (like `task flows`) — never in CI. Needs `claude` (Claude Code CLI) and
+`gopls` (only to *regenerate* truth). Two auth modes:
+
+- **`ANTHROPIC_API_KEY` set** (preferred): sessions run `--bare` — fully hermetic, no
+  ambient hooks/skills/MCP/CLAUDE.md. Keys are never committed.
+- **No key**: sessions use the logged-in claude CLI (subscription auth, bills your
+  plan). `--bare` is replaced by `--strict-mcp-config`, which still pins the MCP
+  surface exactly per arm — the baseline arm cannot see codemap through ambient
+  config, preserving the A/B's core fairness property. Residual caveat: user-level
+  CLAUDE.md/hooks may load, so treat subscription-mode numbers as even more
+  directional than usual.
 
 ```sh
 task bench                              # full matrix: build → fetch fixture → index → run → report

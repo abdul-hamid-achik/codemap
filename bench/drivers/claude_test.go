@@ -82,6 +82,7 @@ func TestInitInfo_HasServer_StatusHandling(t *testing.T) {
 }
 
 func TestClaudeArgs_RequiredFlags(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key-1234") // api-key mode → --bare
 	d := ClaudeDriver{}
 	arm := Arm{Name: "codemap", AllowedTools: "Read,Grep,Glob,mcp__codemap", MCPConfig: "/x/mcp.json", Model: "claude-sonnet-5"}
 	args := d.Args("do the thing", arm)
@@ -91,10 +92,31 @@ func TestClaudeArgs_RequiredFlags(t *testing.T) {
 			t.Errorf("args missing %q: %v", want, args)
 		}
 	}
+	if strings.Contains(joined, "--strict-mcp-config") {
+		t.Error("api-key mode must use --bare, not --strict-mcp-config")
+	}
 	// baseline arm: no --mcp-config
 	base := d.Args("q", Arm{Name: "baseline", AllowedTools: "Read,Grep,Glob", Model: "m"})
 	if strings.Contains(strings.Join(base, " "), "--mcp-config") {
 		t.Error("baseline must not pass --mcp-config")
+	}
+}
+
+func TestClaudeArgs_SubscriptionMode(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "") // subscription mode → no --bare, strict MCP
+	d := ClaudeDriver{}
+	arm := Arm{Name: "codemap", AllowedTools: "Read,Grep,Glob,mcp__codemap", MCPConfig: "/x/mcp.json", Model: "m"}
+	joined := strings.Join(d.Args("q", arm), " ")
+	if strings.Contains(joined, "--bare") {
+		t.Error("subscription mode must not pass --bare")
+	}
+	for _, want := range []string{"--strict-mcp-config", "--mcp-config /x/mcp.json"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("subscription args missing %q: %v", want, joined)
+		}
+	}
+	if got := AuthMode(); got != "subscription" {
+		t.Errorf("AuthMode() = %q, want subscription", got)
 	}
 }
 

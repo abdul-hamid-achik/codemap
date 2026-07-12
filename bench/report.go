@@ -96,7 +96,7 @@ func RenderTable(sum suite.Summary) string {
 	fmt.Fprintf(&b, "> | metric (mean ± σ, per session) | baseline (Read/Grep/Glob) | with codemap | Δ |\n")
 	fmt.Fprintf(&b, "> |---|---|---|---|\n")
 	rowStat(&b, "tool calls", base, cm, func(a suite.ArmSummary) suite.Stat { return a.ToolCalls }, fmtNum, true)
-	rowStat(&b, "input tokens", base, cm, func(a suite.ArmSummary) suite.Stat { return a.InputTokens }, fmtK, true)
+	rowStat(&b, "input tokens (incl. cache reads)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.InputTokens }, fmtK, true)
 	rowStat(&b, "output tokens", base, cm, func(a suite.ArmSummary) suite.Stat { return a.OutputTokens }, fmtK, true)
 	rowStat(&b, "wall-clock (s)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.WallClockS }, fmtNum, true)
 	rowStat(&b, "cost (USD)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.CostUSD }, fmtUSD, true)
@@ -135,6 +135,16 @@ func rowCorrect(b *strings.Builder, base, cm *suite.ArmSummary) {
 		delta = fmt.Sprintf("%+d", cm.TasksCorrect-base.TasksCorrect)
 	}
 	fmt.Fprintf(b, "> | tasks correct | %s | %s | %s |\n", bc, cc, delta)
+	warnFailed(b, base)
+	warnFailed(b, cm)
+}
+
+// warnFailed appends a visible caveat when an arm had errored sessions — they
+// are excluded from the metric stats, and a table that hides that would lie.
+func warnFailed(b *strings.Builder, a *suite.ArmSummary) {
+	if a != nil && a.Failed > 0 {
+		fmt.Fprintf(b, ">\n> ⚠ %s: %d of %d sessions failed and are excluded from the stats above.\n", a.Arm, a.Failed, a.Sessions)
+	}
 }
 
 func cell(a *suite.ArmSummary, pick func(suite.ArmSummary) suite.Stat, f func(float64) string) string {

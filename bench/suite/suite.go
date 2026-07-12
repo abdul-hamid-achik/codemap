@@ -116,6 +116,7 @@ type ArmSummary struct {
 	TasksCorrect int    `json:"tasks_correct"` // distinct tasks passing in a majority of reps
 	TasksTotal   int    `json:"tasks_total"`
 	Sessions     int    `json:"sessions"`
+	Failed       int    `json:"failed,omitempty"` // sessions that errored; excluded from the metric stats
 }
 
 // Summary is the committed artifact: metadata + per-arm aggregates + raw
@@ -164,12 +165,22 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 		var tc, in, outp, wall, cost []float64
 		type pc struct{ pass, total int }
 		perTask := map[string]*pc{}
+		failed := 0
 		for _, s := range ss {
-			tc = append(tc, float64(s.ToolCalls))
-			in = append(in, float64(s.InputTokens))
-			outp = append(outp, float64(s.OutputTokens))
-			wall = append(wall, float64(s.WallClockMs)/1000.0)
-			cost = append(cost, s.CostUSD)
+			// An errored session (harness/CLI failure, no complete transcript)
+			// still counts against correctness but must not drag the metric
+			// means toward zero — exclude it from the stat pools.
+			if s.Error != "" {
+				failed++
+			} else {
+				tc = append(tc, float64(s.ToolCalls))
+				// input includes cache reads: fresh-only input_tokens hides the
+				// context the session actually consumed (cache reads dominate).
+				in = append(in, float64(s.InputTokens+s.CacheReadTokens))
+				outp = append(outp, float64(s.OutputTokens))
+				wall = append(wall, float64(s.WallClockMs)/1000.0)
+				cost = append(cost, s.CostUSD)
+			}
 			p := perTask[s.Task]
 			if p == nil {
 				p = &pc{}
@@ -196,6 +207,7 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 			TasksCorrect: correct,
 			TasksTotal:   len(perTask),
 			Sessions:     len(ss),
+			Failed:       failed,
 		})
 	}
 	return out

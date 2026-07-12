@@ -50,9 +50,15 @@ CI `action` job, 9c0bb49) · **action DX** — six outputs, GITHUB_STEP_SUMMARY,
 reusable workflow, Ollama-service-container example (11b8ace, 107 assertions) ·
 **authenticated Ollama endpoints** `CODEMAP_OLLAMA_API_KEY` (ad01ae9; note: Ollama Cloud
 has no embedding model in catalog yet — near-term value is authenticated team servers).
-**Released as v0.41.0** (2026-07-12). Remaining follow-ups: BACKLOG item for Cursor's
-~40-tool ceiling; extend specs/selectors.yml to cover `candidates[]`; benchmark run
-(needs ANTHROPIC_API_KEY, ~$5-15); plugin marketplace listing rides this release.
+**Released as v0.41.0** (2026-07-12). Post-release: specs/selectors.yml now asserts
+`candidates[]` (5 outcomes, re-stamped); bench gained subscription-auth mode
+(`--strict-mcp-config` fairness substitute for `--bare`) + two harness fixes (absolute
+MCP config path; failed sessions excluded from stats) — full A/B matrix run in flight.
+
+- [ ] **Cursor tool ceiling:** Cursor caps ~40 tools across all MCP servers and codemap
+  alone ships 39 — `agent setup cursor` warns at runtime, but the real fix is an MCP
+  profile (panel idea I01: `CODEMAP_MCP_PROFILE=core|full`, core ≈ the 12 workflow
+  tools) so codemap coexists with other servers in capped harnesses.
 
 ## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
 All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see
