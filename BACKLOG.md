@@ -53,7 +53,16 @@ has no embedding model in catalog yet — near-term value is authenticated team 
 **Released as v0.41.0** (2026-07-12). Post-release: specs/selectors.yml now asserts
 `candidates[]` (5 outcomes, re-stamped); bench gained subscription-auth mode
 (`--strict-mcp-config` fairness substitute for `--bare`) + two harness fixes (absolute
-MCP config path; failed sessions excluded from stats) — full A/B matrix run in flight.
+MCP config path; failed sessions excluded from stats).
+
+**v0.42.0 (2026-07-12):** test_commands on impact/context · tokenized degraded search
+(matched_in) · portable index tarballs (cache export/import) · review/risk gates
+(--fail-on-risk/--fail-on-untested, exit 6) + .pre-commit-hooks.yaml · studio UX (mouse,
+$EDITOR jump, yank, scrollbars, blast-tree, uniform q) · landing redesign + docs/ci page
++ og card + WCAG fixes · docs reader-flow polish + consistency sweep · dogfood
+codemap.yaml (bench fixture exclude) · **first full A/B benchmark** (60 sessions, go-git,
+DIRECTIONAL: −59% tool calls, −43% cost, correctness tied, wall-clock higher this run).
+45 specs, 39 tools.
 
 - [ ] **Cursor tool ceiling:** Cursor caps ~40 tools across all MCP servers and codemap
   alone ships 39 — `agent setup cursor` warns at runtime, but the real fix is an MCP
