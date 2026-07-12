@@ -147,6 +147,7 @@ func orchestrate(c config) error {
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
 		Driver:        driver.Name(),
 		Model:         c.model,
+		AuthMode:      drivers.AuthMode(),
 		FixtureRepo:   fixtureRepo(c.fixture),
 		FixtureSHA:    fixtureSHA(c.fixture),
 		Reps:          c.reps,

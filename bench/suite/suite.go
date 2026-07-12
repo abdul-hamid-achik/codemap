@@ -130,7 +130,8 @@ type Summary struct {
 	FixtureRepo   string       `json:"fixture_repo"`
 	FixtureSHA    string       `json:"fixture_sha"`
 	Reps          int          `json:"reps"`
-	IndexSeconds  float64      `json:"index_seconds"` // one-time codemap index cost, reported separately
+	AuthMode      string       `json:"auth_mode,omitempty"` // api-key (hermetic --bare) | subscription (--strict-mcp-config)
+	IndexSeconds  float64      `json:"index_seconds"`       // one-time codemap index cost, reported separately
 	TotalCostUSD  float64      `json:"total_cost_usd"`
 	Arms          []ArmSummary `json:"arms"`
 	Sessions      []Session    `json:"sessions"`

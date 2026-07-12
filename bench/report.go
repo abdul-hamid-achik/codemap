@@ -87,8 +87,12 @@ func SpliceTable(readme string, sum suite.Summary) (string, error) {
 // RenderTable renders the DIRECTIONAL banner + metrics table from a summary.
 func RenderTable(sum suite.Summary) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "> **DIRECTIONAL** — %s @ `%s`, %s, N=%d (mean ± σ), %s. Not a controlled study; see [bench/README.md](bench/README.md).\n>\n",
-		sum.FixtureRepo, shortSHA(sum.FixtureSHA), sum.Model, sum.Reps, dateOf(sum.GeneratedAt))
+	auth := ""
+	if sum.AuthMode != "" {
+		auth = ", " + sum.AuthMode + " auth"
+	}
+	fmt.Fprintf(&b, "> **DIRECTIONAL** — %s @ `%s`, %s, N=%d (mean ± σ)%s, %s. Not a controlled study; see [bench/README.md](bench/README.md).\n>\n",
+		sum.FixtureRepo, shortSHA(sum.FixtureSHA), sum.Model, sum.Reps, auth, dateOf(sum.GeneratedAt))
 
 	base := findArm(sum.Arms, "baseline")
 	cm := findArm(sum.Arms, "codemap")
