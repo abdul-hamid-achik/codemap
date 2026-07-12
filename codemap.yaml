@@ -1,0 +1,7 @@
+# codemap's own project config (dogfood).
+# bench/fixtures/ holds a vendored benchmark fixture repo (go-git, ~445 files,
+# gitignored) — without this exclude it leaks into codemap's own index and
+# pollutes hotspots/ambiguity results with go-git symbols.
+index:
+  exclude_extra:
+    - bench/fixtures/

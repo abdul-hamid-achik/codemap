@@ -20,7 +20,11 @@ export default defineConfig({
     ['meta', { property: 'og:title', content: 'codemap — your agent greps. codemap knows.' }],
     ['meta', { property: 'og:description', content: 'Local-first code intelligence for coding agents: who calls this, what breaks, which tests cover it — one call each, over MCP or CLI.' }],
     ['meta', { property: 'og:url', content: 'https://codemap.tools' }],
-    ['meta', { name: 'twitter:card', content: 'summary' }],
+    ['meta', { property: 'og:image', content: 'https://codemap.tools/og-image.png' }],
+    ['meta', { property: 'og:image:width', content: '1200' }],
+    ['meta', { property: 'og:image:height', content: '630' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:image', content: 'https://codemap.tools/og-image.png' }],
   ],
 
   sitemap: { hostname: 'https://codemap.tools' },

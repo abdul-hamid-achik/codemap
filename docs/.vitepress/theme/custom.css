@@ -17,10 +17,10 @@
 
   --vp-font-family-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  /* brand: teal-shifted for contrast on white */
-  --vp-c-brand-1: #0f7b93;
-  --vp-c-brand-2: #0e6f84;
-  --vp-c-brand-3: #0c6376;
+  /* brand: teal-shifted for contrast on white (5.3:1, comfortable AA margin) */
+  --vp-c-brand-1: #0a6577;
+  --vp-c-brand-2: #095a6a;
+  --vp-c-brand-3: #084f5d;
   --vp-c-brand-soft: rgba(102, 217, 239, 0.14);
 }
 
@@ -117,8 +117,16 @@
   letter-spacing: 0.1em;
 }
 
-.cm-term-bar .cm-verdict-bad { color: var(--cm-magenta); }
+/* lightened from the studio magenta (#f92672 = 4.3:1 on the pane) to clear
+   WCAG AA 4.5:1 at this size */
+.cm-term-bar .cm-verdict-bad { color: #ff6b9a; }
 .cm-term-bar .cm-verdict-good { color: var(--cm-green); }
+
+.cm-term-bar span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .cm-term-body {
   padding: 12px 16px 14px;
@@ -181,6 +189,18 @@
   color: var(--vp-c-text-3);
   font-size: 13px;
   margin-top: 8px;
+}
+
+@media (max-width: 480px) {
+  .cm-term {
+    font-size: 11px;
+  }
+  .cm-term-bar {
+    font-size: 10px;
+  }
+  .VPHero .tagline {
+    max-width: 30em;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {
