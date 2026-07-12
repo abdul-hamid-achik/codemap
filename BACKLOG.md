@@ -43,10 +43,16 @@ distribution — canonical playbook, in-repo Claude Code plugin, `agent setup` f
 harnesses (49326ad) · **F6** `bench/` agent A/B benchmark harness, merged from worktree
 (real ground truth generated; run needs API key, ~$5–15, results stay DIRECTIONAL).
 **F5** lives outside the repo: `~/projects/codemap-action` (composite GH Action + GitLab
-mirror, 95/95 assertions, local only — publishing needs explicit authorization). New specs:
-coverage/grep/agent_setup (+ semantic extended) → 42 flows. Follow-ups: BACKLOG item for
-Cursor's ~40-tool ceiling interaction; extend specs/selectors.yml to cover `candidates[]`;
-publish plugin marketplace + codemap-action when authorized.
+mirror, 95/95 assertions). New specs: coverage/grep/agent_setup (+ semantic extended) →
+42 flows. Post-sprint follow-ups also landed: **F5 moved in-repo** at
+`integrations/github-action/` (e955232; Makefile → included Taskfile, `task action:test`,
+CI `action` job, 9c0bb49) · **action DX** — six outputs, GITHUB_STEP_SUMMARY, one-line
+reusable workflow, Ollama-service-container example (11b8ace, 107 assertions) ·
+**authenticated Ollama endpoints** `CODEMAP_OLLAMA_API_KEY` (ad01ae9; note: Ollama Cloud
+has no embedding model in catalog yet — near-term value is authenticated team servers).
+**Released as v0.41.0** (2026-07-12). Remaining follow-ups: BACKLOG item for Cursor's
+~40-tool ceiling; extend specs/selectors.yml to cover `candidates[]`; benchmark run
+(needs ANTHROPIC_API_KEY, ~$5-15); plugin marketplace listing rides this release.
 
 ## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
 All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see
