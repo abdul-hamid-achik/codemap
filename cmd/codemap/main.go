@@ -221,7 +221,7 @@ func init() {
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
 		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
-		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, configCmd, daemonCmd)
+		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured
 	// {ok,error,code,hint} envelope to stdout with a stable machine code, and

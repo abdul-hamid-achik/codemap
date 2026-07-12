@@ -1,0 +1,12 @@
+{
+  "name": "codemap",
+  "owner": {"name": "abdul hamid"},
+  "description": "Local-first code intelligence for AI agents: call graph, impact analysis, and semantic search as MCP tools",
+  "plugins": [
+    {
+      "name": "codemap",
+      "source": "./integrations/claude-code",
+      "description": "codemap MCP server + a skill that makes structural questions go through the code graph"
+    }
+  ]
+}

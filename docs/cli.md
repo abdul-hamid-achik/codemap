@@ -121,6 +121,16 @@ config) for the exact pre-adaptive equal-weighted behavior.
 | `codemap studio` | Open the interactive [TUI](/studio) |
 | `codemap version` | Print version information |
 
+## Agent harness setup
+
+One command wires codemap into an AI coding harness — no hand-editing MCP config files. See [codemap for agents](/agents#one-command-setup) for the harness table and the Claude Code plugin.
+
+| Command | Description |
+|---|---|
+| `codemap agent list` | List known harnesses (Claude Code, Cursor, Codex, Gemini, Cline/Roo, Zed, VS Code, OpenCode, aider), whether each is detected here, and if codemap is already registered (`--json`) |
+| `codemap agent setup <harness>` | Merge the codemap MCP server into the harness's native config and drop the canonical playbook into its guidance file (`.cursor/rules/*.mdc`, `AGENTS.md`, `GEMINI.md`, …). Never clobbers other servers or your prose. Flags: `--global` (user-level config where the harness has one), `--dry-run` (print planned writes, change nothing), `--no-playbook` (MCP registration only) |
+| `codemap agent playbook [--format markdown\|markdown-cli\|claude-skill\|cursor-rule]` | Print the canonical "when to use codemap" playbook, for wiring an unlisted harness by hand |
+
 ## Branches & caching
 
 The index is a snapshot of one working tree. Two features keep it aligned with your

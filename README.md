@@ -327,7 +327,20 @@ marshalers), so those aren't flagged as dead (Go). It still can't see callers re
 
 ## Use it from an agent (MCP)
 
-codemap is a stdio MCP server. Register `codemap serve` with your agent — most CLIs have a one-liner:
+codemap is a stdio MCP server. The fastest path is `codemap agent setup <harness>` — it merges the
+codemap server into the harness's native config and drops a playbook that teaches agents *when* to
+use the tools (no hand-editing config files):
+
+```bash
+codemap agent setup claude-code   # installs the plugin (MCP server + using-codemap skill)
+codemap agent setup cursor        # or: codex, gemini, vscode, opencode, cline, roo, zed, aider
+codemap agent list                # what's detected here, and whether codemap is registered
+```
+
+In **Claude Code** you can also install the plugin directly:
+`/plugin marketplace add abdul-hamid-achik/codemap` then `/plugin install codemap@codemap`.
+
+Prefer to wire it yourself? Most CLIs have a one-liner:
 
 ```bash
 claude mcp add codemap -- codemap serve     # Claude Code (add --scope user for all projects)

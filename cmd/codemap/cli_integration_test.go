@@ -475,6 +475,32 @@ func TestCLIContracts(t *testing.T) {
 			t.Fatalf("invalid provider error is not actionable: %s", res.stdout)
 		}
 	})
+
+	t.Run("agent commands need no index and report structured results", func(t *testing.T) {
+		// agent list --json returns a well-formed array (works with no index).
+		res := runCLI(t, bin, runner, env, "agent", "list", "-C", cold, "--json")
+		if res.exit != 0 {
+			t.Fatalf("agent list exit=%d stderr=%s", res.exit, res.stderr)
+		}
+		var dets []map[string]any
+		mustJSON(t, res.stdout, &dets)
+		if len(dets) == 0 {
+			t.Fatalf("agent list should report harnesses, got %s", res.stdout)
+		}
+
+		// A dry-run setup into a fresh project writes nothing but reports the plan.
+		res = runCLI(t, bin, runner, env, "agent", "setup", "vscode", "-C", cold, "--dry-run", "--json")
+		if res.exit != 0 {
+			t.Fatalf("agent setup --dry-run exit=%d stderr=%s stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		if _, err := os.Stat(filepath.Join(cold, ".vscode", "mcp.json")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("dry-run must not write config, got err=%v", err)
+		}
+
+		// An unknown harness is an operational failure with the standard envelope.
+		res = runCLI(t, bin, runner, env, "agent", "setup", "nope", "-C", cold, "--json")
+		assertCLIEnvelope(t, res, exitOperational, "operational")
+	})
 }
 
 func writeTestFile(t *testing.T, path, content string) {

@@ -89,6 +89,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      language/directory + bounded per-file detail
   annotate <sym> | <from> <to>       pin a note/data to a symbol or call path
   annotations [sym] | [from] [to]    list annotations (--rm <id> to remove)
+  agent setup <harness> | list | playbook   wire codemap (MCP server + playbook) into an AI coding harness
   serve                              run the MCP server (stdio)
   studio                             the interactive TUI
 

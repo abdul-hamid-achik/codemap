@@ -13,6 +13,51 @@ envelopes; MCP structured tool results). The built-in guide
 `codemap docs workflow` (and the `codemap_docs` tool) is the in-band version of this
 page.
 
+## One-command setup
+
+codemap registers itself with your harness — no hand-editing MCP config files, no forgetting
+the guidance. `codemap agent setup <harness>` merges the codemap MCP server into the harness's
+native config and writes the canonical playbook (this page, in-band) to the harness's guidance
+surface, so the agent knows *when* to reach for the tools before it is even connected.
+
+```bash
+codemap agent setup claude-code   # installs the plugin (MCP server + using-codemap skill)
+codemap agent setup cursor        # .cursor/mcp.json + .cursor/rules/codemap.mdc
+codemap agent setup vscode        # .vscode/mcp.json (key: servers) + copilot-instructions.md
+codemap agent list                # what's detected here, and whether codemap is registered
+```
+
+| Harness | MCP registration | Playbook surface |
+|---|---|---|
+| Claude Code | the [plugin](#claude-code-plugin) (`.mcp.json`) | `using-codemap` skill |
+| Cursor | `.cursor/mcp.json` (`mcpServers`) | `.cursor/rules/codemap.mdc` |
+| OpenAI Codex | `codex mcp add` / `~/.codex/config.toml` (`[mcp_servers.codemap]`) | `AGENTS.md` |
+| Gemini CLI | `.gemini/settings.json` (`mcpServers`) | `GEMINI.md` |
+| Cline | VS Code globalStorage `cline_mcp_settings.json` | `.clinerules` |
+| Roo Code | `.roo/mcp.json` (`mcpServers`) | `.roo/rules/codemap.md` |
+| Zed | `~/.config/zed/settings.json` (`context_servers`) | `.rules` |
+| VS Code Copilot | `.vscode/mcp.json` (**`servers`**, not `mcpServers`) | `.github/copilot-instructions.md` |
+| OpenCode | `opencode.json` (`mcp`, command is an array) | `AGENTS.md` |
+| aider | none (no MCP) — CLI playbook | `CONVENTIONS.md` |
+
+`setup` defaults to **project-scoped** files and never clobbers other servers or your prose (it
+merges JSON and replaces only a marked `<!-- codemap:begin … end -->` block). Global-only configs
+(Codex, Zed, Cline) print the exact snippet unless you pass `--global`; `--dry-run` shows every
+planned write. For any harness not listed, `codemap agent playbook` prints the guidance to paste.
+
+### Claude Code plugin
+
+In Claude Code, add the marketplace and install the plugin (it references `codemap` on your PATH —
+install via Homebrew/`go install`, it is not bundled):
+
+```
+/plugin marketplace add abdul-hamid-achik/codemap
+/plugin install codemap@codemap
+```
+
+You get the `codemap` MCP tools, the `using-codemap` skill (this playbook), and a
+`/codemap:codemap-setup` command that indexes the current repo.
+
 ## The agent loop
 
 A typical "understand or change this code" loop, and the one-call tool for each step:

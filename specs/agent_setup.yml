@@ -1,0 +1,54 @@
+version: 1
+name: agent_setup
+intent: |
+    `codemap agent setup <harness>` wires codemap into an AI coding harness with no
+    manual config editing: it merges the codemap MCP server into the harness's native
+    config file and drops the canonical playbook into the harness's guidance surface.
+    This pins the Cursor path end-to-end — `.cursor/mcp.json` gets a `codemap` server
+    under `mcpServers`, `.cursor/rules/codemap.mdc` gets the playbook that teaches the
+    `codemap_*` tools — and pins the never-clobber idempotency guarantee: a second run
+    is byte-identical and reports "unchanged". `codemap agent list` then reports the
+    harness as detected and codemap registered. Pure-Go, needs no harness installed.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/p\"; mkdir -p \"$HOME\" \"$P\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; echo '== setup cursor =='; \"$CM\" agent setup cursor; cp -r .cursor \"$TMP/first\"; echo '== playbook teaches the tools =='; grep -o 'codemap_context' .cursor/rules/codemap.mdc | head -1; echo '== mcp server registered =='; grep -o '\"codemap\"' .cursor/mcp.json | head -1; echo '== setup cursor AGAIN (idempotency) =='; \"$CM\" agent setup cursor; cmp -s .cursor/mcp.json \"$TMP/first/mcp.json\" && cmp -s .cursor/rules/codemap.mdc \"$TMP/first/rules/codemap.mdc\" && echo IDEMPOTENT || echo DRIFTED; echo '== agent list =='; \"$CM\" agent list | awk '/^cursor/{print \"CURSOR_ROW:\"$2\":\"$3}'"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: agent_setup
+outcomes:
+    - id: playbook_written
+      description: the Cursor rule file teaches the codemap_* tools
+      verify:
+        screen:
+            contains: "codemap_context"
+    - id: mcp_server_registered
+      description: the codemap MCP server is merged into .cursor/mcp.json
+      verify:
+        screen:
+            contains: "\"codemap\""
+    - id: idempotent_rerun
+      description: a second setup run is byte-identical and reports unchanged
+      verify:
+        screen:
+            contains: "IDEMPOTENT"
+    - id: unchanged_reported
+      description: the second run reports the files as unchanged, not rewritten
+      verify:
+        screen:
+            contains: "unchanged"
+    - id: list_reports_registered
+      description: agent list shows cursor detected with codemap registered
+      verify:
+        screen:
+            contains: "CURSOR_ROW:yes:yes"
+contractHash: sha256:6638c5acfef01837b323026e637070b70298344d3aa2c05014b953d99385b950

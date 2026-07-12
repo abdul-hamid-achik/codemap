@@ -1,0 +1,9 @@
+{
+  "name": "codemap",
+  "displayName": "codemap",
+  "description": "Local-first code intelligence: call graph + impact + semantic search as MCP tools, with a skill that teaches when to use them",
+  "author": {"name": "abdul hamid", "email": "abdulachik@icloud.com"},
+  "repository": "https://github.com/abdul-hamid-achik/codemap",
+  "license": "MIT",
+  "keywords": ["code-intelligence", "call-graph", "mcp", "impact-analysis"]
+}
