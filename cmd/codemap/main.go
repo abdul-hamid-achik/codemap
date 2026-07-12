@@ -169,6 +169,7 @@ func init() {
 	callersCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	callersCmd.Flags().Bool("lsp", false, "(alias for --precise; kept for back-compat)")
 	_ = callersCmd.Flags().MarkHidden("lsp")
+	referencesCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	calleesCmd.Flags().Bool("precise", false, "use the language server for precise callees (gopls / typescript-language-server / pyright, per the project's languages)")
 	calleesCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	calleesCmd.Flags().Bool("lsp", false, "(alias for --precise; kept for back-compat)")
@@ -211,7 +212,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, configCmd, daemonCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured

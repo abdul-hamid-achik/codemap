@@ -13,14 +13,15 @@
 
 ## Current state — what's shipped
 Released through **v0.39.0** (`brew install abdul-hamid-achik/tap/codemap`). Pure-Go, `CGO_ENABLED=0`,
-5 cross-compiled targets. Three surfaces over one store: **CLI**, **MCP** (`codemap serve`, 36 tools),
+5 cross-compiled targets. Three surfaces over one store: **CLI**, **MCP** (`codemap serve`, 37 tools),
 **studio** TUI (Graph/Metrics/Impact/Search/Path + `?` help + source & context
 overlays). Languages: **Go** (go/parser + opt-in `--precise` go/types) and **TypeScript/JavaScript/Python**
 (one typescript-language-server for TS+JS, pyright for Python; `--precise` = the unified exact pass —
 go/types for Go, LSP `callHierarchy` for the rest). Semantic vectors via veclite + Ollama nomic-embed-text
 (hybrid vector+BM25). **Annotation layer** (pin notes + opaque data to nodes & call paths, survives reindex,
 surfaces on every surface). Flagship one-call **`context`** bundle (def + callers + callees + tests + blast
-radius). Graph analytics: `impact` (cycle-safe blast radius + covering tests), `hotspots`, `orphans`, `path`.
+radius + bounded value-reference wiring). Graph analytics: `impact` (cycle-safe blast radius + covering
+tests), `references` (callback/handler registrations), `hotspots`, `orphans`, `path`.
 Agent-trust honesty: index freshness/`stale`, ambiguous-name notes, name-inflation flags, call-graph-
 unavailable `resolution` note. `doctor`, multi-project registry, incremental reindex with deleted-file pruning.
 
@@ -29,6 +30,8 @@ conservative file deletion analysis, and Studio's fifth Path tab are released. C
 work classifies dependency edges as confirmed/candidate, prevents name-fanout candidates from proving
 an unsafe deletion, preserves deleted-file impact in `review` before reindex, keeps Studio selections
 exact, and compacts MCP JSON to reduce agent response tokens.
+The next usefulness slice adds first-class `references` across CLI/MCP/context and lets people create
+exact-symbol annotations directly inside Studio.
 
 ## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
 All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see
@@ -312,11 +315,13 @@ Ordered by leverage (from a verified state-review + adversarial critic, 2026-06-
 - [ ] **P4 — studio for humans** (capped — human surface on an agent-first project):
   - [x] **Path tab** — source/target editors, exact selector-aware endpoints, async shortest-call-path lookup,
     explicit confidence/stale/unresolved states, vim+arrow navigation, and Graph/source/context drills.
-  - [ ] Mouse support; drive `ctrl+r` from empty/cold states; in-TUI annotate; jump-to-`$EDITOR` + yank
+  - [x] **In-TUI annotate** — exact-symbol modal composer on Graph/Search/Impact/Path with async save,
+    same-name isolation, retry-safe failures, and narrow-terminal coverage.
+  - [ ] Mouse support; drive `ctrl+r` from empty/cold states; jump-to-`$EDITOR` + yank
     `file:line`; blast-radius-as-tree; scrollbars; remaining per-tab `q` traps.
 - [ ] **P5 — Ecosystem integration** (the EI.* epic below).
 - [ ] **Unbuilt query/tooling debt:** E2.3 unified extractor (LSP-over-go/parser merge + FQN dedupe);
-  E3.2 `codemap_semantic_callers`; E3.3 `codemap_refactor_plan`; E2.5 remainder (`references` MCP tool);
+  E3.2 `codemap_semantic_callers`; E3.3 `codemap_refactor_plan`;
   E3.1 TODO (`impact` semantically-similar via `vector.Similar`); E5.1 high-
   coverage unit sweep.
 - [ ] **Process:** cut **0.10.0** (FIX.md §1/§2/§3 are on `main`; needs explicit auth). Move/delete the
@@ -677,7 +682,7 @@ _v0.14.0 shipped 2026-06-25._
 ## Original epic checklist — remaining open work
 Epics 0–6 are complete and shipped through v0.9.1 (full per-item detail in the vault archive). Remaining:
 - [ ] **E2.3** unified extractor (merge LSP precedence over go/parser, dedupe by FQN) — Go + LSP paths run side-by-side today.
-- [~] **E2.5** MCP query tools — callees/impact/path/hotspots/orphans/symbols/dependencies done; `references` remains.
+- [x] **E2.5** MCP query tools — callees/impact/path/hotspots/orphans/symbols/dependencies/references done.
 - [ ] **E3.2** `codemap_semantic_callers` (semantic → graph expansion) · [ ] **E3.3** `codemap_refactor_plan`.
 - [ ] **E3.1 follow-up** — `impact` add semantically-similar (needs `vector.Similar`).
 - [ ] **E4.2** ntcharts real charts for Metrics (validate R1 first) · **E4.3** Graph node-link/Sugiyama canvas (future).

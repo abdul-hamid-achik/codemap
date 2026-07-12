@@ -19,6 +19,18 @@ var (
 		Args:  symbolOrAtArgs,
 		RunE:  runCallers,
 	}
+	referencesCmd = &cobra.Command{
+		Use:   "references [<symbol>]",
+		Short: "List enclosing scopes that use a function/method as a value",
+		Long: `List indexed callback and registration wiring for a function or method.
+
+This follows value-reference edges, not calls. Each result is the enclosing
+function, method, or file scope; it is not an exact expression line. Coverage
+and confidence remain explicit because an empty result does not prove there is
+no dynamic or otherwise-unindexed wiring.`,
+		Args: symbolOrAtArgs,
+		RunE: runReferences,
+	}
 	calleesCmd = &cobra.Command{
 		Use:   "callees [<symbol>]",
 		Short: "List functions/methods that a symbol calls",
@@ -180,6 +192,91 @@ func runCallers(cmd *cobra.Command, args []string) error {
 
 func runCallees(cmd *cobra.Command, args []string) error {
 	return runRelation(cmd, args, false)
+}
+
+func runReferences(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sess.Close() }()
+	cwd := targetDir(cmd)
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	symbol := ""
+	if len(args) > 0 {
+		symbol = args[0]
+	}
+	selector, err := selectorFromAtFlag(svc, cwd, cmd)
+	if err != nil {
+		return err
+	}
+	var rep *app.ReferencesReport
+	if selector != nil {
+		rep, err = svc.ReferencesBySelector(cwd, *selector)
+	} else {
+		rep, err = svc.References(cwd, symbol)
+	}
+	if err != nil {
+		return err
+	}
+	if !rep.Found {
+		if selector != nil {
+			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
+		}
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
+			fmt.Sprintf("run: codemap find %q", symbol))
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+
+	fmt.Printf("Value references to %s (%s; not callers)\n", rep.Symbol, rep.Project)
+	if rep.Selector != nil {
+		fmt.Printf("  selected:      %s — %s:%d\n", disp(rep.Selector.FQN, rep.Symbol), rep.Selector.File, rep.Selector.StartLine)
+	} else if rep.DefinitionsTotal > 1 {
+		fmt.Printf("  definitions:   %d merged (use --at <file>:<line> for one)\n", rep.DefinitionsTotal)
+	}
+	fmt.Printf("  scopes:        %d total", rep.ReferencesTotal)
+	if rep.ReferencesTruncated > 0 {
+		fmt.Printf(" (%d shown, %d omitted; text and JSON are bounded)", len(rep.References), rep.ReferencesTruncated)
+	}
+	fmt.Println()
+	fmt.Printf("  confidence:    %s\n", rep.Confidence)
+	fmt.Printf("  coverage:      %s\n", rep.Coverage)
+	fmt.Printf("  call graph:    %s (independent of value-reference confidence)\n", rep.CallGraph)
+	if rep.Stale {
+		fmt.Println("  ⚠ stale index — stored scopes are candidates and newer wiring may be missing")
+	}
+	if rep.Resolution != "" {
+		fmt.Println("  ⚠ " + rep.Resolution)
+	}
+	if len(rep.References) == 0 {
+		fmt.Println("  no indexed value-reference scopes found — absence is not proof of no wiring")
+	} else {
+		fmt.Println("  enclosing scopes:")
+		for _, site := range rep.References {
+			reason := strings.ReplaceAll(site.ConfidenceReason, "_", " ")
+			confidence := site.Confidence
+			if reason != "" {
+				confidence += " · " + reason
+			}
+			if site.Source.Kind == graph.KindFile {
+				fmt.Printf("     file scope — %-30s [%s]\n", site.Source.File, confidence)
+				continue
+			}
+			fmt.Printf("     %-36s %s:%d  [%s]\n",
+				disp(site.Source.FQN, site.Source.Symbol), site.Source.File, site.Source.StartLine, confidence)
+		}
+	}
+	if rep.Note != "" {
+		fmt.Println("  ⚠ " + rep.Note)
+	}
+	renderAnnotations(rep.Annotations)
+	return nil
 }
 
 // runRelation implements callers/callees. The only differences are the service

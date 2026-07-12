@@ -349,6 +349,21 @@ func collectValueRefs(fset *token.FileSet, from string, node ast.Node, collectCa
 	}
 	ast.Inspect(node, func(n ast.Node) bool {
 		switch t := n.(type) {
+		case *ast.ValueSpec:
+			// Direct storage: `var Hook = Handler` (package or local scope).
+			for _, value := range t.Values {
+				add(value)
+			}
+		case *ast.AssignStmt:
+			// Local storage/reassignment: `hook := Handler` / `hook = Handler`.
+			for _, value := range t.Rhs {
+				add(value)
+			}
+		case *ast.ReturnStmt:
+			// A function returned as a value is wiring too, not a call.
+			for _, value := range t.Results {
+				add(value)
+			}
 		case *ast.KeyValueExpr:
 			add(t.Value) // struct/map field: `RunE: runInit`, `"x": handler`
 		case *ast.CallExpr:

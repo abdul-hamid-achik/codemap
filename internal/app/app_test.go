@@ -649,7 +649,7 @@ func TestServiceContext(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
 	if err := os.WriteFile(filepath.Join(proj, "main.go"),
-		[]byte("package app\n\n// A does the thing.\nfunc A() { B() }\n\nfunc B() {}\n\nfunc C() { A() }\n"), 0o644); err != nil {
+		[]byte("package app\n\n// A does the thing.\nfunc A() { B() }\n\nvar Hook = struct{ Run func() }{Run: A}\n\nfunc B() {}\n\nfunc C() { A() }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(proj, "a_test.go"),
@@ -698,6 +698,12 @@ func TestServiceContext(t *testing.T) {
 	}
 	if rep.BlastRadius < 1 {
 		t.Errorf("A should have a non-empty blast radius, got %d", rep.BlastRadius)
+	}
+	if rep.ReferencesTotal != 1 || len(rep.References) != 1 || rep.References[0].Source.Kind != graph.KindFile {
+		t.Errorf("A should include its top-level value wiring as a file scope, got %+v", rep.References)
+	}
+	if rep.ReferencesCoverage != ReferenceCoveragePartial || !strings.Contains(rep.ReferencesResolution, "not exact expression lines") {
+		t.Errorf("context lost reference-specific coverage honesty: %+v", rep)
 	}
 	// Not truncated here, so the totals equal the (small) list lengths.
 	if rep.CallersTotal != len(rep.Callers) || rep.CalleesTotal != len(rep.Callees) || rep.TestsTotal != len(rep.Tests) {

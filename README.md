@@ -31,17 +31,19 @@ instead of dozens of file reads.
   transitive blast radius (everything affected by a change), and which tests cover those
   paths (flagging untested code).
 - **Built for agent harnesses** — `context <symbol>` bundles definition + callers + callees +
-  tests + blast radius in **one call** (no four-round-trip stitching), and `status` reports index
+  value-reference wiring + tests + blast radius in **one call** (no multi-round-trip stitching),
+  and `status` reports index
   *freshness* (files changed since indexing) so an agent reindexes before trusting a stale answer.
 - **Exact, reusable source selectors** — every symbol result already carries `file`, `start_line`,
   `fqn`, and `kind`. Agents project those fields into a `selector` for `source`/`context`/`callers`/
-  `callees`/`impact`/`risk` (or paired path selectors), while people use `--at file:line`. This picks
+  `callees`/`references`/`impact`/`risk` (or paired path selectors), while people use
+  `--at file:line`. This picks
   one same-named definition without persisting reindex-volatile database IDs.
 - **Multi-project registry** — one shared store indexes all your repos; `projects` lists what's
   indexed, and any query targets one project (resolved from cwd, or `--path`).
 - **Annotations** — pin notes and external data (DB rows from mongosh/postgres, vidtrace/vecgrep
   findings, …) to a symbol or a call path; they persist across reindex. A knowledge layer over the
-  graph for agent harnesses (`annotate` / `annotations`, also on MCP).
+  graph for agent harnesses (`annotate` / `annotations`, also on MCP) and people (`a` in Studio).
 - **Precise call resolution** — the fast name-based graph over-matches same-named methods
   (`x.Close()` links to *every* `Close`). `codemap index --precise` attempts to resolve each call to
   the one it actually invokes and records successful precise coverage per file. A query is reported
@@ -98,6 +100,9 @@ the selected node's signature is previewed (`⟩ func runInit(...)`).
 - **Path** — choose `FROM` and `TO`, then inspect the shortest directed call chain.
   The ordered nodes are keyboard-navigable and every answer shows its `call_graph` confidence,
   keeping “disconnected,” “unresolved,” and “missing endpoint” visibly distinct.
+- **Knowledge capture** — press `a` on an exact selected symbol in Graph, Search, Impact, or Path
+  to write an annotation without leaving Studio. The composer keeps typing isolated from global
+  shortcuts and pins the note to the selected FQN.
 
 ## Installation
 
@@ -171,6 +176,7 @@ codemap callers authenticateUser   # who calls it (fast, name-based)
 codemap callers authenticateUser --precise   # exact one-off callers via the language server
 codemap callers --at auth.go:42    # exact definition from the indexed graph
 codemap callees authenticateUser   # what it calls
+codemap references authenticateUser # where it is stored/passed as a callback or handler
 codemap path     Handler Login     # shortest call path between two symbols
 
 # 5. Analyze impact and structure
@@ -246,10 +252,11 @@ complete set.
 | Project | `projects` | list all registered projects and their index sizes |
 | Project | `config path` / `config show` | resolved config file path and values (`--json`) |
 | Navigate | `callers` / `callees` | call-graph navigation (`--at file:line` selects one definition; `--precise` resolves on demand) |
+| Navigate | `references` | where a function/method is used as a value (callbacks, handlers, registrations); partial-coverage confidence is explicit |
 | Navigate | `path` | shortest call path; unique FQNs select exact endpoints and every result states call-graph confidence |
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
-| Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, tests, blast radius |
+| Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, value references, tests, blast radius |
 | Navigate | `read-order` | ranked reading list for an unfamiliar repo |
 | Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact, file dependency evidence, or diff-scoped tests |
 | Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
@@ -340,8 +347,8 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-Tools (36): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
-`codemap_callers`, `codemap_callees`, `codemap_impact`, `codemap_file_impact`,
+Tools (37): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+`codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
 `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
 `codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_read_order`, `codemap_path`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_source`,
@@ -349,8 +356,8 @@ Tools (36): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,
 `codemap_cache_save`, `codemap_cache_restore`, `codemap_cache_list`, `codemap_cache_drop`. Each takes an
 optional `path` (the project directory) and returns JSON. The two an agent reaches for first:
-**`codemap_context <symbol>`** bundles a symbol's definition, callers, callees, covering tests and
-blast radius in **one call** (instead of four), and **`codemap_status`** reports index *freshness* —
+**`codemap_context <symbol>`** bundles a symbol's definition, callers, callees, value references,
+covering tests and blast radius in **one call**, and **`codemap_status`** reports index *freshness* —
 a `stale` count of files changed/added/removed since indexing, so the agent knows to reindex before
 trusting results. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
 gopls-resolved results (Go); `codemap_source` returns a symbol's body; `codemap_projects` lists
@@ -359,7 +366,8 @@ what's indexed; **`codemap_docs`** returns an agent guide so a harness can learn
 symbols and call paths — a knowledge layer over the graph (see below).
 
 For same-named definitions, pass `selector:{file,start_line,fqn,kind}` to `codemap_source`,
-`codemap_context`, `codemap_callers`, `codemap_callees`, `codemap_impact`, or `codemap_risk`.
+`codemap_context`, `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`,
+or `codemap_risk`.
 `codemap_path` accepts `from_selector` + `to_selector`. The fields are a direct projection of the
 symbol objects these tools already return, so chaining adds no database-ID contract.
 

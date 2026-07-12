@@ -32,12 +32,13 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap callers --at <file>:<line>` | Callers of exactly one definition (same selector is available on `callees`) |
 | `codemap callees <symbol>` | Functions/methods a symbol calls |
 | `codemap callees <symbol> --precise` | **Precise one-off** callees via the language server |
+| `codemap references <symbol>` | Places a function/method is used as a value rather than called — callbacks, handlers, and registrations. `--at file:line` selects one definition; JSON reports bounded sites plus totals, partial/unavailable coverage, stale state, and confirmed/candidate confidence. The stored edge identifies the enclosing symbol or file, not the exact expression column. |
 | `codemap path <from> <to>` | Shortest call path between two symbols. Unique FQNs such as `app.Controller.Run` and `app.Store.Save` select exact endpoints; human output always reports `call_graph` confidence and any resolution/staleness warning. |
 | `codemap symbols <file>` | Outline a file's symbols with their signatures (a structured alternative to reading it) |
 | `codemap symbol-at <file>:<line>` | Resolve a file:line position to its enclosing symbol (FQN, kind, range, reusable selector). The `indexed` field in `--json` distinguishes an unindexed project (`indexed:false`) from a real miss (`indexed:true`, `resolution:none`). `callers`, `callees`, `source`, `context`, `impact`, and `risk` also accept `--at` to select that exact definition. |
 | `codemap related-files <file>` | Files related to a file via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence |
 | `codemap source <symbol>` | Print source for matching definitions; use `--at <file>:<line>` for exactly one |
-| `codemap context <symbol> [<symbol>...] [--depth N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, covering tests, blast-radius size, and pinned annotations. Uses the indexed graph only (never launches a language server implicitly); unresolved relationships stay explicit. Replaces separate `source`/`callers`/`callees`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling). Batch source bodies share a 64 KiB budget disclosed by `source_budget`/`source_truncations`; optional component failures appear in `partial_errors` without discarding usable context. |
+| `codemap context <symbol> [<symbol>...] [--depth N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, value-reference wiring, covering tests, blast-radius size, and pinned annotations. Uses the indexed graph only (never launches a language server implicitly); unresolved relationships stay explicit. Replaces separate `source`/`callers`/`callees`/`references`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling). Batch source bodies share a 64 KiB budget disclosed by `source_budget`/`source_truncations`; optional component failures appear in `partial_errors` without discarding usable context. |
 
 The fast default uses the indexed graph (name-based resolution; same-named methods can over-match,
 e.g. `callers Close` lists callers of every `Close`). **The best fix is to reindex once with
@@ -51,7 +52,7 @@ when the language server isn't available — never a hard error. The old `--lsp`
 hidden compatibility alias, but new scripts and people should use `--precise`.
 
 Precise indexing fixes call **edges**; a bare name can still match several exact
-definitions. Use `--at <file>:<line>` to keep callers/callees/source/context/impact/risk
+definitions. Use `--at <file>:<line>` to keep callers/callees/references/source/context/impact/risk
 on one definition. `--at` replaces the positional symbol and cannot be combined
 with one. JSON/MCP consumers use the field-compatible
 `selector:{file,start_line,fqn,kind}` described in the MCP guide. The selector prefers
@@ -221,7 +222,7 @@ additive optional properties but does not rename or repurpose existing fields. T
 degrades gracefully (a plain changed-file list with a note) when the project isn't indexed or
 isn't a git repo; hard-failure error envelopes are separate from the success schema.
 
-**`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`review`/`context`/
+**`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`references`/`review`/`context`/
 `hotspots`/`orphans`/`path`
 tells a consumer how much to trust the call graph without parsing prose: `resolved`
 (every matched definition file has precise coverage), `name` (Go name-based — same-named methods may over-match), `unresolved`

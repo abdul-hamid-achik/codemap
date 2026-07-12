@@ -42,6 +42,7 @@ name-based call edges for them), so `callers`/`callees`/`impact` need it — run
 codemap context  authenticateUser     # everything about it in ONE call (def, callers, callees, tests)
 codemap context  --at auth.go:42      # exactly one definition when a short name is shared
 codemap callers  authenticateUser     # who calls it
+codemap references authenticateUser  # where it is registered/passed as a value
 codemap impact   authenticateUser     # callers + blast radius + covering tests
 codemap path     Handler Login        # shortest call path
 codemap hotspots                      # the most-referenced symbols
@@ -51,7 +52,7 @@ codemap status                        # stats + warns if the index is stale vs y
 
 Add `--json` to any query for machine-readable output (handy for agents and scripts).
 JSON symbol results carry `file`, `start_line`, `fqn`, and `kind`; MCP clients project
-those fields into `selector` to keep source/context/callers/callees/impact/risk on that
+those fields into `selector` to keep source/context/callers/callees/references/impact/risk on that
 same definition across calls. See [MCP exact source selectors](/mcp#exact-source-selectors).
 
 ## Explore visually

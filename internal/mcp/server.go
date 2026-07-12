@@ -36,13 +36,15 @@ Understand a symbol:
 - codemap_impact (flagship) — definition sites, direct callers, the transitive blast radius
   (everything a change affects), and which tests cover it. One call replaces many file reads.
 - codemap_callers / codemap_callees — who calls a symbol / what it calls.
+- codemap_references — where a function/method is stored or passed as a callback value;
+  enclosing scopes, not callers or exact expression lines. It has its own coverage/confidence.
 - codemap_source — a symbol's source code; codemap_symbols — a file's outline.
-- codemap_context — the one-call bundle for a symbol (def+callers+callees+tests+blast+notes);
+- codemap_context — the one-call bundle for a symbol (def+callers+callees+value refs+tests+blast+notes);
   codemap_context_batch — the same for several symbols at once, plus the callers they share
   (coupling), so you model a whole component in one round-trip.
 Results carry each symbol's signature and docstring, so you rarely need to open files.
 When a result's short name is shared, project its existing file, start_line, fqn, and kind
-fields into a selector object for codemap_source/context/callers/callees/impact/path. Selectors
+fields into a selector object for codemap_source/context/callers/callees/references/impact/path. Selectors
 choose one definition without exposing volatile database ids; file+fqn+kind survives line shifts.
 
 After you edit: codemap_review — diff-scoped impact + test selection. It reads your git diff
@@ -82,6 +84,10 @@ resolution degrades to name-based (with a "note" in the result) when the toolcha
 unavailable, so precise:true is never a hard failure. Likewise
 codemap_semantic returns a "note" (not an error) when the project has no embeddings — fall back to
 codemap_find.
+
+Value references are independent of call precision: codemap_references follows stored callback/
+registration 'references' edges, and never accepts precise:true. Its partial/unavailable coverage,
+stale flag, and per-site confidence remain authoritative even after a precise call-graph index.
 
 Call codemap_docs for the full guide (workflow, every tool, accuracy, and how codemap fits the
 local toolchain) — useful when wiring codemap into a harness.`
@@ -164,6 +170,12 @@ type symbolQueryInput struct {
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from a result's file/start_line/fqn/kind fields; takes precedence over symbol"`
 	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Precise  bool                `json:"precise,omitempty" jsonschema:"use the language server (gopls) for exact results (Go) — slower, but not inflated by same-named symbols"`
+}
+
+type referencesInput struct {
+	Symbol   string              `json:"symbol,omitempty" jsonschema:"function/method name to inspect for callback/value wiring; omit when selector is provided"`
+	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact target definition projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
 type impactInput struct {
@@ -359,6 +371,10 @@ func (s *Server) register() {
 		Description: "List functions/methods called by a symbol. Pass selector:{file,start_line,fqn,kind} projected from a prior result to select one exact definition instead of merging same-named definitions. Pass precise=true for an on-demand language-server resolution.",
 	}, s.handleCallees)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+		Name:        "codemap_references",
+		Description: "List bounded enclosing function/method/file scopes that store or pass a function/method as a callback value. This follows references edges, never calls; source.start_line is the enclosing declaration line, not the exact expression line. Returns definitions, references_total/truncation, stale, reference-specific confirmed|candidate confidence and partial|unavailable coverage, plus independent call_graph honesty. Pass selector:{file,start_line,fqn,kind} for one exact target. Missing sites do not prove no wiring; precise call indexing does not upgrade this evidence.",
+	}, s.handleReferences)
+	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_impact",
 		Description: "Impact analysis: definition sites, direct callers, transitive blast radius, and covering tests. Pass selector:{file,start_line,fqn,kind} projected from a find/symbols/context result to analyze one exact definition; name-only input remains supported and honestly reports when same-named definitions are merged.",
 	}, s.handleImpact)
@@ -424,7 +440,7 @@ func (s *Server) register() {
 	}, s.handleSource)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_context",
-		Description: "Everything about a symbol in ONE call: source, callers, callees, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported. Uses the indexed graph only; capped lists carry true *_total counts and optional failures appear in partial_errors.",
+		Description: "Everything about a symbol in ONE call: source, callers, callees, callback/value references, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported. Uses the indexed graph only; capped lists carry true *_total counts, reference coverage/staleness stays independent of call_graph, and optional failures appear in partial_errors.",
 	}, s.handleContext)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_context_batch",
@@ -706,6 +722,21 @@ func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return result(rep, err)
 	}
 	rep, err := s.svc.Callees(cwdOf(in.Path), in.Symbol)
+	return result(rep, err)
+}
+
+func (s *Server) handleReferences(_ context.Context, _ *sdkmcp.CallToolRequest, in referencesInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	if in.Selector != nil {
+		rep, err := s.svc.ReferencesBySelector(cwdOf(in.Path), *in.Selector)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return result(nil, fmt.Errorf("references needs symbol or selector"))
+	}
+	rep, err := s.svc.References(cwdOf(in.Path), in.Symbol)
 	return result(rep, err)
 }
 

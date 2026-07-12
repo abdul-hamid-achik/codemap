@@ -33,6 +33,8 @@ func (m Model) render() string {
 	}
 	content := m.body(m.width, bodyH)
 	switch {
+	case m.annotationOpen:
+		content = m.renderAnnotationComposer(m.width, bodyH)
 	case m.showHelp:
 		content = renderHelp()
 	case m.srcView:
@@ -61,7 +63,7 @@ func renderHelp() string {
 	row("alt+1–5", "switch tabs while a text input has focus (Search/Impact/Path)")
 	row("ctrl+g", "open the selection in the Graph walker")
 	row("ctrl+s", "view the selected symbol's source")
-	row("ctrl+o", "orient: context card (callers/callees/tests/blast)")
+	row("ctrl+o / a", "orient context / add a note to an exact selection (in-flight save is non-cancellable)")
 	row("ctrl+r", "reindex and refresh (keeps the project's precision)")
 	row("alt+← / alt+→", "back / forward (global history — restores the bar you came from)")
 	row("esc", "step back one level (also closes help/overlay)")
@@ -126,6 +128,38 @@ func (m Model) renderSource(w, h int) string {
 		}
 	}
 	return b.String()
+}
+
+// renderAnnotationComposer is a compact modal editor. Every dynamic segment is
+// width-clamped before the outer MaxWidth guard, so even a tiny terminal keeps
+// the target, input, error, and save/cancel affordances usable without wrapping
+// the rest of Studio underneath it.
+func (m Model) renderAnnotationComposer(w, _ int) string {
+	contentW := w - 4 // rounded border + one cell of horizontal padding
+	if contentW < 1 {
+		contentW = 1
+	}
+	target := displayName(m.annotationCenter.fqn, m.annotationCenter.sym)
+	location := fmt.Sprintf("%s:%d", m.annotationCenter.file, m.annotationCenter.line)
+	var b strings.Builder
+	b.WriteString(titleStyle.Render(truncate("Add annotation", contentW)) + "\n")
+	b.WriteString(symStyle.Render(truncate(target, contentW)) + "\n")
+	b.WriteString(mutedStyle.Render(truncate(location, contentW)) + "\n\n")
+	if m.annotationSaving {
+		b.WriteString(mutedStyle.Render(truncate(m.spinnerGlyph()+" saving note…", contentW)))
+	} else {
+		b.WriteString(lipgloss.NewStyle().MaxWidth(contentW).Render(m.annotationInput.View()))
+	}
+	if m.annotationErr != "" {
+		b.WriteString("\n" + errorStyle.Render(truncate(m.annotationErr, contentW)))
+	}
+	b.WriteString("\n\n" + mutedStyle.Render(truncate("enter save · esc cancel · ctrl+c quit", contentW)))
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorAccent).
+		Padding(0, 1).
+		Render(b.String())
+	return lipgloss.NewStyle().MaxWidth(w).Render(box)
 }
 
 func (m Model) header() string {
@@ -193,6 +227,12 @@ func (m Model) statusText() string {
 func (m Model) footer() string {
 	var hint string
 	switch {
+	case m.annotationOpen:
+		hint = "type note · enter save · esc cancel · ctrl+c quit"
+		if m.annotationSaving {
+			hint = "saving note… · ctrl+c quit"
+		}
+		return spread(mutedStyle.Render(hint), m.statusText(), m.width)
 	case m.showHelp:
 		return spread(mutedStyle.Render("? / esc close"), m.statusText(), m.width)
 	case m.srcView:
@@ -208,22 +248,22 @@ func (m Model) footer() string {
 	switch m.active {
 	case tabGraph:
 		if m.graphFocus == focusRefs {
-			hint = "↑/↓ ref · enter re-center · m map · s source · ⌫ back · ← hubs · ctrl+c quit"
-			compact = "↑/↓ · enter re-center · m map · ⌫ back · ← hubs"
+			hint = "↑/↓ ref · enter re-center · a note · m map · s source · ⌫ back · ← hubs · ctrl+c quit"
+			compact = "↑/↓ · enter re-center · a note · ⌫ back · ← hubs"
 		} else {
-			hint = "↑/↓ hub · → walk · enter → impact · m map · s source · p precise · ctrl+c quit"
-			compact = "↑/↓ · → walk · enter impact · m map · s src"
+			hint = "↑/↓ hub · → walk · enter → impact · a note · m map · s source · p precise · ctrl+c quit"
+			compact = "↑/↓ · → walk · enter impact · a note · s src"
 		}
 	case tabSearch:
-		hint = "type · enter search/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
-		compact = "type · enter · ↑/↓ · ctrl+g graph · ctrl+s src · tab"
+		hint = "type · enter search/open · ↑/↓ select · a note · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
+		compact = "type · enter · ↑/↓ · a note · ctrl+g graph · tab"
 	case tabImpact:
-		hint = "type symbol · enter run/open · ↑/↓ select · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
-		compact = "type · enter · ↑/↓ · ctrl+g graph · ctrl+s src · tab"
+		hint = "type symbol · enter run/open · ↑/↓ select · a note · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
+		compact = "type · enter · ↑/↓ · a note · ctrl+g graph · tab"
 	case tabPath:
 		if m.pathFocus == focusPathResult {
-			hint = "↑/↓ · k/j inspect · enter/ctrl+g graph · ctrl+s source · f/t edit · r rerun · ctrl+c quit"
-			compact = "↑/↓ · k/j · enter graph · f/t edit · r rerun"
+			hint = "↑/↓ · k/j inspect · a note · enter/ctrl+g graph · ctrl+s source · f/t edit · r rerun · ctrl+c quit"
+			compact = "↑/↓ · k/j · a note · enter graph · f/t edit"
 		} else {
 			hint = "type endpoint · ↑/↓ field · enter next/run · alt+1–5 tabs · ctrl+c quit"
 			compact = "type · ↑/↓ field · enter next/run · alt+1–5 tabs"
@@ -241,19 +281,55 @@ func (m Model) footer() string {
 }
 
 func (m Model) body(w, h int) string {
+	var content string
 	switch m.active {
 	case tabGraph:
-		return m.renderGraph(w, h)
+		content = m.renderGraph(w, h)
 	case tabMetrics:
-		return m.renderMetrics(w, h)
+		content = m.renderMetrics(w, h)
 	case tabImpact:
-		return m.renderImpact(w, h)
+		content = m.renderImpact(w, h)
 	case tabSearch:
-		return m.renderSearch(w, h)
+		content = m.renderSearch(w, h)
 	case tabPath:
-		return m.renderPath(w, h)
+		content = m.renderPath(w, h)
 	}
-	return ""
+	if banner := m.annotationBanner(w); banner != "" {
+		return banner + "\n" + content
+	}
+	return content
+}
+
+func (m Model) annotationBanner(w int) string {
+	current, ok := m.annotationSelection()
+	if !ok || !sameGraphCenter(current, m.annotationCacheAt) || len(m.annotationCache) == 0 {
+		return ""
+	}
+	// Graph centers, Search hits, and exact Impact roots already render their
+	// refreshed annotation collections inline. The banner fills the remaining
+	// drill surfaces (Graph refs, blast nodes, Path rows) without duplicating notes.
+	switch m.active {
+	case tabGraph:
+		if m.graphFocus == focusHubs && sameGraphCenter(m.graphCenter, current) {
+			return ""
+		}
+	case tabSearch:
+		return ""
+	case tabImpact:
+		if root, rootOK := impactRootCenter(m.impactRep); rootOK && sameGraphCenter(root, current) {
+			return ""
+		}
+	}
+	a := m.annotationCache[len(m.annotationCache)-1]
+	note := strings.TrimSpace(a.Note)
+	if note == "" {
+		note = strings.TrimSpace(a.Data)
+	}
+	if note == "" {
+		return ""
+	}
+	line := fmt.Sprintf("⟐ %s · [%s] %s", displayName(current.fqn, current.sym), a.Source, note)
+	return countStyle.Render(truncate(line, w))
 }
 
 // ---- Graph tab: two-column call-graph explorer ----

@@ -49,6 +49,8 @@ func TestCLIContracts(t *testing.T) {
 	writeTestFile(t, filepath.Join(project, "wire.go"), "package main\n\nfunc Wire() { Helper() }\n")
 	writeTestFile(t, filepath.Join(project, "model.go"), "package main\n\ntype Item struct{}\nfunc (Item) Touch() {}\n")
 	writeTestFile(t, filepath.Join(project, "candidate.go"), "package main\n\nfunc Candidate() { Item{}.Touch() }\n")
+	writeTestFile(t, filepath.Join(project, "handler.go"), "package main\n\nfunc Handler() {}\n")
+	writeTestFile(t, filepath.Join(project, "hooks.go"), "package main\n\nvar Hook = struct{ Run func() }{Run: Handler}\n\nfunc Register(func()) {}\nfunc Setup() { Register(Handler) }\n")
 	// A project-local value proves that -C affects config discovery too, not only
 	// the final service call.
 	writeTestFile(t, filepath.Join(project, "codemap.yaml"), "embedding:\n  dimensions: 321\n")
@@ -90,6 +92,7 @@ func TestCLIContracts(t *testing.T) {
 		for _, args := range [][]string{
 			{"source", "Helper", "--at", "main.go:4", "--json"},
 			{"context", "Helper", "--at", "main.go:4", "--json"},
+			{"references", "Handler", "--at", "handler.go:3", "--json"},
 		} {
 			res = runCLI(t, bin, runner, env, args...)
 			assertCLIEnvelope(t, res, exitOperational, "operational")
@@ -214,6 +217,50 @@ func TestCLIContracts(t *testing.T) {
 		if rep.Symbol != "Helper" || rep.Selector.File != "main.go" || rep.Selector.StartLine != 4 || len(rep.Matches) != 1 || !strings.Contains(rep.Matches[0].Source, "func Helper") {
 			t.Fatalf("source --at report = %+v", rep)
 		}
+	})
+
+	t.Run("value references are distinct, bounded, and selector-aware", func(t *testing.T) {
+		res := runCLI(t, bin, runner, env, "references", "Handler", "-C", project)
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("references exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		for _, want := range []string{
+			"Value references to Handler", "not callers", "2 total", "coverage:      partial",
+			"file scope — hooks.go", "main.Setup", "enclosing scopes:",
+		} {
+			if !strings.Contains(res.stdout, want) {
+				t.Fatalf("references text missing %q:\n%s", want, res.stdout)
+			}
+		}
+		if strings.Contains(res.stdout, "file scope — hooks.go:1") || strings.Contains(res.stdout, "--precise") {
+			t.Fatalf("references text fabricated a lexical file line or suggested call precision:\n%s", res.stdout)
+		}
+
+		res = runCLI(t, bin, runner, env, "references", "Handler", "-C", project, "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("references JSON exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var rep struct {
+			SchemaVersion       int              `json:"schema_version"`
+			Found               bool             `json:"found"`
+			References          []map[string]any `json:"references"`
+			ReferencesTotal     int              `json:"references_total"`
+			ReferencesTruncated int              `json:"references_truncated"`
+			Coverage            string           `json:"coverage"`
+			CallGraph           string           `json:"call_graph"`
+		}
+		mustJSON(t, res.stdout, &rep)
+		if rep.SchemaVersion != 1 || !rep.Found || rep.ReferencesTotal != 2 || len(rep.References) != 2 ||
+			rep.ReferencesTruncated != 0 || rep.Coverage != "partial" || rep.CallGraph != "name" {
+			t.Fatalf("references JSON contract = %+v", rep)
+		}
+
+		res = runCLI(t, bin, runner, env, "references", "--at", "handler.go:3", "-C", project, "--json")
+		if res.exit != 0 || !strings.Contains(res.stdout, `"fqn": "main.Handler"`) || !strings.Contains(res.stdout, `"references_total": 2`) {
+			t.Fatalf("exact references selector failed: exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		res = runCLI(t, bin, runner, env, "references", "DoesNotExist", "-C", project, "--json")
+		assertCLIEnvelope(t, res, exitNotFound, codeNotFound)
 	})
 
 	t.Run("dependency confidence is visible in human reports", func(t *testing.T) {

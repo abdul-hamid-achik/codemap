@@ -1,0 +1,66 @@
+version: 1
+name: studio_annotations
+intent: |
+    A person exploring an exact symbol in Studio can capture what they learn without
+    leaving the TUI. Search for Handler, open the modal annotation composer with `a`,
+    save a note, see it immediately on the selected result, then exit and prove the
+    same FQN-scoped note persisted through the shared annotation service.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'module example.com/studioann\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf '%s' 'package app; func Handler() {}; func Run() { Handler() }' > \"$P/app.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed --no-lsp >/dev/null 2>&1; \"$CM\" studio; CODE=$?; if [ \"$CODE\" -ne 0 ]; then exit \"$CODE\"; fi; echo '== persisted Studio annotation =='; \"$CM\" annotations app.Handler > \"$TMP/annotations.out\"; cat \"$TMP/annotations.out\"; grep -q 'registered by router' \"$TMP/annotations.out\" || exit 1; echo NOTE_PERSISTED_OK; grep -q 'studio' \"$TMP/annotations.out\" || exit 1; echo STUDIO_SOURCE_OK"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+    alternateScreen: require
+steps:
+    - wait:
+        screen:
+            contains: "codemap studio"
+        timeoutMs: 8000
+    - press: "4"
+    - type: "Handler"
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "name mode"
+        timeoutMs: 8000
+    - press: "a"
+    - wait:
+        screen:
+            contains: "Add annotation"
+        timeoutMs: 5000
+    - snapshot: annotation_composer
+    - type: "registered by router"
+    - press: "enter"
+    - wait:
+        screen:
+            contains: "annotation #"
+        timeoutMs: 8000
+    - snapshot: annotation_saved
+    - press: "ctrl+c"
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 5000
+    - snapshot: annotation_persisted
+outcomes:
+    - id: note_persisted
+      description: the note created in Studio persists in the shared annotation layer after Studio exits
+      verify:
+        screen:
+            contains: "NOTE_PERSISTED_OK"
+    - id: studio_provenance
+      description: Studio labels the persisted annotation with its source
+      verify:
+        screen:
+            contains: "STUDIO_SOURCE_OK"
+    - id: clean_exit
+      description: Studio and the follow-up annotation read complete successfully
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:eb5ad52d1ea41c3536a373ed60b7dec789c31f7f008d95a1464343cacc6ccbdc

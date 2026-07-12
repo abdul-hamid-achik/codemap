@@ -23,12 +23,13 @@ Key features:
 - **Structural graph** — nodes (files, functions, types, methods, tests) + `calls`/`defines` edges
   in pure-Go SQLite (Go call edges are name-based by default, exact via `go/types` with `--precise`;
   TypeScript/JavaScript/Python call edges come only from `--precise` via `callHierarchy`;
-  `imports`/`implements`/`references`/`overrides` edge types are reserved for the planned LSP/tree-sitter
-  backends).
+  Go callback/handler uses are persisted as `references`; imports are package-scoped evidence;
+  `implements`/`overrides` remain reserved for planned backends).
 - **Semantic search** — node source text embedded via Ollama (`nomic-embed-text`, 768-dim)
   into veclite; vector + BM25 hybrid (RRF) search.
-- **Hybrid queries** — `codemap_impact` (blast radius + test coverage), `semantic_callers`
-  (semantic match then graph expansion), `refactor_plan`.
+- **Hybrid queries** — `codemap_context` (one-call source + wiring + impact), `codemap_impact`
+  (blast radius + test coverage), `codemap_review` (diff → impact + tests), and confidence-aware
+  file dependency analysis.
 - **Cross-project** — the graph spans all registered projects.
 - **Incremental** — hash-based reindex; embedding-profile guard forces rebuild on
   provider/model/dim change.
@@ -48,6 +49,7 @@ codemap/
 │   │   ├── service_init.go        #   init / index / status / doctor
 │   │   ├── service_query.go       #   callers / callees / path / symbols / find / source
 │   │   ├── service_relations.go   #   precise callers/callees (callHierarchy / go/types)
+│   │   ├── references.go          #   inbound callback/handler value-reference query
 │   │   ├── service_impact.go      #   impact / blast radius / hotspots / orphans / read-order
 │   │   ├── service_context.go     #   context (the one-call bundle) + context_batch
 │   │   ├── service_semantic.go    #   semantic search (veclite hybrid) + find fallback
@@ -69,7 +71,8 @@ codemap/
 │   │   ├── store.go          #   Open/Close, CRUD for nodes/edges/projects, stats
 │   │   ├── schema.go         #   SQL schema + migrations (PRAGMA user_version); edges.provenance
 │   │   ├── queries.go        #   callers/callees, blast radius, hotspots/orphans/path
-│   │   └── dependencies.go   #   deduped inbound call/reference/import evidence
+│   │   ├── dependencies.go   #   deduped inbound call/reference/import evidence
+│   │   └── references.go     #   project-scoped inbound references with ambiguity metadata
 │   ├── extract/              # code structure extraction (pluggable backends)
 │   │   ├── extractor.go      #   Extractor interface + Symbol/Reference/FileResult
 │   │   ├── gosrc/            #   stdlib go/parser backend (pure Go, default for Go)
@@ -88,7 +91,7 @@ codemap/
 │   │   ├── staleness.go      #   hash-based drift detection (status/agent trust)
 │   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
 │   │   └── import_index.go   #   fcheap cache restore (skip extract+embed)
-│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (36 tools)
+│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (37 tools)
 │   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
 │   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search)
 │   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
@@ -109,13 +112,13 @@ codemap/
 │
 │   # planned: extract/treesitter (CGO, build-tagged), extract/scip
 ├── docs/                      # VitePress site (product docs ONLY) → deployed to Vercel
-├── specs/                     # glyphrun E2E specs (*.yml, 37): version/help/index_status/query/context/
+├── specs/                     # glyphrun E2E specs (*.yml, 39): version/help/index_status/query/context/
 │                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
 │                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
 │                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/
 │                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/
 │                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies/
-│                              #   review_deletion
+│                              #   review_deletion/references/studio_annotations
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md LICENSE
@@ -243,7 +246,7 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (36): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise`; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
+- Tool names are `codemap_`-prefixed. Current set (37): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path.
 - Exact-definition inputs use the durable source-selector projection
   `{file,start_line,fqn,kind}`, never a SQLite node id. `source`, `context`,
   `callers`, `callees`, `impact`, and `risk` accept `selector`; `path` accepts
@@ -270,7 +273,7 @@ task install         # go install ./cmd/codemap
   per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable.
   `callers`/`callees --precise` (`precise:true` in MCP) remains the per-query language-server path for a one-off without
   reindexing.
-- **Stable machine contract**: every impact/callers/callees/review/context/hotspots/orphans/path report carries a
+- **Stable machine contract**: every impact/callers/callees/references/review/context/hotspots/orphans/path report carries a
   `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) so a consumer can switch on
   confidence (resolved→high, name→medium, unresolved/none→low) without parsing the free-form
   `resolution` sentence. `codemap review` additionally folds one aggregate `risk` band

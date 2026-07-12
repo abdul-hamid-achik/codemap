@@ -1,0 +1,46 @@
+version: 1
+name: references
+intent: |
+    A call edge and a value-reference edge mean different things: calling Handler
+    makes Caller a caller, while storing/passing Handler makes the enclosing file or
+    Setup function a registration scope. The CLI, flagship context bundle, and real
+    MCP stdio transport expose that wiring with bounded totals and partial-coverage
+    honesty; ordinary calls never leak into the references report.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'module example.com/refs\\n\\ngo 1.25\\n' > \"$P/go.mod\"; printf '%s' 'package main; func Handler() {}; func Caller() { Handler() }' > \"$P/handler.go\"; printf '%s' 'package main; var Hook = Handler; func Register(func()) {}; func Setup() { Register(Handler) }' > \"$P/hooks.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed --no-lsp >/dev/null 2>&1; echo '== CLI value references =='; \"$CM\" references Handler; \"$CM\" references Handler --json > \"$TMP/refs.json\"; grep -q '\"references_total\": 2' \"$TMP/refs.json\" || exit 1; if grep -q '\"fqn\": \"main.Caller\"' \"$TMP/refs.json\"; then exit 1; fi; echo VALUE_WIRING_OK; \"$CM\" context Handler --json > \"$TMP/context.json\"; grep -q '\"references_total\": 2' \"$TMP/context.json\" && grep -q '\"references_coverage\": \"partial\"' \"$TMP/context.json\" && echo CONTEXT_WIRING_OK; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"references-flow\",\"version\":\"0\"}}}' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' '{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"codemap_references\",\"arguments\":{\"symbol\":\"Handler\"}}}' > \"$TMP/reqs\"; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/mcp.out\" 2>/dev/null; grep -q '\"name\":\"codemap_references\"' \"$TMP/mcp.out\" && echo MCP_TOOL_OK; grep -q 'references_total' \"$TMP/mcp.out\" && grep -q 'main.Setup' \"$TMP/mcp.out\" && echo MCP_CALL_OK; grep -c Content-Length \"$TMP/mcp.out\" | sed 's/^/content_length_lines: /'"
+    cwd: "."
+terminal:
+    cols: 110
+    rows: 34
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 20000
+    - snapshot: references
+outcomes:
+    - id: value_wiring_is_distinct
+      description: CLI reports the enclosing file and function scopes while excluding the ordinary caller edge
+      verify:
+        screen:
+            contains: "VALUE_WIRING_OK"
+    - id: context_carries_wiring
+      description: the one-call context bundle includes bounded reference wiring and its partial coverage
+      verify:
+        screen:
+            contains: "CONTEXT_WIRING_OK"
+    - id: mcp_reference_call
+      description: the real newline-delimited MCP transport lists and successfully calls codemap_references
+      verify:
+        screen:
+            contains: "MCP_CALL_OK"
+    - id: no_lsp_framing_leak
+      description: MCP output remains newline-delimited JSON-RPC rather than Content-Length framed
+      verify:
+        screen:
+            contains: "content_length_lines: 0"
+contractHash: sha256:bdb7b97d0ada7c56b686a049164d8a80c661ea7af5a8cf383183754d98687a3d

@@ -35,6 +35,7 @@ store, and the project registry — so other tools can inspect the same store.`}
                                # codemap_context_batch <s1> <s2> …  (several symbols at once + shared callers)
   5. go deeper                 # codemap_impact (blast radius) · codemap_source (full body)
                                # codemap_callers / codemap_callees (add precise:true on Go)
+                               # codemap_references (callback/RunE/registration value wiring; not callers)
   6. before a risky change     # codemap_risk <sym>  (how careful?)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
   7. trace flow                # codemap_path <from> <to>  (shortest call chain)
@@ -54,7 +55,7 @@ files; use codemap_source when you need the implementation. codemap_context's
 callers/callees/tests are capped (see *_total); drill with codemap_callers/impact
 for the full lists. When a short name has several definitions, project a result's
 existing {file,start_line,fqn,kind} fields into the "selector" input accepted by
-source/context/callers/callees/impact/risk (and paired selectors for path). This
+source/context/callers/callees/references/impact/risk (and paired selectors for path). This
 keeps every follow-up on one definition without persisting volatile database ids;
 file+fqn+kind still resolves after declaration lines shift.`},
 
@@ -62,6 +63,7 @@ file+fqn+kind still resolves after declaration lines shift.`},
   init / index / status / projects   register, index (--reindex, --no-embed, --precise), stats, projects
   doctor                             check toolchains, language servers, embeddings (with install hints)
   callers / callees [--precise|--at] who calls X / what X calls (exact definition with --at file:line)
+  references <sym> [--at file:line]  enclosing scopes that use X as a callback/value (not callers)
   impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests
   review [--since R] [--staged]      diff-scoped: changed/deleted symbols, blast radius, tests to run, risk band
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
@@ -83,18 +85,19 @@ file+fqn+kind still resolves after declaration lines shift.`},
   studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
-callers, callees, impact, file_impact, dependencies, review, secret_impact,
+callers, callees, references, impact, file_impact, dependencies, review, secret_impact,
 required_keys, risk, hotspots, orphans, read_order, path, related_files, symbols,
 symbol_at, find, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
 
-codemap_context bundles a symbol's definition+callers+callees+tests in one graph-only call
+codemap_context bundles a symbol's definition+callers+callees+value references+tests in one graph-only call
 (no implicit language-server spawn); context_batch budgets aggregate source bodies and both
 surfaces report optional component failures in partial_errors;
 codemap_review is the post-edit query (diff, including retained deleted definitions → impact + tests to run + one aggregate risk band);
-callers/callees accept precise:true. Agent-facing source/context/callers/callees/
-impact/risk accept selector:{file,start_line,fqn,kind}; path accepts from_selector
+callers/callees accept precise:true; references deliberately does not, because call precision
+does not upgrade value-reference edges. Agent-facing source/context/callers/callees/
+references/impact/risk accept selector:{file,start_line,fqn,kind}; path accepts from_selector
 and to_selector. codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
@@ -115,7 +118,7 @@ codemap_unannotate, or re-add against the new name.
 
 'source' is a free label (note, mongosh, postgres, vidtrace, …); 'data' is stored
 opaquely (often JSON). Annotations on a symbol surface INLINE in EVERY query result
-— codemap_impact, codemap_callers/callees (by-name and precise:true), codemap_source,
+— codemap_impact, codemap_callers/callees (by-name and precise:true), codemap_references, codemap_source,
 and codemap_semantic/codemap_find — matched by name or resolved FQN, so once pinned
 the knowledge shows up wherever you look at the symbol (and on every studio tab).
 Typical use: codemap_impact a symbol, then codemap_annotate it with the DB rows /
@@ -154,6 +157,15 @@ from find/symbols/context results to choose one. Selectors are stable across rei
 and ordinary line shifts when file+FQN+kind remain, but moves/renames can invalidate
 them and return found:false rather than silently selecting a different node. Raw graph
 node ids are never part of the public contract.
+
+codemap_references is a separate inbound value-wiring query for callbacks, Cobra
+RunE handlers, and registrations. It follows only 'references' edges, never
+'calls', and returns bounded enclosing function/method/file scopes with true
+totals. Go coverage is partial and other language backends do not yet persist
+general value references; an empty result is therefore not proof of no wiring.
+The stored source location is the enclosing declaration (or file scope), not the
+exact expression line. 'index --precise' resolves call edges and does not upgrade
+reference confidence; use the report's own coverage/stale/confidence fields.
 
 File dependency evidence is deliberately broader and more conservative than the call graph:
 file-impact groups inbound calls, Go function-value references, and imports by dependent file,

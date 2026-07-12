@@ -22,9 +22,10 @@ A typical "understand or change this code" loop, and the one-call tool for each 
 | **Index once** | `codemap_index` | build the graph (+ embeddings if Ollama is up) |
 | **Where do I start?** | `codemap_read_order` | entrypoints (`main`, `cmd/`, exported API) + load-bearing hubs, ranked with a reason — a reading guide for an unfamiliar repo |
 | **Find the entry point** | `codemap_semantic` / `codemap_find` | by meaning, or by name (offline) |
-| **Orient on a symbol** | `codemap_context` | def + callers + callees + covering tests + blast size + notes, in ONE call |
+| **Orient on a symbol** | `codemap_context` | def + callers + callees + value-reference wiring + covering tests + blast size + notes, in ONE call |
 | **Model a component** | `codemap_context_batch` | the bundle for several symbols at once, plus the callers they share (coupling) |
 | **Go deeper** | `codemap_impact` · `codemap_source` | full blast radius · the implementation body |
+| **Find registrations** | `codemap_references` | where a function/method is stored or passed as a callback/handler, distinct from calls |
 | **How careful?** | `codemap_risk` | a 0..1 change-risk score (untested + fan-in + cross-package spread + ambiguity) + the factors |
 | **Need file dependencies?** | `codemap_dependencies` | bounded inbound evidence split into confirmed vs candidate, with source→target samples and explicit domain coverage |
 | **Touch a whole file?** | `codemap_file_impact` | confidence-aware evidence plus blast radius, tests, and conservative `delete_verdict` |
@@ -57,6 +58,10 @@ calibrate its confidence:
   sample is `confirmed` or `candidate` with a reason; additive confirmed/candidate totals
   survive list caps. Go imports are package-scoped candidates, not proof that the
   representative file is required.
+- **`references.coverage` / `references.confidence`** — Go callback/handler patterns are
+  indexed, but general type/value use and runtime wiring are not. Empty partial coverage is
+  never presented as proof that no registration exists; name fan-out and stale snapshots remain
+  candidates.
 - **`note` / `shared_name`** — the name resolves to several definitions, so a count
   merges them. Precise indexing fixes the edges; pass an exact source selector to
   choose one definition.
@@ -77,7 +82,7 @@ answer without reindexing, pass `precise: true` to `codemap_callers`/`codemap_ca
 
 Every symbol result already has `file`, `start_line`, `fqn`, and `kind`. Project those
 same fields into `selector` for `codemap_source`, `codemap_context`, `codemap_callers`,
-`codemap_callees`, `codemap_impact`, or `codemap_risk`; path accepts `from_selector`
+`codemap_callees`, `codemap_references`, `codemap_impact`, or `codemap_risk`; path accepts `from_selector`
 and `to_selector`. This scopes the whole query to one definition even when a short
 name is shared. File+FQN+kind is preferred, so a declaration can shift lines across
 a reindex. A move or rename can invalidate the selector and returns a miss; codemap

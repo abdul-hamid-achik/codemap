@@ -206,15 +206,39 @@ func TestContextPartialErrorsAreExplicitAndBounded(t *testing.T) {
 	rep := &ContextReport{Symbol: "Target", CallGraph: CallGraphNone}
 	longErr := errors.New(strings.Repeat("x", contextErrorMaxRunes+50))
 	applyContextRelation(rep, "callers", nil, longErr)
+	applyContextReferences(rep, nil, errors.New("references unavailable"))
 	applyContextImpact(rep, nil, errors.New("impact unavailable"))
 
-	if len(rep.PartialErrors) != 2 {
-		t.Fatalf("partial errors = %+v, want callers + impact", rep.PartialErrors)
+	if len(rep.PartialErrors) != 3 {
+		t.Fatalf("partial errors = %+v, want callers + references + impact", rep.PartialErrors)
 	}
-	if rep.PartialErrors[0].Component != "callers" || rep.PartialErrors[1].Component != "impact" {
+	if rep.PartialErrors[0].Component != "callers" || rep.PartialErrors[1].Component != "references" || rep.PartialErrors[2].Component != "impact" {
 		t.Fatalf("unexpected partial error components: %+v", rep.PartialErrors)
 	}
 	if got := utf8.RuneCountInString(rep.PartialErrors[0].Error); got > contextErrorMaxRunes {
 		t.Fatalf("partial error has %d runes, cap is %d", got, contextErrorMaxRunes)
+	}
+}
+
+func TestContextReferencesAreCappedWithoutChangingCallGraph(t *testing.T) {
+	sites := make([]ReferenceSite, contextListCap+5)
+	for i := range sites {
+		sites[i] = ReferenceSite{Source: SymbolRef{Symbol: fmt.Sprintf("Wire%d", i)}}
+	}
+	rep := &ContextReport{Symbol: "Target", CallGraph: CallGraphResolved}
+	applyContextReferences(rep, &ReferencesReport{
+		References: sites, ReferencesTotal: len(sites) + 2,
+		Coverage: ReferenceCoveragePartial, Confidence: ReferenceConfidenceMixed,
+		Stale: true, Resolution: "partial reference coverage",
+	}, nil)
+	if len(rep.References) != contextListCap || rep.ReferencesTotal != contextListCap+7 || rep.ReferencesTruncated != 7 {
+		t.Fatalf("context references cap/totals = len:%d total:%d truncated:%d", len(rep.References), rep.ReferencesTotal, rep.ReferencesTruncated)
+	}
+	if rep.ReferencesCoverage != ReferenceCoveragePartial || !rep.ReferencesStale ||
+		rep.ReferencesConfidence != ReferenceConfidenceMixed || rep.ReferencesResolution == "" {
+		t.Fatalf("context lost reference honesty: %+v", rep)
+	}
+	if rep.CallGraph != CallGraphResolved {
+		t.Fatalf("references changed independent call_graph to %q", rep.CallGraph)
 	}
 }

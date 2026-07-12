@@ -10,10 +10,11 @@ import (
 )
 
 // ContextReport is the one-call bundle for a symbol: its definition(s) with
-// source, who calls it, what it calls, the tests that cover it, the blast-radius
+// source, who calls it, what it calls, where it is stored/passed as a value, the
+// tests that cover it, the blast-radius
 // size, and any pinned annotations. It exists so a person or agent gets a
 // complete picture in a single query instead of stitching together source +
-// callers + callees + impact (four round-trips for a harness).
+// callers + callees + references + impact (five round-trips for a harness).
 type ContextReport struct {
 	Symbol      string          `json:"symbol"`
 	Selector    *SymbolSelector `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
@@ -22,20 +23,30 @@ type ContextReport struct {
 	Definitions []SourceMatch   `json:"definitions"` // signature, doc, file:line, and source body per matching def
 	Callers     []SymbolRef     `json:"callers"`     // who calls it (capped — see callers_total)
 	Callees     []SymbolRef     `json:"callees"`     // what it calls (capped — see callees_total)
+	References  []ReferenceSite `json:"references"`  // enclosing scopes that use it as a value (capped)
 	Tests       []ImpactNode    `json:"tests"`       // tests covering it (capped — see tests_total)
 	// *Total are the true counts before capping, so an agent knows when a list was
-	// truncated and can call codemap_callers/codemap_callees/codemap_impact for the
+	// truncated and can call codemap_callers/codemap_callees/codemap_references/
+	// codemap_impact for the
 	// complete set. The bundle stays bounded so one orientation call can't blow an
 	// agent's context window.
-	CallersTotal int                `json:"callers_total"`
-	CalleesTotal int                `json:"callees_total"`
-	TestsTotal   int                `json:"tests_total"`
-	BlastRadius  int                `json:"blast_radius"`          // count of transitively-affected nodes
-	BlastDepth   int                `json:"blast_depth"`           // depth the blast radius was traversed to (it's bounded, not the full closure)
-	Note         string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
-	Resolution   string             `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
-	CallGraph    string             `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none (carried from the bundled Impact)
-	Annotations  []graph.Annotation `json:"annotations,omitempty"` // pinned notes/data on the symbol
+	CallersTotal        int `json:"callers_total"`
+	CalleesTotal        int `json:"callees_total"`
+	ReferencesTotal     int `json:"references_total"`
+	ReferencesTruncated int `json:"references_truncated,omitempty"`
+	TestsTotal          int `json:"tests_total"`
+	// Reference-specific honesty is independent of CallGraph: precise call
+	// resolution does not upgrade stored callback/value-reference edges.
+	ReferencesCoverage   string             `json:"references_coverage"`             // partial|unavailable|none
+	ReferencesStale      bool               `json:"references_stale"`                // stale sites are candidates
+	ReferencesConfidence string             `json:"references_confidence"`           // confirmed|candidate|mixed|none
+	ReferencesResolution string             `json:"references_resolution,omitempty"` // coverage/lexical-location caveat
+	BlastRadius          int                `json:"blast_radius"`                    // count of transitively-affected nodes
+	BlastDepth           int                `json:"blast_depth"`                     // depth the blast radius was traversed to (it's bounded, not the full closure)
+	Note                 string             `json:"note,omitempty"`                  // set when the name is ambiguous (merges same-named defs)
+	Resolution           string             `json:"resolution,omitempty"`            // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
+	CallGraph            string             `json:"call_graph"`                      // stable machine enum: resolved|name|unresolved|none (carried from the bundled Impact)
+	Annotations          []graph.Annotation `json:"annotations,omitempty"`           // pinned notes/data on the symbol
 	// Memories are TRANSIENT agent notes recalled by meaning from vecgrep's global
 	// memory store, scoped to this project via codemap's project_key (G2) — distinct
 	// from Annotations (codemap's own durable, symbol-pinned layer). Empty when
@@ -50,7 +61,7 @@ type ContextReport struct {
 
 // ContextPartialError is one non-fatal failure while assembling a context
 // bundle. Component is a stable, small enum-like label (callers, callees,
-// impact, memory_recall); Error is bounded so a backend failure cannot itself
+// references, impact, memory_recall); Error is bounded so a backend failure cannot itself
 // bloat an agent response. Symbol is useful on an aggregated context_batch.
 type ContextPartialError struct {
 	Symbol    string `json:"symbol,omitempty"`
@@ -69,7 +80,7 @@ type MemoryNote struct {
 
 // contextListCap bounds each relationship list in a context bundle so one
 // orientation call stays small even for a hub. The full lists are a drill-down
-// away (codemap_callers / codemap_callees / codemap_impact).
+// away (codemap_callers / codemap_callees / codemap_references / codemap_impact).
 const (
 	contextListCap       = 25
 	contextMemoryTimeout = 3 * time.Second
@@ -135,7 +146,8 @@ func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol
 	}
 	rep := &ContextReport{
 		Symbol: symbol, Selector: selector, Definitions: []SourceMatch{},
-		Callers: []SymbolRef{}, Callees: []SymbolRef{}, Tests: []ImpactNode{},
+		Callers: []SymbolRef{}, Callees: []SymbolRef{}, References: []ReferenceSite{}, Tests: []ImpactNode{},
+		ReferencesCoverage: ReferenceCoverageNone, ReferencesConfidence: ReferenceConfidenceNone,
 		BlastDepth: depth, CallGraph: CallGraphNone, // refined from the bundled Impact below
 	}
 	var src *SourceReport
@@ -186,6 +198,21 @@ func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol
 		return nil, nil, err
 	}
 	_ = applyContextRelation(rep, "callees", ce, ceErr)
+
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	var refs *ReferencesReport
+	var refsErr error
+	if selector != nil {
+		refs, refsErr = svc.ReferencesBySelector(cwd, *selector)
+	} else {
+		refs, refsErr = svc.References(cwd, symbol)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	applyContextReferences(rep, refs, refsErr)
 
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -256,6 +283,33 @@ func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol
 		return nil, nil, err
 	}
 	return rep, fullCallers, nil
+}
+
+func applyContextReferences(rep *ContextReport, refs *ReferencesReport, err error) {
+	if err != nil {
+		rep.addPartialError("references", err)
+		return
+	}
+	if refs == nil {
+		rep.addPartialError("references", fmt.Errorf("empty references report"))
+		return
+	}
+	rep.ReferencesTotal = refs.ReferencesTotal
+	sites := refs.References
+	if sites == nil {
+		sites = []ReferenceSite{}
+	}
+	rep.References = capSlice(sites, contextListCap)
+	rep.ReferencesTruncated = refs.ReferencesTotal - len(rep.References)
+	rep.ReferencesCoverage = refs.Coverage
+	rep.ReferencesStale = refs.Stale
+	rep.ReferencesConfidence = refs.Confidence
+	rep.ReferencesResolution = refs.Resolution
+	if rep.ReferencesTruncated > 0 {
+		rep.Note = joinNote(rep.Note, fmt.Sprintf(
+			"showing %d of %d enclosing value-reference scopes — call codemap_references for the bounded drill-down",
+			len(rep.References), rep.ReferencesTotal))
+	}
 }
 
 // applyContextRelation adds one graph-relation component and returns its full,

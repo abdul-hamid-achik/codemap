@@ -422,6 +422,42 @@ func (s *Server) wire() {
 	}
 }
 
+func TestValueRefsForDirectStorageAndReturn(t *testing.T) {
+	const src = `package sample
+
+func Handler() {}
+func Other() {}
+
+var Hook = Handler
+
+func choose() func() {
+	local := Other
+	return Handler
+}
+
+func caller() { Handler() }
+`
+	res, err := New().ExtractFile("hooks.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ from, to string }{
+		{from: "hooks.go", to: "Handler"},
+		{from: "sample.choose", to: "Other"},
+		{from: "sample.choose", to: "Handler"},
+	} {
+		if !hasKindRef(res.References, tc.from, tc.to, extract.RefReferences) {
+			t.Errorf("missing stored value reference %s -> %s: %+v", tc.from, tc.to, res.References)
+		}
+	}
+	if hasKindRef(res.References, "sample.caller", "Handler", extract.RefReferences) {
+		t.Fatalf("ordinary call became a value reference: %+v", res.References)
+	}
+	if !hasKindRef(res.References, "sample.caller", "Handler", extract.RefCalls) {
+		t.Fatalf("ordinary call edge was lost: %+v", res.References)
+	}
+}
+
 // TestValueRefsHandleGenerics pins that an instantiated generic function used as
 // a value (passed as an arg) or called inside a package-level closure is captured
 // as a reference — so it isn't a false orphan. (Generic calls in function bodies

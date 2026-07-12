@@ -107,6 +107,16 @@ type sourceMsg struct {
 	firstLine   int  // file line number of lines[0], so the gutter shows real file lines (0 = fall back to 1-based)
 	err         error
 }
+type annotationSavedMsg struct {
+	op          uint64
+	center      graphCenter
+	target      string
+	id          int64
+	matched     bool
+	annotations []graph.Annotation
+	saveErr     error
+	refreshErr  error
+}
 
 // Model is the studio TUI state.
 type Model struct {
@@ -181,6 +191,18 @@ type Model struct {
 	srcHighlight bool // srcLines carry chroma ANSI styling (source overlay only)
 	srcFirstLine int  // file line of srcLines[0], for the gutter (0 = 1-based fallback)
 
+	// Annotation composer: a small modal editor opened with `a` for one exact
+	// file+line selection. The captured center survives the asynchronous save so
+	// same-named definitions never collapse back to a short-name selection.
+	annotationOpen    bool
+	annotationSaving  bool
+	annotationInput   textinput.Model
+	annotationCenter  graphCenter
+	annotationErr     string
+	annotationOp      uint64
+	annotationCacheAt graphCenter
+	annotationCache   []graph.Annotation
+
 	// graph walking: the right pane can be focused to walk into callers/callees,
 	// re-centering the explorer on any node (not just hubs). graphStack records
 	// the path so backspace pops back.
@@ -215,7 +237,7 @@ type Model struct {
 // command whose status ends in "…" (searching/analyzing/indexing/resolving). Drives
 // the footer spinner and keeps the animation frame loop running until it clears.
 func (m Model) busy() bool {
-	return m.loading || m.pathLoading || strings.HasSuffix(m.statusMsg, "…")
+	return m.loading || m.pathLoading || m.annotationSaving || strings.HasSuffix(m.statusMsg, "…")
 }
 
 // graphFocus is which pane of the Graph tab has keyboard focus.
@@ -408,20 +430,26 @@ func NewModel(ctx context.Context, sess *app.Session, startDir string) Model {
 	pt.Placeholder = "target symbol or FQN, e.g. store.Save"
 	pt.SetWidth(56)
 
+	a := textinput.New()
+	a.Placeholder = "write a note for this exact symbol"
+	a.CharLimit = 500
+	a.SetWidth(72)
+
 	return Model{
-		ctx:           ctx,
-		service:       app.NewService(sess),
-		startDir:      startDir,
-		active:        tabGraph,
-		loading:       true,
-		search:        s,
-		impact:        i,
-		pathFromInput: pf,
-		pathToInput:   pt,
-		pathFocus:     focusPathFrom,
-		revealSpring:  newRevealSpring(),
-		metricsReveal: 1, // fully shown until a tab activation triggers the grow-in
-		mapReveal:     1, // fully shown until the map toggle triggers the grow-in
+		ctx:             ctx,
+		service:         app.NewService(sess),
+		startDir:        startDir,
+		active:          tabGraph,
+		loading:         true,
+		search:          s,
+		impact:          i,
+		pathFromInput:   pf,
+		pathToInput:     pt,
+		pathFocus:       focusPathFrom,
+		annotationInput: a,
+		revealSpring:    newRevealSpring(),
+		metricsReveal:   1, // fully shown until a tab activation triggers the grow-in
+		mapReveal:       1, // fully shown until the map toggle triggers the grow-in
 	}
 }
 
@@ -587,6 +615,168 @@ func (m Model) selectedCenter() (graphCenter, bool) {
 		if m.pathRep != nil && m.pathSel >= 0 && m.pathSel < len(m.pathRep.Path) {
 			return centerOfRef(m.pathRep.Path[m.pathSel]), true
 		}
+	}
+	return graphCenter{}, false
+}
+
+// annotationSelection is deliberately stricter than selectedCenter: annotations
+// are durable knowledge, so Studio only offers the composer when the highlighted
+// item carries a selector-ready file+line identity. Metrics is excluded from this
+// shortcut; the creation workflow is scoped to the Graph/Search/Impact/Path drill
+// surfaces where an exact row is visibly selected.
+func (m Model) annotationSelection() (graphCenter, bool) {
+	var c graphCenter
+	var ok bool
+	switch m.active {
+	case tabGraph:
+		c, ok = m.selectedCenter()
+	case tabSearch:
+		if m.searchQuery == "" || m.search.Value() != m.searchQuery {
+			return graphCenter{}, false // the person is editing, not inspecting a settled result
+		}
+		c, ok = m.selectedCenter()
+	case tabImpact:
+		if m.impactRep == nil || !m.impactRep.Found || m.impactSymbol == "" || m.impact.Value() != m.impactSymbol {
+			return graphCenter{}, false
+		}
+		if m.impactSel >= 0 && m.impactSel < len(m.impactRep.BlastRadius) {
+			n := m.impactRep.BlastRadius[m.impactSel]
+			c, ok = graphCenter{sym: n.Symbol, fqn: n.FQN, kind: n.Kind, file: n.File, line: n.StartLine}, true
+		} else if sel := m.impactRep.Selector; sel != nil {
+			c, ok = graphCenter{sym: m.impactRep.Symbol, fqn: sel.FQN, kind: sel.Kind, file: sel.File, line: sel.StartLine}, true
+		} else if len(m.impactRep.Locations) == 1 {
+			c, ok = centerOfRef(m.impactRep.Locations[0]), true
+		}
+	case tabPath:
+		if m.pathFocus == focusPathResult {
+			c, ok = m.selectedCenter()
+		}
+	}
+	if !ok || strings.TrimSpace(c.sym) == "" {
+		return graphCenter{}, false
+	}
+	if _, exact := c.selector(); !exact {
+		return graphCenter{}, false
+	}
+	return c, true
+}
+
+// hasAnnotationCandidate distinguishes "there is a highlighted result, but it
+// lacks exact source identity" from an empty text-input surface. On Search,
+// Impact, and editable Path, an empty surface must keep accepting the letter `a`.
+func (m Model) hasAnnotationCandidate() bool {
+	switch m.active {
+	case tabGraph:
+		if m.graphFocus == focusRefs {
+			return len(m.graphRefs()) > 0
+		}
+		return m.graphCenter.sym != ""
+	case tabSearch:
+		return m.searchQuery != "" && m.search.Value() == m.searchQuery && len(m.searchHits) > 0
+	case tabImpact:
+		return m.impactRep != nil && m.impactRep.Found && m.impactSymbol != "" && m.impact.Value() == m.impactSymbol
+	case tabPath:
+		return m.pathFocus == focusPathResult && m.pathLen() > 0
+	}
+	return false
+}
+
+func sameGraphCenter(a, b graphCenter) bool {
+	if a.file != b.file || a.line != b.line || a.kind != b.kind {
+		return false
+	}
+	if a.fqn != "" || b.fqn != "" {
+		return a.fqn != "" && a.fqn == b.fqn
+	}
+	return a.sym == b.sym
+}
+
+func annotationTarget(c graphCenter) string {
+	if strings.TrimSpace(c.fqn) != "" {
+		return c.fqn
+	}
+	return c.sym
+}
+
+func (m Model) openAnnotationComposer() (tea.Model, tea.Cmd) {
+	c, ok := m.annotationSelection()
+	if !ok {
+		m.errMsg = ""
+		m.statusMsg = "select an exact indexed symbol before annotating"
+		return m, nil
+	}
+	m.annotationOpen = true
+	m.annotationSaving = false
+	m.annotationCenter = c
+	m.annotationErr = ""
+	m.annotationInput.SetValue("")
+	m.errMsg = ""
+	m.statusMsg = ""
+	m.syncFocus()
+	return m, nil
+}
+
+func (m Model) annotationSaveCmd(op uint64, c graphCenter, note string) tea.Cmd {
+	svc, dir := m.service, m.startDir
+	selector, _ := c.selector() // annotationSelection already proved this exact
+	target := annotationTarget(c)
+	return func() tea.Msg {
+		id, matched, err := svc.AnnotateNode(dir, target, "studio", note, "")
+		if err != nil {
+			return annotationSavedMsg{op: op, center: c, target: target, saveErr: err}
+		}
+		rep, refreshErr := svc.SourceBySelector(dir, selector)
+		if refreshErr != nil {
+			return annotationSavedMsg{op: op, center: c, target: target, id: id, matched: matched, refreshErr: refreshErr}
+		}
+		var annotations []graph.Annotation
+		if rep != nil {
+			annotations = append([]graph.Annotation(nil), rep.Annotations...)
+		}
+		return annotationSavedMsg{
+			op: op, center: c, target: target, id: id, matched: matched, annotations: annotations,
+		}
+	}
+}
+
+// applyAnnotationRefresh updates only the still-matching exact selection. The
+// async result may arrive after navigation in tests or future non-modal flows;
+// it must never paste one definition's annotations onto another same-named row.
+func (m *Model) applyAnnotationRefresh(c graphCenter, annotations []graph.Annotation) {
+	current, ok := m.annotationSelection()
+	if !ok || !sameGraphCenter(current, c) {
+		return
+	}
+	m.annotationCacheAt = c
+	m.annotationCache = append([]graph.Annotation(nil), annotations...)
+	switch m.active {
+	case tabGraph:
+		if m.graphFocus == focusHubs && sameGraphCenter(m.graphCenter, c) {
+			m.graphAnnotations = append([]graph.Annotation(nil), annotations...)
+		}
+	case tabSearch:
+		if m.searchSel >= 0 && m.searchSel < len(m.searchHits) {
+			m.searchHits[m.searchSel].Annotations = append([]graph.Annotation(nil), annotations...)
+		}
+	case tabImpact:
+		if m.impactRep != nil {
+			root, rootOK := impactRootCenter(m.impactRep)
+			if rootOK && sameGraphCenter(root, c) {
+				m.impactRep.Annotations = append([]graph.Annotation(nil), annotations...)
+			}
+		}
+	}
+}
+
+func impactRootCenter(rep *app.ImpactReport) (graphCenter, bool) {
+	if rep == nil || !rep.Found {
+		return graphCenter{}, false
+	}
+	if sel := rep.Selector; sel != nil {
+		return graphCenter{sym: rep.Symbol, fqn: sel.FQN, kind: sel.Kind, file: sel.File, line: sel.StartLine}, true
+	}
+	if len(rep.Locations) == 1 {
+		return centerOfRef(rep.Locations[0]), true
 	}
 	return graphCenter{}, false
 }
@@ -871,6 +1061,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.resizePathInputs()
+		m.resizeAnnotationInput()
 		return m, nil
 
 	case statusMsg:
@@ -941,6 +1132,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.srcHighlight = msg.highlighted
 		m.srcFirstLine = msg.firstLine
 		m.srcScroll = 0
+		return m, nil
+
+	case annotationSavedMsg:
+		currentSave := m.annotationSaving && msg.op == m.annotationOp && sameGraphCenter(msg.center, m.annotationCenter)
+		if !currentSave {
+			// A stale completion must never close or overwrite a newer composer.
+			// The write still happened, so report it neutrally and refresh only if
+			// the user happens to still be inspecting that exact captured selector.
+			if msg.saveErr != nil {
+				m.errMsg = fmt.Sprintf("annotation failed for %s: %v", msg.target, msg.saveErr)
+				m.statusMsg = ""
+				return m, nil
+			}
+			m.applyAnnotationRefresh(msg.center, msg.annotations)
+			m.errMsg = ""
+			m.statusMsg = fmt.Sprintf("annotation #%d saved · %s", msg.id, msg.target)
+			if !msg.matched {
+				m.statusMsg = fmt.Sprintf("⚠ annotation #%d saved · target no longer resolves (dangling)", msg.id)
+			}
+			if msg.refreshErr != nil {
+				m.errMsg = "annotation saved, but refresh failed: " + msg.refreshErr.Error()
+				m.statusMsg = ""
+			}
+			return m, nil
+		}
+		m.annotationSaving = false
+		if msg.saveErr != nil {
+			m.annotationErr = msg.saveErr.Error()
+			m.errMsg = "annotation failed: " + msg.saveErr.Error()
+			m.statusMsg = ""
+			m.syncFocus()
+			return m, nil
+		}
+		m.annotationOpen = false
+		m.annotationErr = ""
+		m.annotationInput.Blur()
+		m.applyAnnotationRefresh(msg.center, msg.annotations)
+		m.statusMsg = fmt.Sprintf("annotation #%d saved · %s", msg.id, msg.target)
+		m.errMsg = ""
+		if !msg.matched {
+			m.statusMsg = fmt.Sprintf("⚠ annotation #%d saved · target no longer resolves (dangling)", msg.id)
+		}
+		if msg.refreshErr != nil {
+			m.errMsg = "annotation saved, but refresh failed: " + msg.refreshErr.Error()
+			m.statusMsg = ""
+		}
+		m.syncFocus()
 		return m, nil
 
 	case graphDetailMsg:
@@ -1107,6 +1345,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key == "ctrl+c" {
 		return m, tea.Quit
 	}
+	// The annotation composer is modal: once open, no tab/global/navigation key
+	// reaches the underlying Studio state. ctrl+c above remains the universal quit.
+	if m.annotationOpen {
+		return m.handleAnnotationKey(msg)
+	}
 	// Modal overlays capture keys until dismissed. Help takes precedence; `?`
 	// works on any tab (searching for "?" isn't meaningful, so capturing it is
 	// safe even where a text input is focused).
@@ -1118,6 +1361,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.srcView {
 		return m.handleSourceKey(key)
+	}
+	if key == "a" {
+		if _, exact := m.annotationSelection(); exact {
+			return m.openAnnotationComposer()
+		}
+		// Preserve normal typing on empty Search/Impact/Path inputs. When a row is
+		// visibly selected (or Graph is active), intercept `a` and explain why a
+		// durable note cannot be attached without exact source identity.
+		if m.hasAnnotationCandidate() || m.active == tabGraph || (m.active == tabPath && m.pathFocus == focusPathResult) {
+			m.errMsg = ""
+			m.statusMsg = "select an exact indexed symbol before annotating"
+			return m, nil
+		}
 	}
 	if key == "?" {
 		m.showHelp = true
@@ -1271,6 +1527,45 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	default: // metrics
 		return m.handleMetricsKey(key)
 	}
+}
+
+func (m Model) handleAnnotationKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if m.annotationSaving {
+		return m, nil
+	}
+	switch key {
+	case "esc":
+		m.annotationOpen = false
+		m.annotationErr = ""
+		m.annotationInput.Blur()
+		m.errMsg = ""
+		m.statusMsg = "annotation canceled"
+		m.syncFocus()
+		return m, nil
+	case "enter":
+		note := strings.TrimSpace(m.annotationInput.Value())
+		if note == "" {
+			m.annotationErr = "write a note before saving"
+			m.errMsg = m.annotationErr
+			m.statusMsg = ""
+			return m, nil
+		}
+		m.annotationSaving = true
+		m.annotationOp++
+		m.annotationErr = ""
+		m.errMsg = ""
+		m.statusMsg = "saving annotation…"
+		m.annotationInput.Blur()
+		return m, m.annotationSaveCmd(m.annotationOp, m.annotationCenter, note)
+	}
+	var cmd tea.Cmd
+	m.annotationInput, cmd = m.annotationInput.Update(msg)
+	if m.annotationErr != "" {
+		m.annotationErr = ""
+		m.errMsg = ""
+	}
+	return m, cmd
 }
 
 // handlePathKey drives the two-stage human workflow: edit FROM/TO, run the
@@ -1691,6 +1986,11 @@ func (m *Model) syncFocus() {
 	m.impact.Blur()
 	m.pathFromInput.Blur()
 	m.pathToInput.Blur()
+	m.annotationInput.Blur()
+	if m.annotationOpen && !m.annotationSaving {
+		m.annotationInput.Focus()
+		return
+	}
 	switch m.active {
 	case tabSearch:
 		m.search.Focus()
@@ -1716,4 +2016,15 @@ func (m *Model) resizePathInputs() {
 	}
 	m.pathFromInput.SetWidth(w)
 	m.pathToInput.SetWidth(w)
+}
+
+func (m *Model) resizeAnnotationInput() {
+	w := m.width - 8 // composer border/padding + prompt
+	if w < 1 {
+		w = 1
+	}
+	if w > 96 {
+		w = 96
+	}
+	m.annotationInput.SetWidth(w)
 }

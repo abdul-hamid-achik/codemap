@@ -17,7 +17,7 @@
 ```
 
 While an async operation is running (indexing, a semantic search, an impact analysis, a path lookup,
-or a precise recompute), the footer shows an **animated spinner** beside the status — a spring-driven
+a precise recompute, or an annotation save), the footer shows an **animated spinner** beside the status — a spring-driven
 frame loop that stops the instant the work completes, so an idle studio costs nothing.
 
 ## Tabs
@@ -63,6 +63,13 @@ frame loop that stops the instant the work completes, so an idle studio costs no
   result, an unresolved graph, and a missing endpoint remain visibly different; stale-index and
   `--precise` guidance are shown in place rather than turning “unknown” into “no path.”
 
+On Graph, Search, Impact, and a completed Path, press `a` on an exact selected symbol to open the
+**annotation composer**. Notes are pinned to the captured FQN through the shared annotation service,
+then refreshed into the current view without losing the selection. The composer is modal: typing cannot
+trigger Studio shortcuts, `enter` saves, and `esc` cancels before a save starts. Once the non-cancellable
+write is in flight, duplicate `enter` and `esc` are ignored; failures preserve the draft for retry, while
+a successful write with a failed refresh is reported as saved rather than inviting a duplicate.
+
 ## Keys
 
 | Key | Action |
@@ -76,7 +83,8 @@ frame loop that stops the instant the work completes, so an idle studio costs no
 | `f` / `t` / `r` | (Path result) edit `FROM`, edit `TO`, or rerun the current endpoint pair |
 | `backspace` | (Graph) step back to the previous centered node while walking |
 | `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓` or `k`/`j`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
-| `o` (Graph/Metrics) / `ctrl+o` (any tab) | **orient** — open the context card for the selected symbol in a scrollable overlay: its definition, callers, callees, covering tests, blast-radius count, and pinned annotations in one view (the same bundle `codemap context` / `codemap_context` returns), so you get the whole picture without hopping between tabs |
+| `o` (Graph/Metrics) / `ctrl+o` (any tab) | **orient** — open the context card for the selected symbol in a scrollable overlay: its definition, callers, callees, value-reference wiring, covering tests, blast-radius count, and pinned annotations in one view (the same bundle `codemap context` / `codemap_context` returns), so you get the whole picture without hopping between tabs |
+| `a` (exact Graph/Search/Impact/Path selection) | Open the modal annotation composer for that exact FQN. Type a note, `enter` to save, or `esc` to cancel before saving; dirty query/endpoint inputs keep accepting the letter `a` normally |
 | `ctrl+g` (any tab) | **open the selection in the Graph walker** — re-centers the Graph on the selected hit/blast node/Path step/row and switches to it, focused on the callers/calls pane, so any symbol becomes a place to start walking the call graph (not just the hubs) |
 | `p` | (Graph) recompute the centered node's callers/callees precisely via gopls (Go) |
 | `ctrl+r` | Reindex the project and refresh, without leaving studio — keeps the project's precision (re-runs `--precise` when it already has a precise call graph, so the graph isn't dropped). The header shows `⚠ stale C/N/D` (changed/new/deleted) when your files have drifted from the index since it was built, so you know when to press it |

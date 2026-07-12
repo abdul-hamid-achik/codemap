@@ -74,7 +74,7 @@ func TestInstructionsCoverKeyCapabilities(t *testing.T) {
 	// The instructions are an agent's first-contact playbook; keep them in sync
 	// with the actual tools and accuracy model.
 	for _, want := range []string{"codemap_index", "codemap_impact", "codemap_semantic",
-		"codemap_source", "codemap_projects", "precise:true", "name-based",
+		"codemap_source", "codemap_references", "codemap_projects", "precise:true", "name-based",
 		"selector", "start_line", "volatile database ids",
 		"confirmed", "candidate", "deletion_analysis",
 		`"indexed": false`, "degrades to name-based",
@@ -104,6 +104,14 @@ func TestMCPServer(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(proj, "other.go"),
 		[]byte("package app\n\nfunc Other() { Helper() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "handler.go"),
+		[]byte("package app\n\nfunc Handler() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "hooks.go"),
+		[]byte("package app\n\nvar Hook = struct{ Run func() }{Run: Handler}\n\nfunc register(func()) {}\nfunc Setup() { register(Handler) }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,7 +149,7 @@ func TestMCPServer(t *testing.T) {
 		got[tool.Name] = true
 		toolsByName[tool.Name] = tool
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_find", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_references", "codemap_find", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}
@@ -149,7 +157,7 @@ func TestMCPServer(t *testing.T) {
 	// Exact-definition tools accept a source selector projected directly from
 	// the file/start_line/fqn/kind fields already present on symbol results. Once
 	// selector exists, symbol must not remain schema-required.
-	for _, name := range []string{"codemap_callers", "codemap_callees", "codemap_impact", "codemap_risk", "codemap_source", "codemap_context"} {
+	for _, name := range []string{"codemap_callers", "codemap_callees", "codemap_references", "codemap_impact", "codemap_risk", "codemap_source", "codemap_context"} {
 		tool := toolsByName[name]
 		raw, err := json.Marshal(tool.InputSchema)
 		if err != nil {
@@ -170,6 +178,11 @@ func TestMCPServer(t *testing.T) {
 				t.Errorf("%s still requires symbol, preventing selector-only calls: %s", name, raw)
 			}
 		}
+	}
+	if raw, err := json.Marshal(toolsByName["codemap_references"].InputSchema); err != nil {
+		t.Fatal(err)
+	} else if strings.Contains(string(raw), `"precise"`) {
+		t.Fatalf("codemap_references must not expose misleading call precision: %s", raw)
 	}
 	// Inventory-only calls must be representable: keys is optional when
 	// via_vault supplies value-free key names, and both inventory fields must be
@@ -231,6 +244,55 @@ func TestMCPServer(t *testing.T) {
 	}
 	if txt := textOf(res2); !strings.Contains(txt, "Run") || !strings.Contains(txt, `"found":true`) {
 		t.Errorf("callers of Helper should include Run and found:true: %s", txt)
+	}
+
+	// codemap_references is callback/value wiring, not callers. It returns the
+	// enclosing file + Setup scopes, bounded totals, and explicit partial
+	// coverage. A selector-only call must preserve the same exact target.
+	refs, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_references",
+		Arguments: map[string]any{"path": proj, "symbol": "Handler"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refsText := textOf(refs)
+	if refs.IsError || !strings.Contains(refsText, `"references_total":2`) ||
+		!strings.Contains(refsText, `"coverage":"partial"`) || !strings.Contains(refsText, `"kind":"file"`) ||
+		!strings.Contains(refsText, `"symbol":"Setup"`) || strings.Contains(refsText, `"symbol":"Run"`) {
+		t.Fatalf("references payload mixed calls or lost wiring honesty: %s", refsText)
+	}
+	exactRefs, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_references",
+		Arguments: map[string]any{"path": proj, "selector": map[string]any{
+			"file": "handler.go", "start_line": 3, "fqn": "app.Handler", "kind": "function",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exactRefs.IsError || !strings.Contains(textOf(exactRefs), `"selector"`) || !strings.Contains(textOf(exactRefs), `"references_total":2`) {
+		t.Fatalf("selector-only references failed: %s", textOf(exactRefs))
+	}
+	missingRefsInput, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_references", Arguments: map[string]any{"path": proj},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !missingRefsInput.IsError || !strings.Contains(textOf(missingRefsInput), "needs symbol or selector") {
+		t.Fatalf("references should validate symbol-or-selector: %s", textOf(missingRefsInput))
+	}
+
+	ctxRefs, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_context", Arguments: map[string]any{"path": proj, "symbol": "Handler"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctxRefs.IsError || !strings.Contains(textOf(ctxRefs), `"references_total":2`) ||
+		!strings.Contains(textOf(ctxRefs), `"references_coverage":"partial"`) {
+		t.Fatalf("context did not embed reference wiring honesty: %s", textOf(ctxRefs))
 	}
 
 	// codemap_dependencies is the thin MCP twin of Service.Dependencies. The
