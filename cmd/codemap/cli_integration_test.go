@@ -5,12 +5,15 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/abdul-hamid-achik/codemap/internal/app"
 )
 
 type cliResult struct {
@@ -548,6 +551,163 @@ func runCLI(t *testing.T, bin, dir string, env []string, args ...string) cliResu
 		exit = ee.ExitCode()
 	}
 	return cliResult{stdout: stdout.String(), stderr: stderr.String(), exit: exit}
+}
+
+// TestReviewRiskGateExitCode drives the real executable (like TestCLIContracts)
+// to pin the I10 gate contract: --fail-on-risk/--fail-on-untested print the
+// normal, unchanged output and only change the process exit code (dedicated
+// exitGateFailed = 6), never synthesizing a {"ok":false,...} failure envelope.
+// It also pins the pre-commit-hook degradation path: an unindexed repo or a
+// non-git directory must exit 0, never block a commit on missing infra.
+func TestReviewRiskGateExitCode(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	binName := "codemap"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	bin := filepath.Join(root, binName)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = "."
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, out)
+	}
+
+	runner := filepath.Join(root, "runner")
+	project := filepath.Join(root, "project") // indexed repo, staged untested+risky change
+	cold := filepath.Join(root, "cold")       // git repo, never indexed
+	nonRepo := filepath.Join(root, "nonrepo") // not a git repository at all
+	for _, dir := range []string{runner, project, cold, nonRepo} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := isolatedCLIEnv(root)
+
+	// Hub() has 8 direct callers and NO covering test: changing it trips both
+	// --fail-on-untested (untested_symbols non-empty) and --fail-on-risk high
+	// (untested alone combines to a high score).
+	var b strings.Builder
+	b.WriteString("package gate\n\nfunc Hub() {}\n")
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&b, "func C%d() { Hub() }\n", i)
+	}
+	writeTestFile(t, filepath.Join(project, "go.mod"), "module example.com/gate\n\ngo 1.25\n")
+	writeTestFile(t, filepath.Join(project, "a.go"), b.String())
+	gateGit(t, project, "init")
+	gateGit(t, project, "config", "user.email", "t@t")
+	gateGit(t, project, "config", "user.name", "t")
+	gateGit(t, project, "config", "commit.gpgsign", "false")
+	gateGit(t, project, "add", "-A")
+	gateGit(t, project, "commit", "-m", "init")
+
+	res := runCLI(t, bin, runner, env, "index", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
+	if res.exit != 0 {
+		t.Fatalf("index exit=%d stderr=%s stdout=%s", res.exit, res.stderr, res.stdout)
+	}
+
+	// Touch Hub's body without shifting line numbers, then STAGE it — the
+	// documented pre-commit hook reviews --staged.
+	edited := strings.Replace(b.String(), "func Hub() {}", "func Hub() { _ = 1 }", 1)
+	writeTestFile(t, filepath.Join(project, "a.go"), edited)
+	gateGit(t, project, "add", "-A")
+
+	t.Run("fail-on-untested trips exit 6 and leaves json body unchanged", func(t *testing.T) {
+		base := runCLI(t, bin, runner, env, "review", "-C", project, "--staged", "--json")
+		if base.exit != 0 || base.stderr != "" {
+			t.Fatalf("baseline review exit=%d stderr=%s stdout=%s", base.exit, base.stderr, base.stdout)
+		}
+		var baseRep app.ReviewReport
+		mustJSON(t, base.stdout, &baseRep)
+		if len(baseRep.UntestedSymbols) == 0 {
+			t.Fatalf("fixture must produce an untested changed symbol, got %+v", baseRep)
+		}
+
+		gated := runCLI(t, bin, runner, env, "review", "-C", project, "--staged", "--json", "--fail-on-untested")
+		if gated.exit != exitGateFailed {
+			t.Fatalf("--fail-on-untested exit=%d, want %d\nstderr=%s\nstdout=%s", gated.exit, exitGateFailed, gated.stderr, gated.stdout)
+		}
+		if gated.stderr != "" {
+			t.Fatalf("gate must not print to stderr: %q", gated.stderr)
+		}
+		if gated.stdout != base.stdout {
+			t.Fatalf("--json body changed when the gate tripped:\n--- base ---\n%s\n--- gated ---\n%s", base.stdout, gated.stdout)
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal([]byte(gated.stdout), &envelope); err != nil {
+			t.Fatalf("gated stdout is not valid JSON: %v", err)
+		}
+		if _, hasOK := envelope["ok"]; hasOK {
+			t.Fatalf("gate must stay the normal success shape (no ok field), got %+v", envelope)
+		}
+	})
+
+	t.Run("fail-on-risk high trips on the same fixture", func(t *testing.T) {
+		gated := runCLI(t, bin, runner, env, "review", "-C", project, "--staged", "--json", "--fail-on-risk", "high")
+		if gated.exit != exitGateFailed {
+			t.Fatalf("--fail-on-risk high exit=%d, want %d\nstdout=%s", gated.exit, exitGateFailed, gated.stdout)
+		}
+	})
+
+	t.Run("invalid fail-on-risk value is an operational error, not a gate", func(t *testing.T) {
+		res := runCLI(t, bin, runner, env, "review", "-C", project, "--staged", "--json", "--fail-on-risk", "critical")
+		assertCLIEnvelope(t, res, exitOperational, "operational")
+	})
+
+	t.Run("risk command gate mirrors review and leaves json body unchanged", func(t *testing.T) {
+		base := runCLI(t, bin, runner, env, "risk", "Hub", "-C", project, "--json")
+		if base.exit != 0 || base.stderr != "" {
+			t.Fatalf("baseline risk exit=%d stderr=%s stdout=%s", base.exit, base.stderr, base.stdout)
+		}
+		var baseRep app.RiskReport
+		mustJSON(t, base.stdout, &baseRep)
+		if baseRep.Level != "high" {
+			t.Fatalf("fixture risk level = %q, want high (untested 8-caller hub)", baseRep.Level)
+		}
+
+		gated := runCLI(t, bin, runner, env, "risk", "Hub", "-C", project, "--json", "--fail-on-risk", "high")
+		if gated.exit != exitGateFailed {
+			t.Fatalf("risk --fail-on-risk exit=%d, want %d\nstdout=%s", gated.exit, exitGateFailed, gated.stdout)
+		}
+		if gated.stdout != base.stdout {
+			t.Fatalf("risk --json body changed when the gate tripped:\n--- base ---\n%s\n--- gated ---\n%s", base.stdout, gated.stdout)
+		}
+	})
+
+	t.Run("hook path degrades to exit 0 on an unindexed or non-git repo", func(t *testing.T) {
+		// cold: a real git repo with a staged change, but never indexed.
+		writeTestFile(t, filepath.Join(cold, "a.go"), "package cold\n\nfunc F() {}\n")
+		gateGit(t, cold, "init")
+		gateGit(t, cold, "config", "user.email", "t@t")
+		gateGit(t, cold, "config", "user.name", "t")
+		gateGit(t, cold, "config", "commit.gpgsign", "false")
+		gateGit(t, cold, "add", "-A")
+		gateGit(t, cold, "commit", "-m", "init")
+		writeTestFile(t, filepath.Join(cold, "a.go"), "package cold\n\nfunc F() { _ = 1 }\n")
+		gateGit(t, cold, "add", "-A")
+
+		res := runCLI(t, bin, runner, env, "review", "-C", cold, "--staged", "--json", "--fail-on-untested")
+		if res.exit != 0 {
+			t.Fatalf("unindexed repo review --fail-on-untested exit=%d, want 0 (never block a commit on missing infra)\nstderr=%s\nstdout=%s", res.exit, res.stderr, res.stdout)
+		}
+
+		// nonRepo: not a git repository at all.
+		res = runCLI(t, bin, runner, env, "review", "-C", nonRepo, "--staged", "--json", "--fail-on-untested")
+		if res.exit != 0 {
+			t.Fatalf("non-repo review --fail-on-untested exit=%d, want 0\nstderr=%s\nstdout=%s", res.exit, res.stderr, res.stdout)
+		}
+	})
+}
+
+// gateGit runs a git command in dir, failing the test on error.
+func gateGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
 }
 
 func assertCLIEnvelope(t *testing.T, res cliResult, wantExit int, wantCode string) {

@@ -1,0 +1,38 @@
+# pre-commit framework hook manifest (https://pre-commit.com/#new-hooks) for
+# codemap review's --fail-on-untested / --fail-on-risk gates (see docs/ci.md).
+#
+# Consumers reference this repo in their own .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/abdul-hamid-achik/codemap
+#       rev: vX.Y.Z            # pin a release tag
+#       hooks:
+#         - id: codemap-review
+#           # args: [--fail-on-untested, --fail-on-risk, high]  # override to add the risk gate
+#
+# `language: system` assumes `codemap` is already on PATH (this hook does not
+# build or install it) and that the project has been indexed at least once
+# (`codemap index`) — the hook degrades to a no-op (exit 0) on an unindexed
+# project or a non-git directory, so a missing/stale index never blocks a
+# commit; it only gates once real signal exists.
+#
+# Speed trade-off: the default entry deliberately does NOT pass --precise. A
+# --staged review with the default name-based call graph is fast enough for
+# a commit-time hook (well under 2s on a small diff), but Go cross-package
+# method calls and TypeScript/JavaScript/Python callers stay unresolved without
+# a separate `codemap index --precise` pass (run that in CI instead, where the
+# extra seconds don't block a commit — see the GitHub Action in
+# integrations/github-action, which runs the exact same review with
+# --precise).
+- id: codemap-review
+  name: codemap review (untested/risk gate)
+  description: >-
+    Fails the commit when staged changes touch untested and/or high-risk
+    code, per codemap's diff-scoped review. Default gate is
+    --fail-on-untested; override `args` to add --fail-on-risk <low|medium|high>.
+    Exits 0 (never blocks) when the project isn't indexed or isn't a git repo.
+  entry: codemap review --staged --json
+  args: ["--fail-on-untested"]
+  language: system
+  pass_filenames: false
+  always_run: true
