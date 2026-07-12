@@ -879,7 +879,7 @@ func TestDocs(t *testing.T) {
 	}
 	// The guide must teach the agent-facing commands so an agent discovers them —
 	// keep this in sync as commands ship (a stale guide hides capabilities).
-	for _, want := range []string{"codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_context_batch", "deletion_analysis", "confirmed", "candidate"} {
+	for _, want := range []string{"codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_context_batch", "deletion_analysis", "confirmed", "candidate", "candidates", "positions", "selectors"} {
 		if !strings.Contains(full, want) {
 			t.Errorf("agent guide should teach %q so agents discover it", want)
 		}
@@ -1513,6 +1513,10 @@ func TestCallersWarnsOnAmbiguousName(t *testing.T) {
 	if amb.Note == "" || !strings.Contains(amb.Note, "definitions") {
 		t.Errorf("ambiguous callers should warn it merges same-named defs, got %q", amb.Note)
 	}
+	if len(amb.Candidates) != 2 {
+		t.Fatalf("ambiguous callers should surface the merged definition set, got %d candidates: %+v", len(amb.Candidates), amb.Candidates)
+	}
+	assertPlausibleCandidates(t, amb.Candidates)
 	// Unique name: no warning.
 	solo, err := svc.Callees(proj, "Solo")
 	if err != nil {
@@ -1520,6 +1524,26 @@ func TestCallersWarnsOnAmbiguousName(t *testing.T) {
 	}
 	if solo.Note != "" {
 		t.Errorf("unambiguous callees should carry no note, got %q", solo.Note)
+	}
+	if len(solo.Candidates) != 0 {
+		t.Errorf("unambiguous callees should carry no candidates, got %+v", solo.Candidates)
+	}
+}
+
+// assertPlausibleCandidates checks that every AmbiguityCandidate carries a
+// usable selector and location — the shape an agent re-issues a query with.
+func assertPlausibleCandidates(t *testing.T, candidates []AmbiguityCandidate) {
+	t.Helper()
+	for i, c := range candidates {
+		if c.Selector == nil || c.Selector.File == "" || c.Selector.StartLine <= 0 || c.Selector.FQN == "" || c.Selector.Kind == "" {
+			t.Errorf("candidate[%d] selector incomplete: %+v", i, c)
+		}
+		if c.File == "" || c.StartLine <= 0 {
+			t.Errorf("candidate[%d] missing file/start_line: %+v", i, c)
+		}
+		if c.Signature == "" {
+			t.Errorf("candidate[%d] missing signature: %+v", i, c)
+		}
 	}
 }
 
@@ -1557,6 +1581,10 @@ func TestImpactWarnsOnAmbiguousName(t *testing.T) {
 	if amb.Note == "" || !strings.Contains(amb.Note, "definitions") {
 		t.Errorf("ambiguous impact should warn it merges same-named defs, got %q", amb.Note)
 	}
+	if len(amb.Candidates) != 2 {
+		t.Fatalf("ambiguous impact should surface the merged definition set, got %d candidates: %+v", len(amb.Candidates), amb.Candidates)
+	}
+	assertPlausibleCandidates(t, amb.Candidates)
 
 	// Unambiguous: no warning.
 	solo, err := svc.Impact(proj, "Solo", 2)
@@ -1565,6 +1593,133 @@ func TestImpactWarnsOnAmbiguousName(t *testing.T) {
 	}
 	if solo.Note != "" {
 		t.Errorf("unambiguous impact should carry no note, got %q", solo.Note)
+	}
+	if len(solo.Candidates) != 0 {
+		t.Errorf("unambiguous impact should carry no candidates, got %+v", solo.Candidates)
+	}
+}
+
+// ambiguousCloseProject builds the shared T/U.Close() + Solo() fixture used
+// across the candidates tests: two same-named methods make "Close" ambiguous,
+// while "Solo" is unique.
+func ambiguousCloseProject(t *testing.T) (*Service, string) {
+	t.Helper()
+	isolate(t)
+	proj := t.TempDir()
+	src := "package app\n\n" +
+		"type T struct{}\ntype U struct{}\n\n" +
+		"func (T) Close() {}\nfunc (U) Close() {}\n\n" +
+		"func RunT() { var t T; t.Close() }\n" +
+		"func RunU() { var u U; u.Close() }\n" +
+		"func Solo() {}\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	return svc, proj
+}
+
+func TestContextCandidatesOnAmbiguousName(t *testing.T) {
+	svc, proj := ambiguousCloseProject(t)
+
+	amb, err := svc.Context(proj, "Close", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(amb.Candidates) != 2 {
+		t.Fatalf("ambiguous context should surface the merged definition set (via the callers-relation passthrough), got %d candidates: %+v", len(amb.Candidates), amb.Candidates)
+	}
+	assertPlausibleCandidates(t, amb.Candidates)
+
+	solo, err := svc.Context(proj, "Solo", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(solo.Candidates) != 0 {
+		t.Errorf("unambiguous context should carry no candidates, got %+v", solo.Candidates)
+	}
+}
+
+func TestRiskCandidatesOnAmbiguousName(t *testing.T) {
+	svc, proj := ambiguousCloseProject(t)
+
+	amb, err := svc.Risk(proj, "Close", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(amb.Candidates) != 2 {
+		t.Fatalf("ambiguous risk should surface the merged definition set, got %d candidates: %+v", len(amb.Candidates), amb.Candidates)
+	}
+	assertPlausibleCandidates(t, amb.Candidates)
+	if !strings.Contains(amb.Note, "definitions") {
+		t.Errorf("ambiguous risk should now carry the impact ambiguity note (riskFromImpact fix), got %q", amb.Note)
+	}
+
+	solo, err := svc.Risk(proj, "Solo", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(solo.Candidates) != 0 || solo.Note != "" {
+		t.Errorf("unambiguous risk should carry no candidates/note, got candidates=%+v note=%q", solo.Candidates, solo.Note)
+	}
+}
+
+func TestSourceCandidatesOnAmbiguousName(t *testing.T) {
+	svc, proj := ambiguousCloseProject(t)
+
+	amb, err := svc.Source(proj, "Close")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(amb.Candidates) != 2 || len(amb.Candidates) != len(amb.Matches) {
+		t.Fatalf("ambiguous source candidates should mirror matches 1:1, got %d candidates, %d matches", len(amb.Candidates), len(amb.Matches))
+	}
+	assertPlausibleCandidates(t, amb.Candidates)
+
+	solo, err := svc.Source(proj, "Solo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(solo.Candidates) != 0 {
+		t.Errorf("unambiguous source should carry no candidates, got %+v", solo.Candidates)
+	}
+}
+
+// TestImpactBySelectorNeverSetsCandidates pins design decision #4: a query
+// already scoped to one exact definition via a selector never reports
+// candidates, even when the bare name is ambiguous project-wide — the
+// selector-resolution seam (resolveSourceSelector) already errors instead of
+// unioning when the selector itself is still ambiguous, so the downstream
+// impactFromLocations call always sees a one-node slice.
+func TestImpactBySelectorNeverSetsCandidates(t *testing.T) {
+	svc, proj := ambiguousCloseProject(t)
+
+	amb, err := svc.Impact(proj, "Close", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(amb.Locations) != 2 {
+		t.Fatalf("expected 2 definitions for Close, got %d", len(amb.Locations))
+	}
+	selector := SymbolSelector{File: amb.Locations[0].File, StartLine: amb.Locations[0].StartLine, FQN: amb.Locations[0].FQN, Kind: amb.Locations[0].Kind}
+
+	exact, err := svc.ImpactBySelector(proj, selector, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exact.Candidates) != 0 {
+		t.Errorf("a selector-scoped impact query must never set candidates, got %+v", exact.Candidates)
+	}
+	if exact.Note != "" && strings.Contains(exact.Note, "matches") {
+		t.Errorf("a selector-scoped impact query should not repeat the name-ambiguity note, got %q", exact.Note)
 	}
 }
 

@@ -28,6 +28,33 @@ func selectorForNode(n graph.Node) *SymbolSelector {
 	return &SymbolSelector{File: n.FilePath, StartLine: n.StartLine, FQN: n.FQN, Kind: n.Kind}
 }
 
+// AmbiguityCandidate is one distinct definition merged into a name-union
+// answer (impact/context/callers/callees/risk/source), so an agent can
+// re-issue the query with candidates[i].selector instead of parsing free-form
+// Note prose and hand-building a selector via find/symbols.
+type AmbiguityCandidate struct {
+	Selector  *SymbolSelector `json:"selector"`
+	Signature string          `json:"signature,omitempty"`
+	File      string          `json:"file"`
+	StartLine int             `json:"start_line"`
+}
+
+// candidatesFromNodes builds the candidate list from a merged node set. Returns
+// nil (→ omitted, not an empty array) when there is nothing ambiguous to report.
+func candidatesFromNodes(nodes []graph.Node) []AmbiguityCandidate {
+	if len(nodes) < 2 {
+		return nil
+	}
+	out := make([]AmbiguityCandidate, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, AmbiguityCandidate{
+			Selector: selectorForNode(n), Signature: n.Signature,
+			File: n.FilePath, StartLine: n.StartLine,
+		})
+	}
+	return out
+}
+
 type resolvedSelector struct {
 	graph       *graph.Store
 	project     *graph.Project

@@ -30,20 +30,21 @@ type ImpactNode struct {
 // ImpactReport is the flagship impact analysis: who is affected by changing a
 // symbol, and which tests cover those paths.
 type ImpactReport struct {
-	Symbol        string             `json:"symbol"`
-	Selector      *SymbolSelector    `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
-	Project       string             `json:"project"`
-	Found         bool               `json:"found"`
-	Locations     []SymbolRef        `json:"locations,omitempty"`
-	DirectCallers []SymbolRef        `json:"direct_callers"`
-	BlastRadius   []ImpactNode       `json:"blast_radius"`
-	Tests         []ImpactNode       `json:"tests"`
-	Untested      bool               `json:"untested"`
-	Note          string             `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
-	Resolution    string             `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (e.g. TS/JS/Python without --precise) — direct_callers/blast_radius/tests are unavailable, not empty
-	CallGraph     string             `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none (keep Resolution for the human sentence)
-	Annotations   []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
-	Next          []NextAction       `json:"next,omitempty"`
+	Symbol        string               `json:"symbol"`
+	Selector      *SymbolSelector      `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
+	Project       string               `json:"project"`
+	Found         bool                 `json:"found"`
+	Locations     []SymbolRef          `json:"locations,omitempty"`
+	DirectCallers []SymbolRef          `json:"direct_callers"`
+	BlastRadius   []ImpactNode         `json:"blast_radius"`
+	Tests         []ImpactNode         `json:"tests"`
+	Untested      bool                 `json:"untested"`
+	Note          string               `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
+	Candidates    []AmbiguityCandidate `json:"candidates,omitempty"`  // the merged definition set behind Note; re-query with candidates[i].selector
+	Resolution    string               `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (e.g. TS/JS/Python without --precise) — direct_callers/blast_radius/tests are unavailable, not empty
+	CallGraph     string               `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none (keep Resolution for the human sentence)
+	Annotations   []graph.Annotation   `json:"annotations,omitempty"` // notes/data pinned to this symbol
+	Next          []NextAction         `json:"next,omitempty"`
 }
 
 // Impact computes impact analysis for a symbol: its definition site(s), direct
@@ -134,6 +135,7 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 		// misleading when it merges six unrelated Close() methods. The fix depends
 		// on the index: name-based can be reindexed --precise; a precise index has
 		// exact per-method edges, so only the query name itself is ambiguous.
+		rep.Candidates = candidatesFromNodes(locs)
 		if rep.CallGraph == CallGraphResolved {
 			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but the direct callers, blast radius, and covering tests below still merge all of them; query a more specific name to separate them", symbol, len(locs))
 		} else {

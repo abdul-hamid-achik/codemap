@@ -46,6 +46,9 @@ Results carry each symbol's signature and docstring, so you rarely need to open 
 When a result's short name is shared, project its existing file, start_line, fqn, and kind
 fields into a selector object for codemap_source/context/callers/callees/references/impact/path. Selectors
 choose one definition without exposing volatile database ids; file+fqn+kind survives line shifts.
+When impact/context/callers/callees/risk/source ARE ambiguous, their response already includes
+candidates:[{selector,signature,file,start_line}] — the exact merged set — so you don't need a
+separate find/symbols round-trip to build that selector.
 
 After you edit: codemap_review — diff-scoped impact + test selection. It reads your git diff
 (working tree by default; staged:true, or since:<ref>), finds the changed symbols, and returns
@@ -222,9 +225,10 @@ type riskInput struct {
 }
 
 type symbolAtInput struct {
-	File string `json:"file" jsonschema:"project-relative file path"`
-	Line int    `json:"line" jsonschema:"1-based line number to resolve to its enclosing symbol"`
-	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	File      string             `json:"file,omitempty" jsonschema:"project-relative file path; omit when positions is set"`
+	Line      int                `json:"line,omitempty" jsonschema:"1-based line number to resolve to its enclosing symbol; omit when positions is set"`
+	Positions []app.FilePosition `json:"positions,omitempty" jsonschema:"batch form: several {file,line} positions resolved in one call (e.g. a pasted stack trace), up to 25; when set, file/line are ignored and the response is a batch report with one result per position"`
+	Path      string             `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
 type secretImpactInput struct {
@@ -278,9 +282,10 @@ type sourceInput struct {
 }
 
 type contextBatchInput struct {
-	Symbols []string `json:"symbols" jsonschema:"the symbols to fetch context for in one call (deduped; up to 25)"`
-	Path    string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth   int      `json:"depth,omitempty" jsonschema:"max hops for each symbol's blast-radius count (default 3)"`
+	Symbols   []string             `json:"symbols" jsonschema:"the symbols to fetch context for in one call (deduped; up to 25)"`
+	Selectors []app.SymbolSelector `json:"selectors,omitempty" jsonschema:"exact definitions to include, unioned with symbols and deduped; union with symbols is capped at 25 total"`
+	Path      string               `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth     int                  `json:"depth,omitempty" jsonschema:"max hops for each symbol's blast-radius count (default 3)"`
 }
 
 type contextInput struct {
@@ -364,11 +369,11 @@ func (s *Server) register() {
 	}, s.handleSemantic)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callers",
-		Description: "List functions/methods that call a symbol. Name-only queries remain backward-compatible and may merge same-named definitions. For one exact definition, pass selector:{file,start_line,fqn,kind} projected from any codemap symbol result; the source selector survives reindex and line shifts when file+fqn+kind still match. precise=true optionally resolves it on demand through the language server.",
+		Description: "List functions/methods that call a symbol. Name-only queries remain backward-compatible and may merge same-named definitions — when ambiguous, the result's candidates:[{selector,signature,file,start_line}] gives the exact merged set so you can re-query one definition without a separate find/symbols lookup. For one exact definition, pass selector:{file,start_line,fqn,kind} projected from any codemap symbol result; the source selector survives reindex and line shifts when file+fqn+kind still match. precise=true optionally resolves it on demand through the language server.",
 	}, s.handleCallers)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callees",
-		Description: "List functions/methods called by a symbol. Pass selector:{file,start_line,fqn,kind} projected from a prior result to select one exact definition instead of merging same-named definitions. Pass precise=true for an on-demand language-server resolution.",
+		Description: "List functions/methods called by a symbol. Pass selector:{file,start_line,fqn,kind} projected from a prior result to select one exact definition instead of merging same-named definitions. An ambiguous name-only query's candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Pass precise=true for an on-demand language-server resolution.",
 	}, s.handleCallees)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_references",
@@ -376,7 +381,7 @@ func (s *Server) register() {
 	}, s.handleReferences)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_impact",
-		Description: "Impact analysis: definition sites, direct callers, transitive blast radius, and covering tests. Pass selector:{file,start_line,fqn,kind} projected from a find/symbols/context result to analyze one exact definition; name-only input remains supported and honestly reports when same-named definitions are merged.",
+		Description: "Impact analysis: definition sites, direct callers, transitive blast radius, and covering tests. Pass selector:{file,start_line,fqn,kind} projected from a find/symbols/context result to analyze one exact definition; name-only input remains supported and honestly reports when same-named definitions are merged, surfacing candidates:[{selector,signature,file,start_line}] — the exact merged set — so you can re-query one definition.",
 	}, s.handleImpact)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_review",
@@ -400,11 +405,11 @@ func (s *Server) register() {
 	}, s.handleFileImpact)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_risk",
-		Description: "Change-risk score in one number (0..1) + level (unknown/low/medium/high), combining coverage, fan-in, cross-package spread, and ambiguity. Pass selector:{file,start_line,fqn,kind} to score one exact definition. An unresolved call graph returns unknown, never a reassuring low.",
+		Description: "Change-risk score in one number (0..1) + level (unknown/low/medium/high), combining coverage, fan-in, cross-package spread, and ambiguity. Pass selector:{file,start_line,fqn,kind} to score one exact definition. An ambiguous name-only query's candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. An unresolved call graph returns unknown, never a reassuring low.",
 	}, s.handleRisk)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_symbol_at",
-		Description: "Resolve a file:line position to its enclosing symbol (FQN, kind, line range). The entry point for joining external file:line results (search hits, stack traces, diffs) onto the code graph. resolution is exact|enclosing|none.",
+		Description: "Resolve a file:line position to its enclosing symbol (FQN, kind, line range). The entry point for joining external file:line results (search hits, stack traces, diffs) onto the code graph. resolution is exact|enclosing|none. Pass positions:[{file,line}] instead of file/line to resolve several positions (e.g. a pasted stack trace) in one call — up to 25, each self-reporting resolution:none on a miss.",
 	}, s.handleSymbolAt)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_secret_impact",
@@ -436,15 +441,15 @@ func (s *Server) register() {
 	}, s.handleFind)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_source",
-		Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition.",
+		Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition, plus candidates:[{selector,signature,file,start_line}] (redundant with matches, present for uniformity with impact/context/callers/callees/risk).",
 	}, s.handleSource)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_context",
-		Description: "Everything about a symbol in ONE call: source, callers, callees, callback/value references, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported. Uses the indexed graph only; capped lists carry true *_total counts, reference coverage/staleness stays independent of call_graph, and optional failures appear in partial_errors.",
+		Description: "Everything about a symbol in ONE call: source, callers, callees, callback/value references, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported; when ambiguous, candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Uses the indexed graph only; capped lists carry true *_total counts, reference coverage/staleness stays independent of call_graph, and optional failures appear in partial_errors.",
 	}, s.handleContext)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_context_batch",
-		Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures.",
+		Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Also accepts selectors:[{file,start_line,fqn,kind}] (e.g. from a prior ambiguous call's candidates) unioned with symbols, same 25-item cap — MCP-only, no CLI batch form for selectors; a malformed selector lands in not_found/partial_errors rather than failing the whole call. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures.",
 	}, s.handleContextBatch)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_projects",
@@ -814,6 +819,10 @@ func (s *Server) handleSymbolAt(_ context.Context, _ *sdkmcp.CallToolRequest, in
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
+	if len(in.Positions) > 0 {
+		rep, err := s.svc.SymbolAtBatch(cwdOf(in.Path), in.Positions)
+		return result(rep, err)
+	}
 	rep, err := s.svc.SymbolAt(cwdOf(in.Path), in.File, in.Line)
 	return result(rep, err)
 }
@@ -907,7 +916,7 @@ func (s *Server) handleContextBatch(ctx context.Context, _ *sdkmcp.CallToolReque
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.ContextBatchWithContext(ctx, cwdOf(in.Path), in.Symbols, in.Depth)
+	rep, err := s.svc.ContextBatchWithContext(ctx, cwdOf(in.Path), in.Symbols, in.Selectors, in.Depth)
 	return result(rep, err)
 }
 

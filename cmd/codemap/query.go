@@ -74,9 +74,9 @@ no dynamic or otherwise-unindexed wiring.`,
 		RunE:  runRisk,
 	}
 	symbolAtCmd = &cobra.Command{
-		Use:   "symbol-at <file>:<line>",
-		Short: "Resolve a file:line position to its enclosing symbol (FQN, kind, range)",
-		Args:  cobra.ExactArgs(1),
+		Use:   "symbol-at <file>:<line> [<file>:<line>...]",
+		Short: "Resolve one or more file:line positions to their enclosing symbol (FQN, kind, range)",
+		Args:  cobra.MinimumNArgs(1),
 		RunE:  runSymbolAt,
 	}
 	secretImpactCmd = &cobra.Command{
@@ -349,6 +349,7 @@ func runRelation(cmd *cobra.Command, args []string, callers bool) error {
 	if rep.Note != "" {
 		fmt.Println("⚠ " + rep.Note)
 	}
+	renderCandidates(rep.Candidates)
 	if rep.Resolution != "" {
 		fmt.Println("⚠ " + rep.Resolution)
 	}
@@ -433,6 +434,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if rep.Note != "" {
 		fmt.Println("  ⚠ " + rep.Note)
 	}
+	renderCandidates(rep.Candidates)
 	fmt.Printf("  direct callers: %d\n", len(rep.DirectCallers))
 	fmt.Printf("  blast radius:   %d (depth ≤ %d)\n", len(rep.BlastRadius), depth)
 	fmt.Printf("  tests covering: %d\n", len(rep.Tests))
@@ -641,6 +643,7 @@ func runRisk(cmd *cobra.Command, args []string) error {
 	if rep.Note != "" {
 		fmt.Println("  ⚠ " + rep.Note)
 	}
+	renderCandidates(rep.Candidates)
 	if len(rep.Factors) == 0 {
 		fmt.Println("  no risk factors — a low-impact, covered change")
 		return nil
@@ -850,6 +853,9 @@ func runSymbolAt(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	cwd := targetDir(cmd)
+	if len(args) > 1 {
+		return runSymbolAtBatch(cmd, svc, cwd, args)
+	}
 	file, line, err := parseFileLine(args[0])
 	if err != nil {
 		return err
@@ -867,6 +873,48 @@ func runSymbolAt(cmd *cobra.Command, args []string) error {
 		return printJSON(rep)
 	}
 	fmt.Printf("%s  %s:%d-%d  (%s, %s)\n", disp(rep.FQN, rep.Symbol), rep.File, rep.StartLine, rep.EndLine, rep.Kind, rep.Resolution)
+	return nil
+}
+
+// runSymbolAtBatch resolves several <file>:<line> positions in one call — a
+// pasted multi-frame stack trace or a diff's changed-line list, without one
+// round-trip per frame. --json prints the whole SymbolAtBatchReport; the human
+// form prints one line per result, reusing the single-position line format.
+func runSymbolAtBatch(cmd *cobra.Command, svc *app.Service, cwd string, args []string) error {
+	positions := make([]app.FilePosition, 0, len(args))
+	for _, arg := range args {
+		file, line, err := parseFileLine(arg)
+		if err != nil {
+			return err
+		}
+		positions = append(positions, app.FilePosition{File: file, Line: line})
+	}
+	rep, err := svc.SymbolAtBatch(cwd, positions)
+	if err != nil {
+		return err
+	}
+	misses := 0
+	for _, r := range rep.Results {
+		if r.Resolution == "none" {
+			misses++
+		}
+	}
+	if len(rep.Results) > 0 && misses == len(rep.Results) {
+		return notFoundError("no symbol found at any of the requested positions", "check the file paths and line numbers")
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if rep.Note != "" {
+		fmt.Println("⚠ " + rep.Note)
+	}
+	for _, r := range rep.Results {
+		if r.Resolution == "none" {
+			fmt.Printf("%s:%d  — not found\n", r.File, r.Line)
+			continue
+		}
+		fmt.Printf("%s  %s:%d-%d  (%s, %s)\n", disp(r.FQN, r.Symbol), r.File, r.StartLine, r.EndLine, r.Kind, r.Resolution)
+	}
 	return nil
 }
 
@@ -1354,5 +1402,27 @@ func renderAnnotations(anns []graph.Annotation) {
 			line += "  " + truncStr(a.Data, 80)
 		}
 		fmt.Printf("     #%d %s\n", a.ID, line)
+	}
+}
+
+// renderCandidates prints the exact merged-definition set behind an ambiguous
+// Note ("X matches N definitions") as a short numbered "did you mean" list —
+// the same selectors an agent would read from --json's candidates field,
+// so a human doesn't have to re-run find/symbols to locate them by hand.
+func renderCandidates(candidates []app.AmbiguityCandidate) {
+	if len(candidates) == 0 {
+		return
+	}
+	fmt.Println("  did you mean:")
+	shown, more := capList(candidates, 8)
+	for i, c := range shown {
+		name := c.Signature
+		if name == "" && c.Selector != nil {
+			name = c.Selector.FQN
+		}
+		fmt.Printf("     %d. %-36s %s:%d\n", i+1, name, c.File, c.StartLine)
+	}
+	if more > 0 {
+		fmt.Printf("     … (%d more — use --json for the full selector list)\n", more)
 	}
 }

@@ -22,17 +22,18 @@ type RiskFactor struct {
 // low/medium/high level, each backed by the factors that produced it. A symbol
 // whose call graph is unavailable is "unknown", never a reassuring "low".
 type RiskReport struct {
-	Symbol   string          `json:"symbol"`
-	Selector *SymbolSelector `json:"selector,omitempty"`
-	Project  string          `json:"project"`
-	Found    bool            `json:"found"`
-	Score    float64         `json:"score"` // 0..1, probabilistic-OR of the factor severities
-	Level    string          `json:"level"` // unknown | low | medium | high
-	Callers  int             `json:"callers"`
-	Tests    int             `json:"covering_tests_count"`
-	Factors  []RiskFactor    `json:"factors"`
-	Note     string          `json:"note,omitempty"`
-	Next     []NextAction    `json:"next,omitempty"`
+	Symbol     string               `json:"symbol"`
+	Selector   *SymbolSelector      `json:"selector,omitempty"`
+	Project    string               `json:"project"`
+	Found      bool                 `json:"found"`
+	Score      float64              `json:"score"` // 0..1, probabilistic-OR of the factor severities
+	Level      string               `json:"level"` // unknown | low | medium | high
+	Callers    int                  `json:"callers"`
+	Tests      int                  `json:"covering_tests_count"`
+	Factors    []RiskFactor         `json:"factors"`
+	Note       string               `json:"note,omitempty"`
+	Candidates []AmbiguityCandidate `json:"candidates,omitempty"` // the merged definition set behind Note; re-query with candidates[i].selector
+	Next       []NextAction         `json:"next,omitempty"`
 }
 
 // Risk computes a change-risk score for a symbol from its impact analysis. Reuses
@@ -63,8 +64,10 @@ func riskFromImpact(cwd, symbol string, depth int, imp *ImpactReport) *RiskRepor
 	rep.Callers = len(imp.DirectCallers)
 	rep.Tests = len(imp.Tests)
 	rep.Factors = riskFactorsFromImpact(imp)
+	rep.Candidates = imp.Candidates
+	rep.Note = joinNote(rep.Note, imp.Note)
 	if imp.Resolution != "" {
-		rep.Note = imp.Resolution
+		rep.Note = joinNote(rep.Note, imp.Resolution)
 	}
 	rep.Score = round3(combineRisk(rep.Factors))
 	rep.Level = riskLevel(rep.Score)

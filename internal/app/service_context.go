@@ -37,16 +37,17 @@ type ContextReport struct {
 	TestsTotal          int `json:"tests_total"`
 	// Reference-specific honesty is independent of CallGraph: precise call
 	// resolution does not upgrade stored callback/value-reference edges.
-	ReferencesCoverage   string             `json:"references_coverage"`             // partial|unavailable|none
-	ReferencesStale      bool               `json:"references_stale"`                // stale sites are candidates
-	ReferencesConfidence string             `json:"references_confidence"`           // confirmed|candidate|mixed|none
-	ReferencesResolution string             `json:"references_resolution,omitempty"` // coverage/lexical-location caveat
-	BlastRadius          int                `json:"blast_radius"`                    // count of transitively-affected nodes
-	BlastDepth           int                `json:"blast_depth"`                     // depth the blast radius was traversed to (it's bounded, not the full closure)
-	Note                 string             `json:"note,omitempty"`                  // set when the name is ambiguous (merges same-named defs)
-	Resolution           string             `json:"resolution,omitempty"`            // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
-	CallGraph            string             `json:"call_graph"`                      // stable machine enum: resolved|name|unresolved|none (carried from the bundled Impact)
-	Annotations          []graph.Annotation `json:"annotations,omitempty"`           // pinned notes/data on the symbol
+	ReferencesCoverage   string               `json:"references_coverage"`             // partial|unavailable|none
+	ReferencesStale      bool                 `json:"references_stale"`                // stale sites are candidates
+	ReferencesConfidence string               `json:"references_confidence"`           // confirmed|candidate|mixed|none
+	ReferencesResolution string               `json:"references_resolution,omitempty"` // coverage/lexical-location caveat
+	BlastRadius          int                  `json:"blast_radius"`                    // count of transitively-affected nodes
+	BlastDepth           int                  `json:"blast_depth"`                     // depth the blast radius was traversed to (it's bounded, not the full closure)
+	Note                 string               `json:"note,omitempty"`                  // set when the name is ambiguous (merges same-named defs)
+	Candidates           []AmbiguityCandidate `json:"candidates,omitempty"`            // the merged definition set behind Note; re-query with candidates[i].selector
+	Resolution           string               `json:"resolution,omitempty"`            // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
+	CallGraph            string               `json:"call_graph"`                      // stable machine enum: resolved|name|unresolved|none (carried from the bundled Impact)
+	Annotations          []graph.Annotation   `json:"annotations,omitempty"`           // pinned notes/data on the symbol
 	// Memories are TRANSIENT agent notes recalled by meaning from vecgrep's global
 	// memory store, scoped to this project via codemap's project_key (G2) — distinct
 	// from Annotations (codemap's own durable, symbol-pinned layer). Empty when
@@ -332,6 +333,9 @@ func applyContextRelation(rep *ContextReport, component string, rel *RelationRep
 	if rep.Note == "" && rel.Note != "" {
 		rep.Note = rel.Note
 	}
+	if len(rep.Candidates) == 0 && len(rel.Candidates) > 0 {
+		rep.Candidates = rel.Candidates
+	}
 	results := nonNil(rel.Results)
 	switch component {
 	case "callers":
@@ -369,6 +373,9 @@ func applyContextImpact(rep *ContextReport, imp *ImpactReport, err error) {
 	if rep.Note == "" {
 		rep.Note = imp.Note
 	}
+	if len(rep.Candidates) == 0 && len(imp.Candidates) > 0 {
+		rep.Candidates = imp.Candidates
+	}
 	if imp.Resolution != "" {
 		rep.Resolution = imp.Resolution
 	}
@@ -395,11 +402,17 @@ func (rep *ContextReport) addPartialError(component string, err error) {
 	if rep == nil || err == nil {
 		return
 	}
+	rep.PartialErrors = append(rep.PartialErrors, ContextPartialError{
+		Symbol: rep.Symbol, Component: component, Error: boundedErrorText(err),
+	})
+}
+
+// boundedErrorText renders err bounded to contextErrorMaxRunes so a backend
+// failure cannot itself bloat a partial_errors response.
+func boundedErrorText(err error) string {
 	msg := []rune(err.Error())
 	if len(msg) > contextErrorMaxRunes {
 		msg = append(msg[:contextErrorMaxRunes-1], '…')
 	}
-	rep.PartialErrors = append(rep.PartialErrors, ContextPartialError{
-		Symbol: rep.Symbol, Component: component, Error: string(msg),
-	})
+	return string(msg)
 }

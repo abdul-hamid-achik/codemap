@@ -219,6 +219,48 @@ func TestCLIContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("symbol-at accepts a batch of positions", func(t *testing.T) {
+		// A lone position keeps today's single-result JSON shape (no batch wrapper).
+		res := runCLI(t, bin, runner, env, "symbol-at", "main.go:4", "-C", project, "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("symbol-at single exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var single struct {
+			Symbol     string `json:"symbol"`
+			Resolution string `json:"resolution"`
+		}
+		mustJSON(t, res.stdout, &single)
+		if single.Symbol != "Helper" || single.Resolution != "exact" {
+			t.Fatalf("symbol-at single report = %+v", single)
+		}
+
+		// Several positions (including a miss) return a batch report in one call.
+		res = runCLI(t, bin, runner, env, "symbol-at", "main.go:3", "main.go:4", "main.go:999", "-C", project, "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("symbol-at batch exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var batch struct {
+			Requested int `json:"requested"`
+			Results   []struct {
+				Symbol     string `json:"symbol"`
+				Resolution string `json:"resolution"`
+			} `json:"results"`
+		}
+		mustJSON(t, res.stdout, &batch)
+		if batch.Requested != 3 || len(batch.Results) != 3 {
+			t.Fatalf("symbol-at batch report = %+v", batch)
+		}
+		if batch.Results[0].Symbol != "Main" || batch.Results[0].Resolution != "exact" {
+			t.Fatalf("symbol-at batch[0] = %+v, want Main/exact", batch.Results[0])
+		}
+		if batch.Results[1].Symbol != "Helper" || batch.Results[1].Resolution != "exact" {
+			t.Fatalf("symbol-at batch[1] = %+v, want Helper/exact", batch.Results[1])
+		}
+		if batch.Results[2].Resolution != "none" {
+			t.Fatalf("symbol-at batch[2] (miss) = %+v, want resolution=none", batch.Results[2])
+		}
+	})
+
 	t.Run("value references are distinct, bounded, and selector-aware", func(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "references", "Handler", "-C", project)
 		if res.exit != 0 || res.stderr != "" {

@@ -129,11 +129,12 @@ type SourceMatch struct {
 
 // SourceReport is returned by Source.
 type SourceReport struct {
-	Symbol      string             `json:"symbol"`
-	Selector    *SymbolSelector    `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
-	Project     string             `json:"project"`
-	Matches     []SourceMatch      `json:"matches"`
-	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
+	Symbol      string               `json:"symbol"`
+	Selector    *SymbolSelector      `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
+	Project     string               `json:"project"`
+	Matches     []SourceMatch        `json:"matches"`
+	Candidates  []AmbiguityCandidate `json:"candidates,omitempty"`  // the merged definition set behind Matches (redundant with Matches by design — kept for uniformity with impact/context/callers/callees/risk)
+	Annotations []graph.Annotation   `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
 // Source returns the source code of every symbol matching name, read from the
@@ -161,13 +162,16 @@ func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	var kept []graph.Node
 	for _, n := range nodes {
 		if n.Kind == graph.KindFile {
 			continue
 		}
 		src, _ := readLineRange(filepath.Join(p.Path, n.FilePath), n.StartLine, n.EndLine)
 		rep.Matches = append(rep.Matches, sourceMatchForNode(n, src))
+		kept = append(kept, n)
 	}
+	rep.Candidates = candidatesFromNodes(kept)
 	rep.Annotations = symbolAnnotations(g, pid, name)
 	return rep, nil
 }

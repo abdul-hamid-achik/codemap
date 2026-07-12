@@ -80,6 +80,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 	if rep.Note != "" {
 		fmt.Println("  ⚠ " + rep.Note)
 	}
+	renderCandidates(rep.Candidates)
 	fmt.Printf("  %s %s\n", label("call graph:"), rep.CallGraph)
 	if rep.Resolution != "" {
 		fmt.Println("  ⚠ " + rep.Resolution)
@@ -140,7 +141,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 // runContextBatch renders the one-call bundle for several symbols plus the callers
 // they share (likely shared entrypoints / coupling). --json carries the full batch.
 func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, depth int) error {
-	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, depth)
+	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, nil, depth)
 	if err != nil {
 		return err
 	}

@@ -35,15 +35,16 @@ func nodeToRef(n graph.Node) SymbolRef {
 
 // RelationReport is returned by Callers/Callees.
 type RelationReport struct {
-	Symbol      string             `json:"symbol"`
-	Selector    *SymbolSelector    `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
-	Project     string             `json:"project"`
-	Found       bool               `json:"found"` // whether the symbol exists in the index — distinguishes a typo from a real symbol with no callers/callees (both yield empty Results)
-	Results     []SymbolRef        `json:"results"`
-	Note        string             `json:"note,omitempty"`        // set when precise resolution fell back to name-based
-	Resolution  string             `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — results are unavailable, not absent
-	CallGraph   string             `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none
-	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to the queried symbol
+	Symbol      string               `json:"symbol"`
+	Selector    *SymbolSelector      `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
+	Project     string               `json:"project"`
+	Found       bool                 `json:"found"` // whether the symbol exists in the index — distinguishes a typo from a real symbol with no callers/callees (both yield empty Results)
+	Results     []SymbolRef          `json:"results"`
+	Note        string               `json:"note,omitempty"`        // set when precise resolution fell back to name-based
+	Candidates  []AmbiguityCandidate `json:"candidates,omitempty"`  // the merged definition set behind Note; re-query with candidates[i].selector
+	Resolution  string               `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — results are unavailable, not absent
+	CallGraph   string               `json:"call_graph"`            // stable machine enum: resolved|name|unresolved|none
+	Annotations []graph.Annotation   `json:"annotations,omitempty"` // notes/data pinned to the queried symbol
 }
 
 // validSymbol reports whether s is a non-blank symbol identifier. P1-04:
@@ -164,6 +165,7 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	// resolution; empty defs on an unknown symbol stays "none".
 	rep.CallGraph = svc.callGraphStatus(g, p.ID, defs)
 	if derr == nil && len(defs) > 1 {
+		rep.Candidates = candidatesFromNodes(defs)
 		if rep.CallGraph == CallGraphResolved {
 			rep.Note = fmt.Sprintf("%q matches %d definitions — each resolved precisely, but these results still merge all of them; query a more specific name to separate them", symbol, len(defs))
 		} else {

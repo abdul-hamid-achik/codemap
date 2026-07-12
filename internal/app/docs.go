@@ -57,7 +57,10 @@ for the full lists. When a short name has several definitions, project a result'
 existing {file,start_line,fqn,kind} fields into the "selector" input accepted by
 source/context/callers/callees/references/impact/risk (and paired selectors for path). This
 keeps every follow-up on one definition without persisting volatile database ids;
-file+fqn+kind still resolves after declaration lines shift.`},
+file+fqn+kind still resolves after declaration lines shift. When impact/context/
+callers/callees/risk/source ARE ambiguous, their response already includes
+candidates:[{selector,signature,file,start_line}] — the exact merged set — so
+you don't need a separate find/symbols round-trip to build that selector.`},
 
 	{"commands", `CLI commands (all query commands accept --json):
   init / index / status / projects   register, index (--reindex, --no-embed, --precise), stats, projects
@@ -98,7 +101,10 @@ codemap_review is the post-edit query (diff, including retained deleted definiti
 callers/callees accept precise:true; references deliberately does not, because call precision
 does not upgrade value-reference edges. Agent-facing source/context/callers/callees/
 references/impact/risk accept selector:{file,start_line,fqn,kind}; path accepts from_selector
-and to_selector. codemap_docs returns this guide.`},
+and to_selector. codemap_context_batch also accepts selectors:[{file,start_line,fqn,kind}]
+unioned with symbols (same 25-cap; MCP-only, no CLI batch form yet). codemap_symbol_at accepts
+positions:[{file,line}] as a batch alternative to file/line — a pasted multi-frame stack trace
+resolves in one call. codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
 external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a
@@ -153,10 +159,11 @@ undecidable, so a precise edge points at the interface method, not concrete impl
 
 Precise indexing makes call EDGES exact; a bare query name can still intentionally
 match several exact definitions. Use the source selector {file,start_line,fqn,kind}
-from find/symbols/context results to choose one. Selectors are stable across reindex
-and ordinary line shifts when file+FQN+kind remain, but moves/renames can invalidate
-them and return found:false rather than silently selecting a different node. Raw graph
-node ids are never part of the public contract.
+from find/symbols/context results — or from a prior ambiguous call's own candidates
+field, which is the same merged-set surface — no extra lookup needed — to choose one.
+Selectors are stable across reindex and ordinary line shifts when file+FQN+kind remain,
+but moves/renames can invalidate them and return found:false rather than silently
+selecting a different node. Raw graph node ids are never part of the public contract.
 
 codemap_references is a separate inbound value-wiring query for callbacks, Cobra
 RunE handlers, and registrations. It follows only 'references' edges, never

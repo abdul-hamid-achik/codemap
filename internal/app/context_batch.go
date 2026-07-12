@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -53,18 +55,85 @@ type ContextBatchReport struct {
 	Note                string                    `json:"note,omitempty"`
 }
 
+// contextBatchItem is one unit of context_batch work — either a plain name
+// (unions same-named definitions, like a solo Context call) or an exact
+// selector (scoped to one definition). Both forms are unioned into a single
+// ordered list of items so the existing cap/elision accounting applies to the
+// combined input, not just the name half.
+type contextBatchItem struct {
+	name     string
+	selector *SymbolSelector
+}
+
+// label identifies the item for not_found/partial_errors — the plain name for
+// a name item (unchanged from today), or a "file:line (fqn)" form for a
+// selector item, since a selector has no Symbol string of its own.
+func (i contextBatchItem) label() string {
+	if i.selector != nil {
+		l := fmt.Sprintf("%s:%d", i.selector.File, i.selector.StartLine)
+		if i.selector.FQN != "" {
+			l += " (" + i.selector.FQN + ")"
+		}
+		return l
+	}
+	return i.name
+}
+
+func itemsFromNames(names []string) []contextBatchItem {
+	items := make([]contextBatchItem, 0, len(names))
+	for _, n := range names {
+		items = append(items, contextBatchItem{name: n})
+	}
+	return items
+}
+
+func itemsFromSelectors(selectors []SymbolSelector) []contextBatchItem {
+	items := make([]contextBatchItem, 0, len(selectors))
+	for i := range selectors {
+		sel := selectors[i]
+		items = append(items, contextBatchItem{selector: &sel})
+	}
+	return items
+}
+
+// dedupSelectors returns the input with blanks (empty File) and duplicates
+// removed, order preserved — the selector counterpart of dedupStrings. Two
+// selectors are the same item when file, start_line, fqn, and kind all match;
+// this does NOT cross-dedup against the symbols list (a name and a selector
+// pointing at one of its definitions are intentionally treated as distinct
+// batch items — see the context_batch package docs).
+func dedupSelectors(xs []SymbolSelector) []SymbolSelector {
+	seen := map[string]bool{}
+	out := make([]SymbolSelector, 0, len(xs))
+	for _, x := range xs {
+		if strings.TrimSpace(x.File) == "" {
+			continue
+		}
+		key := x.File + "\x00" + strconv.Itoa(x.StartLine) + "\x00" + x.FQN + "\x00" + x.Kind
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, x)
+	}
+	return out
+}
+
 // ContextBatch fetches Context for each symbol and aggregates them. Reuses the
 // flagship Context bundle per symbol; never errors on a missing symbol (it lands in
 // NotFound). Dedups and bounds the input so the response stays usable.
-func (svc *Service) ContextBatch(cwd string, symbols []string, depth int) (*ContextBatchReport, error) {
-	return svc.ContextBatchWithContext(context.Background(), cwd, symbols, depth)
+func (svc *Service) ContextBatch(cwd string, symbols []string, selectors []SymbolSelector, depth int) (*ContextBatchReport, error) {
+	return svc.ContextBatchWithContext(context.Background(), cwd, symbols, selectors, depth)
 }
 
 // ContextBatchWithContext is the cancellable form of ContextBatch. It reuses
 // each symbol's already-fetched, uncapped graph callers for common-caller
 // aggregation, so a 25-symbol unresolved batch performs zero one-off LSP
-// upgrades and zero duplicate caller queries.
-func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, symbols []string, depth int) (*ContextBatchReport, error) {
+// upgrades and zero duplicate caller queries. selectors is unioned with
+// symbols (not cross-deduped against it) so an agent can pass exact
+// definitions — e.g. from a prior ambiguous call's candidates — alongside
+// plain names.
+func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, symbols []string, selectors []SymbolSelector, depth int) (*ContextBatchReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -75,18 +144,18 @@ func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, sym
 	if err != nil {
 		return nil, err
 	}
+	items := append(itemsFromNames(dedupStrings(symbols)), itemsFromSelectors(dedupSelectors(selectors))...)
 	rep := &ContextBatchReport{
-		Project: name, Indexed: found, Requested: len(symbols), Results: []*ContextReport{},
+		Project: name, Indexed: found, Requested: len(items), Results: []*ContextReport{},
 		SourceBudget: ContextSourceBudget{LimitBytes: contextBatchSourceBudgetBytes},
 	}
 	if !found {
 		return rep, nil
 	}
 
-	uniq := dedupStrings(symbols)
-	if len(uniq) > contextBatchMax {
-		rep.Note = joinNote(rep.Note, fmt.Sprintf("requested %d symbols — analyzed the first %d", len(uniq), contextBatchMax))
-		uniq = uniq[:contextBatchMax]
+	if len(items) > contextBatchMax {
+		rep.Note = joinNote(rep.Note, fmt.Sprintf("requested %d symbols — analyzed the first %d", len(items), contextBatchMax))
+		items = items[:contextBatchMax]
 	}
 
 	callerCount := map[string]int{}     // caller key → how many queried symbols it calls
@@ -95,19 +164,29 @@ func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, sym
 	// instead of up to 25 independent three-second tails.
 	memoryCtx, cancelMemory := context.WithTimeout(ctx, contextMemoryTimeout)
 	defer cancelMemory()
-	for _, sym := range uniq {
+	for _, item := range items {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		cr, callers, cerr := svc.contextWithContexts(ctx, memoryCtx, cwd, sym, depth)
+		cr, callers, cerr := svc.contextForTarget(ctx, memoryCtx, cwd, item.name, item.selector, depth)
 		if cerr != nil {
+			// A selector's own validation (blank file, ambiguous selector, no
+			// start_line/fqn) is a bad individual input, not a broken batch —
+			// record it and move on, exactly like an unresolvable name already
+			// lands in NotFound rather than aborting. A real cancellation/backend
+			// failure (ctx.Err() != nil) still aborts the whole batch, unchanged.
+			if item.selector != nil && ctx.Err() == nil {
+				rep.PartialErrors = append(rep.PartialErrors, ContextPartialError{Component: "selector", Error: boundedErrorText(cerr)})
+				rep.NotFound = append(rep.NotFound, item.label())
+				continue
+			}
 			return nil, cerr
 		}
 		applyContextBatchSourceBudget(cr, &rep.SourceBudget, &rep.SourceTruncations)
 		rep.Results = append(rep.Results, cr)
 		rep.PartialErrors = append(rep.PartialErrors, cr.PartialErrors...)
 		if !cr.Found {
-			rep.NotFound = append(rep.NotFound, sym)
+			rep.NotFound = append(rep.NotFound, item.label())
 			continue
 		}
 		rep.CombinedBlastRadius += cr.BlastRadius

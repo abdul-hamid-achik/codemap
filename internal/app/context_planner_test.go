@@ -73,7 +73,7 @@ func TestContextBatchUnresolvedUsesNoLanguageServersAndBudgetsSource(t *testing.
 	}
 	svc, proj, syms, marker := unresolvedContextProject(t, contextBatchMax, 4000)
 
-	rep, err := svc.ContextBatchWithContext(context.Background(), proj, syms, 3)
+	rep, err := svc.ContextBatchWithContext(context.Background(), proj, syms, nil, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,8 +151,18 @@ func TestContextWithContextCancelsVecgrepRecall(t *testing.T) {
 
 	cancelled, stop := context.WithCancel(context.Background())
 	stop()
-	if _, err := svc.ContextBatchWithContext(cancelled, proj, syms, 2); !errors.Is(err, context.Canceled) {
+	if _, err := svc.ContextBatchWithContext(cancelled, proj, syms, nil, 2); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ContextBatchWithContext error = %v, want context canceled", err)
+	}
+
+	// A selector-containing batch must still abort on a real cancellation —
+	// the new per-item "partial, don't abort" path (design decision #7) is
+	// reserved for a selector's own validation failure, not ctx.Err().
+	selCancelled, stopSel := context.WithCancel(context.Background())
+	stopSel()
+	sel := SymbolSelector{File: "symbol_00.ts", StartLine: 1, FQN: syms[0]}
+	if _, err := svc.ContextBatchWithContext(selCancelled, proj, nil, []SymbolSelector{sel}, 2); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ContextBatchWithContext (selector) error = %v, want context canceled", err)
 	}
 }
 
@@ -191,7 +201,7 @@ func TestContextSurfacesVecgrepExecutionAndJSONFailures(t *testing.T) {
 			if !found {
 				t.Fatalf("%s failure missing from partial_errors: %+v", tc.name, rep.PartialErrors)
 			}
-			batch, err := svc.ContextBatchWithContext(context.Background(), proj, syms, 2)
+			batch, err := svc.ContextBatchWithContext(context.Background(), proj, syms, nil, 2)
 			if err != nil {
 				t.Fatalf("batch should preserve partial context: %v", err)
 			}
