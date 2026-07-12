@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "project": "hand-authored-fixture",
+  "mode": "working",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": false,
+  "changed_files": [
+    { "path": "pkg/new.go", "status": "A", "symbols": 0 }
+  ],
+  "changed_symbols": [],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [],
+  "stale": false,
+  "note": "project not indexed — run 'codemap index' for blast radius and test selection"
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "project": "hand-authored-fixture",
+  "mode": "working",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [],
+  "changed_symbols": [],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [],
+  "stale": false
+}

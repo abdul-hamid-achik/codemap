@@ -1,0 +1,30 @@
+# Dogfood: run the in-repo codemap GitHub Action (integrations/github-action)
+# on codemap's own pull requests, posting the review as a sticky PR comment.
+#
+# Informational-only on purpose for the first few weeks (fail-on-untested:
+# false, no fail-on-risk) — flip both once the action has proven quiet/
+# low-noise on real codemap PRs.
+name: codemap review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # required — codemap review --since needs merge-base history
+
+      - uses: ./integrations/github-action
+        with:
+          # codemap indexes its own Go source with --precise (default); no
+          # language-server inputs needed for a Go-only repo like codemap.
+          fail-on-untested: 'false'  # informational only until the action has run quietly for a while
+          fail-on-risk: ''  # disabled during the trial period

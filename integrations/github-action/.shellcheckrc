@@ -1,0 +1,7 @@
+# SC2016 fires on every single-quoted printf format string that contains a
+# literal backtick/`%s` (e.g. 'Mode: `since %s`') — intentional throughout
+# render-comment.sh and test.sh (single quotes protect the format string from
+# the shell; the %s placeholders are filled by printf's own argument
+# substitution, not shell expansion). Disabling repo-wide rather than
+# sprinkling `# shellcheck disable=SC2016` over every markdown-building line.
+disable=SC2016

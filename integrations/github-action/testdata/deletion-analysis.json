@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "project": "hand-authored-fixture",
+  "mode": "working",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    { "path": "pkg/legacy.go", "status": "D", "symbols": 0 },
+    { "path": "pkg/legacy_other.go", "status": "D", "symbols": 0 }
+  ],
+  "changed_symbols": [],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [],
+  "stale": false,
+  "deletion_analysis": {
+    "files": 2,
+    "analyzed": 1,
+    "missing": 1,
+    "source": "last_index",
+    "complete": false
+  },
+  "note": "1 deleted file(s) no longer have indexed definitions; their prior impact is unavailable",
+  "test_commands": []
+}

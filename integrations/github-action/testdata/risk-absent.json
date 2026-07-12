@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "project": "hand-authored-fixture",
+  "mode": "working",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    { "path": "pkg/thing.go", "status": "M", "symbols": 1 }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "Thing",
+      "fqn": "pkg.Thing",
+      "kind": "function",
+      "file": "pkg/thing.go",
+      "start_line": 10,
+      "end_line": 12,
+      "signature": "func Thing()"
+    }
+  ],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [],
+  "stale": false,
+  "test_commands": []
+}

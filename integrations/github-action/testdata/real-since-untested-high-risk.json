@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "project": "scratch-repo",
+  "mode": "since",
+  "since": "5176ca1868eb74c4d3964ad503b289ba23b992bd",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    {
+      "path": "app/app.go",
+      "status": "M",
+      "symbols": 1
+    }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "Orphan",
+      "fqn": "app.Orphan",
+      "kind": "function",
+      "file": "app/app.go",
+      "start_line": 11,
+      "end_line": 13,
+      "signature": "func Orphan() int"
+    }
+  ],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [
+    {
+      "symbol": "Orphan",
+      "fqn": "app.Orphan",
+      "kind": "function",
+      "file": "app/app.go",
+      "start_line": 11,
+      "end_line": 13,
+      "signature": "func Orphan() int"
+    }
+  ],
+  "stale": false,
+  "staleness": {
+    "changed": 0,
+    "new": 0,
+    "deleted": 0
+  },
+  "call_graph": "resolved",
+  "risk": {
+    "level": "high",
+    "score": 0.9,
+    "factors": [
+      {
+        "factor": "untested_changes",
+        "severity": 0.9,
+        "detail": "1 changed symbol(s) have no covering test — changes are unverified"
+      }
+    ]
+  },
+  "next": [
+    {
+      "tool": "codemap_risk",
+      "args": {
+        "depth": 3,
+        "path": "/tmp/codemap-f5/scratch-repo",
+        "symbol": "Orphan"
+      },
+      "why": "some changed symbols have no covering tests; inspect their risk before declaring the change verified"
+    }
+  ]
+}

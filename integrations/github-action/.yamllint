@@ -1,0 +1,7 @@
+extends: default
+
+rules:
+  line-length: disable # action.yml's ${{ ... }} default expressions run long
+  document-start: disable
+  truthy:
+    check-keys: false # composite action `if:`/`with:` values commonly use bare true/false

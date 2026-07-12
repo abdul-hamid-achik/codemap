@@ -1,0 +1,113 @@
+name: 'codemap review'
+description: 'Post codemap review (blast radius, untested symbols, risk) as a sticky PR comment'
+author: 'abdul-hamid-achik'
+branding:
+  icon: 'git-pull-request'
+  color: 'blue'
+
+inputs:
+  version:
+    description: "codemap release version to install (e.g. 'v0.40.0'); default 'latest' resolves and pins the exact tag at run start (never floats mid-job)"
+    default: 'latest'
+  precise:
+    description: "run 'codemap index --precise' (needs the go toolchain and/or typescript-language-server / pyright-langserver on PATH for those languages; degrades honestly and says so in the comment when a toolchain is missing)"
+    default: 'true'
+  depth:
+    description: 'blast-radius depth passed to codemap review --depth'
+    default: '3'
+  install-ts-language-server:
+    description: "npm install -g typescript-language-server typescript before indexing (opt-in; costs ~10-20s)"
+    default: 'false'
+  install-pyright:
+    description: "npm install -g pyright before indexing (opt-in; costs ~5-10s)"
+    default: 'false'
+  fail-on-untested:
+    description: 'fail the check if any changed symbol has no covering test'
+    default: 'false'
+  fail-on-risk:
+    description: 'fail the check if the aggregate risk.level is at or above this band (low|medium|high); empty disables the risk gate'
+    default: ''
+  base-sha:
+    description: 'commit to diff against; default resolves from the pull_request event (base.sha) or a push event (before)'
+    default: ${{ github.event.pull_request.base.sha || github.event.before }}
+  github-token:
+    description: 'token used to post/update the sticky PR comment'
+    default: ${{ github.token }}
+  skip-comment:
+    description: 'compute the review and gate on it, but skip posting a PR comment (useful outside pull_request events)'
+    default: 'false'
+
+outputs:
+  risk-level:
+    description: 'the aggregate risk.level from the review JSON (unknown|low|medium|high), or "absent" when the diff touched no indexed symbols'
+    value: ${{ steps.gate.outputs.risk-level }}
+  untested-count:
+    description: 'count of untested_symbols in the review JSON'
+    value: ${{ steps.gate.outputs.untested-count }}
+  review-json-path:
+    description: 'path to the raw codemap review --json output, for downstream steps'
+    value: ${{ steps.review.outputs.review-json-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve codemap version + platform
+      id: resolve
+      shell: bash
+      env:
+        CODEMAP_VERSION: ${{ inputs.version }}
+      run: ${{ github.action_path }}/scripts/resolve-version.sh
+
+    - name: Cache codemap binary
+      uses: actions/cache@v6
+      with:
+        path: ${{ env.CODEMAP_BIN_DIR }}
+        key: codemap-bin-${{ env.CODEMAP_TAG }}-${{ env.CODEMAP_ARCHIVE_OS }}-${{ env.CODEMAP_ARCHIVE_ARCH }}
+
+    - name: Install codemap
+      shell: bash
+      run: ${{ github.action_path }}/scripts/install-codemap.sh
+
+    - name: Install optional language servers
+      shell: bash
+      env:
+        INSTALL_TS_LANGUAGE_SERVER: ${{ inputs.install-ts-language-server }}
+        INSTALL_PYRIGHT: ${{ inputs.install-pyright }}
+      run: ${{ github.action_path }}/scripts/install-language-servers.sh
+
+    - name: codemap init + index + review
+      id: review
+      shell: bash
+      env:
+        CODEMAP_PRECISE: ${{ inputs.precise }}
+        CODEMAP_DEPTH: ${{ inputs.depth }}
+        CODEMAP_BASE_SHA: ${{ inputs.base-sha }}
+      run: ${{ github.action_path }}/scripts/run-review.sh
+
+    - name: Render comment
+      id: render
+      shell: bash
+      env:
+        REVIEW_JSON_PATH: ${{ steps.review.outputs.review-json-path }}
+        CODEMAP_ACTION_VERSION: ${{ github.action_ref }}
+      run: ${{ github.action_path }}/scripts/render-comment.sh
+
+    - name: Post sticky PR comment
+      if: ${{ inputs.skip-comment != 'true' }}
+      uses: actions/github-script@v9
+      env:
+        REVIEW_COMMENT_PATH: ${{ steps.render.outputs.comment-path }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const script = require(`${{ github.action_path }}/scripts/post-comment.js`);
+          await script({ github, context, core });
+
+    - name: Gate on risk / untested
+      id: gate
+      shell: bash
+      env:
+        FAIL_ON_UNTESTED: ${{ inputs.fail-on-untested }}
+        FAIL_ON_RISK: ${{ inputs.fail-on-risk }}
+        REVIEW_JSON_PATH: ${{ steps.review.outputs.review-json-path }}
+      run: ${{ github.action_path }}/scripts/gate.sh

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "project": "hand-authored-fixture",
+  "mode": "working",
+  "depth": 3,
+  "is_repo": false,
+  "indexed": false,
+  "changed_files": [],
+  "changed_symbols": [],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [],
+  "stale": false,
+  "note": "not a git repository — codemap review needs git to compute the diff"
+}

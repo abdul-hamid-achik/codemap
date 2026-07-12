@@ -1,0 +1,78 @@
+# Thin GitLab CI mirror of the codemap GitHub Action (integrations/github-action) (Slice 3 of the F5
+# plan). Reuses install-codemap.sh, run-review.sh, render-comment.sh, and
+# gate.sh UNMODIFIED from the sibling GitHub Action — only the actual comment
+# post is platform-specific (post-comment-gitlab.sh, curl + GitLab's Notes API,
+# vs. post-comment.js + Octokit on GitHub).
+#
+# Usage, in your project's .gitlab-ci.yml:
+#
+#   include:
+#     - remote: 'https://raw.githubusercontent.com/abdul-hamid-achik/codemap/main/integrations/github-action/gitlab/codemap-review.yml'
+#
+# Required CI/CD variables (Settings > CI/CD > Variables):
+#   CODEMAP_GITLAB_TOKEN — a masked project or personal access token with the
+#     `api` scope. $CI_JOB_TOKEN can only read notes, not create/update them
+#     (verified against GitLab's CI/CD job token docs, 2026-07) — this template
+#     does not fall back to it.
+#
+# Optional CI/CD variables (mirror the GitHub Action's `inputs:`):
+#   CODEMAP_VERSION            (default: latest)
+#   CODEMAP_PRECISE             (default: "true")
+#   CODEMAP_DEPTH                (default: "3")
+#   CODEMAP_FAIL_ON_UNTESTED (default: "false")
+#   CODEMAP_FAIL_ON_RISK       (default: "" — disabled)
+#
+# codemap review needs full history to diff against the target branch, same
+# as the GitHub Action's fetch-depth: 0 requirement — set GIT_DEPTH: "0" (or
+# GIT_STRATEGY: clone with no depth) at the project or job level.
+codemap_review:
+  stage: test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  variables:
+    CODEMAP_VERSION: "latest"
+    CODEMAP_PRECISE: "true"
+    CODEMAP_DEPTH: "3"
+    CODEMAP_FAIL_ON_UNTESTED: "false"
+    CODEMAP_FAIL_ON_RISK: ""
+  before_script:
+    - apk add --no-cache curl jq bash tar gzip git 2>/dev/null || (apt-get update -qq && apt-get install -yqq curl jq bash tar gzip git)
+  script:
+    - export SCRIPTS_BASE="https://raw.githubusercontent.com/abdul-hamid-achik/codemap/main/integrations/github-action/scripts"
+    - curl -sSL --fail -o resolve-version.sh "${SCRIPTS_BASE}/resolve-version.sh"
+    - curl -sSL --fail -o install-codemap.sh "${SCRIPTS_BASE}/install-codemap.sh"
+    - curl -sSL --fail -o run-review.sh "${SCRIPTS_BASE}/run-review.sh"
+    - curl -sSL --fail -o render-comment.sh "${SCRIPTS_BASE}/render-comment.sh"
+    - curl -sSL --fail -o gate.sh "${SCRIPTS_BASE}/gate.sh"
+    - curl -sSL --fail -o post-comment-gitlab.sh "${SCRIPTS_BASE}/post-comment-gitlab.sh"
+    - chmod +x ./*.sh
+    # resolve-version.sh / install-codemap.sh were written against GitHub
+    # Actions' env conventions (RUNNER_OS/RUNNER_ARCH, $GITHUB_ENV,
+    # $GITHUB_PATH). Map GitLab's runner facts onto the same variable names so
+    # both scripts run unmodified.
+    - export RUNNER_OS="Linux"
+    - export RUNNER_ARCH="$(uname -m | sed 's/x86_64/X64/; s/aarch64/ARM64/')"
+    - export RUNNER_TEMP="${CI_PROJECT_DIR}/.codemap-action-tmp"
+    - mkdir -p "$RUNNER_TEMP"
+    - export GITHUB_ENV="${RUNNER_TEMP}/github_env.sh"
+    - export GITHUB_PATH="${RUNNER_TEMP}/github_path.sh"
+    - touch "$GITHUB_ENV" "$GITHUB_PATH"
+    - export CODEMAP_VERSION_INPUT="${CODEMAP_VERSION}"
+    - CODEMAP_VERSION="$CODEMAP_VERSION_INPUT" ./resolve-version.sh
+    - source "$GITHUB_ENV"
+    - ./install-codemap.sh
+    - export PATH="$PATH:$(cat "$GITHUB_PATH" | tr '\n' ':' | sed 's/:$//')"
+    - export CODEMAP_BASE_SHA="${CI_MERGE_REQUEST_DIFF_BASE_SHA}"
+    - export GITHUB_WORKSPACE="${CI_PROJECT_DIR}"
+    - export GITHUB_OUTPUT="${RUNNER_TEMP}/github_output.sh"
+    - touch "$GITHUB_OUTPUT"
+    - ./run-review.sh
+    - source "$GITHUB_ENV"
+    - export CODEMAP_ACTION_VERSION="gitlab-v1"
+    - export GITHUB_SHA="${CI_COMMIT_SHA}"
+    - ./render-comment.sh
+    - export REVIEW_COMMENT_PATH="${RUNNER_TEMP}/codemap-review-comment.md"
+    - ./post-comment-gitlab.sh
+    - export FAIL_ON_UNTESTED="${CODEMAP_FAIL_ON_UNTESTED}"
+    - export FAIL_ON_RISK="${CODEMAP_FAIL_ON_RISK}"
+    - ./gate.sh

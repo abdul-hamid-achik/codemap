@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "project": "hand-authored-fixture",
+  "mode": "since",
+  "since": "abc1234",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    { "path": "pkg/core.go", "status": "M", "symbols": 1 }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "CoreDispatch",
+      "fqn": "pkg.CoreDispatch",
+      "kind": "function",
+      "file": "pkg/core.go",
+      "start_line": 20,
+      "end_line": 40,
+      "signature": "func CoreDispatch(req Request) Response"
+    }
+  ],
+  "blast_radius": [
+    {
+      "symbol": "TestCoreDispatch",
+      "fqn": "pkg.TestCoreDispatch",
+      "kind": "test",
+      "file": "pkg/core_test.go",
+      "start_line": 8,
+      "depth": 1,
+      "signature": "func TestCoreDispatch(t *testing.T)"
+    }
+  ],
+  "covering_tests": [
+    {
+      "symbol": "TestCoreDispatch",
+      "fqn": "pkg.TestCoreDispatch",
+      "kind": "test",
+      "file": "pkg/core_test.go",
+      "start_line": 8,
+      "depth": 1,
+      "signature": "func TestCoreDispatch(t *testing.T)"
+    }
+  ],
+  "untested_symbols": [],
+  "hotspots": [
+    {
+      "symbol": "CoreDispatch",
+      "fqn": "pkg.CoreDispatch",
+      "kind": "function",
+      "file": "pkg/core.go",
+      "start_line": 20,
+      "end_line": 40,
+      "signature": "func CoreDispatch(req Request) Response"
+    }
+  ],
+  "stale": false,
+  "call_graph": "resolved",
+  "risk": {
+    "level": "medium",
+    "score": 0.55,
+    "factors": [
+      { "factor": "hotspot_fanin", "severity": 0.55, "detail": "CoreDispatch has 12 direct callers" }
+    ]
+  },
+  "test_commands": ["go test ./pkg -run '^(TestCoreDispatch)$'"]
+}

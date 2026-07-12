@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "project": "hand-authored-fixture",
+  "mode": "staged",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    { "path": "src/widget.ts", "status": "M", "symbols": 1 }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "renderWidget",
+      "fqn": "widget.renderWidget",
+      "kind": "function",
+      "file": "src/widget.ts",
+      "start_line": 4,
+      "end_line": 9,
+      "signature": "function renderWidget(props: Props): JSX.Element"
+    }
+  ],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [
+    {
+      "symbol": "renderWidget",
+      "fqn": "widget.renderWidget",
+      "kind": "function",
+      "file": "src/widget.ts",
+      "start_line": 4,
+      "end_line": 9,
+      "signature": "function renderWidget(props: Props): JSX.Element"
+    }
+  ],
+  "stale": false,
+  "resolution": "call graph for TypeScript is name-based; install typescript-language-server and re-run with --precise for exact edges",
+  "call_graph": "unresolved",
+  "risk": {
+    "level": "unknown",
+    "score": 0,
+    "factors": [
+      { "factor": "unresolved", "severity": 0.4, "detail": "call graph could not be resolved for this changed symbol" }
+    ]
+  },
+  "test_commands": []
+}
