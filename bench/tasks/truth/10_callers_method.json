@@ -1,0 +1,8 @@
+{
+  "callers": [
+    "git.Repository.cloneRefSpec",
+    "plumbing.ReferenceSuite.TestReferenceNameNote",
+    "plumbing.ReferenceSuite.TestReferenceNameShort",
+    "plumbing.ReferenceSuite.TestReferenceNameWithSlash"
+  ]
+}

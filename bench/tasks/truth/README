@@ -1,0 +1,30 @@
+Ground truth for the codemap agent benchmark — INDEPENDENCE RULE
+================================================================
+
+Every *.json file in this directory is the frozen, correct answer for one task,
+derived at the pinned fixture SHA (bench/fixtures/fixture.lock).
+
+Ground truth is produced INDEPENDENTLY OF CODEMAP — never by a codemap
+invocation, and never from codemap's graph package. If any truth file were
+regenerated from codemap, the "with codemap" arm would win by construction and
+the benchmark would be worthless. The oracle here is the Go type checker itself:
+
+  bench/tasks/truth/gen/  is a standalone program that loads the fixture with
+  go/types (via golang.org/x/tools/go/packages — the same independent type
+  information gopls exposes) and computes callers, callees, definitions,
+  blast radius (inbound BFS), covering tests (transitive inbound to Test funcs),
+  call-path edges, file outlines, and rename-impact counts directly from type
+  info. It imports nothing from codemap.
+
+Which symbol each task points at is recorded, auditable, in targets.json.
+
+Regenerate (only when fixture.lock's SHA changes, or targets.json changes):
+
+  bench/fixtures/fetch.sh                 # ensure the pinned fixture is present
+  go run ./bench/tasks/truth/gen          # rewrites the *.json here
+
+A SHA bump means re-deriving AND re-reviewing all truth — treat it as a
+deliberate, reviewed change. For the transitive tasks (04 blast_radius,
+05 covering_tests, 07 call_path) a human should skim the regenerated sets and
+confirm they look right before committing; the derivation is auditable per task
+from targets.json + the fixture source.

@@ -1,0 +1,8 @@
+{
+  "id": "01_find_def",
+  "category": "orient",
+  "grader": "exact",
+  "answer_key": "file",
+  "truth": "truth/01_find_def.json",
+  "prompt": "In this repository, where is the function `NewHash` in package `plumbing` defined? Answer ONLY as a json fenced block: {\"file\": \"<path relative to the repo root>\", \"line\": <int>} where line is the line of its `func` declaration."
+}

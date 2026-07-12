@@ -1,0 +1,21 @@
+Representative change for task 05 (covering_tests), pinned to fixture SHA
+48a1ae05eec4fff4dd0343744a00bf8d6a7a0b4b (go-git v5.16.5). It edits the body of
+plumbing.NewTagReferenceName; task 05 asks which test functions cover this
+symbol so a harness could decide what to re-run. Apply with:
+  git -C bench/fixtures/repo apply ../../tasks/patches/05.diff
+
+diff --git a/plumbing/reference.go b/plumbing/reference.go
+index 0000000..1111111 100644
+--- a/plumbing/reference.go
++++ b/plumbing/reference.go
+@@ -86,8 +86,9 @@ func NewSymbolicReference(n, target ReferenceName) *Reference {
+ // NewTagReferenceName returns a reference name describing a tag based on short
+ // his name.
+ func NewTagReferenceName(name string) ReferenceName {
+-	return ReferenceName(refTagPrefix + name)
++	// (task-05 representative change: normalise before prefixing)
++	return ReferenceName(refTagPrefix + string(name))
+ }
+
+ // IsBranch check if a reference is a branch
+ func (r ReferenceName) IsBranch() bool {

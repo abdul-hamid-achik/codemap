@@ -145,6 +145,41 @@ tasks:
     cmds:
       - glyph run specs/*.yml --format md --progress auto
 
+  bench:
+    desc: "Agent benchmark A/B (LOCAL ONLY — needs claude, gopls, ANTHROPIC_API_KEY; not in CI, like flows). Costs API $$ (~$5-15 on sonnet)."
+    deps: [build]
+    cmds:
+      - |
+        set -euo pipefail
+        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+          echo "task bench: ANTHROPIC_API_KEY is not set (required by claude --bare)"; exit 1
+        fi
+        # 1. fetch the pinned fixture by SHA (gitignored)
+        bench/fixtures/fetch.sh
+        # 2. pre-index the fixture into an ISOLATED codemap data dir (structural
+        #    only, --no-embed so no Ollama needed); time it and report separately.
+        export CODEMAP_DATA="$PWD/bench/results/index"
+        rm -rf "$CODEMAP_DATA"
+        idx_start=$(date +%s)
+        ./bin/codemap index --precise --no-embed bench/fixtures/repo
+        idx_end=$(date +%s)
+        idx_secs=$((idx_end - idx_start))
+        echo "codemap index (one-time): ${idx_secs}s"
+        # 3. run the A/B matrix (model via CODEMAP_BENCH_MODEL, default sonnet)
+        go run ./bench --index-seconds "$idx_secs" {{.CLI_ARGS}}
+        # 4. regenerate the README table from the newest summary
+        go run ./bench --report-only
+
+  bench:report:
+    desc: "Regenerate the README benchmark table from the newest results JSON (no re-run, no API)"
+    cmds:
+      - go run ./bench --report-only
+
+  bench:smoke:
+    desc: "Offline benchmark plumbing check (fabricated metrics, no API, no fixture index) — for CI-like sanity"
+    cmds:
+      - go run ./bench --smoke {{.CLI_ARGS}}
+
   site:deps:
     desc: Install docs (VitePress) dependencies with Bun
     cmds:

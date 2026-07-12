@@ -1,0 +1,8 @@
+{
+  "id": "04_blast_radius",
+  "category": "understand",
+  "grader": "set_equal",
+  "answer_key": "symbols",
+  "truth": "truth/04_blast_radius.json",
+  "prompt": "In this repository, if the function `NewTagReferenceName` in package `plumbing` changes, which functions and methods are transitively affected within 2 call hops (its direct callers, and their callers)? Exclude `NewTagReferenceName` itself. Use fully-qualified names: `package.Function` for package-level functions and `package.ReceiverType.Method` for methods (receiver type WITHOUT any pointer `*`). `package` is the Go package NAME (the root go-git package is `git`). Test-suite methods count too and are named like `git.RepositorySuite.TestFoo`. Answer ONLY as a json fenced block: {\"symbols\": [\"pkg.Recv.Method\", ...]}."
+}
