@@ -1326,6 +1326,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncFocus()
 		return m, nil
 
+	case editorClosedMsg:
+		if msg.err != nil {
+			m.errMsg = fmt.Sprintf("editor exited with error for %s:%d: %v", msg.file, msg.line, msg.err)
+			m.statusMsg = ""
+			return m, nil
+		}
+		m.errMsg = ""
+		m.statusMsg = fmt.Sprintf("edited %s:%d", msg.file, msg.line)
+		return m, nil
+
+	case tea.MouseWheelMsg:
+		switch msg.Mouse().Button {
+		case tea.MouseWheelUp:
+			return m.handleWheel(true)
+		case tea.MouseWheelDown:
+			return m.handleWheel(false)
+		}
+		return m, nil
+
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
+			return m.handleClick(msg.X, msg.Y)
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		model, cmd := m.handleKey(msg)
 		// If the key kicked off an async op (status ends in "…"), spin the footer.
@@ -1375,9 +1400,34 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	// `e` jumps to $EDITOR and `y` yanks file:line — both act on a settled
+	// selection carrying a file location, and otherwise fall through so the letter
+	// still types into a Search/Impact/Path query (mirrors how `a` is gated).
+	if key == "e" || key == "y" {
+		if c, ok := m.locationSelection(); ok {
+			if key == "e" {
+				return m.openEditor(c)
+			}
+			return m.yank(c)
+		}
+		// On a non-input surface (Graph/Metrics, or a focused Path result) there is
+		// nothing to type, so explain why the shortcut did nothing instead of eating
+		// the key silently.
+		if m.active == tabGraph || m.active == tabMetrics || (m.active == tabPath && m.pathFocus == focusPathResult) {
+			m.errMsg = ""
+			m.statusMsg = "select a symbol with a file location first"
+			return m, nil
+		}
+	}
 	if key == "?" {
 		m.showHelp = true
 		return m, nil
+	}
+	// Uniform quit: with no overlay open (handled above), `q` quits everywhere
+	// except while a text input is focused, where it must type. This centralizes
+	// what the per-tab handlers used to each special-case.
+	if key == "q" && !m.textInputActive() {
+		return m, tea.Quit
 	}
 	// esc steps back one global nav level — the instinctive "get me back". Yields to
 	// the Graph refs pane (esc there returns to the hub list) and only fires when
@@ -1579,8 +1629,6 @@ func (m Model) handlePathKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.pathFocus == focusPathResult {
 		switch key {
-		case "q":
-			return m, tea.Quit
 		case "up", "k":
 			m.pathSel = clampIdx(m.pathSel-1, m.pathLen())
 		case "down", "j":
@@ -1593,7 +1641,7 @@ func (m Model) handlePathKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.pathSel = 0
 		case "end", "G":
 			m.pathSel = clampIdx(m.pathLen()-1, m.pathLen())
-		case "f", "e", "i":
+		case "f", "i":
 			m.pathFocus = focusPathFrom
 			m.syncFocus()
 		case "t":
@@ -1694,8 +1742,6 @@ func (m Model) metricsItem(i int) (sym, fqn, kind, file string, line int, ok boo
 // selection into Impact (enter) — ctrl+s (handled globally) reads its source.
 func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q":
-		return m, tea.Quit
 	case "o":
 		// orient: the context card for the selected row (mirrors ctrl+o globally).
 		return m, m.viewContext()
@@ -1727,6 +1773,19 @@ func (m Model) handleMetricsKey(key string) (tea.Model, tea.Cmd) {
 
 // pageStep is roughly one screenful of list rows, for pgup/pgdn jumps.
 func (m Model) pageStep() int { return clamp(m.height-6, 1, 40) }
+
+// textInputActive reports whether the focused surface is a text field, where a
+// bare `q` must be typed rather than quit. Search and Impact are always editing;
+// Path edits only while a field (not the result) is focused.
+func (m Model) textInputActive() bool {
+	switch m.active {
+	case tabSearch, tabImpact:
+		return true
+	case tabPath:
+		return m.pathFocus != focusPathResult
+	}
+	return false
+}
 
 // blastLen is the number of selectable blast-radius rows on the Impact tab.
 func (m Model) blastLen() int {
@@ -1764,8 +1823,6 @@ func (m Model) selectHub(idx int) (tea.Model, tea.Cmd) {
 // node's callers/callees, re-centering on enter so you can traverse the graph.
 func (m Model) handleGraphKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q":
-		return m, tea.Quit
 	case "p":
 		// recompute the centered node's relations precisely via gopls — but on a
 		// selected node whose relation report is resolved, the stored edges are

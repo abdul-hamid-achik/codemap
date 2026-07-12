@@ -15,6 +15,10 @@ import (
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
+	// Mouse reporting is a per-View setting in bubbletea v2 (there is no
+	// program-level option). CellMotion delivers wheel, click, and release events,
+	// which Update routes to scroll lists/overlays, switch tabs, and select rows.
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -64,11 +68,12 @@ func renderHelp() string {
 	row("ctrl+g", "open the selection in the Graph walker")
 	row("ctrl+s", "view the selected symbol's source")
 	row("ctrl+o / a", "orient context / add a note to an exact selection (in-flight save is non-cancellable)")
-	row("ctrl+r", "reindex and refresh (keeps the project's precision)")
+	row("e / y", "open file:line in $EDITOR ($VISUAL fallback) / yank file:line to the clipboard (OSC52)")
+	row("ctrl+r", "reindex and refresh (keeps the project's precision — works from an empty tab)")
 	row("alt+← / alt+→", "back / forward (global history — restores the bar you came from)")
-	row("esc", "step back one level (also closes help/overlay)")
-	row("?", "toggle this help")
-	row("ctrl+c", "quit (q also quits on Graph/Metrics)")
+	row("esc / ?", "step back one level (also closes help/overlay) / toggle this help")
+	row("ctrl+c", "quit (q also quits, except while typing in a Search/Impact/Path field)")
+	row("mouse", "wheel scrolls the focused list/overlay · click a tab or a Graph/Search/Impact row")
 	b.WriteString("\n" + sectionStyle.Render("Graph") + "\n")
 	row("↑/↓ · k/j", "move the hub selection (also pgup/pgdn · home/end)")
 	row("→/l · ←/h", "focus the callers/calls pane · back to hubs")
@@ -95,6 +100,8 @@ func renderHelp() string {
 }
 
 // renderSource is the full-screen, scrollable source overlay (opened with `s`).
+// A minimal 1-column scrollbar thumb (theme-styled) tracks the viewport down the
+// right edge whenever the content overflows.
 func (m Model) renderSource(w, h int) string {
 	var b strings.Builder
 	vp := h - 2
@@ -108,26 +115,74 @@ func (m Model) renderSource(w, h int) string {
 	if n > vp { // scrollable → show where we are
 		hdr += "  " + mutedStyle.Render(fmt.Sprintf("(lines %d–%d of %d)", start+1, end, n))
 	}
-	b.WriteString(hdr + "\n\n")
-	for i := start; i < end; i++ {
-		if m.srcGutter { // source body: line numbers; the context card has none
-			ln := i + 1
-			if m.srcFirstLine > 0 { // show real file line numbers, not 1-based within the def
-				ln = i + m.srcFirstLine
-			}
-			gutter := mutedStyle.Render(fmt.Sprintf("%4d ", ln))
-			if m.srcHighlight { // chroma ANSI — clip ANSI-aware (rune truncate would mangle escapes)
-				b.WriteString(gutter + lipgloss.NewStyle().MaxWidth(w-5).Render(m.srcLines[i]) + "\n")
-			} else {
-				b.WriteString(gutter + truncate(m.srcLines[i], w-5) + "\n")
-			}
-		} else {
-			// the context card carries lipgloss styling, so clip ANSI-aware
-			// (rune-based truncate would miscount the escape codes).
-			b.WriteString(lipgloss.NewStyle().MaxWidth(w).Render(m.srcLines[i]) + "\n")
+	// Reserve a right-edge column (plus a gap) for the thumb when overflowing.
+	bar := scrollbarColumn(vp, n, start, vp)
+	contentW := w
+	if bar != nil {
+		if contentW = w - 2; contentW < 1 {
+			contentW = 1
 		}
 	}
+	b.WriteString(hdr + "\n\n")
+	for row := 0; row < vp; row++ {
+		i := start + row
+		var line string
+		if i < end {
+			if m.srcGutter { // source body: line numbers; the context card has none
+				ln := i + 1
+				if m.srcFirstLine > 0 { // show real file line numbers, not 1-based within the def
+					ln = i + m.srcFirstLine
+				}
+				gutter := mutedStyle.Render(fmt.Sprintf("%4d ", ln))
+				if m.srcHighlight { // chroma ANSI — clip ANSI-aware (rune truncate would mangle escapes)
+					line = gutter + lipgloss.NewStyle().MaxWidth(contentW-5).Render(m.srcLines[i])
+				} else {
+					line = gutter + truncate(m.srcLines[i], contentW-5)
+				}
+			} else {
+				// the context card carries lipgloss styling, so clip ANSI-aware
+				// (rune-based truncate would miscount the escape codes).
+				line = lipgloss.NewStyle().MaxWidth(contentW).Render(m.srcLines[i])
+			}
+		}
+		if bar != nil {
+			line = padRight(line, contentW) + " " + bar[row]
+		}
+		b.WriteString(line + "\n")
+	}
 	return b.String()
+}
+
+// scrollbarColumn builds a vertical 1-column scrollbar of `rows` cells for a list
+// of `total` items showing `visible` starting at `start`. It returns styled
+// single-rune strings (muted track, accent thumb), or nil when everything fits.
+func scrollbarColumn(rows, total, start, visible int) []string {
+	if rows <= 0 || visible <= 0 || total <= visible {
+		return nil
+	}
+	thumb := rows * visible / total
+	if thumb < 1 {
+		thumb = 1
+	}
+	if thumb > rows {
+		thumb = rows
+	}
+	pos := 0
+	if maxStart := total - visible; maxStart > 0 {
+		pos = (rows - thumb) * clamp(start, 0, maxStart) / maxStart
+	}
+	if pos > rows-thumb {
+		pos = rows - thumb
+	}
+	out := make([]string, rows)
+	for i := range out {
+		if i >= pos && i < pos+thumb {
+			out[i] = scrollThumbStyle.Render("█")
+		} else {
+			out[i] = scrollTrackStyle.Render("│")
+		}
+	}
+	return out
 }
 
 // renderAnnotationComposer is a compact modal editor. Every dynamic segment is
@@ -248,29 +303,29 @@ func (m Model) footer() string {
 	switch m.active {
 	case tabGraph:
 		if m.graphFocus == focusRefs {
-			hint = "↑/↓ ref · enter re-center · a note · m map · s source · ⌫ back · ← hubs · ctrl+c quit"
-			compact = "↑/↓ · enter re-center · a note · ⌫ back · ← hubs"
+			hint = "↑/↓ ref · enter re-center · a note · e edit · y yank · m map · s source · ⌫ back · ← hubs · ctrl+c quit"
+			compact = "↑/↓ · enter re-center · a note · e edit · ⌫ back"
 		} else {
-			hint = "↑/↓ hub · → walk · enter → impact · a note · m map · s source · p precise · ctrl+c quit"
-			compact = "↑/↓ · → walk · enter impact · a note · s src"
+			hint = "↑/↓ hub · → walk · enter → impact · a note · e edit · y yank · m map · s source · p precise · ctrl+c quit"
+			compact = "↑/↓ · → walk · enter impact · a note · e edit · s src"
 		}
 	case tabSearch:
-		hint = "type · enter search/open · ↑/↓ select · a note · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
-		compact = "type · enter · ↑/↓ · a note · ctrl+g graph · tab"
+		hint = "type · enter search/open · ↑/↓ select · a note · e edit · y yank · ctrl+g graph · ctrl+s source · ctrl+c quit"
+		compact = "type · enter · ↑/↓ · a note · e edit · ctrl+g graph"
 	case tabImpact:
-		hint = "type symbol · enter run/open · ↑/↓ select · a note · ctrl+g graph · ctrl+s source · tab · ctrl+c quit"
-		compact = "type · enter · ↑/↓ · a note · ctrl+g graph · tab"
+		hint = "type symbol · enter run/open · ↑/↓ select · a note · e edit · y yank · ctrl+g graph · ctrl+s source · ctrl+c quit"
+		compact = "type · enter · ↑/↓ · a note · e edit · ctrl+g graph"
 	case tabPath:
 		if m.pathFocus == focusPathResult {
-			hint = "↑/↓ · k/j inspect · a note · enter/ctrl+g graph · ctrl+s source · f/t edit · r rerun · ctrl+c quit"
-			compact = "↑/↓ · k/j · a note · enter graph · f/t edit"
+			hint = "↑/↓ · k/j inspect · a note · e edit · y yank · enter/ctrl+g graph · ctrl+s source · f/t edit · r rerun · ctrl+c quit"
+			compact = "↑/↓ · k/j · a note · e edit · enter graph · f/t"
 		} else {
 			hint = "type endpoint · ↑/↓ field · enter next/run · alt+1–5 tabs · ctrl+c quit"
 			compact = "type · ↑/↓ field · enter next/run · alt+1–5 tabs"
 		}
 	default: // metrics
-		hint = "↑/↓ select · enter → impact · ctrl+g graph · ctrl+s source · ctrl+r reindex · ctrl+c quit"
-		compact = "↑/↓ · enter impact · ctrl+g graph · ctrl+s src · ctrl+r reindex"
+		hint = "↑/↓ select · enter → impact · e edit · y yank · ctrl+g graph · ctrl+s source · ctrl+r reindex · ctrl+c quit"
+		compact = "↑/↓ · enter impact · e edit · ctrl+g graph · ctrl+r reindex"
 	}
 	hint += " · ? help"
 	compact += " · ? help"
@@ -853,25 +908,12 @@ func (m Model) renderImpact(w, h int) string {
 		if start > 0 {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▲ %d more\n", start)))
 		}
+		// Rendered as an indented tree by depth: each level steps right and its
+		// branch connector is colored by the same depth heatmap (hot near → cool
+		// far), so the shape of the propagation reads at a glance.
 		for i := start; i < end; i++ {
 			n := br[i]
-			name := truncate(displayName(n.FQN, n.Symbol), 32)
-			loc := truncate(fmt.Sprintf("%s:%d", n.File, n.StartLine), w-44)
-			test := ""
-			if n.Kind == "test" {
-				test = " ✓"
-			}
-			if i == m.impactSel {
-				plain := fmt.Sprintf(" ▸[%d] %s %s%s", n.Depth, padRight(name, 32), loc, test)
-				b.WriteString(selectedStyle.Width(w).Render(truncate(plain, w)) + "\n")
-			} else {
-				marker := "  "
-				if n.Kind == "test" {
-					marker = symStyle.Render("✓ ")
-				}
-				// The [depth] tag is colored by the heatmap — hot (direct) → cool (far).
-				fmt.Fprintf(&b, " %s%s %s %s\n", marker, depthHeat(n.Depth), padRight(name, 32), mutedStyle.Render(loc))
-			}
+			b.WriteString(m.blastRow(n, i == m.impactSel, w) + "\n")
 		}
 		if end < len(br) {
 			b.WriteString(mutedStyle.Render(fmt.Sprintf("  ▼ %d more", len(br)-end)) + "\n")
@@ -883,6 +925,42 @@ func (m Model) renderImpact(w, h int) string {
 		}
 	}
 	return b.String()
+}
+
+// blastRow renders one blast-radius node as a tree row: indented by depth with a
+// heat-colored branch connector. The selected row is drawn as a single
+// full-width highlight; others are ANSI-clipped to the pane width.
+func (m Model) blastRow(n app.ImpactNode, selected bool, w int) string {
+	depth := n.Depth
+	if depth < 1 {
+		depth = 1
+	}
+	level := depth - 1
+	if level > 6 { // cap the indent so deep radii keep names legible
+		level = 6
+	}
+	indent := strings.Repeat("  ", level)
+	branch := "▪ " // a direct dependent (depth 1) roots the tree
+	if level > 0 {
+		branch = "└ "
+	}
+	name := displayName(n.FQN, n.Symbol)
+	loc := fmt.Sprintf("%s:%d", n.File, n.StartLine)
+	test := ""
+	if n.Kind == "test" {
+		test = " ✓"
+	}
+	if selected {
+		plain := fmt.Sprintf(" ▸%s%s%s  %s%s", indent, branch, name, loc, test)
+		return selectedStyle.Width(w).Render(truncate(plain, w))
+	}
+	mark := ""
+	if n.Kind == "test" {
+		mark = symStyle.Render("✓ ")
+	}
+	row := " " + indent + depthHeatStyle(depth).Render(branch) + mark +
+		symStyle.Render(name) + "  " + mutedStyle.Render(loc)
+	return lipgloss.NewStyle().MaxWidth(w).Render(row)
 }
 
 // ---- Search tab ----

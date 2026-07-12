@@ -35,6 +35,11 @@ var (
 	// daemonOnStyle marks the live "background daemon is watching" header indicator.
 	daemonOnStyle = lipgloss.NewStyle().Foreground(colorSym)
 
+	// scrollTrackStyle / scrollThumbStyle draw the minimal 1-column scrollbar on
+	// the source/context overlay: a muted track with an accent thumb.
+	scrollTrackStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3A3F4B"))
+	scrollThumbStyle = lipgloss.NewStyle().Foreground(colorAccent)
+
 	// heat1..heat3Style form the blast-radius depth heatmap (Impact tab): depth 1 is
 	// "hottest" (a direct caller, most likely affected) and fades to muted with depth.
 	heat1Style = lipgloss.NewStyle().Foreground(colorBad)  // depth 1 — direct
@@ -42,21 +47,25 @@ var (
 	heat3Style = lipgloss.NewStyle().Foreground(colorBar)  // depth 3
 )
 
+// depthHeatStyle is the heatmap color for a blast-radius depth: hot (direct) →
+// cool (distant). Shared by the [depth] tag and the tree-branch connectors.
+func depthHeatStyle(depth int) lipgloss.Style {
+	switch {
+	case depth <= 1:
+		return heat1Style
+	case depth == 2:
+		return heat2Style
+	case depth == 3:
+		return heat3Style
+	default:
+		return mutedStyle
+	}
+}
+
 // depthHeat renders a blast-radius node's [depth] tag colored by how directly the
 // change reaches it — a one-glance heatmap from hot (near) to cool (far).
 func depthHeat(depth int) string {
-	var st lipgloss.Style
-	switch {
-	case depth <= 1:
-		st = heat1Style
-	case depth == 2:
-		st = heat2Style
-	case depth == 3:
-		st = heat3Style
-	default:
-		st = mutedStyle
-	}
-	return st.Render(fmt.Sprintf("[%d]", depth))
+	return depthHeatStyle(depth).Render(fmt.Sprintf("[%d]", depth))
 }
 
 // heatLegend is a compact key for the depth heatmap shown beside the Blast radius
