@@ -44,3 +44,8 @@ node_modules/
 .env.*
 !.env.example
 .vercel
+
+# Benchmark harness: fixture repo is fetched by SHA (only fixture.lock is committed),
+# results/transcripts are runtime artifacts (only *.summary.json is committed by hand).
+/bench/fixtures/repo/
+/bench/results/

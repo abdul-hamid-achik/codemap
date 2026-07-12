@@ -13,6 +13,15 @@ then show me everything that calls into it*. It precomputes the
 structure once, then serves narrow, structured answers — so an agent spends a few tool calls
 instead of dozens of file reads.
 
+<!-- BENCH:START -->
+> **DIRECTIONAL** — results table pending the first benchmark run. The A/B harness
+> (agent working *with* vs *without* codemap over a pinned go-git fixture, ground truth
+> derived independently of codemap) lives in [bench/](bench/README.md); run it locally
+> with `task bench` (needs `claude`, `gopls`, and `ANTHROPIC_API_KEY`), then
+> `go run ./bench --report-only` regenerates this block from the run's summary JSON.
+> Every published number is DIRECTIONAL — not a controlled study.
+<!-- BENCH:END -->
+
 ## Features
 
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
