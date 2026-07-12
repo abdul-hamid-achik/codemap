@@ -121,10 +121,10 @@ codemap/
 │                              #   .github/workflows/codemap-review.yml via `uses: ./integrations/github-action`;
 │                              #   consumers: `uses: abdul-hamid-achik/codemap/integrations/github-action@main`)
 ├── .claude-plugin/            # marketplace.json (repo-root plugin marketplace entry)
-├── specs/                     # glyphrun E2E specs (*.yml, 43): version/help/index_status/query/context/
+├── specs/                     # glyphrun E2E specs (*.yml, 44): version/help/index_status/query/context/
 │                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
 │                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
-│                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/cache_export/grep/
+│                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/semantic_degraded/cache_export/grep/
 │                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/coverage/
 │                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies/
 │                              #   review_deletion/references/studio_annotations/agent_setup
