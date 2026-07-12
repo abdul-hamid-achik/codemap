@@ -1,8 +1,14 @@
 # CLI
 
-Every query command accepts `--json` for machine-readable output.
+The full `codemap` command reference — for people running it by hand and for scripts/CI
+piping `--json`. New here? Start with [Quick Start](/quick-start); wiring an agent instead
+of a terminal? See [codemap for agents](/agents) and the [MCP server](/mcp). Every query
+command below accepts `--json` for machine-readable output.
 
 ## Project management
+
+Register a directory, build its graph, and check on it — the commands you run before
+anything else.
 
 | Command | Description |
 |---|---|
@@ -17,6 +23,10 @@ Every query command accepts `--json` for machine-readable output.
 
 ## Configuration introspection
 
+Read-only commands for checking which config file codemap resolved and what it contains
+— useful when precedence (flag > env > project file > global file) isn't giving the
+value you expect.
+
 | Command | Description |
 |---|---|
 | `codemap config path` | Show the resolved config file path (honours `CODEMAP_CONFIG`, `~`, and XDG defaults) |
@@ -24,6 +34,9 @@ Every query command accepts `--json` for machine-readable output.
 | `codemap config show --json` | Same values as `show`, as structured JSON for agents |
 
 ## Navigation
+
+Follow the call graph from a symbol you already have a name for — who calls it, what it
+calls, where it's registered, and how it connects to another symbol.
 
 | Command | Description |
 |---|---|
@@ -67,6 +80,9 @@ callers reached via interface dispatch or reflection — treat its output as dea
 
 ## Analysis
 
+The commands built around a change: how far it reaches, what tests cover it, how risky
+it is, and — for `review` — what your current diff already touched.
+
 | Command | Description |
 |---|---|
 | `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, covering tests, and copy/paste-ready `test_commands` derived from those tests (`--at file:line` selects one definition) |
@@ -82,6 +98,9 @@ callers reached via interface dispatch or reflection — treat its output as dea
 | `codemap read-order [query] [--top N]` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/` packages, module index files, exported public API) and load-bearing hubs (call-graph in-degree) into a newcomer's reading guide, each with the reason it ranked. Optional `query` narrows by name/path. The agent-facing answer to "I just landed in this repo — what do I read first?" |
 
 ## Semantic
+
+Three ways to search when you don't already have an exact symbol name: by meaning, by
+name fragment, or by literal text.
 
 | Command | Description |
 |---|---|
@@ -123,6 +142,9 @@ line above the hit list otherwise. Pass `--fusion balanced` (or set `semantic.fu
 config) for the exact pre-adaptive equal-weighted behavior.
 
 ## Surfaces
+
+The three ways to run codemap beyond one-off CLI queries: as an MCP server, as an
+interactive TUI, or just check what's installed.
 
 | Command | Description |
 |---|---|

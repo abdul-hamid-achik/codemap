@@ -60,29 +60,28 @@ You get the `codemap` MCP tools, the `using-codemap` skill (this playbook), and 
 
 ## The agent loop
 
-A typical "understand or change this code" loop, and the one-call tool for each step:
+Call `codemap_index` once per repo (it builds the graph, and embeddings if Ollama is up)
+before any of this works. Then it's six moves, from landing in an unfamiliar repo to
+shipping a change. Each row names the one tool to call and the one signal that tells you
+whether to trust what it returned — full tool descriptions live in the
+[MCP reference](/mcp#tools), this is the order to call them in.
 
-| When | Tool | Answers |
+| Stage | Tool | Check |
 |---|---|---|
-| **Index once** | `codemap_index` | build the graph (+ embeddings if Ollama is up) |
-| **Where do I start?** | `codemap_read_order` | entrypoints (`main`, `cmd/`, exported API) + load-bearing hubs, ranked with a reason — a reading guide for an unfamiliar repo |
-| **Find the entry point** | `codemap_semantic` / `codemap_find` | by meaning, or by name (offline) |
-| **Find exact text** | `codemap_grep` | a string literal, error message, route, or env-var name, joined onto its enclosing symbol (offline) |
-| **Orient on a symbol** | `codemap_context` | def + callers + callees + value-reference wiring + covering tests + blast size + notes, in ONE call |
-| **Model a component** | `codemap_context_batch` | the bundle for several symbols at once, plus the callers they share (coupling) |
-| **Go deeper** | `codemap_impact` · `codemap_source` | full blast radius · the implementation body |
-| **Find registrations** | `codemap_references` | where a function/method is stored or passed as a callback/handler, distinct from calls |
-| **How careful?** | `codemap_risk` | a 0..1 change-risk score (untested + fan-in + cross-package spread + ambiguity) + the factors |
-| **Need file dependencies?** | `codemap_dependencies` | bounded inbound evidence split into confirmed vs candidate, with source→target samples and explicit domain coverage |
-| **Touch a whole file?** | `codemap_file_impact` | confidence-aware evidence plus blast radius, tests, and conservative `delete_verdict` |
-| **Trace flow** | `codemap_path` | the shortest call chain between two symbols |
-| **AFTER you edit** | `codemap_review` | your git diff (including retained deleted definitions) → changed symbols, blast radius, and the **tests to run** |
-| **Survey** | `codemap_hotspots` · `codemap_orphans` | hubs · dead-code candidates |
-| **Calibrate trust per package** | `codemap_coverage` | per-file precise call-graph coverage, rolled up by language/directory (worst-covered first) |
+| **Orient** — where do I start? | `codemap_read_order` | ranked entrypoints + hubs, each with a reason — read these first, once per repo |
+| **Locate** — find the symbol | `codemap_find` (by name) / `codemap_semantic` (by meaning) / `codemap_grep` (exact text) | `matched_in` on `find`, `fusion` on `semantic` — why the hit surfaced |
+| **Understand** — read it in full | `codemap_context` (one symbol) / `codemap_context_batch` (several) | `call_graph` — trust level; `candidates` if the name is ambiguous, re-query with `candidates[i].selector` |
+| **Gate** — how careful, and is this even current? | `codemap_risk` (change-risk score) alongside `codemap_impact` / `codemap_file_impact` for the blast surface | `stale` — an index that's drifted since last run makes every other signal provisional |
+| **Edit** — make the change | informed by the tools above; codemap has no write path | — |
+| **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` — the diff's changed symbols, blast radius, and the tests to run |
 
-The two queries built specifically for the edit loop are **`codemap_review`** ("what
-did I just affect, and what should I run?") and **`codemap_risk`** ("how careful should
-I be?"). Run `read_order` on first contact with a repo; run `review` after every change.
+Deeper tools plug into the same stages on demand: `codemap_dependencies` and
+`codemap_references` sharpen **Locate**/**Gate** with confirmed-vs-candidate file and
+callback evidence; `codemap_hotspots`/`codemap_orphans` support a **Gate**-time survey
+(hubs, dead-code candidates); `codemap_coverage` tells you which packages' `call_graph`
+answers to trust before you lean on them; `codemap_path` traces the shortest call chain
+between two symbols anywhere in the loop. Run `read_order` once per repo and `review`
+after every change — those two bookend the loop.
 
 ## Honesty signals — why an agent can trust the answers
 

@@ -1,7 +1,10 @@
 # MCP server
 
 codemap is a stdio [Model Context Protocol](https://modelcontextprotocol.io) server, so AI
-agents can query your code graph directly instead of reading dozens of files.
+agents can query your code graph directly instead of reading dozens of files. This page is
+the full tool reference — for registering codemap in one command with a playbook included,
+see [codemap for agents](/agents#one-command-setup); for the order to call these tools in,
+see [the agent loop](/agents#the-agent-loop).
 Tool text payloads use compact JSON to avoid spending context tokens on indentation; the
 structured result fields are identical to CLI `--json` reports.
 
