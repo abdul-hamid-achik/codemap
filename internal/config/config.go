@@ -65,6 +65,14 @@ type EmbeddingConfig struct {
 	OllamaURL  string `yaml:"ollama_url"` // base URL for the Ollama HTTP API
 	Dimensions int    `yaml:"dimensions"` // vector dimension (nomic-embed-text = 768)
 	Distance   string `yaml:"distance"`   // cosine (default), dot, euclidean
+	// APIKey authenticates against Ollama Cloud (ollama_url: https://ollama.com)
+	// or any authenticated Ollama-compatible endpoint (e.g. a team server behind
+	// a reverse proxy). Optional — empty means today's unauthenticated local
+	// behavior, unchanged. Reachable via config file (this field) or the
+	// CODEMAP_OLLAMA_API_KEY env var ONLY — deliberately no CLI flag, since flag
+	// values are visible in `ps` output; see docs/configuration.md. Never printed
+	// by `config show`/`doctor` — those report only whether it is set.
+	APIKey string `yaml:"api_key"`
 }
 
 // IndexConfig controls what gets indexed.
@@ -257,6 +265,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODEMAP_OLLAMA_URL"); v != "" {
 		cfg.Embedding.OllamaURL = v
+	}
+	if v := os.Getenv("CODEMAP_OLLAMA_API_KEY"); v != "" {
+		cfg.Embedding.APIKey = v
 	}
 	if v := os.Getenv("CODEMAP_EMBEDDING_DIMENSIONS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

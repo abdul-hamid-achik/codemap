@@ -25,10 +25,13 @@ to a path inside the repo if you want a repo-local index too.
 7. Built-in defaults
 
 Most config-file settings are reachable all three ways — config file, env var, and flag —
-with the flag winning when explicitly set. Three knobs are exceptions: `daemon.embed_cache_size`
-is file + flag only (no env var), `index.extract_concurrency` is file + env only (no flag), and
+with the flag winning when explicitly set. Four knobs are exceptions: `daemon.embed_cache_size`
+is file + flag only (no env var), `index.extract_concurrency` is file + env only (no flag),
 `semantic.fusion_weights.*` (the per-profile weight floats) is file-only (no env var, no flag) —
-`semantic.fusion` itself (the `auto`/`balanced` switch) is reachable all three ways.
+`semantic.fusion` itself (the `auto`/`balanced` switch) is reachable all three ways — and
+`embedding.api_key` is file + env only (**no flag, deliberately**): flag values show up in
+`ps`/shell history, which a secret should never do. Use the config file or
+`CODEMAP_OLLAMA_API_KEY` instead (see [Authenticated Ollama endpoints / Ollama Cloud](#authenticated-ollama-endpoints-ollama-cloud)).
 
 ## Environment variables
 
@@ -43,6 +46,7 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_EMBEDDING_PROVIDER` | `embedding.provider` (e.g. `ollama`) |
 | `CODEMAP_EMBEDDING_MODEL` | `embedding.model` (e.g. `nomic-embed-text`) |
 | `CODEMAP_OLLAMA_URL` | `embedding.ollama_url` |
+| `CODEMAP_OLLAMA_API_KEY` | `embedding.api_key` (bearer token for Ollama Cloud or an authenticated Ollama-compatible endpoint) |
 | `CODEMAP_EMBEDDING_DIMENSIONS` | `embedding.dimensions` |
 | `CODEMAP_EMBEDDING_DISTANCE` | `embedding.distance` (e.g. `cosine`) |
 | `CODEMAP_EXCLUDE_EXTRA` | `index.exclude_extra` (comma-separated; appended) |
@@ -85,6 +89,7 @@ embedding:
   provider: ollama
   model: nomic-embed-text
   ollama_url: http://localhost:11434
+  api_key: ""       # bearer token; empty = today's unauthenticated local Ollama (default)
   dimensions: 768
   distance: cosine
 index:
@@ -167,6 +172,46 @@ Indexing structure (the graph) is fast — the time in a full index is almost en
 
 If the embedder is unreachable mid-index, the **structural index still succeeds** — codemap reports
 `embeddings skipped: …` and you can re-run later to add the vectors.
+
+## Authenticated Ollama endpoints / Ollama Cloud
+
+`embedding.ollama_url` doesn't have to be `localhost`. Point it at any Ollama-compatible HTTP
+endpoint — a teammate's shared server behind a reverse proxy, or Ollama Cloud — and set
+`embedding.api_key` (or `CODEMAP_OLLAMA_API_KEY`) so codemap sends
+`Authorization: Bearer <key>` on every embed request. The wire format (`POST /api/embed`,
+`{model, input}` in, `{embeddings: [...]}` out) is unchanged — same code path as local Ollama,
+just with one extra header.
+
+```yaml
+embedding:
+  ollama_url: https://ollama.com
+  api_key: ""   # set via CODEMAP_OLLAMA_API_KEY instead — see below
+  model: nomic-embed-text
+```
+
+```bash
+export CODEMAP_OLLAMA_API_KEY="$(cat ~/.config/secrets/ollama-key)"  # never paste it inline
+codemap index
+```
+
+Notes, verified against Ollama's docs as of this writing:
+
+- **Host and auth**: Ollama Cloud is served at `https://ollama.com` (not a subdomain), using
+  the same `/api/*` surface as a local server. Create a key at `ollama.com/settings/keys` and
+  send it as `Authorization: Bearer <key>` — this is exactly what `embedding.api_key` does.
+- **No cloud embedding model today**: as of this writing, Ollama Cloud's catalog has **no**
+  embedding model (`ollama.com/search?c=cloud&c=embedding` returns none) — cloud models there
+  are chat/generation models (`gpt-oss:120b-cloud` and similar). `nomic-embed-text` remains a
+  **local** pull. This feature is therefore chiefly useful today for an **authenticated
+  self-hosted/team Ollama** (e.g. a shared GPU box behind a reverse proxy that requires a
+  bearer token) — and it costs nothing to support Ollama Cloud too, so a future embedding
+  model on their cloud tier will work without a codemap change.
+- **Never put the key on the command line.** There is intentionally no `--ollama-api-key`
+  flag — command-line arguments are visible to other processes on the same machine (`ps`).
+  Use the config file or `CODEMAP_OLLAMA_API_KEY`.
+- **Secrets hygiene**: `codemap config show` and `codemap doctor` never print the key —
+  `config show` masks it (`****`+last 4 characters, or `(set)` for short values; empty stays
+  empty), and `doctor` reports only whether `embedding auth` is `configured` or not.
 
 ## Embedding profile guard
 

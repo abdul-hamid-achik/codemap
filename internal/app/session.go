@@ -73,7 +73,9 @@ func (s *Session) Embedder() embed.Provider {
 		return s.embedder
 	}
 	e := s.Config.Embedding
-	return embed.NewOllama(e.OllamaURL, e.Model, e.Dimensions, e.Distance)
+	p := embed.NewOllama(e.OllamaURL, e.Model, e.Dimensions, e.Distance)
+	p.APIKey = e.APIKey
+	return p
 }
 
 // SetEmbedder overrides the embedding provider (used by tests and alternate

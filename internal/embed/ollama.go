@@ -19,6 +19,20 @@ type OllamaProvider struct {
 	Dims     int
 	Distance string
 	Client   *http.Client
+	// APIKey, when non-empty, is sent as "Authorization: Bearer <key>" on every
+	// request. Optional — a local Ollama server needs none. It authenticates
+	// against Ollama Cloud (host https://ollama.com, same /api/* surface as
+	// local Ollama; bearer tokens are created at ollama.com/settings/keys —
+	// verified against docs.ollama.com/api/authentication) or any
+	// Ollama-compatible endpoint sitting behind auth (e.g. a team's shared
+	// server behind a reverse proxy). As of this writing Ollama Cloud has no
+	// embedding model in its catalog (ollama.com/search?c=cloud&c=embedding
+	// returns none), so this is chiefly useful for an authenticated
+	// self-hosted/team Ollama today — but the wire format is identical, so it
+	// costs nothing to support and picks up cloud embedding models the day
+	// they ship. Never logged, never part of Profile() — auth is orthogonal to
+	// the embedding space identity that guards the vector collection.
+	APIKey string
 	// dimsOnce guards the lazy-write of Dims from the first Embed
 	// response. Pre-fix the write was a plain int store, which
 	// -race flagged when two parallel indexer workers called Embed
@@ -47,6 +61,14 @@ func NewOllama(baseURL, model string, dims int, distance string) *OllamaProvider
 // Profile implements Provider.
 func (o *OllamaProvider) Profile() EmbeddingProfile {
 	return EmbeddingProfile{Provider: "ollama", Model: o.Model, Dimensions: o.Dims, Distance: o.Distance}
+}
+
+// setAuth attaches the bearer token when APIKey is configured. A no-op for
+// the default local Ollama setup (APIKey == "").
+func (o *OllamaProvider) setAuth(req *http.Request) {
+	if o.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+o.APIKey)
+	}
 }
 
 type embedRequest struct {
@@ -81,9 +103,14 @@ func (o *OllamaProvider) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	o.setAuth(req)
 
 	resp, err := o.Client.Do(req)
 	if err != nil {
+		// Wrap with a stable prefix only — never format %v/%w of the request
+		// itself (Go's http.Request.String()/error paths never echo headers,
+		// but this keeps it that way defensively: only the error the client
+		// returned is included, never req.Header).
 		return nil, fmt.Errorf("ollama embed request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -120,6 +147,7 @@ func (o *OllamaProvider) Available(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	o.setAuth(req)
 	resp, err := o.Client.Do(req)
 	if err != nil {
 		return fmt.Errorf("ollama not reachable at %s: %w", o.BaseURL, err)

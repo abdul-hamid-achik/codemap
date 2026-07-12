@@ -15,7 +15,7 @@ func clearEnv(t *testing.T) {
 		EnvConfig, EnvConfigDir, EnvData, EnvCache,
 		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
 		"CODEMAP_EMBEDDING_PROVIDER", "CODEMAP_EMBEDDING_MODEL",
-		"CODEMAP_OLLAMA_URL", "CODEMAP_EMBEDDING_DIMENSIONS", "CODEMAP_EMBEDDING_DISTANCE",
+		"CODEMAP_OLLAMA_URL", "CODEMAP_OLLAMA_API_KEY", "CODEMAP_EMBEDDING_DIMENSIONS", "CODEMAP_EMBEDDING_DISTANCE",
 	} {
 		t.Setenv(k, "")
 	}
@@ -151,6 +151,63 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if c.Embedding.Model != "nomic-embed-text" {
 		t.Errorf("model = %q, want default", c.Embedding.Model)
+	}
+}
+
+// TestDefaultConfigNoAPIKey pins additive-only behavior: an absent api_key
+// (no file, no env) leaves EmbeddingConfig.APIKey empty, so a config resolved
+// with no Ollama Cloud/auth setup behaves exactly like it did before this
+// field existed.
+func TestDefaultConfigNoAPIKey(t *testing.T) {
+	c := DefaultConfig()
+	if c.Embedding.APIKey != "" {
+		t.Errorf("default APIKey = %q, want empty", c.Embedding.APIKey)
+	}
+}
+
+// TestLoadOllamaAPIKeyEnv verifies the CODEMAP_OLLAMA_API_KEY env override
+// (file < env, same precedence tier as CODEMAP_OLLAMA_URL) using an obviously
+// fake key value, per the "never write a real key" rule for this feature.
+func TestLoadOllamaAPIKeyEnv(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	t.Setenv("CODEMAP_OLLAMA_API_KEY", "test-key-1234")
+
+	c, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Embedding.APIKey != "test-key-1234" {
+		t.Errorf("api key = %q, want test-key-1234", c.Embedding.APIKey)
+	}
+}
+
+// TestLoadOllamaAPIKeyFile verifies the config-file `embedding.api_key` key is
+// honored (lowest of the three reachable tiers: file < env; there is no flag
+// for this field — secrets on argv leak via `ps`).
+func TestLoadOllamaAPIKeyFile(t *testing.T) {
+	clearEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Chdir(t.TempDir())
+
+	dir := ConfigDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := "embedding:\n  api_key: test-key-1234\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Embedding.APIKey != "test-key-1234" {
+		t.Errorf("api key = %q, want test-key-1234", c.Embedding.APIKey)
 	}
 }
 

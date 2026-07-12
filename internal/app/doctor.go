@@ -99,6 +99,15 @@ func (svc *Service) Doctor(ctx context.Context) *DoctorReport {
 		add("embeddings (Ollama)", true, "model "+model, "")
 	}
 
+	// Embedding auth: report only whether a key is configured, never its value
+	// — the key itself must never appear in doctor output (config file, env
+	// CODEMAP_OLLAMA_API_KEY, no CLI flag; see docs/configuration.md).
+	if svc.s.Config.Embedding.APIKey != "" {
+		add("embedding auth", true, "configured", "")
+	} else {
+		add("embedding auth", true, "not set (fine for a local, unauthenticated Ollama)", "")
+	}
+
 	// Background daemon (optional): is one watching the tree + keeping the index
 	// fresh? A plain socket-connect probe — app can't import the daemon package
 	// (that would cycle: daemon imports app), and connectivity is enough for a
