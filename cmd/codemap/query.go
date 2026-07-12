@@ -499,6 +499,13 @@ func runImpact(cmd *cobra.Command, args []string) error {
 // that cover them, and the changed symbols that are untested or load-bearing. The
 // human view is a scannable summary; --json carries the full bundle for an agent.
 func runReview(cmd *cobra.Command, args []string) error {
+	// Validate --fail-on-risk before any query work: a bad value is an
+	// operational error (exit 1), fast-failed like any other bad flag.
+	failOnRiskThreshold, hasFailOnRisk, err := parseFailOnRiskFlag(cmd)
+	if err != nil {
+		return err
+	}
+	failOnUntested, _ := cmd.Flags().GetBool("fail-on-untested")
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
@@ -518,12 +525,19 @@ func runReview(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// reviewGate is called AFTER every point below that prints the normal
+	// (unchanged) output, human or --json, so a tripped --fail-on-risk/
+	// --fail-on-untested threshold only changes the exit code.
+	reviewGate := func() error { return reviewGateResult(rep, hasFailOnRisk, failOnRiskThreshold, failOnUntested) }
 	if jsonOut(cmd) {
-		return printJSON(rep)
+		if err := printJSON(rep); err != nil {
+			return err
+		}
+		return reviewGate()
 	}
 	if !rep.IsRepo {
 		fmt.Println(rep.Note)
-		return nil
+		return reviewGate()
 	}
 	scope := rep.Mode
 	if rep.Mode == "since" {
@@ -537,7 +551,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		if rep.Note != "" {
 			fmt.Println("  ⚠ " + rep.Note)
 		}
-		return nil
+		return reviewGate()
 	}
 	if line := reviewStalenessLine(rep); line != "" {
 		fmt.Println(line)
@@ -593,6 +607,22 @@ func runReview(cmd *cobra.Command, args []string) error {
 		// absence is unverified (the Resolution line above already explains it).
 		fmt.Println("  ⚠ no tests cover these changes")
 	}
+	return reviewGate()
+}
+
+// reviewGateResult evaluates --fail-on-risk/--fail-on-untested against an
+// already-printed ReviewReport. It never changes what was printed — it only
+// turns a tripped threshold into the dedicated gate exit code (errGate; see
+// gate.go). "unknown" risk never trips --fail-on-risk (the honesty rule), and
+// a diff with no changed symbols (rep.Risk == nil) never trips it either —
+// there is nothing to gate on.
+func reviewGateResult(rep *app.ReviewReport, hasFailOnRisk bool, threshold int, failOnUntested bool) error {
+	if hasFailOnRisk && rep.Risk != nil && riskGateTrips(rep.Risk.Level, threshold) {
+		return errGate
+	}
+	if failOnUntested && len(rep.UntestedSymbols) > 0 {
+		return errGate
+	}
 	return nil
 }
 
@@ -623,6 +653,12 @@ func reviewDeletionAnalysisLine(analysis *app.ReviewDeletionAnalysis) string {
 // runRisk renders a symbol's change-risk: one score + level, the caller/test
 // counts behind it, and the factors that drove it. --json carries the full report.
 func runRisk(cmd *cobra.Command, args []string) error {
+	// Validate --fail-on-risk before any query work: a bad value is an
+	// operational error (exit 1), fast-failed like any other bad flag.
+	failOnRiskThreshold, hasFailOnRisk, err := parseFailOnRiskFlag(cmd)
+	if err != nil {
+		return err
+	}
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
@@ -655,8 +691,20 @@ func runRisk(cmd *cobra.Command, args []string) error {
 			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
 			fmt.Sprintf("run: codemap find %q", args[0]))
 	}
+	// riskGate is called AFTER every point below that prints the normal
+	// (unchanged) output, human or --json, so a tripped --fail-on-risk
+	// threshold only changes the exit code.
+	riskGate := func() error {
+		if hasFailOnRisk && riskGateTrips(rep.Level, failOnRiskThreshold) {
+			return errGate
+		}
+		return nil
+	}
 	if jsonOut(cmd) {
-		return printJSON(rep)
+		if err := printJSON(rep); err != nil {
+			return err
+		}
+		return riskGate()
 	}
 	icon, label := riskBadge(rep.Level)
 	fmt.Printf("Risk of %s (%s): %s %s (%.2f)\n", rep.Symbol, rep.Project, icon, label, rep.Score)
@@ -667,13 +715,13 @@ func runRisk(cmd *cobra.Command, args []string) error {
 	renderCandidates(rep.Candidates)
 	if len(rep.Factors) == 0 {
 		fmt.Println("  no risk factors — a low-impact, covered change")
-		return nil
+		return riskGate()
 	}
 	fmt.Println("  factors:")
 	for _, f := range rep.Factors {
 		fmt.Printf("     %-14s %s\n", f.Factor, f.Detail)
 	}
-	return nil
+	return riskGate()
 }
 
 func riskBadge(level string) (icon, label string) {

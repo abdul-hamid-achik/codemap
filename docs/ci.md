@@ -51,6 +51,47 @@ include:
   - remote: 'https://raw.githubusercontent.com/abdul-hamid-achik/codemap/main/integrations/github-action/gitlab/codemap-review.yml'
 ```
 
+## pre-commit
+
+For a local, pre-push gate (rather than a PR check), codemap ships a
+[pre-commit](https://pre-commit.com) hook manifest at the repo root
+([`.pre-commit-hooks.yaml`](https://github.com/abdul-hamid-achik/codemap/blob/main/.pre-commit-hooks.yaml)).
+Add it to your project's `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/abdul-hamid-achik/codemap
+    rev: vX.Y.Z # pin a release tag
+    hooks:
+      - id: codemap-review
+        # args: [--fail-on-untested, --fail-on-risk, high]  # override to add the risk gate
+```
+
+The hook runs `codemap review --staged --json --fail-on-untested` and fails
+the commit (exit code 6 — see [CLI: Gating a commit or script](/cli#gating-a-commit-or-script))
+when a staged change touches an untested symbol.
+
+**Trade-offs, by design:**
+
+- **Name-based, not `--precise`.** The hook does not pass `--precise` — reindexing
+  with the language server/`go/types` on every commit would blow past the "fast
+  enough for a hook" bar. Name-based resolution is what's already indexed, so
+  the hook stays well under 2s on a small diff; the cost is the usual
+  same-named-method over-match on cross-package Go calls, and TypeScript/
+  JavaScript/Python get **no** call graph at all without `--precise` (their risk
+  factor becomes `unresolved` → `level:"unknown"`, which `--fail-on-risk` never
+  trips — see the honesty rule in the CLI guide). Run `--precise` in CI (the
+  GitHub Action above already does) where the extra seconds don't block a commit.
+- **Degrades to exit 0, never blocks on missing infrastructure.** If the project
+  hasn't been indexed yet (`codemap index`) or the directory isn't a git
+  repository, `review` already returns a normal (not failed) report with a
+  `note` explaining why — no changed symbols, no risk band, no untested list —
+  so the gate has nothing to trip on and exits 0. A missing/stale index is a
+  reason to run `codemap index`, not a reason to block every commit.
+- `entry` intentionally omits `--depth`/other tuning flags; override `args` in
+  your own `.pre-commit-config.yaml` if you want a narrower or wider blast-radius
+  bound.
+
 ## Embeddings in CI (optional)
 
 PR review never needs embeddings. If a CI job should build a *semantic* index

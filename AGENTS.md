@@ -121,14 +121,14 @@ codemap/
 │                              #   .github/workflows/codemap-review.yml via `uses: ./integrations/github-action`;
 │                              #   consumers: `uses: abdul-hamid-achik/codemap/integrations/github-action@main`)
 ├── .claude-plugin/            # marketplace.json (repo-root plugin marketplace entry)
-├── specs/                     # glyphrun E2E specs (*.yml, 42): version/help/index_status/query/context/
+├── specs/                     # glyphrun E2E specs (*.yml, 43): version/help/index_status/query/context/
 │                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
 │                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
 │                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/grep/
 │                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/coverage/
 │                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies/
-│                              #   review_deletion/references/studio_annotations/agent_setup
-├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml
+│                              #   review_deletion/references/studio_annotations/agent_setup/review_gate
+├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml .pre-commit-hooks.yaml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md CLAUDE.md BACKLOG.md LICENSE
 ```
@@ -309,11 +309,20 @@ task install         # go install ./cmd/codemap
 - MCP text results use compact JSON (the structured payload is unchanged) so agents do not spend
   context tokens on indentation. HTML escaping remains disabled for readable code/FQNs.
 - **CLI exit-code taxonomy** (extends P2-06): `0`=answered, `1`=operational error,
-  `2`=not found/not indexed, `3`=`index_missing`, `4`=`index_corrupt`, `5`=`not_a_repo`.
-  Under `--json`, ANY failure prints a structured envelope to **stdout**:
+  `2`=not found/not indexed, `3`=`index_missing`, `4`=`index_corrupt`, `5`=`not_a_repo`,
+  `6`=`gate_failed`. Under `--json`, ANY failure (codes 1-5) prints a structured envelope to **stdout**:
   `{"ok":false,"error":"…","code":"not_found|not_indexed|index_missing|index_corrupt|not_a_repo|operational","hint":"run: codemap index"}`
   (the `code` matches the exit-code suffix). The `cmd/codemap/jsonHandler` wraps every RunE;
   hard failures are wrapped as `app.CodedError` at the `Session.Graph()` seam (`internal/app/errors.go`).
+  Exit **6** (`gate_failed`, `cmd/codemap/gate.go`) is different in kind: `codemap review`/`codemap risk`
+  accept `--fail-on-risk <low|medium|high>` and (`review` only) `--fail-on-untested`; after printing
+  the normal, unchanged output (human or `--json` success envelope — never an `{"ok":false,...}`
+  failure envelope), the process exits 6 if the aggregate/symbol risk level's ordinal is at or above
+  the threshold, or `--fail-on-untested` finds a non-empty `untested_symbols`. `level:"unknown"` never
+  trips `--fail-on-risk` (the honesty rule — an unresolved call graph is not evidence of risk). A
+  ready-made `.pre-commit-hooks.yaml` at the repo root runs `codemap review --staged --json
+  --fail-on-untested` (name-based, not `--precise`, for hook speed; degrades to exit 0 on an
+  unindexed project or non-git directory so missing infra never blocks a commit).
 
 ### Config precedence (highest → lowest)
 1. CLI flags (per-setting override flags — win when explicitly set; see `docs/configuration.md`).

@@ -1,0 +1,53 @@
+version: 1
+name: review_gate
+intent: |
+    `codemap review --fail-on-untested` (and `--fail-on-risk`) turn the untested/
+    risk signal review already computes into a dedicated exit code (6) instead of
+    always exiting 0 — the check a pre-commit hook or CI step gates on without
+    hand-rolling jq. The gate never changes the printed report; it only changes
+    the process exit code once the normal output is already on screen. Here Run()
+    is changed, has a caller (Other) but NO covering test, so review must flag it
+    untested and exit 6.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf 'package app\\n\\nfunc Helper() {}\\n\\nfunc Run() {\\n\\tHelper()\\n}\\n' > \"$P/a.go\"; printf 'package app\\n\\nfunc Other() { Run() }\\n' > \"$P/b.go\"; cd \"$P\"; git init -q; git config user.email t@t; git config user.name t; git config commit.gpgsign false; git add -A; git commit -qm init >/dev/null 2>&1; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed >/dev/null 2>&1; printf 'package app\\n\\nfunc Helper() {}\\n\\nfunc Run() {\\n\\tHelper() // edited\\n}\\n' > \"$P/a.go\"; \"$CM\" review --fail-on-untested; echo \"EXIT:$?\""
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 30
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 15000
+    - snapshot: review_gate
+outcomes:
+    - id: review_header
+      description: review prints its scoped header (the normal report, unchanged)
+      verify:
+        screen:
+            contains: "Review (proj"
+    - id: untested_flagged
+      description: the untested changed symbol is flagged in the normal output
+      verify:
+        screen:
+            contains: "untested changes"
+    - id: gate_exit_code
+      description: an untested changed symbol trips the dedicated gate exit code (6), not 0 or 1
+      verify:
+        screen:
+            contains: "EXIT:6"
+    - id: no_failure_envelope
+      description: the gate is exit-code-only — it never prints a {"ok":false,...} failure envelope
+      verify:
+        screen:
+            notContains: "\"ok\": false"
+    - id: clean_exit
+      description: the wrapping shell itself still exits cleanly (it echoes codemap's real exit code rather than propagating it, so the spec can assert on the printed code)
+      verify:
+        process:
+            exitCode: 0
+contractHash: sha256:46551cefd3bcd6876e264c9128718306df81d57f61d9ab4f63d2014e9108e0ee

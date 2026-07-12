@@ -72,10 +72,10 @@ callers reached via interface dispatch or reflection — treat its output as dea
 | `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, and covering tests (`--at file:line` selects one definition) |
 | `codemap dependencies <file>` | Direct inbound call/reference/import evidence grouped by dependent file and edge kind. Every relationship is classified as **confirmed** or **candidate** with a reason (`precise`, `same_package`, `name_fanout`, `package_scope`, or `stale_snapshot`); totals and bounded source→target samples preserve that confidence. Coverage remains explicit for calls, references, imports, runtime wiring, and external consumers. Missing evidence never means safe. |
 | `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Returns grouped dependency evidence, coverage, blast radius, tests, and `delete_verdict`. Only fresh, confirmed, file-scoped indexed evidence can prove `unsafe`; name-fanout candidates, stale evidence, and Go's package-scoped imports remain `unknown` for the exact file. Missing evidence never proves safety; legacy `safe_to_delete` stays false. |
-| `codemap review [--since <ref>] [--staged] [--depth N]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, `stale`/`resolution`, and stable `call_graph` honesty signals. |
+| `codemap review [--since <ref>] [--staged] [--depth N] [--fail-on-risk <low\|medium\|high>] [--fail-on-untested]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, `stale`/`resolution`, and stable `call_graph` honesty signals. `--fail-on-risk`/`--fail-on-untested` gate on that data — see [Gating a commit or script](#gating-a-commit-or-script). |
 | `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). Each request accepts at most 256 unique names, 256 bytes per name. |
 | `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. Candidate input is capped at 256 unique names, 256 bytes per name. |
-| `codemap risk <symbol> [--depth N]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. |
+| `codemap risk <symbol> [--depth N] [--fail-on-risk <low\|medium\|high>]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. `--fail-on-risk` gates on the level — see [Gating a commit or script](#gating-a-commit-or-script). |
 | `codemap hotspots [--top N]` | Most-referenced symbols (hubs) |
 | `codemap orphans [--top N]` | Functions/methods with no callers (dead-code candidates) |
 | `codemap coverage [--prefix P] [--lang L] [--uncovered] [--files] [--top N]` | Per-file precise call-graph coverage: rollups by language and by directory (worst-covered first), plus a bounded per-file list (`--files`, or any filter, includes it; capped at `--top`, default 200) showing each file's `resolver`, `resolved_at`, and whether it's gone `stale` since the last index. Complements, does not replace, the per-query `call_graph` enum. |
@@ -266,6 +266,38 @@ tells a consumer how much to trust the call graph without parsing prose: `resolv
 verification on one call instead of fanning `risk` out per symbol. Absent when the diff
 maps to no indexed symbols. `unknown` means one or more changed symbols lacks a usable call graph.
 
+### Gating a commit or script
+
+`codemap review` and `codemap risk` compute a risk level and an untested-symbols
+list either way, but historically always exited `0` — a caller wanting to block
+on "this diff touches untested high-risk code" had to hand-roll the check
+against `--json` output (exactly what the [GitHub Action](/ci) did before it
+grew `fail-on-untested`/`fail-on-risk` inputs). Two flags turn that into a
+first-class exit code instead:
+
+- `--fail-on-risk <low|medium|high>` — after printing the normal output
+  (unchanged), exit **6** if the risk level's ordinal is at or above the
+  threshold (`low` ≤ `medium` ≤ `high`). `level:"unknown"` **never** trips
+  this, at any threshold — the same honesty rule as everywhere else: an
+  unresolved call graph is not evidence of risk, so a repo indexed without
+  `--precise` can't spuriously fail a gate. Available on both `review`
+  (gates the aggregate diff-wide `risk` band) and `risk` (gates one symbol).
+- `--fail-on-untested` — after printing the normal output (unchanged), exit
+  **6** if `untested_symbols` is non-empty. `review` only (there is no
+  untested-*symbols* list on `risk`, which reports one symbol at a time).
+
+The gate is **exit-code-only**: under `--json` the body printed is the exact
+same success envelope you'd get without the flag (`ok`/`error`/`code` never
+appear — that shape is reserved for real failures, see below). A tripped gate
+is not a query failure; nothing was left unanswered. This means a script can
+run the same command it already runs for output and just also check `$?`.
+
+A ready-made [pre-commit](https://pre-commit.com) hook packages the common
+case — see [`.pre-commit-hooks.yaml`](https://github.com/abdul-hamid-achik/codemap/blob/main/.pre-commit-hooks.yaml)
+and the [pre-commit section of the CI guide](/ci#pre-commit) for the trade-offs
+(name-based resolution for speed; degrades to exit 0 on an unindexed or
+non-git project so a missing index never blocks a commit).
+
 ### Machine-readable errors + exit codes
 
 Under `--json`, a failure prints a structured envelope to **stdout** (not stderr) so an
@@ -285,6 +317,7 @@ The non-zero exit codes follow a documented taxonomy:
 | 3 | `index_missing` — no index for the project |
 | 4 | `index_corrupt` — the graph DB exists but won't open |
 | 5 | `not_a_repo` — a git operation was required but cwd isn't a repo |
+| 6 | `gate_failed` — a `--fail-on-risk`/`--fail-on-untested` threshold tripped on `review`/`risk`. **Not** a query failure: there is no `--json` failure envelope for it (see [Gating a commit or script](#gating-a-commit-or-script)) |
 
 So a consumer can map `code`→action deterministically either way (the JSON `code`
-matches the exit-code suffix).
+matches the exit-code suffix) for exit codes 0-5; exit 6 is exit-code-only by design.

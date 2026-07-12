@@ -20,6 +20,11 @@ import (
 //	3 = index_missing  — no index for the project (DB absent / unregistered)
 //	4 = index_corrupt  — the graph DB exists but won't open
 //	5 = not_a_repo     — a git operation was required but cwd isn't a repo
+//	6 = gate_failed    — a --fail-on-risk/--fail-on-untested threshold tripped
+//	                     on `review`/`risk` (see gate.go). NOT a query failure:
+//	                     the normal output already printed unchanged, so this
+//	                     code never appears in the --json failure envelope's
+//	                     `code` field — there is no failure envelope for it.
 //
 // Scripts/agents can distinguish "answered" from a structured failure without
 // parsing output: the --json envelope carries the same code, so a consumer
@@ -31,8 +36,9 @@ const (
 	exitIndexMissing = 3
 	exitIndexCorrupt = 4
 	exitNotARepo     = 5
-	codeNotFound     = "not_found"
-	codeNotIndexed   = "not_indexed"
+	// exitGateFailed = 6 is defined in gate.go, next to the gate logic it belongs to.
+	codeNotFound   = "not_found"
+	codeNotIndexed = "not_indexed"
 )
 
 // exitCodeFor maps a stable machine code (app.CodedError.Code) to its exit code.
@@ -155,6 +161,16 @@ func jsonHandler(fn func(cmd *cobra.Command, args []string) error) func(cmd *cob
 		err := fn(cmd, args)
 		if err == nil {
 			return nil
+		}
+		var ge *gateExit
+		if errors.As(err, &ge) {
+			// A --fail-on-risk/--fail-on-untested gate tripped. The RunE already
+			// printed its normal, unchanged output (human text or the --json
+			// success envelope) — silence cobra's error line in BOTH modes and
+			// surface only the dedicated exit code. No {"ok":false,...} envelope:
+			// the gate is exit-code-only.
+			cmd.SilenceErrors = true
+			return &exitCoded{code: exitGateFailed}
 		}
 		if jsonOut(cmd) {
 			cmd.SilenceErrors = true // envelope already printed; don't let cobra echo
