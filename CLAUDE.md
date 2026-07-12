@@ -10,15 +10,17 @@ Local-first code intelligence: a structural code graph (Go via stdlib `go/parser
 resolving across the `.ts`↔`.js` boundary — **Python** via `pyright-langserver`, and **Vue SFCs**
 (`.vue` → `<script>` blocks routed to the same TS server); tree-sitter still planned) fused with
 semantic vectors (veclite), exposed as a unified query layer. Three surfaces over one store: CLI
-(`--json` for agents), MCP server (`codemap serve`, 35 tools), and the `studio` TUI.
+(`--json` for agents), MCP server (`codemap serve`, 39 tools), and the `studio` TUI.
 
 Surfaces / key files:
-- CLI: `cmd/codemap/` — cobra CLI split per-command (main.go plus annotate/branch/cache/
-  config/daemon/index/init_status/query). Each `RunE` is thin → opens a session → calls `internal/app`.
+- CLI: `cmd/codemap/` — cobra CLI split per-command (main.go plus agent/annotate/branch/cache/
+  config/coverage/daemon/gate/index/init_status/query). Each `RunE` is thin → opens a session →
+  calls `internal/app`.
 - Service layer (everything routes here): `internal/app/` (service_core / _init / _query /
   _relations / _impact / _context / _semantic / _annotations; plus session, review, file_impact,
-  risk, readorder, secret_impact, branchswitch, cache, doctor, docs, vecgrep_client).
-- MCP server (thin, 35 tools): `internal/mcp/server.go`
+  risk, readorder, secret_impact, branchswitch, cache, doctor, docs, agentsetup, playbook,
+  vecgrep_client).
+- MCP server (thin, 39 tools): `internal/mcp/server.go`
 - studio TUI: `internal/tui/` (model.go/view.go/theme.go/run.go + anim.go [harmonica springs]
   + highlight.go [chroma syntax]; tabs graph/metrics/impact/search)
 - Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`
@@ -28,6 +30,9 @@ Surfaces / key files:
 - Branch/cache/daemon: `internal/branchstate` · `internal/cachestate` · `internal/snapshot`
   (fcheap) · `internal/daemon` (watcher) · `internal/git` (branch/ref/diff for review + branch-switch)
   ·  config (XDG): `internal/config/`
+- Harness distribution: `integrations/claude-code/` (Claude Code plugin — MCP registration +
+  `using-codemap` skill, generated from `docs.go`/`playbook.go`) and `integrations/github-action/`
+  (composite CI action + reusable workflow; GitLab mirror)
 
 ## Two documentation surfaces — do not mix them
 

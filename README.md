@@ -14,12 +14,18 @@ structure once, then serves narrow, structured answers — so an agent spends a 
 instead of dozens of file reads.
 
 <!-- BENCH:START -->
-> **DIRECTIONAL** — results table pending the first benchmark run. The A/B harness
-> (agent working *with* vs *without* codemap over a pinned go-git fixture, ground truth
-> derived independently of codemap) lives in [bench/](bench/README.md); run it locally
-> with `task bench` (needs `claude`, `gopls`, and `ANTHROPIC_API_KEY`), then
-> `go run ./bench --report-only` regenerates this block from the run's summary JSON.
-> Every published number is DIRECTIONAL — not a controlled study.
+> **DIRECTIONAL** — go-git/go-git @ `48a1ae05eec4`, claude-sonnet-5, N=1 (mean ± σ), 2026-07-12. Not a controlled study; see [bench/README.md](bench/README.md).
+>
+> | metric (mean ± σ, per session) | baseline (Read/Grep/Glob) | with codemap | Δ |
+> |---|---|---|---|
+> | tool calls | 1.0 ± 0.0 | 1.0 ± 0.0 | +0% |
+> | input tokens | 4 ± 0 | 4 ± 0 | +0% |
+> | output tokens | 177 ± 0 | 177 ± 0 | +0% |
+> | wall-clock (s) | 438.0 ± 0.0 | 13.3 ± 0.0 | -97% |
+> | cost (USD) | $0.028 ± $0.000 | $0.102 ± $0.000 | +265% |
+> | tasks correct | 1/1 | 1/1 | +0 |
+>
+> One-time codemap index cost (disclosed, not per-session): **6s**. codemap is modelled as pre-indexed (the daemon keeps it fresh in real use), so the codemap arm pays query time, not index time.
 <!-- BENCH:END -->
 
 ## Features
@@ -273,10 +279,13 @@ complete set.
 | Analyze | `risk` | 0..1 change-risk score with factors |
 | Analyze | `secret-impact` / `required-keys` | key-rotation blast radius and least-privilege key sets |
 | Search | `semantic` (alias `search`) / `find` | meaning-based search, and offline name search |
+| Search | `grep` | exact text search over indexed file content, joined to its enclosing symbol |
 | Cache | `cache save` / `restore` / `list` / `drop` | fcheap content-addressed index snapshots |
+| Cache | `cache export` / `import` | portable `tar.gz` index snapshots — no fcheap needed, for CI/team sharing |
 | Branch | `branch-status` / `branch-switch` / `branch-snapshot` | per-branch index snapshots via fcheap |
 | Daemon | `daemon start` / `status` / `stop` | background watcher that keeps the index fresh |
 | Knowledge | `annotate` / `annotations` | pin / list notes and external data on symbols/paths |
+| Agent harness | `agent setup` / `list` / `playbook` | wire codemap (MCP server + playbook) into an AI coding harness |
 | Surfaces | `serve` / `studio` | MCP server (stdio) and interactive TUI |
 
 All query commands accept `--json`.

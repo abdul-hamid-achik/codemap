@@ -116,7 +116,14 @@ calibrate its confidence:
   candidates.
 - **`note` / `shared_name`** — the name resolves to several definitions, so a count
   merges them. Precise indexing fixes the edges; pass an exact source selector to
-  choose one definition.
+  choose one definition. The response's own `candidates:[{selector,signature,file,start_line}]`
+  is that exact merged set already shaped as selectors — re-query with `candidates[i].selector`
+  instead of a separate `codemap_find`/`codemap_symbols` lookup.
+- **`matched_in`** — `codemap_find` in degraded (no-embeddings) mode reports whether each hit
+  matched on `"symbol"`, `"fqn"`, or `"docstring"`, so you know why it surfaced.
+- **`fusion`** — `codemap_semantic` reports which hybrid vector/BM25 weighting it used
+  (`"identifier"`, `"natural_language"`, `"balanced"`), adaptively chosen from the query's shape
+  unless pinned with `fusion: "balanced"`.
 - **`untested` / `heuristic`** — a symbol has no covering tests, or a test was matched
   by name-scan rather than the call graph (flag it, don't trust it blindly).
 - **`*_total`** — true counts behind a capped list, so you know when to drill with

@@ -22,6 +22,12 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 > declarations, with lines mapped back onto the `.vue` file). Other languages are recognized and
 > reported as skipped (HTML/CSS support is planned).
 
+## Using an AI coding agent?
+
+If you're setting codemap up for an agent harness (Claude Code, Cursor, Codex, …), skip ahead
+to `codemap agent setup <harness>` — it registers the MCP server *and* drops the playbook that
+teaches the agent when to use it, in one command. See [codemap for agents](/agents#one-command-setup).
+
 ## Index a project
 
 ```bash

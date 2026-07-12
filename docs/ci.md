@@ -79,6 +79,7 @@ hash that doesn't match the tarball — the `||` fallback above reindexes from s
 those, so a cache miss degrades to a normal (slower) run rather than failing the job. See
 [Branches & caching](/branches#portable-tarballs-team-ci-shareable-no-fcheap-required) for the
 full validation/refusal policy.
+
 ## pre-commit
 
 For a local, pre-push gate (rather than a PR check), codemap ships a
