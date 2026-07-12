@@ -46,9 +46,10 @@ frame loop that stops the instant the work completes, so an idle studio costs no
   Impact, `ctrl+s` reads its source, `ctrl+g` opens it in the Graph walker — so the overview is
   also a launchpad.
 - **Impact** — type a symbol, see its callers, blast radius, and which tests cover it. The blast
-  radius is a **depth heatmap**: each node's `[depth]` tag is colored from hot (a direct caller,
-  most likely affected) to cool (a distant transitive dependent), so the shape of the impact reads
-  at a glance. `ctrl+s` reads the selected blast node's source; `ctrl+g` opens it in the Graph walker.
+  radius renders as an **indented tree by depth**: each level steps right under the change and its
+  branch connector is colored by a **depth heatmap** — hot (a direct caller, most likely affected)
+  to cool (a distant transitive dependent) — so the shape of the propagation reads at a glance.
+  `ctrl+s` reads the selected blast node's source; `ctrl+g` opens it in the Graph walker.
 - **Search** — search by meaning (semantic, when an embedded index exists), automatically
   falling back to fast name search otherwise; the header shows which mode is active. `ctrl+s`
   reads the selected hit's source; `ctrl+g` opens it in the Graph walker to explore its call
@@ -82,7 +83,8 @@ a successful write with a failed refresh is reported as saved rather than inviti
 | `enter` | (Graph, hub pane) drill the hub into Impact · (Graph, refs pane) re-center on the selected caller/callee · (Search/Impact) drill the selection or run edited text · (Path) advance `FROM` → `TO`, run the lookup, or open a selected result step in Graph |
 | `f` / `t` / `r` | (Path result) edit `FROM`, edit `TO`, or rerun the current endpoint pair |
 | `backspace` | (Graph) step back to the previous centered node while walking |
-| `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓` or `k`/`j`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
+| `s` (Graph) / `ctrl+s` (any tab) | view the selected symbol's **source code** in a scrollable overlay (`↑`/`↓` or `k`/`j`, `pgup`/`pgdn`, `g`/`G`; `esc`/`q` to close). A minimal scrollbar thumb tracks your position down the right edge. `ctrl+s` works on Impact/Search too, where the text input would otherwise capture a plain `s` |
+| `e` / `y` | **jump to $EDITOR** / **yank file:line**. `e` opens the selected symbol's `file:line` in `$EDITOR` (falling back to `$VISUAL`; a no-op with a status hint when neither is set), suspending and restoring studio around the editor. `y` copies the `file:line` to the clipboard via OSC52 (and echoes it into the status line so it is copyable even where OSC52 is unsupported). Both act on a settled Graph/Search/Impact/Path selection that carries a file location; on a half-typed Search/Impact/Path query the letter still types normally |
 | `o` (Graph/Metrics) / `ctrl+o` (any tab) | **orient** — open the context card for the selected symbol in a scrollable overlay: its definition, callers, callees, value-reference wiring, covering tests, blast-radius count, and pinned annotations in one view (the same bundle `codemap context` / `codemap_context` returns), so you get the whole picture without hopping between tabs |
 | `a` (exact Graph/Search/Impact/Path selection) | Open the modal annotation composer for that exact FQN. Type a note, `enter` to save, or `esc` to cancel before saving; dirty query/endpoint inputs keep accepting the letter `a` normally |
 | `ctrl+g` (any tab) | **open the selection in the Graph walker** — re-centers the Graph on the selected hit/blast node/Path step/row and switches to it, focused on the callers/calls pane, so any symbol becomes a place to start walking the call graph (not just the hubs) |
@@ -90,7 +92,8 @@ a successful write with a failed refresh is reported as saved rather than inviti
 | `ctrl+r` | Reindex the project and refresh, without leaving studio — keeps the project's precision (re-runs `--precise` when it already has a precise call graph, so the graph isn't dropped). The header shows `⚠ stale C/N/D` (changed/new/deleted) when your files have drifted from the index since it was built, so you know when to press it |
 | `alt+←` / `alt+→` (any tab) | **Global back / forward** — browser-style history across tabs and drills. Drilling a search hit into Impact, opening it in the Graph walker, etc. records where you came from; `alt+←` returns to the *exact* prior view **with the text you'd typed still in the bar** and the prior selection highlighted. `alt+→` re-walks forward; a new search/drill clears the forward stack. (This is a layer above the Graph's own `⌫` walk.) |
 | `esc` | Step back one global level (when no overlay/help is open); also closes the help/source/context overlay |
-| `ctrl+c` | Quit (`q` also quits on Graph, Metrics, and Path result focus) |
+| `ctrl+c` | Quit. `q` also quits everywhere **except** while a Search/Impact/Path text field is focused (there it types), and closes an open overlay instead of quitting |
+| mouse | The wheel scrolls the focused list or the source/context overlay; a left click on a tab label switches tabs, and a click on a Graph hub / Search hit / Impact blast row selects it |
 
 When a [background daemon](/cli#background-daemon) is keeping the index fresh, the header shows a
 live green `● daemon <branch>` indicator (polled every few seconds) so you can tell at a glance
