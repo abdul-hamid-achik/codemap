@@ -343,6 +343,48 @@ func TestConfigValidateDistance(t *testing.T) {
 	}
 }
 
+// TestSemanticFusionDefault pins F7: fusion defaults to "auto".
+func TestSemanticFusionDefault(t *testing.T) {
+	c := DefaultConfig()
+	if c.Semantic.Fusion != "auto" {
+		t.Errorf("Semantic.Fusion = %q, want auto", c.Semantic.Fusion)
+	}
+}
+
+// TestSemanticFusionEnvOverride pins F7: CODEMAP_SEMANTIC_FUSION overrides
+// the config-file/default value via applyEnv.
+func TestSemanticFusionEnvOverride(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	t.Setenv("CODEMAP_SEMANTIC_FUSION", "balanced")
+	c, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Semantic.Fusion != "balanced" {
+		t.Errorf("Semantic.Fusion = %q, want balanced (env override)", c.Semantic.Fusion)
+	}
+}
+
+// TestSemanticFusionValidate pins F7: Validate rejects an unrecognized
+// semantic.fusion value.
+func TestSemanticFusionValidate(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Semantic.Fusion = "nonsense"
+	if err := cfg.Validate(); err == nil {
+		t.Error("Validate should reject semantic.fusion 'nonsense'")
+	}
+	cfg.Semantic.Fusion = "balanced"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate should accept 'balanced': %v", err)
+	}
+	cfg.Semantic.Fusion = ""
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate should accept empty (defaults to auto): %v", err)
+	}
+}
+
 // TestConfigProjectFirstMatchWins pins P1-12 (B67): pre-fix Load merged
 // ALL matching project config markers (codemap.yaml + codemap.yml +
 // .config/codemap.yaml) with last-wins, inverting the documented

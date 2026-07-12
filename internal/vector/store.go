@@ -281,6 +281,24 @@ func (s *Store) HybridSearch(query []float32, text string, topK int, project str
 	return toHits(res), nil
 }
 
+// HybridSearchWeighted fuses vector similarity with BM25 keyword search using
+// explicit per-channel weights (veclite.WithVectorWeight / WithTextWeight). A
+// weight <= 0 falls back to veclite's own default (1.0) for that channel.
+func (s *Store) HybridSearchWeighted(query []float32, text string, topK int, project string, vectorWeight, textWeight float64) ([]Hit, error) {
+	opts := searchOpts(topK, project)
+	if vectorWeight > 0 {
+		opts = append(opts, veclite.WithVectorWeight(vectorWeight))
+	}
+	if textWeight > 0 {
+		opts = append(opts, veclite.WithTextWeight(textWeight))
+	}
+	res, err := s.coll.HybridSearch(query, text, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return toHits(res), nil
+}
+
 func searchOpts(topK int, project string) []veclite.SearchOption {
 	opts := []veclite.SearchOption{veclite.TopK(topK), veclite.WithContent(true)}
 	if project != "" {

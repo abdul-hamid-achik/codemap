@@ -55,9 +55,28 @@ func enrichHitAnnotations(g *graph.Store, projectID int64, hits []SemanticHit) {
 type SemanticReport struct {
 	Query   string        `json:"query"`
 	Project string        `json:"project"`
-	Mode    string        `json:"mode"`           // "semantic", "name", or "none" (no embeddings)
-	Note    string        `json:"note,omitempty"` // why there are no results, when applicable
+	Mode    string        `json:"mode"`             // "semantic", "name", or "none" (no embeddings)
+	Fusion  string        `json:"fusion,omitempty"` // hybrid-search weighting used: "identifier", "natural_language", or "balanced" (empty when no fusion happened, e.g. a pure-vector fallback)
+	Note    string        `json:"note,omitempty"`   // why there are no results, when applicable
 	Hits    []SemanticHit `json:"hits"`
+}
+
+// fusionWeights resolves the vector/text weight pair for query given the
+// resolved semantic.fusion config, and the profile name to surface in the
+// report.
+func (svc *Service) fusionWeights(query string) (profile string, vectorWeight, textWeight float64) {
+	cfg := svc.s.Config.Semantic
+	if cfg.Fusion == "balanced" {
+		return "balanced", 1.0, 1.0
+	}
+	switch classifyQuery(query) {
+	case shapeIdentifier:
+		w := cfg.FusionWeights.Identifier
+		return "identifier", w.Vector, w.Text
+	default:
+		w := cfg.FusionWeights.NaturalLanguage
+		return "natural_language", w.Vector, w.Text
+	}
 }
 
 // Semantic runs a meaning-based search over the project's embedded nodes.
@@ -114,11 +133,16 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	}
 	// Hybrid (vector + BM25 over symbol/fqn) fuses meaning with keyword matches —
 	// e.g. a query that names a symbol gets a keyword boost while conceptual
-	// queries still match by vector. Fall back to pure vector if the index has no
+	// queries still match by vector. The fusion weighting adapts to the query's
+	// shape (identifier vs natural-language), or stays equal-weighted under
+	// semantic.fusion: balanced. Fall back to pure vector if the index has no
 	// text index (older indexes) so search never hard-fails.
-	hits, err := vstore.HybridSearch(vecs[0], query, topK, name)
+	profile, vw, tw := svc.fusionWeights(query)
+	rep.Fusion = profile
+	hits, err := vstore.HybridSearchWeighted(vecs[0], query, topK, name, vw, tw)
 	if err != nil {
 		hits, err = vstore.Search(vecs[0], topK, name)
+		rep.Fusion = "" // pure-vector fallback path — no fusion happened
 	}
 	if err != nil {
 		return nil, err

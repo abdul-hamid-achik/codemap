@@ -16,6 +16,30 @@ type Config struct {
 	Index     IndexConfig     `yaml:"index"`
 	Daemon    DaemonConfig    `yaml:"daemon"`
 	Vecgrep   VecgrepConfig   `yaml:"vecgrep"`
+	Semantic  SemanticConfig  `yaml:"semantic"`
+}
+
+// SemanticConfig controls how `codemap semantic`/`search` fuses vector and
+// BM25 (text) search. Fusion is reachable file < env (CODEMAP_SEMANTIC_FUSION)
+// < flag (--fusion); FusionWeights is a file-only advanced-tuning knob (no
+// env/flag), matching the exception pattern documented for
+// daemon.embed_cache_size/index.extract_concurrency.
+type SemanticConfig struct {
+	Fusion        string              `yaml:"fusion"` // auto (default, classify query shape) | balanced (equal weights, pre-F7 behavior)
+	FusionWeights FusionWeightsConfig `yaml:"fusion_weights"`
+}
+
+// FusionWeightsConfig holds the per-profile vector/text weight pairs used
+// when semantic.fusion is "auto".
+type FusionWeightsConfig struct {
+	Identifier      FusionWeightPair `yaml:"identifier"`
+	NaturalLanguage FusionWeightPair `yaml:"natural_language"`
+}
+
+// FusionWeightPair is one profile's veclite HybridSearch weights.
+type FusionWeightPair struct {
+	Vector float64 `yaml:"vector"`
+	Text   float64 `yaml:"text"`
 }
 
 // VecgrepConfig controls the optional fallback to the sibling vecgrep tool for
@@ -110,6 +134,13 @@ func DefaultConfig() *Config {
 			EmbedCacheSize:   4096,
 		},
 		Vecgrep: VecgrepConfig{Enabled: true},
+		Semantic: SemanticConfig{
+			Fusion: "auto",
+			FusionWeights: FusionWeightsConfig{
+				Identifier:      FusionWeightPair{Vector: 0.5, Text: 1.5},
+				NaturalLanguage: FusionWeightPair{Vector: 1.5, Text: 0.5},
+			},
+		},
 	}
 }
 
@@ -187,6 +218,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Embedding.Dimensions < 0 {
 		return fmt.Errorf("embedding dimensions must be >= 0 (0 = auto-detect from the model)")
+	}
+	switch c.Semantic.Fusion {
+	case "auto", "balanced", "":
+		// supported (empty defaults to auto at read time)
+	default:
+		return fmt.Errorf("semantic fusion %q is not a valid value; use auto or balanced", c.Semantic.Fusion)
 	}
 	return nil
 }
@@ -283,6 +320,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODEMAP_VECGREP_BIN"); v != "" {
 		cfg.Vecgrep.Bin = v
+	}
+	if v := os.Getenv("CODEMAP_SEMANTIC_FUSION"); v != "" {
+		cfg.Semantic.Fusion = v
 	}
 }
 

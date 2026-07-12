@@ -25,8 +25,10 @@ to a path inside the repo if you want a repo-local index too.
 7. Built-in defaults
 
 Most config-file settings are reachable all three ways — config file, env var, and flag —
-with the flag winning when explicitly set. Two knobs are an exception: `daemon.embed_cache_size`
-is file + flag only (no env var), and `index.extract_concurrency` is file + env only (no flag).
+with the flag winning when explicitly set. Three knobs are exceptions: `daemon.embed_cache_size`
+is file + flag only (no env var), `index.extract_concurrency` is file + env only (no flag), and
+`semantic.fusion_weights.*` (the per-profile weight floats) is file-only (no env var, no flag) —
+`semantic.fusion` itself (the `auto`/`balanced` switch) is reachable all three ways.
 
 ## Environment variables
 
@@ -54,6 +56,7 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_DAEMON_IDLE_TIMEOUT_MIN` | `daemon.idle_timeout_min` |
 | `CODEMAP_DAEMON_EMBED_RPS` | `daemon.embed_rps` |
 | `CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT` | `daemon.embed_max_in_flight` |
+| `CODEMAP_SEMANTIC_FUSION` | `semantic.fusion` (`auto` or `balanced`) |
 
 ## Command-line flags
 
@@ -68,6 +71,7 @@ Each config knob also has a flag, which wins over the file and env when set:
 | `--embed-batch-size` / `--embed-concurrency` / `--embed-max-chars` | `index.embed_*` | `index` |
 | `--debounce` / `--idle-timeout` | `daemon.debounce_ms` / `daemon.idle_timeout_min` | `daemon start` |
 | `--embed-rps` / `--embed-max-in-flight` / `--embed-cache-size` | `daemon.embed_*` | `daemon start` |
+| `--fusion` | `semantic.fusion` | `semantic`, `search` |
 
 ```bash
 codemap index --exclude-extra migrations,db/migrations,**/testdata
@@ -110,6 +114,15 @@ daemon:                   # background indexer (codemap daemon)
 vecgrep:                  # sibling-tool integration (see Ecosystem)
   enabled: true           # use vecgrep for semantic search when codemap has no embeddings, + memory recall
   bin: ""                 # path to the vecgrep binary (resolved via $PATH if empty)
+semantic:
+  fusion: auto            # auto (classify query shape) | balanced (equal weights, pre-F7 behavior)
+  fusion_weights:          # file-only (no env/flag) — advanced tuning
+    identifier:
+      vector: 0.5
+      text: 1.5
+    natural_language:
+      vector: 1.5
+      text: 0.5
 ```
 
 The default exclude list also covers `build`, build-output variants (`dist-*`, `build-*`, e.g.

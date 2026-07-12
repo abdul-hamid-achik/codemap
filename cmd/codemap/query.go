@@ -1035,6 +1035,9 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
+	if rep.Fusion != "" {
+		fmt.Printf("fusion: %s\n", rep.Fusion)
+	}
 	for _, h := range rep.Hits {
 		// Mirror `find`'s outline (file:line + signature) but lead with the relevance
 		// score — so a meaning-based hit shows WHAT it is, not just a bare name.

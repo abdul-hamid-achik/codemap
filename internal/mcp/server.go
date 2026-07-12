@@ -378,7 +378,7 @@ func (s *Server) register() {
 	}, s.handleStatus)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_semantic",
-		Description: "Semantic search across the code graph: find code by meaning, ranked by similarity.",
+		Description: "Semantic search across the code graph: find code by meaning, ranked by similarity. The result carries a \"fusion\" field naming the vector/BM25 weighting profile used (\"identifier\", \"natural_language\", or \"balanced\").",
 	}, s.handleSemantic)
 	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 		Name:        "codemap_callers",

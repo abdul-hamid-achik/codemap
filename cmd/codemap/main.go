@@ -214,7 +214,7 @@ func init() {
 	coverageCmd.Flags().Int("top", 200, "cap on by_directory rows and per-file detail rows (max 2000)")
 
 	// Per-setting override flags (config file < env < flag) for every tunable.
-	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd)
+	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
 		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,

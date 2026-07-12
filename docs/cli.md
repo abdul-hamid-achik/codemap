@@ -85,13 +85,21 @@ callers reached via interface dispatch or reflection — treat its output as dea
 
 | Command | Description |
 |---|---|
-| `codemap semantic <query> [--top N]` | Meaning-based search across the indexed graph (alias: `codemap search`) |
+| `codemap semantic <query> [--top N] [--fusion auto\|balanced]` | Meaning-based search across the indexed graph (alias: `codemap search`) |
 | `codemap find <query> [--top N]` | Find symbols by name, with signatures (offline; no embeddings needed) |
 
 On a structure-only project (indexed with `--no-embed`, or before Ollama was available), `codemap semantic`
 returns no hits with a short note explaining there are no embeddings — and the JSON carries `"mode": "none"`
 plus that `"note"` — so you know to embed the index or fall back to `codemap find`. It never calls the
 embedder or creates an empty vector store in that case.
+
+`codemap semantic` adaptively balances the vector/BM25 hybrid-search fusion by the shape of your query:
+an identifier-looking query (`ParseSelector`, `graph.Store.NodeAtLine`) leans toward the exact-name/BM25
+channel, while a natural-language question (`where do we retry on rate limit`) leans toward the vector
+channel — both channels always contribute, just unevenly. The chosen profile is surfaced as `fusion`
+(`"identifier"`, `"natural_language"`, or `"balanced"`) in `--json` output and printed as a `fusion: …`
+line above the hit list otherwise. Pass `--fusion balanced` (or set `semantic.fusion: balanced` in
+config) for the exact pre-adaptive equal-weighted behavior.
 
 ## Surfaces
 

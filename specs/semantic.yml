@@ -10,7 +10,7 @@ target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s\\n' 'package app' '' '// Authenticate validates a JSON Web Token and returns the callers claims.' 'func Authenticate(token string) bool { return token != \"\" }' '' '// RenderTemplate writes an HTML page to the response writer.' 'func RenderTemplate(name string) string { return name }' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index >/dev/null 2>&1; echo '== semantic =='; \"$CM\" semantic 'verify a signed login credential'"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\"; printf '%s\\n' 'package app' '' '// Authenticate validates a JSON Web Token and returns the callers claims.' 'func Authenticate(token string) bool { return token != \"\" }' '' '// RenderTemplate writes an HTML page to the response writer.' 'func RenderTemplate(name string) string { return name }' > \"$P/a.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index >/dev/null 2>&1; echo '== semantic =='; \"$CM\" semantic 'verify a signed login credential'; echo '== semantic-json =='; \"$CM\" semantic Authenticate --json | grep -o '\"fusion\": *\"[^\"]*\"'"
     cwd: "."
 terminal:
     cols: 100
@@ -33,4 +33,9 @@ outcomes:
       verify:
         process:
             exitCode: 0
-contractHash: sha256:35bf6f99655826bdaa27d5771890b82d3aa76eaa072657aaf36773b5539947f5
+    - id: fusion_identifier_json
+      description: a bare single-word identifier query classifies as the "identifier" fusion profile in --json output (F7 adaptive fusion)
+      verify:
+        screen:
+            contains: "\"fusion\": \"identifier\""
+contractHash: sha256:da33ce0c9ed36565332a7f8fadfba109e6699e6e0cc44c5a8f9384d9493b07c2

@@ -114,6 +114,50 @@ func TestHybridSearch(t *testing.T) {
 	}
 }
 
+// TestHybridSearchWeighted pins F7: HybridSearchWeighted's per-channel
+// weights actually move the ranking. Record 1 is the vector-nearest hit but
+// has no BM25 overlap with the query text; record 2 is the BM25-best hit
+// (heavy "jwt" repetition) but is far from the query vector. A strong text
+// weight should rank record 2 above record 1, and vice versa for a strong
+// vector weight — a direct, DB-free assertion through the codemap wrapper.
+func TestHybridSearchWeighted(t *testing.T) {
+	s := openMem(t)
+	if _, err := s.Insert([]float32{1, 0, 0}, "render html template", NodeMeta{NodeID: 1, Project: "p", File: "view.go", Symbol: "Render", FQN: "p.Render"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Insert([]float32{0, 1, 0}, "jwt jwt jwt jwt jwt authentication token", NodeMeta{NodeID: 2, Project: "p", File: "auth.go", Symbol: "Authenticate", FQN: "p.Authenticate"}); err != nil {
+		t.Fatal(err)
+	}
+
+	query := []float32{1, 0, 0}
+
+	// veclite's RRF uses a fixed k=60 constant, so with only two candidate
+	// records the rank-1-vs-rank-2 gap is small (1/61 vs 1/62); the weight
+	// ratio has to be large enough to swing the fused ranking despite that.
+	// 0.1/10.0 (100x) does so decisively in both directions.
+	textHeavy, err := s.HybridSearchWeighted(query, "jwt", 5, "p", 0.1, 10.0)
+	if err != nil {
+		t.Fatalf("hybrid search (text-heavy): %v", err)
+	}
+	if len(textHeavy) < 2 {
+		t.Fatalf("text-heavy search: got %d hits, want 2", len(textHeavy))
+	}
+	if textHeavy[0].NodeID != 2 {
+		t.Errorf("text-heavy top hit NodeID = %d, want 2 (BM25-favored record)", textHeavy[0].NodeID)
+	}
+
+	vectorHeavy, err := s.HybridSearchWeighted(query, "jwt", 5, "p", 10.0, 0.1)
+	if err != nil {
+		t.Fatalf("hybrid search (vector-heavy): %v", err)
+	}
+	if len(vectorHeavy) < 2 {
+		t.Fatalf("vector-heavy search: got %d hits, want 2", len(vectorHeavy))
+	}
+	if vectorHeavy[0].NodeID != 1 {
+		t.Errorf("vector-heavy top hit NodeID = %d, want 1 (vector-nearest record)", vectorHeavy[0].NodeID)
+	}
+}
+
 func TestProfileGuardPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v.veclite")
 
