@@ -2316,3 +2316,52 @@ func TestVueCallGraphHonesty(t *testing.T) {
 		t.Error("noNameBasedCallLang must return false for 'go' (has name-based call edges)")
 	}
 }
+
+// TestFindSymbolsMatchedIn pins panel idea I19: the no-Ollama search floor
+// (FindSymbols, via Search's fallback) reports which field satisfied a
+// multi-word query — name match ("symbol") ranks ahead of a docstring-only
+// match ("docstring") — and Ollama never enters the picture (pure fixture,
+// no embeddings requested).
+func TestFindSymbolsMatchedIn(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	src := "package app\n\n" +
+		"func ParseSelector() {}\n\n" +
+		"// ValidateInput parses the given selector before use.\n" +
+		"func ValidateInput() {}\n"
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.FindSymbols(proj, "parse selector", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Hits) < 2 {
+		t.Fatalf("FindSymbols('parse selector') = %d hits, want >= 2 (name + docstring match); got %+v", len(rep.Hits), rep.Hits)
+	}
+	if rep.Hits[0].Symbol != "ParseSelector" || rep.Hits[0].MatchedIn != "symbol" {
+		t.Errorf("name match should rank first with matched_in=symbol: got %+v", rep.Hits[0])
+	}
+	found := false
+	for _, h := range rep.Hits[1:] {
+		if h.Symbol == "ValidateInput" {
+			found = true
+			if h.MatchedIn != "docstring" {
+				t.Errorf("ValidateInput matched_in = %q, want docstring", h.MatchedIn)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("docstring-only match ValidateInput missing from hits: %+v", rep.Hits)
+	}
+}

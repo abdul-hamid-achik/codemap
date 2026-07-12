@@ -94,6 +94,15 @@ returns no hits with a short note explaining there are no embeddings — and the
 plus that `"note"` — so you know to embed the index or fall back to `codemap find`. It never calls the
 embedder or creates an empty vector store in that case.
 
+**`codemap find` in degraded (no-Ollama) mode**: it's the offline search floor, not a semantic
+replacement — it tokenizes the query on whitespace and camelCase boundaries (query side only) and
+matches each token against symbol/FQN or docstring, so a multi-word query like `parse selector` finds
+`ParseSelector` and `parse_selector` alike, and a docstring-only mention still surfaces (ranked below a
+name match). Each hit carries `matched_in` (`"symbol"`, `"fqn"`, or `"docstring"`) so you can see why it
+matched. It's still substring/keyword matching, not meaning search: it won't find a conceptually related
+symbol that shares no words with the query — for that, embed the index (`codemap index`, with Ollama
+running) and use `codemap semantic`.
+
 `codemap grep` searches only the **indexed file set** — the files codemap extracted structure from
 (same excludes as `codemap index`) — not every byte in the repo; a config/YAML/README file with no
 registered extractor is invisible to it, exactly as it already is to `codemap find`/`codemap symbols`.

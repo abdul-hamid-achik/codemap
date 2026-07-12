@@ -17,6 +17,7 @@ type SemanticHit struct {
 	Score       float32            `json:"score"`
 	Signature   string             `json:"signature,omitempty"`
 	Doc         string             `json:"doc,omitempty"`
+	MatchedIn   string             `json:"matched_in,omitempty"`  // "symbol"|"fqn"|"docstring" — no-embeddings fallback only (FindSymbols)
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
@@ -184,14 +185,16 @@ func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, 
 		return rep, nil
 	}
 	g, _ := svc.s.Graph()
-	nodes, err := g.SearchSymbols(pid, query, limit)
+	matches, err := g.SearchSymbols(pid, query, limit)
 	if err != nil {
 		return nil, err
 	}
-	for _, n := range nodes {
+	for _, m := range matches {
+		n := m.Node
 		rep.Hits = append(rep.Hits, SemanticHit{
 			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
 			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Doc: n.Docstring,
+			MatchedIn: m.MatchedIn,
 		})
 	}
 	enrichHitAnnotations(g, pid, rep.Hits)
