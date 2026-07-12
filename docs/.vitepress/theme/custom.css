@@ -1,0 +1,193 @@
+/* codemap docs theme — the landing wears studio's own Monokai palette.
+   Roles (same as the TUI): cyan = act, green = symbol, magenta = cost/risk,
+   yellow = caveat. See internal/tui/theme.go. */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --cm-cyan: #66d9ef;
+  --cm-green: #a6e22e;
+  --cm-magenta: #f92672;
+  --cm-yellow: #e6db74;
+  --cm-ink: #e6e6e6;
+  --cm-muted: #8a8f98;
+  --cm-pane: #1a1d23;
+  --cm-pane-edge: #3a3f4b;
+  --cm-chip: #252932;
+
+  --vp-font-family-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* brand: teal-shifted for contrast on white */
+  --vp-c-brand-1: #0f7b93;
+  --vp-c-brand-2: #0e6f84;
+  --vp-c-brand-3: #0c6376;
+  --vp-c-brand-soft: rgba(102, 217, 239, 0.14);
+}
+
+.dark {
+  /* dark is codemap's native mode: run the real studio cyan */
+  --vp-c-brand-1: var(--cm-cyan);
+  --vp-c-brand-2: #4fc4d9;
+  --vp-c-brand-3: #3aafc4;
+  --vp-c-brand-soft: rgba(102, 217, 239, 0.16);
+}
+
+/* ---------- hero ---------- */
+
+.VPHero .name,
+.VPHero .text {
+  font-family: 'Space Grotesk', var(--vp-font-family-base);
+  letter-spacing: -0.02em;
+}
+
+.VPHero .name {
+  /* no gradient: flat studio cyan, like a focused pane title */
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--vp-c-brand-1);
+}
+
+.VPHero .tagline {
+  max-width: 42em;
+}
+
+.VPFeature h2 {
+  font-family: 'Space Grotesk', var(--vp-font-family-base);
+  letter-spacing: -0.01em;
+}
+
+/* ---------- custom landing sections ---------- */
+
+.cm-section {
+  margin: 48px 0 0;
+}
+
+.cm-section > h2 {
+  font-family: 'Space Grotesk', var(--vp-font-family-base);
+  letter-spacing: -0.01em;
+  border-top: none;
+}
+
+.cm-kicker {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--vp-c-brand-1);
+  margin: 0 0 4px;
+}
+
+/* the signature: two agent transcripts, same question ------------------- */
+
+.cm-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 24px 0 8px;
+}
+
+@media (max-width: 720px) {
+  .cm-diff {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* terminals stay dark in both site modes — terminals are dark */
+.cm-term {
+  background: var(--cm-pane);
+  border: 1px solid var(--cm-pane-edge);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.cm-term-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--cm-pane-edge);
+  color: var(--cm-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.cm-term-bar .cm-verdict-bad { color: var(--cm-magenta); }
+.cm-term-bar .cm-verdict-good { color: var(--cm-green); }
+
+.cm-term-body {
+  padding: 12px 16px 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--cm-ink);
+  margin: 0;
+}
+
+.cm-term-body .dim { color: var(--cm-muted); }
+.cm-term-body .cyan { color: var(--cm-cyan); }
+.cm-term-body .green { color: var(--cm-green); }
+.cm-term-body .magenta { color: var(--cm-magenta); }
+.cm-term-body .yellow { color: var(--cm-yellow); }
+
+.cm-tally {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--cm-pane-edge);
+  color: var(--cm-muted);
+  font-size: 12px;
+}
+
+.cm-tally strong {
+  color: var(--cm-ink);
+  font-weight: 600;
+}
+
+/* harness chips ---------------------------------------------------------- */
+
+.cm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cm-chips li {
+  margin: 0;
+  font-family: var(--vp-font-family-mono);
+  font-size: 12.5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  color: var(--vp-c-text-2);
+}
+
+.cm-chips li.on {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+/* quiet footnote */
+.cm-note {
+  color: var(--vp-c-text-3);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cm-term {
+    transition: border-color 0.2s ease;
+  }
+  .cm-term:hover {
+    border-color: var(--vp-c-brand-1);
+  }
+}

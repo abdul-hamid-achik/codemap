@@ -13,7 +13,14 @@ export default defineConfig({
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32.png' }],
     ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' }],
-    ['meta', { name: 'description', content: 'codemap documentation site.' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
+    ['meta', { name: 'description', content: 'A local-first code graph + semantic search your coding agent calls over MCP. One pure-Go binary, fully offline.' }],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:title', content: 'codemap — your agent greps. codemap knows.' }],
+    ['meta', { property: 'og:description', content: 'Local-first code intelligence for coding agents: who calls this, what breaks, which tests cover it — one call each, over MCP or CLI.' }],
+    ['meta', { property: 'og:url', content: 'https://codemap.tools' }],
+    ['meta', { name: 'twitter:card', content: 'summary' }],
   ],
 
   sitemap: { hostname: 'https://codemap.tools' },
@@ -27,6 +34,7 @@ export default defineConfig({
       { text: 'CLI', link: '/cli' },
       { text: 'studio', link: '/studio' },
       { text: 'MCP', link: '/mcp' },
+      { text: 'CI', link: '/ci' },
     ],
     sidebar: [
       {
@@ -50,6 +58,7 @@ export default defineConfig({
         text: 'Agents',
         items: [
           { text: 'For agents', link: '/agents' },
+          { text: 'CI review gate', link: '/ci' },
         ],
       },
       {
