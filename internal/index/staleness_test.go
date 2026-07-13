@@ -156,3 +156,67 @@ func TestStalenessRespectsSlashAnchoredExclude(t *testing.T) {
 		t.Errorf("P1-07 regression: db/migrations/* must be excluded from staleness.New (slash-anchored exclude should match the project-relative path); got New=%d", st.New)
 	}
 }
+
+// TestStalenessDefaultExcludesAreRootAnchored is the staleness-side twin of
+// TestDefaultExcludesAreRootAnchoredNotAnySegment (indexer_test.go): with the
+// DEFAULT config (no exclude_extra needed), a real nested subpackage named
+// like an ambiguous default exclude ("internal/env") must register as drift
+// like any other tracked file, while a root-level "env/" directory must
+// never surface as staleness.New — proving staleness.WalkDir shares the same
+// root-anchored matchExclude semantics as the indexer walk, not a divergent
+// copy.
+func TestStalenessDefaultExcludesAreRootAnchored(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	g, _ := newStores(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/fix2\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "internal/env"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal/env/e.go"),
+		[]byte("package env\n\nfunc LoadEnv() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "env"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "env/generated.go"),
+		[]byte("package env\n\nfunc RootArtifact() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject("fix2", dir, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix := New(g, nil, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+	res, err := ix.IndexProject(context.Background(), pid, "fix2", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesIndexed != 1 {
+		t.Fatalf("FilesIndexed = %d, want 1 (internal/env/e.go only; root env/ excluded)", res.FilesIndexed)
+	}
+	// A fresh index of a repo with an already-excluded root env/ must show no
+	// drift at all.
+	st, err := ix.Staleness(pid, dir, map[string]bool{"go": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Any() {
+		t.Errorf("P1-11 regression: fresh index should not be stale, got %+v", st)
+	}
+	// Simulate the file falling out of index_state (as if never indexed) to
+	// probe whether staleness's own walk would (wrongly) offer it as "new".
+	_, _ = g.DB().Exec("DELETE FROM index_state WHERE project_id=? AND file_path='env/generated.go'", pid)
+	st, err = ix.Staleness(pid, dir, map[string]bool{"go": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.New != 0 {
+		t.Errorf("root-level env/generated.go must stay excluded from staleness.New even without an index_state row; got New=%d", st.New)
+	}
+}
