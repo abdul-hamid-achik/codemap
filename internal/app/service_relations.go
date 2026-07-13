@@ -87,6 +87,20 @@ func (svc *Service) Callees(cwd, symbol string) (*RelationReport, error) {
 // call graph is already available (Go, or a precise index), so those queries pay no
 // latency. If the language server is absent or fails, the honest "run --precise"
 // note is kept unchanged. wantCallers selects the direction.
+//
+// P1-06 (B1): preciseRelations distinguishes three outcomes, not two — genuinely
+// resolved (err == nil, regardless of whether the results are empty: a FOUND
+// symbol with a prepared call hierarchy that the server reports has zero
+// incoming/outgoing calls is an honest zero) from a soft miss (err ==
+// errPreciseUnresolved: the project isn't registered, the symbol's live position
+// couldn't be found in the server's documentSymbol response, or the server
+// prepared no call-hierarchy item for it) from a hard failure (any other err: the
+// server is missing, unreachable, or errored). Only the first may claim
+// resolution here; both the soft-miss and the hard-failure branches fall into the
+// same `err != nil` case below and keep base's honest "unresolved" note — a
+// soft miss must never be reported as "resolved on demand" with an empty result,
+// which is a confidently-wrong answer ("no callers, resolved") where the truth is
+// "could not resolve".
 func (svc *Service) autoUpgradeRelation(base *RelationReport, cwd, symbol string, wantCallers bool) *RelationReport {
 	if base.Resolution == "" {
 		return base // call graph available — nothing to upgrade, no server spawn
@@ -95,7 +109,7 @@ func (svc *Service) autoUpgradeRelation(base *RelationReport, cwd, symbol string
 	defer cancel()
 	callers, callees, _, err := svc.preciseRelations(ctx, cwd, symbol, "", 0)
 	if err != nil {
-		return base // server missing/failed — keep the honest "unresolved" note
+		return base // soft miss (errPreciseUnresolved) or hard failure — keep the honest "unresolved" note
 	}
 	results := callees
 	if wantCallers {
@@ -288,12 +302,36 @@ func lspServerFor(lang, filePath string) (cmd string, args []string, langID stri
 	return "", nil, "", false
 }
 
+// errPreciseUnresolved marks a "soft miss" from preciseRelations: the graph/LSP
+// plumbing itself worked (no transport or process error), but the symbol
+// couldn't be pinned down precisely — the project isn't registered, the live
+// file no longer has a documentSymbol matching the queried name at the expected
+// position, or the server prepared no call-hierarchy item for it. It is
+// deliberately distinct from a nil error (see preciseRelations) so a caller can
+// tell "the server told us, concretely, that this symbol has zero calls" from
+// "we couldn't even ask the question" — only the former may claim resolution
+// (P1-06 / B1).
+var errPreciseUnresolved = errors.New("precise: symbol not resolved by the language server")
+
 // preciseRelations resolves the symbol's node via the graph (preferring the one
 // at hintFile:hintLine), then drives the matching language server (gopls for Go;
 // typescript-language-server / pyright for the LSP languages) through
 // documentSymbol → prepareCallHierarchy → incoming + outgoing in a single session.
 // Scoped to the one queried symbol, so it works on demand without a full
 // `index --precise` reindex.
+//
+// Return contract (P1-06 / B1): err == nil means genuinely resolved — even when
+// callers/callees come back empty, that's the server's explicit, honest answer
+// for a symbol it FOUND and prepared a call hierarchy for ("resolved-genuinely-
+// zero"). err == errPreciseUnresolved means a soft miss — the symbol could not
+// be located/prepared at all, so the caller must NOT treat empty results as a
+// real answer. Any other err is a hard failure (server missing, spawn/transport
+// error). Callers (autoUpgradeRelation, autoUpgradeSelectorRelation,
+// PreciseCallers/Callees, preciseRelationBySelector) already branch on
+// `err != nil` alone, so both the soft-miss and hard-failure cases are handled
+// identically today — the sentinel exists so the soft-miss branch is explicit,
+// named, and independently testable rather than accidentally sharing the "nil
+// error, empty results" shape genuine resolution uses.
 func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile string, hintLine int) (callers, callees []SymbolRef, project string, err error) {
 	g, err := svc.s.Graph()
 	if err != nil {
@@ -304,7 +342,7 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 	}
 	p, err := g.GetProjectByName(project)
 	if errors.Is(err, graph.ErrNotFound) {
-		return nil, nil, project, nil
+		return nil, nil, project, errPreciseUnresolved // soft miss: project never indexed
 	}
 	if err != nil {
 		return nil, nil, project, err
@@ -364,11 +402,14 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 	}
 	pos, ok := findSymbolPos(syms, symbol, node.StartLine)
 	if !ok {
-		return nil, nil, project, nil
+		return nil, nil, project, errPreciseUnresolved // soft miss: no live documentSymbol matches the queried name/position
 	}
 	items, err := cl.PrepareCallHierarchy(ctx, uri, pos)
-	if err != nil || len(items) == 0 {
+	if err != nil {
 		return nil, nil, project, err
+	}
+	if len(items) == 0 {
+		return nil, nil, project, errPreciseUnresolved // soft miss: server prepared no call-hierarchy item here
 	}
 
 	in, err := cl.IncomingCalls(ctx, items[0])

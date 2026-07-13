@@ -192,6 +192,34 @@ func TestBind(t *testing.T) {
 	}
 }
 
+// TestRelOf verifies relOf percent-decodes the callee URI before computing the
+// root-relative path (P1-02 residual): a raw TrimPrefix(uri, "file://") left
+// "%20" in the path, which never matched a project root containing a space and
+// silently marked every such callee External, dropping the precise call edge.
+func TestRelOf(t *testing.T) {
+	root := "/Users/dev/My Project"
+	e := &Extractor{root: root}
+
+	t.Run("percent-encoded path inside root resolves and is not external", func(t *testing.T) {
+		uri := "file:///Users/dev/My%20Project/src/util%20file.ts"
+		rel, external := e.relOf(uri)
+		if external {
+			t.Fatalf("relOf(%q) external = true, want false", uri)
+		}
+		want := filepath.Join("src", "util file.ts")
+		if rel != want {
+			t.Errorf("relOf(%q) = %q, want %q", uri, rel, want)
+		}
+	})
+
+	t.Run("path outside root is external", func(t *testing.T) {
+		uri := "file:///Users/dev/Other%20Project/dep.ts"
+		if _, external := e.relOf(uri); !external {
+			t.Errorf("relOf(%q) external = false, want true (outside root)", uri)
+		}
+	})
+}
+
 // TestWrapExtractErr verifies a request timeout becomes an actionable message
 // (not a bare "context deadline exceeded"), while other errors pass through.
 func TestWrapExtractErr(t *testing.T) {
