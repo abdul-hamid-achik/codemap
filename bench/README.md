@@ -53,28 +53,35 @@ go run ./bench --dry-run                # print the full plan + exact claude inv
 Opus. The harness prints the summed `total_cost_usd` at the end so spend is never a surprise.
 Subset with `--tasks` / `--reps` to iterate cheaply.
 
-## The two 2026-07-12 runs disagree — read this
+## The three runs tell a story — read this
 
-Both 60-session matrices are committed (`results/20260712-182434.summary.json`
-subscription auth, `results/20260712-203241.summary.json` api-key/`--bare`), and they
-tell different stories:
+All three 60-session matrices are committed under `results/` and they differ in
+exactly instructive ways:
 
-| Δ (codemap vs baseline) | subscription | api-key (hermetic) |
-|---|---|---|
-| tool calls | −59% | −26% |
-| input tokens (incl. cache) | −30% | **+95%** |
-| wall-clock | +65% | −23% |
-| cost | −43% | +6% |
-| correctness | 8/10 both | 10/10 vs 9/10 |
+| Δ (codemap vs baseline) | subscription (full) | hermetic (full, 39 tools) | **hermetic (core, 22 tools)** |
+|---|---|---|---|
+| tool calls | −59% | −26% | **−40%** |
+| input tokens (incl. cache) | −30% | **+95%** | **+12%** |
+| wall-clock | +65% | −23% | **−40%** |
+| cost | −43% | +6% | **−22%** |
+| correctness | 8/10 both | 10/10 vs 9/10 | **8/10 vs 9/10 (codemap +1)** |
 
-Lessons, honestly stated: (1) the subscription run's wall-clock penalty was plan
-throttling, not codemap — hermetically the codemap arm is *faster*; (2) the
-subscription run's big token/cost savings were inflated by ambient user config
-(hooks/CLAUDE.md) loading into both arms; (3) hermetically, codemap's input-token
-overhead is real — 39 MCP tool schemas ride in every session's context. That last
-one is direct evidence for a leaner tool profile (`core` subset) as the next
-optimization. Treat the hermetic run as the reference; it is the table in the
-repo README.
+(`20260712-182434` subscription/full · `20260712-203241` api-key/full ·
+`20260713-001943` api-key/core — the **reference run**, and the repo README table.)
+
+Lessons, honestly stated:
+1. The subscription run's wall-clock penalty was plan throttling, not codemap —
+   hermetically the codemap arm is faster; its big savings were inflated by ambient
+   user config loading into both arms.
+2. The full profile's +95% input tokens was the 39-tool schema tax. Cutting to the
+   22-tool `core` profile (`CODEMAP_MCP_PROFILE=core`, shipped as a direct result of
+   this measurement) collapsed it to +12% and flipped cost to −22%.
+3. **Usage rate**: only ~half the codemap-arm sessions actually called an MCP tool
+   (15/30 full, 16/30 core) — `--bare` sessions carry no playbook teaching *when* to
+   reach for codemap, so these numbers measure "codemap available but untaught." Real
+   deployments install the tool-selection playbook (`codemap agent setup` / the Claude
+   Code plugin); a playbook-injected arm is the obvious next methodology improvement
+   and would likely widen the deltas further.
 
 ## Methodology (read before trusting a number)
 
