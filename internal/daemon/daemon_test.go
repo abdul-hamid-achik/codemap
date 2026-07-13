@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/config"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
 // boolPtr is a test helper so ReindexOpts{Embed: boolPtr(false)} reads cleanly.
@@ -95,6 +97,64 @@ func TestDaemonIndexesOnChange(t *testing.T) {
 	}
 	if _, err := os.Stat(config.DaemonStatePath()); !os.IsNotExist(err) {
 		t.Errorf("state file should be removed after stop")
+	}
+}
+
+func TestDaemonPreciseMaintainsCoverageAfterChange(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	root := t.TempDir()
+	mustWrite(t, root, "go.mod", "module example.com/daemonprecise\n\ngo 1.25\n")
+	mustWrite(t, root, "a.go", "package daemonprecise\n\nfunc Alpha() { Beta() }\n")
+	mustWrite(t, root, "b.go", "package daemonprecise\n\nfunc Beta() {}\n")
+
+	d, err := Start(context.Background(), root, Config{
+		NoEmbed:  true,
+		Precise:  true,
+		Debounce: 80 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	g, err := d.sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := g.CallGraphResolvedFiles(d.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved["a.go"] || !resolved["b.go"] {
+		t.Fatalf("precise daemon did not start with exact coverage: %v", resolved)
+	}
+	if info := QueryStatus(); info == nil || !info.Precise {
+		t.Fatalf("daemon.status should advertise persistent precise mode, got %+v", info)
+	}
+
+	// Editing a covered file replaces its node generation and clears its old
+	// coverage. The watcher batch must run the precise pass before it reports
+	// success, leaving both coverage and exact edges current again.
+	mustWrite(t, root, "a.go", "package daemonprecise\n\nfunc Alpha() { Beta() }\nfunc Added() { Beta() }\n")
+	if !eventually(5*time.Second, func() bool {
+		nodes, _ := g.FindNodesBySymbol(d.pid, "Added")
+		if len(nodes) != 1 {
+			return false
+		}
+		coverage, err := g.CallGraphResolvedFiles(d.pid)
+		return err == nil && coverage["a.go"] && coverage["b.go"]
+	}) {
+		coverage, _ := g.CallGraphResolvedFiles(d.pid)
+		t.Fatalf("daemon indexed the edit but did not restore precise coverage: %v", coverage)
+	}
+	if n, err := g.CountEdgesByProvenance(d.pid, graph.ProvPrecise); err != nil {
+		t.Fatal(err)
+	} else if n < 2 {
+		t.Fatalf("precise daemon edges = %d, want Alpha→Beta and Added→Beta", n)
 	}
 }
 

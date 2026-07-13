@@ -136,6 +136,14 @@ func (svc *Service) ContextBatch(cwd string, symbols []string, selectors []Symbo
 // definition's Source dropped, SourceOmitted set) — when brief, the source
 // budget below has nothing left to truncate.
 func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, symbols []string, selectors []SymbolSelector, depth int, brief bool) (*ContextBatchReport, error) {
+	return svc.contextBatchWithContext(ctx, cwd, symbols, selectors, depth, brief, true)
+}
+
+// contextBatchWithContext is the internal policy form. Explore disables
+// transient memory recall because it already performs a semantic search and is
+// intentionally a compact graph-orientation response; ordinary context_batch
+// preserves the existing project-scoped memory layer.
+func (svc *Service) contextBatchWithContext(ctx context.Context, cwd string, symbols []string, selectors []SymbolSelector, depth int, brief, recallMemories bool) (*ContextBatchReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -170,7 +178,7 @@ func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, sym
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		cr, callers, cerr := svc.contextForTarget(ctx, memoryCtx, cwd, item.name, item.selector, depth, brief)
+		cr, callers, cerr := svc.contextForTarget(ctx, memoryCtx, cwd, item.name, item.selector, depth, brief, recallMemories)
 		if cerr != nil {
 			// A selector's own validation (blank file, ambiguous selector, no
 			// start_line/fqn) is a bad individual input, not a broken batch —

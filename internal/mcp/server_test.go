@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -72,9 +73,9 @@ func TestResultPreservesCodedErrorForAgents(t *testing.T) {
 
 func TestInstructionsCoverKeyCapabilities(t *testing.T) {
 	// The instructions are an agent's first-contact playbook; keep them in sync
-	// with the actual tools and accuracy model.
+	// with the taught tools available in every profile and the accuracy model.
 	for _, want := range []string{"codemap_index", "codemap_impact", "codemap_semantic",
-		"codemap_source", "codemap_references", "codemap_projects", "precise:true", "name-based",
+		"codemap_source", "codemap_references", "codemap_read_order", "codemap_status", "precise:true", "name-based",
 		"selector", "start_line", "volatile database ids",
 		"confirmed", "candidate", "deletion_analysis",
 		`"indexed": false`, "degrades to name-based",
@@ -158,7 +159,7 @@ func TestMCPServer(t *testing.T) {
 		got[tool.Name] = true
 		toolsByName[tool.Name] = tool
 	}
-	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_references", "codemap_find", "codemap_grep", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_coverage", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
+	for _, want := range []string{"codemap_init", "codemap_index", "codemap_status", "codemap_semantic", "codemap_callers", "codemap_references", "codemap_find", "codemap_grep", "codemap_source", "codemap_context", "codemap_context_batch", "codemap_review", "codemap_read_order", "codemap_map", "codemap_explore", "codemap_traverse", "codemap_dependencies", "codemap_file_impact", "codemap_risk", "codemap_coverage", "codemap_projects", "codemap_docs", "codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor", "codemap_branch_status", "codemap_branch_switch"} {
 		if !got[want] {
 			t.Errorf("missing tool %q (have %v)", want, got)
 		}
@@ -241,6 +242,133 @@ func TestMCPServer(t *testing.T) {
 		// Agents are told (codemap_docs) to check freshness before trusting results,
 		// so the staleness object must reach them over MCP, not just the CLI.
 		t.Errorf("status should carry the staleness object for agents: %s", txt)
+	}
+
+	// codemap_map is the bounded full-profile architecture overview. Its input
+	// schema exposes independent caps, and its payload preserves stable v1 +
+	// confidence/freshness fields rather than returning raw graph ids.
+	mapTool := toolsByName["codemap_map"]
+	mapSchemaJSON, err := json.Marshal(mapTool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"top_subsystems", "top_bridges", "top_hubs", "top_entrypoints"} {
+		if !strings.Contains(string(mapSchemaJSON), `"`+field+`"`) {
+			t.Errorf("codemap_map schema missing %s: %s", field, mapSchemaJSON)
+		}
+	}
+	mapRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_map",
+		Arguments: map[string]any{
+			"path": proj, "top_subsystems": 1, "top_bridges": 1,
+			"top_hubs": 1, "top_entrypoints": 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapText := textOf(mapRes)
+	if mapRes.IsError || !strings.Contains(mapText, `"schema_version":1`) ||
+		!strings.Contains(mapText, `"strategy":"source_path"`) ||
+		!strings.Contains(mapText, `"subsystems"`) || !strings.Contains(mapText, `"bridges"`) ||
+		!strings.Contains(mapText, `"hubs"`) || !strings.Contains(mapText, `"entrypoints"`) ||
+		strings.Contains(mapText, `"id":`) {
+		t.Fatalf("architecture map transport contract is incomplete or leaked ids: %s", mapText)
+	}
+
+	// codemap_explore and codemap_traverse are full-profile, bounded composition
+	// tools. Explore promotes intent hits to exact source-light contexts;
+	// traverse requires one durable selector and never accepts a name union.
+	for name, fields := range map[string][]string{
+		"codemap_explore":  {"query", "seeds", "edges", "depth"},
+		"codemap_traverse": {"selector", "direction", "edge_types", "depth", "limit"},
+	} {
+		raw, marshalErr := json.Marshal(toolsByName[name].InputSchema)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		for _, field := range fields {
+			if !strings.Contains(string(raw), `"`+field+`"`) {
+				t.Errorf("%s schema missing %s: %s", name, field, raw)
+			}
+		}
+		if name == "codemap_traverse" {
+			var schema struct {
+				Required   []string       `json:"required"`
+				Properties map[string]any `json:"properties"`
+			}
+			if err := json.Unmarshal(raw, &schema); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(schema.Required, "selector") {
+				t.Errorf("codemap_traverse must require selector: %s", raw)
+			}
+			if _, hasSymbol := schema.Properties["symbol"]; hasSymbol {
+				t.Errorf("codemap_traverse must not expose a name-union symbol input: %s", raw)
+			}
+		}
+	}
+
+	exploreRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_explore",
+		Arguments: map[string]any{
+			"path": proj, "query": "Run", "seeds": 1, "edges": 1, "depth": 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exploreText := textOf(exploreRes)
+	if exploreRes.IsError || !strings.Contains(exploreText, `"schema_version":1`) ||
+		!strings.Contains(exploreText, `"query":"Run"`) || !strings.Contains(exploreText, `"seeds"`) ||
+		!strings.Contains(exploreText, `"contexts"`) || !strings.Contains(exploreText, `"selector"`) ||
+		!strings.Contains(exploreText, `"source_omitted":true`) || strings.Contains(exploreText, `"id":`) {
+		t.Fatalf("explore transport contract is incomplete, source-heavy, or leaked ids: %s", exploreText)
+	}
+
+	traverseRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_traverse",
+		Arguments: map[string]any{
+			"path": proj,
+			"selector": map[string]any{
+				"file": "main.go", "start_line": 3, "fqn": "app.Run", "kind": "function",
+			},
+			"direction": "outgoing", "edge_types": []string{"calls"}, "depth": 1, "limit": 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	traverseText := textOf(traverseRes)
+	if traverseRes.IsError || !strings.Contains(traverseText, `"schema_version":1`) ||
+		!strings.Contains(traverseText, `"found":true`) || !strings.Contains(traverseText, `"direction":"outgoing"`) ||
+		!strings.Contains(traverseText, `"edge_types":["calls"]`) || !strings.Contains(traverseText, `"hops"`) ||
+		!strings.Contains(traverseText, `"parent_selector"`) || !strings.Contains(traverseText, `"domains"`) ||
+		strings.Contains(traverseText, `"id":`) {
+		t.Fatalf("traverse transport contract is incomplete or leaked ids: %s", traverseText)
+	}
+
+	badExplore, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_explore", Arguments: map[string]any{"path": proj, "query": "Run", "seeds": app.MaxExploreSeeds + 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !badExplore.IsError || !strings.Contains(textOf(badExplore), "explore seeds must be between") {
+		t.Fatalf("explore bounds must return a tool error: %s", textOf(badExplore))
+	}
+	badTraverse, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_traverse",
+		Arguments: map[string]any{
+			"path": proj, "selector": map[string]any{"file": "main.go", "start_line": 3},
+			"limit": app.MaxTraverseLimit + 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !badTraverse.IsError || !strings.Contains(textOf(badTraverse), "traverse limit must be between") {
+		t.Fatalf("traverse bounds must return a tool error: %s", textOf(badTraverse))
 	}
 
 	// codemap_callers — a real symbol with callers reports found:true.
@@ -471,6 +599,9 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 		{"codemap_grep", map[string]any{"path": proj, "pattern": "Run"}},
 		{"codemap_semantic", map[string]any{"path": proj, "query": "run"}},
 		{"codemap_hotspots", map[string]any{"path": proj}},
+		{"codemap_map", map[string]any{"path": proj}},
+		{"codemap_explore", map[string]any{"path": proj, "query": "run"}},
+		{"codemap_traverse", map[string]any{"path": proj, "selector": map[string]any{"file": "main.go", "start_line": 3}}},
 	} {
 		res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.args})
 		if err != nil {
@@ -1167,12 +1298,12 @@ func listToolNames(t *testing.T, srv *Server) map[string]bool {
 }
 
 // fullToolNames is the exhaustive, hand-maintained list of every tool
-// codemap ships under ProfileFull (39; AGENTS.md's "Current set (39)" line
+// codemap ships under ProfileFull (42; AGENTS.md's "Current set (42)" line
 // must be updated alongside this list if it ever changes).
 var fullToolNames = []string{
 	"codemap_init", "codemap_index", "codemap_status", "codemap_semantic",
 	"codemap_callers", "codemap_callees", "codemap_references", "codemap_impact",
-	"codemap_review", "codemap_read_order", "codemap_related_files", "codemap_dependencies",
+	"codemap_review", "codemap_read_order", "codemap_map", "codemap_explore", "codemap_traverse", "codemap_related_files", "codemap_dependencies",
 	"codemap_file_impact", "codemap_risk", "codemap_symbol_at", "codemap_secret_impact",
 	"codemap_required_keys", "codemap_hotspots", "codemap_orphans", "codemap_coverage",
 	"codemap_path", "codemap_symbols", "codemap_find", "codemap_grep", "codemap_source",
@@ -1209,10 +1340,9 @@ func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
 	}
 }
 
-// TestMCPToolsByProfile pins I01's exact registered-tool set for both
-// profiles: ProfileFull is unchanged back-compat behavior (all 39 tools,
-// zero fewer, zero more); ProfileCore is exactly coreTools (22) — the lean
-// set covering the taught agent workflow plus codemap_docs/codemap_status.
+// TestMCPToolsByProfile pins the exact registered-tool set for all profiles:
+// ProfileFull remains all 42 tools, ProfileCore remains its shipped 22-tool
+// inventory, and ProfileAgent is the separately versioned taught workflow.
 func TestMCPToolsByProfile(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
 		sess := newProfileTestSession(t)
@@ -1230,6 +1360,16 @@ func TestMCPToolsByProfile(t *testing.T) {
 		got := listToolNames(t, NewServer(sess))
 		assertExactToolSet(t, got, want)
 	})
+	t.Run("agent", func(t *testing.T) {
+		sess := newProfileTestSession(t)
+		sess.Config.MCP.Profile = ProfileAgent
+		want := make([]string, 0, len(agentTools))
+		for name := range agentTools {
+			want = append(want, name)
+		}
+		got := listToolNames(t, NewServer(sess))
+		assertExactToolSet(t, got, want)
+	})
 	// The default (zero-value Config, as a hand-built test Config that never
 	// ran through config.Validate would produce) must behave as ProfileFull —
 	// the back-compat guarantee — not silently register zero tools.
@@ -1241,16 +1381,10 @@ func TestMCPToolsByProfile(t *testing.T) {
 	})
 }
 
-// TestCoreProfileCoversTaughtTools is I01's hypothesis-2 invariant: every
-// codemap_<tool> token the canonical playbook (RenderPlaybook, which embeds
-// docs.go's workflow+accuracy topics verbatim — see playbook.go) and the
-// docs.go workflow topic actually teach an agent to call MUST be in
-// coreTools. If a future edit to docs.go/playbook.go starts teaching a new
-// tool without adding it to coreTools here, ProfileCore would silently break
-// the very loop it's supposed to preserve — this test fails first instead.
-func TestCoreProfileCoversTaughtTools(t *testing.T) {
+func taughtToolSet(t *testing.T) map[string]bool {
+	t.Helper()
 	toolRe := regexp.MustCompile(`codemap_([a-z][a-z_]*)`)
-	taught := map[string]bool{}
+	taught := map[string]bool{"codemap_docs": true}
 	for _, src := range []string{
 		app.RenderPlaybook(app.FormatClaudeSkill), // preamble + workflow + accuracy
 		app.Docs("workflow"),
@@ -1259,9 +1393,21 @@ func TestCoreProfileCoversTaughtTools(t *testing.T) {
 			taught["codemap_"+m[1]] = true
 		}
 	}
-	if len(taught) == 0 {
+	if len(taught) == 1 {
 		t.Fatal("no codemap_<tool> tokens found in the playbook/docs — regex or source drifted")
 	}
+	return taught
+}
+
+// TestCoreProfileCoversTaughtTools is I01's hypothesis-2 invariant: every
+// codemap_<tool> token the canonical playbook (RenderPlaybook, which embeds
+// docs.go's workflow+accuracy topics verbatim — see playbook.go) and the
+// docs.go workflow topic actually teach an agent to call MUST be in
+// coreTools. If a future edit to docs.go/playbook.go starts teaching a new
+// tool without adding it to coreTools here, ProfileCore would silently break
+// the very loop it's supposed to preserve — this test fails first instead.
+func TestCoreProfileCoversTaughtTools(t *testing.T) {
+	taught := taughtToolSet(t)
 	var missing []string
 	for name := range taught {
 		if !coreTools[name] {
@@ -1271,5 +1417,40 @@ func TestCoreProfileCoversTaughtTools(t *testing.T) {
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		t.Errorf("tools taught by the playbook/docs but missing from coreTools (ProfileCore would silently break the taught workflow): %v", missing)
+	}
+}
+
+// TestAgentProfileExactlyMatchesTaughtWorkflow makes ProfileAgent a measured
+// contract rather than a hand-wavy "small" profile. It must include every
+// tool named by the canonical playbook, retain codemap_docs for discovery,
+// and include no untaught admin or expert surface.
+func TestAgentProfileExactlyMatchesTaughtWorkflow(t *testing.T) {
+	taught := taughtToolSet(t)
+	if len(taught) != 22 {
+		t.Fatalf("taught workflow tool count = %d, want 22; review the agent profile and its schema benchmark", len(taught))
+	}
+	got := map[string]bool{}
+	for name := range agentTools {
+		got[name] = true
+	}
+	want := make([]string, 0, len(taught))
+	for name := range taught {
+		want = append(want, name)
+	}
+	assertExactToolSet(t, got, want)
+
+	for _, excluded := range []string{"codemap_init", "codemap_annotate", "codemap_map", "codemap_explore", "codemap_traverse"} {
+		if agentTools[excluded] {
+			t.Errorf("agent profile unexpectedly includes untaught tool %s", excluded)
+		}
+	}
+	if !strings.Contains(instructionsFor(ProfileAgent), "profile: agent") {
+		t.Error("agent instructions do not identify the selected profile")
+	}
+	toolRe := regexp.MustCompile(`codemap_[a-z][a-z_]*`)
+	for _, name := range toolRe.FindAllString(instructionsFor(ProfileAgent), -1) {
+		if !agentTools[name] {
+			t.Errorf("agent instructions teach unregistered tool %s", name)
+		}
 	}
 }

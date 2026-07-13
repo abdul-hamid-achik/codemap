@@ -5,11 +5,7 @@
 // stay CGO_ENABLED=0.
 package extract
 
-import (
-	"context"
-	"path/filepath"
-	"strings"
-)
+import "context"
 
 // Symbol kinds (string values shared with internal/graph node kinds).
 const (
@@ -73,12 +69,17 @@ type Extractor interface {
 	ExtractFile(relPath string, src []byte) (*FileResult, error)
 }
 
-// CallEdge is one resolved call from a caller declaration to a callee, located by
-// the callee's declaration position (root-relative file + 1-based line, matching a
-// node's StartLine). External callees (a dependency / lib outside the project) have
-// no graph node. Produced by a CallResolver (e.g. the LSP backend's callHierarchy).
+// CallEdge is one resolved call between declarations, located by root-relative
+// file + 1-based line (matching each node's StartLine). FromFQN is retained as
+// descriptive evidence, but identity is positional: FQNs from several files may
+// legitimately collide in languages whose documentSymbol response omits a
+// package/module prefix. External callees (a dependency / lib outside the
+// project) have no graph node. Produced by a CallResolver (e.g. the LSP
+// backend's callHierarchy).
 type CallEdge struct {
 	FromFQN  string
+	FromFile string
+	FromLine int
 	ToFile   string
 	ToLine   int
 	External bool
@@ -90,30 +91,4 @@ type CallEdge struct {
 // name-based call extraction (e.g. TypeScript).
 type CallResolver interface {
 	CallEdges(ctx context.Context, relPath string) ([]CallEdge, error)
-}
-
-// LanguageForPath maps a file path to a codemap language id, or "" if unknown.
-func LanguageForPath(path string) string {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".go":
-		return "go"
-	case ".ts", ".tsx":
-		return "typescript"
-	case ".js", ".jsx", ".mjs", ".cjs":
-		return "javascript"
-	case ".py":
-		return "python"
-	case ".lua":
-		return "lua"
-	case ".rb":
-		return "ruby"
-	case ".vue":
-		return "vue"
-	case ".html", ".htm":
-		return "html"
-	case ".css":
-		return "css"
-	default:
-		return ""
-	}
 }

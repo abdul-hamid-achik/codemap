@@ -220,6 +220,9 @@ func TestContextBatchSelectorsCap(t *testing.T) {
 // batches already honor.
 func TestContextBatchMalformedSelectorIsPartialNotFatal(t *testing.T) {
 	svc, proj := contextBatchProj(t)
+	// Keep this selector-contract test independent of an installed sibling
+	// vecgrep binary and its optional memory store.
+	svc.s.Config.Vecgrep.Enabled = false
 	selForA := selectorForSymbol(t, svc, proj, "A")
 	// Neither a positive start_line nor an fqn: resolveSourceSelector rejects
 	// this before ever touching the graph ("selector needs a positive

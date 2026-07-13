@@ -903,6 +903,15 @@ func TestMetricsShowsEmbeddingState(t *testing.T) {
 	if !strings.Contains(m2.render(), "no embeddings") {
 		t.Error("metrics should note no embeddings when vectors == 0")
 	}
+
+	m3 := sized(t, 120, 40)
+	m3.active = tabMetrics
+	vecgrepOwned := base
+	vecgrepOwned.SemanticBackend = "vecgrep"
+	m3, _ = applyMsg(m3, statusMsg{st: &vecgrepOwned})
+	if !strings.Contains(m3.render(), "semantic owner: vecgrep") || strings.Contains(m3.render(), "name search only") {
+		t.Errorf("metrics should distinguish vecgrep-owned retrieval from structure-only:\n%s", m3.render())
+	}
 }
 
 func TestMetricsDashboardShowsHubsAndDeadCode(t *testing.T) {

@@ -221,8 +221,9 @@ func TestMCPProfileFlagPrecedence(t *testing.T) {
 		t.Errorf("env over file: profile = %q, want full", got)
 	}
 
-	// 4. an explicit --profile flag wins over env (and file).
-	if got := openWithProfile(t, "core"); got != "core" {
-		t.Errorf("flag over env: profile = %q, want core", got)
+	// 4. an explicit --profile flag wins over env (and file), including the
+	// agent profile added after the original core/full contract shipped.
+	if got := openWithProfile(t, "agent"); got != "agent" {
+		t.Errorf("flag over env: profile = %q, want agent", got)
 	}
 }

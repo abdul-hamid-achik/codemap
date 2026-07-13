@@ -85,3 +85,58 @@ func TestApplyConfigFlagsIdleTimeoutUnset(t *testing.T) {
 		t.Fatalf("unset --idle-timeout must not override the config value: got %d, want 7", cfg.Daemon.IdleTimeoutMin)
 	}
 }
+
+func newDaemonPreciseTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "daemon-start"}
+	cmd.Flags().Bool("precise", false, "")
+	return cmd
+}
+
+func TestApplyConfigFlagsDaemonPrecise(t *testing.T) {
+	for _, tc := range []struct {
+		arg  string
+		want bool
+	}{
+		{arg: "true", want: true},
+		{arg: "false", want: false},
+	} {
+		cmd := newDaemonPreciseTestCmd()
+		if err := cmd.Flags().Set("precise", tc.arg); err != nil {
+			t.Fatal(err)
+		}
+		cfg := config.DefaultConfig()
+		cfg.Daemon.Precise = !tc.want
+		applyConfigFlags(cmd, cfg)
+		if cfg.Daemon.Precise != tc.want {
+			t.Fatalf("--precise=%s -> Daemon.Precise = %t, want %t", tc.arg, cfg.Daemon.Precise, tc.want)
+		}
+	}
+}
+
+func TestApplyConfigFlagsDaemonPreciseUnsetPreservesConfig(t *testing.T) {
+	cmd := newDaemonPreciseTestCmd()
+	cfg := config.DefaultConfig()
+	cfg.Daemon.Precise = true
+	applyConfigFlags(cmd, cfg)
+	if !cfg.Daemon.Precise {
+		t.Fatal("unset --precise must not override daemon.precise=true from config or env")
+	}
+}
+
+func TestApplyConfigFlagsSemanticBackend(t *testing.T) {
+	cmd := &cobra.Command{Use: "semantic"}
+	cmd.Flags().String("backend", "fallback", "")
+	cfg := config.DefaultConfig()
+	cfg.Semantic.Backend = "local"
+	applyConfigFlags(cmd, cfg)
+	if cfg.Semantic.Backend != "local" {
+		t.Fatalf("unset --backend overrode config: %q", cfg.Semantic.Backend)
+	}
+	if err := cmd.Flags().Set("backend", "vecgrep"); err != nil {
+		t.Fatal(err)
+	}
+	applyConfigFlags(cmd, cfg)
+	if cfg.Semantic.Backend != "vecgrep" {
+		t.Fatalf("--backend did not win: %q", cfg.Semantic.Backend)
+	}
+}

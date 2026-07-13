@@ -32,6 +32,7 @@ type Config struct {
 	Debounce    time.Duration        // watcher debounce
 	Throttle    embed.ThrottleConfig // applied to the embedder when embedding is on
 	NoEmbed     bool                 // structure-only (skip Ollama; used by tests)
+	Precise     bool                 // keep exact call edges current after watched edits
 	// Overrides, if set, is applied to the daemon's freshly-loaded config after it
 	// opens its session, so CLI-flag overrides (exclude, embedding) reach the
 	// daemon's own indexer/embedder — not just the debounce/throttle in this struct.
@@ -48,6 +49,7 @@ type Info struct {
 	StartedAt     string `json:"started_at"`
 	LastReindexAt string `json:"last_reindex_at,omitempty"`
 	Watching      bool   `json:"watching"`
+	Precise       bool   `json:"precise"`
 	// LastError is the most recent unexpected error from the watcher or an
 	// incremental index (B46). It is cleared by a successful reindex and
 	// surfaced via daemon.status so failures are no longer silent while
@@ -112,6 +114,10 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	if cfg.Overrides != nil {
 		cfg.Overrides(sess.Config) // CLI flags win over the daemon's config file + env
 	}
+	// semantic.backend=vecgrep makes local embeddings intentionally unused.
+	// Persist that as the daemon's effective structure-only mode so the initial
+	// service index and every watcher batch make the same ownership decision.
+	cfg.NoEmbed = cfg.NoEmbed || sess.Config.Semantic.Backend == "vecgrep"
 	svc := app.NewService(sess)
 
 	// Wrap the embedder in the throttle so background re-indexing is gentle on Ollama.
@@ -129,7 +135,7 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	}
 
 	// One-time (incremental) index registers the project and brings it current.
-	rep, err := svc.Index(parent, root, index.Options{}, !cfg.NoEmbed)
+	rep, err := svc.Index(parent, root, index.Options{Precise: cfg.Precise}, !cfg.NoEmbed)
 	if err != nil {
 		_ = sess.Close()
 		return nil, err
@@ -174,12 +180,13 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	// project actually contains, so IndexFiles routes those edits
 	// through the same path the one-shot index used. Missing/failed
 	// servers land in d.info.MissingServers for status reporting.
+	var missingServers map[string]string
 	if missing, lspErr := d.ix.RegisterLSPForProject(ctx, d.root); lspErr != nil {
 		// Non-fatal: best-effort LSP registration. Fall back to Go-only
 		// watching rather than aborting startup.
 		fmt.Fprintf(os.Stderr, "codemap daemon: LSP registration error: %v\n", lspErr)
 	} else {
-		d.info.MissingServers = missing
+		missingServers = missing
 	}
 
 	w, err := index.NewWatcher(d.root, index.WatchConfig{
@@ -208,7 +215,8 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	}
 	d.info = Info{
 		PID: os.Getpid(), Socket: sockPath, ProjectRoot: d.root, ProjectName: d.name,
-		Branch: branch, StartedAt: nowRFC3339(), Watching: true,
+		Branch: branch, StartedAt: nowRFC3339(), Watching: true, Precise: cfg.Precise,
+		MissingServers: missingServers,
 	}
 	if err := d.writeState(); err != nil {
 		_ = ln.Close()
@@ -290,7 +298,7 @@ func (d *Daemon) onChange(toIndex, toRemove []string) {
 		return
 	}
 	d.withIndexMu(func() {
-		if _, err := d.ix.IndexFiles(d.ctx, d.pid, d.name, d.root, rels, index.Options{}); err != nil {
+		if _, err := d.ix.IndexFiles(d.ctx, d.pid, d.name, d.root, rels, index.Options{Precise: d.cfg.Precise}); err != nil {
 			// B46: surface per-sync index errors via info.LastError so callers
 			// (status, log scrapers) can see them; pre-fix the error was
 			// silently swallowed while watching:true stayed asserted.
@@ -382,7 +390,13 @@ func (d *Daemon) handleConn(conn net.Conn) {
 				reindexed bool
 			}
 			res := d.runWithIndexMu(func() any {
-				rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: r.Precise, NoLSP: r.NoLSP}, embed)
+				// A daemon started in precise mode owns the invariant that every
+				// successful write leaves exact coverage current. An ordinary
+				// delegated `codemap index` therefore cannot accidentally downgrade
+				// it merely because the request omitted --precise; stop/restart the
+				// daemon with precise=false to opt out of that persistent mode.
+				precise := d.cfg.Precise || r.Precise
+				rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: precise, NoLSP: r.NoLSP}, embed)
 				if ierr != nil {
 					return reindexResult{err: ierr}
 				}

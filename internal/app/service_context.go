@@ -124,7 +124,7 @@ func (svc *Service) ContextWithContext(ctx context.Context, cwd, symbol string, 
 // ContextBySelectorWithContext assembles the same bounded bundle for one exact
 // definition. It is the selector-safe counterpart of ContextWithContext.
 func (svc *Service) ContextBySelectorWithContext(ctx context.Context, cwd string, selector SymbolSelector, depth int, brief bool) (*ContextReport, error) {
-	rep, _, err := svc.contextForTarget(ctx, ctx, cwd, "", &selector, depth, brief)
+	rep, _, err := svc.contextForTarget(ctx, ctx, cwd, "", &selector, depth, brief, true)
 	return rep, err
 }
 
@@ -135,10 +135,10 @@ func (svc *Service) ContextBySelectorWithContext(ctx context.Context, cwd string
 // memory-recall budget. ContextBatch supplies one shared, bounded memory context
 // across all symbols, preventing N independent 3-second sidecar tails.
 func (svc *Service) contextWithContexts(ctx, memoryCtx context.Context, cwd, symbol string, depth int, brief bool) (*ContextReport, []SymbolRef, error) {
-	return svc.contextForTarget(ctx, memoryCtx, cwd, symbol, nil, depth, brief)
+	return svc.contextForTarget(ctx, memoryCtx, cwd, symbol, nil, depth, brief, true)
 }
 
-func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol string, selector *SymbolSelector, depth int, brief bool) (*ContextReport, []SymbolRef, error) {
+func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol string, selector *SymbolSelector, depth int, brief, recallMemories bool) (*ContextReport, []SymbolRef, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -244,7 +244,7 @@ func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	if svc.s.Config.Vecgrep.Enabled {
+	if recallMemories && svc.s.Config.Vecgrep.Enabled {
 		if root, _, rerr := svc.resolveProject(cwd); rerr == nil {
 			mctx, cancel := context.WithTimeout(memoryCtx, contextMemoryTimeout)
 			memories, recallErr := vecgrepMemoryRecall(mctx, svc.s.Config.Vecgrep, cwd, rep.Symbol,

@@ -6,13 +6,11 @@
 # Called by: action.yml step id=review; gitlab/codemap-review.yml (curled
 # down and invoked unmodified).
 #
-# IMPORTANT: codemap review's own process exit code is NOT a gate signal.
-# Review() (internal/app/review.go in the codemap repo) is explicitly
-# documented to degrade gracefully and return ok:true even for a high-risk,
-# fully-untested, non-indexed, or non-repo diff. This script only treats
-# codemap review as a genuine operational failure when --json prints a
-# structured `{"ok":false,...}` envelope (cmd/codemap/errors.go) — gating on
-# risk/untested happens later, in gate.sh, by reading the JSON body.
+# IMPORTANT: codemap review has native --fail-on-risk/--fail-on-untested
+# gates that print the normal success report and then exit 6. This Action
+# deliberately passes neither flag: it needs that JSON to render/post and set
+# outputs before its final gate.sh step decides pass/fail. A structured
+# `{"ok":false,...}` envelope is still an operational failure here.
 set -euo pipefail
 
 : "${CODEMAP_PRECISE:=true}"
@@ -75,14 +73,16 @@ if jq -e '.ok == false' "$out" >/dev/null 2>&1; then
   msg="$(jq -r '.error // "unknown error"' "$out")"
   hint="$(jq -r '.hint // empty' "$out")"
   # cmd/codemap/errors.go exit taxonomy: 0 answered / 1 operational /
-  # 2 not_found / 3 index_missing / 4 index_corrupt / 5 not_a_repo. This
+  # 2 not_found / 3 index_missing / 4 index_corrupt / 5 not_a_repo. Exit 6 is
+  # gate_failed, but cannot occur here because this invocation supplies no
+  # native gate flags. This
   # {"ok":false,...} envelope is the ONE signal this script treats as a real
-  # operational failure — unrelated to the risk/untested gate, which never
-  # trusts codemap review's process exit code (see file header + README).
+  # operational failure — unrelated to the risk/untested gate, which is
+  # applied later from the success JSON (see file header + README).
   echo "::error::codemap review failed: ${msg} (code=${code})${hint:+ — hint: ${hint}}" >&2
   exit 1
 fi
 
 echo "REVIEW_JSON_PATH=${out}" >> "${GITHUB_ENV:?}"
 echo "review-json-path=${out}" >> "${GITHUB_OUTPUT:?}"
-echo "codemap-action: wrote review JSON to ${out} (process exit ${review_exit}, not used for gating)"
+echo "codemap-action: wrote review JSON to ${out} (native gate flags intentionally omitted; Action gate runs last)"

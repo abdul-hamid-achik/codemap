@@ -43,6 +43,7 @@ var (
 
 func init() {
 	daemonStartCmd.Flags().Bool("no-embed", false, "watch + index structure only (skip Ollama embeddings)")
+	daemonStartCmd.Flags().Bool("precise", false, "keep exact call edges and per-file coverage current after watched edits")
 	daemonCmd.AddCommand(daemonStartCmd, daemonStopCmd, daemonStatusCmd)
 }
 
@@ -77,6 +78,7 @@ func startDaemonForeground(cmd *cobra.Command, root string) error {
 	d, err := daemon.Start(cmd.Context(), root, daemon.Config{
 		Debounce:    time.Duration(dc.DebounceMS) * time.Millisecond,
 		IdleTimeout: time.Duration(dc.IdleTimeoutMin) * time.Minute,
+		Precise:     dc.Precise,
 		Throttle: embed.ThrottleConfig{
 			RPS:         dc.EmbedRPS,
 			MaxInFlight: dc.EmbedMaxInFlight,

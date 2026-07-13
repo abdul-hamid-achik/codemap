@@ -39,8 +39,22 @@ type Extractor struct {
 	lang   string // codemap language id (e.g. "typescript")
 	langID string // LSP languageId (e.g. "typescript")
 	root   string // project root, to resolve a relative path to a file:// URI
-	client *lsp.Client
+	client languageClient
 	shared bool // true for a Bind()'d extractor sharing another's server; it must not close it
+}
+
+// languageClient is the narrow LSP port the extractor needs. Keeping it as an
+// interface makes capability admission and per-symbol failure handling testable
+// without spawning a real language server.
+type languageClient interface {
+	SupportsDocumentSymbols() bool
+	SupportsCallHierarchy() bool
+	DidOpen(uri, languageID, text string) error
+	DocumentSymbols(ctx context.Context, uri string) ([]lsp.DocumentSymbol, error)
+	PrepareCallHierarchy(ctx context.Context, uri string, pos lsp.Position) ([]lsp.CallHierarchyItem, error)
+	OutgoingCalls(ctx context.Context, item lsp.CallHierarchyItem) ([]lsp.CallHierarchyOutgoingCall, error)
+	Shutdown(ctx context.Context) error
+	Exit() error
 }
 
 // New spawns the language server `command args...`, initializes it at root, and
@@ -53,6 +67,10 @@ func New(ctx context.Context, lang, langID, root, command string, args ...string
 	if err := client.Initialize(ctx, root); err != nil {
 		_ = client.Close()
 		return nil, err
+	}
+	if !client.SupportsDocumentSymbols() {
+		_ = client.Close()
+		return nil, fmt.Errorf("%s does not advertise textDocument/documentSymbol", command)
 	}
 	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, client: client}, nil
 }
@@ -165,43 +183,82 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 // must already be open in the server (ExtractFile did didOpen); callHierarchy
 // resolves cross-file because the whole project's files were opened first.
 func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
+	if !e.client.SupportsCallHierarchy() {
+		return nil, fmt.Errorf("%s language server does not advertise callHierarchy", e.lang)
+	}
 	uri, _ := lsp.URI(filepath.Join(e.root, relPath))
 	syms, err := e.client.DocumentSymbols(ctx, uri)
 	if err != nil {
 		return nil, err
 	}
+	if len(syms) == 0 {
+		// A successful callable leaf still appears here and prepares one hierarchy
+		// item with zero outgoing calls. An empty documentSymbol response cannot
+		// prove that definitions observed during extraction were analyzed, so keep
+		// the file uncovered rather than upgrading an unknown graph to resolved.
+		return nil, fmt.Errorf("%s documentSymbol returned no symbols for %s", e.lang, relPath)
+	}
 	var out []extract.CallEdge
-	e.walkCallEdges(ctx, uri, "", syms, &out)
+	if err := e.walkCallEdges(ctx, uri, relPath, "", false, syms, &out); err != nil {
+		return nil, wrapExtractErr(e.lang, relPath, err)
+	}
 	return out, nil
 }
 
-func (e *Extractor) walkCallEdges(ctx context.Context, uri, parentFQN string, syms []lsp.DocumentSymbol, out *[]extract.CallEdge) {
+func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN string, insideCallable bool, syms []lsp.DocumentSymbol, out *[]extract.CallEdge) error {
 	for _, s := range syms {
-		fqn := s.Name
-		if parentFQN != "" {
-			fqn = parentFQN + "." + s.Name
+		class := classifyIndexedSymbol(s, insideCallable, relPath)
+		fqn := parentFQN
+		if !class.anonymous {
+			fqn = symbolFQN(parentFQN, s)
 		}
-		if isCallable(s.Kind) {
+		if class.callable {
 			items, err := e.client.PrepareCallHierarchy(ctx, uri, s.SelectionRange.Start)
-			if err == nil && len(items) > 0 {
-				calls, _ := e.client.OutgoingCalls(ctx, items[0])
-				for _, c := range calls {
-					file, external := e.relOf(c.To.URI)
-					*out = append(*out, extract.CallEdge{
-						FromFQN:  fqn,
-						ToFile:   file,
-						ToLine:   c.To.Range.Start.Line + 1, // 1-based, matches node StartLine
-						External: external,
-					})
-				}
+			if err != nil {
+				return fmt.Errorf("prepare call hierarchy for %s: %w", fqn, err)
+			}
+			if len(items) == 0 {
+				// A leaf callable still has a call-hierarchy item and zero outgoing
+				// calls. A null/empty prepare response means the server could not
+				// resolve this declaration, so marking the whole file covered would
+				// turn an unknown relation into a confidently-empty one.
+				return fmt.Errorf("prepare call hierarchy for %s returned no item", fqn)
+			}
+			calls, err := e.client.OutgoingCalls(ctx, items[0])
+			if err != nil {
+				return fmt.Errorf("outgoing calls for %s: %w", fqn, err)
+			}
+			for _, c := range calls {
+				file, external := e.relOf(c.To.URI)
+				*out = append(*out, extract.CallEdge{
+					FromFQN:  fqn,
+					FromFile: relPath,
+					FromLine: s.Range.Start.Line + 1, // 1-based, matches caller node StartLine
+					ToFile:   file,
+					ToLine:   c.To.Range.Start.Line + 1, // 1-based, matches node StartLine
+					External: external,
+				})
 			}
 		}
-		e.walkCallEdges(ctx, uri, fqn, s.Children, out)
+		childInside := insideCallable || class.anonymous || class.callable
+		if err := e.walkCallEdges(ctx, uri, relPath, fqn, childInside, s.Children, out); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func isCallable(kind int) bool {
-	return kind == lsp.SymbolFunction || kind == lsp.SymbolMethod || kind == lsp.SymbolConstructor
+// symbolFQN normalizes ownership across both legal documentSymbol response
+// shapes. Hierarchical DocumentSymbol children use parentFQN; flat
+// SymbolInformation entries carry their owner in ContainerName.
+func symbolFQN(parentFQN string, s lsp.DocumentSymbol) string {
+	if parentFQN != "" {
+		return parentFQN + "." + s.Name
+	}
+	if s.ContainerName != "" {
+		return s.ContainerName + "." + s.Name
+	}
+	return s.Name
 }
 
 // relOf turns a callee's file:// URI into a root-relative path; external=true when
@@ -237,44 +294,16 @@ func (e *Extractor) Close() error {
 // extract.Symbols. parentFQN builds a dotted fully-qualified name from nesting
 // (e.g. ClassName.method), which is how class-based languages scope members.
 func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN string, insideCallable bool, relPath string, s lsp.DocumentSymbol) {
-	kind := mapKind(s)
-	// Some servers (notably pyright) report a function's parameters and locals as
-	// nested Variable symbols — skip those so the graph isn't cluttered with param
-	// nodes. Module- and class-level variables (not inside a callable) are kept.
-	if kind == extract.KindVariable && insideCallable {
-		kind = ""
-	}
-	// Language servers report inline anonymous functions as symbols, named after
-	// their call site ("map() callback", "defineEventHandler() callback") or
-	// "<function>"/"<anonymous>"/"<lambda>". They aren't real, queryable
-	// declarations, and on callback-heavy code (Nuxt/React/Vue, array methods, zod)
-	// they drown the graph — ~a third of a real app's symbols, and the bulk of its
-	// dead-code candidates. Don't index them; still recurse so a genuinely-named
-	// nested declaration is kept, parented to the real enclosing scope (not the
-	// synthesized junk name).
-	// P2-03 (O29): mark test-file functions/methods as KindTest.
-	if kind == extract.KindFunction || kind == extract.KindMethod {
-		if isTestFilePath(relPath) {
-			kind = extract.KindTest
-		}
-	}
-	anon := isAnonymousCallable(s.Name)
-	if anon {
-		kind = ""
-	}
+	class := classifyIndexedSymbol(s, insideCallable, relPath)
 	fqn := parentFQN
-	if !anon {
-		if parentFQN == "" {
-			fqn = s.Name
-		} else {
-			fqn = parentFQN + "." + s.Name
-		}
+	if !class.anonymous {
+		fqn = symbolFQN(parentFQN, s)
 	}
-	if kind != "" {
+	if class.kind != "" {
 		res.Symbols = append(res.Symbols, extract.Symbol{
 			Name:      s.Name,
 			FQN:       fqn,
-			Kind:      kind,
+			Kind:      class.kind,
 			Language:  lang,
 			StartLine: s.Range.Start.Line + 1, // LSP is 0-based; codemap 1-based
 			EndLine:   s.Range.End.Line + 1,
@@ -285,10 +314,49 @@ func appendSymbols(res *extract.FileResult, lines []string, lang, parentFQN stri
 	}
 	// A function/method (incl. an anonymous callback) scopes its params and locals;
 	// mark children inside-callable so nested Variable symbols are dropped (above).
-	childInside := insideCallable || anon || kind == extract.KindFunction || kind == extract.KindMethod
+	childInside := insideCallable || class.anonymous || class.callable
 	for _, child := range s.Children {
 		appendSymbols(res, lines, lang, fqn, childInside, relPath, child)
 	}
+}
+
+// indexedSymbolClass is the single normalization boundary shared by structural
+// extraction and callHierarchy. If these paths disagree, a callable can be
+// indexed without being queried (false resolved coverage), or an anonymous
+// callback that is deliberately absent from the graph can fail the whole file.
+type indexedSymbolClass struct {
+	kind      string
+	callable  bool
+	anonymous bool
+}
+
+func classifyIndexedSymbol(s lsp.DocumentSymbol, insideCallable bool, relPath string) indexedSymbolClass {
+	kind := mapKind(s)
+	// Some servers (notably pyright) report a function's parameters and locals as
+	// nested Variable symbols. Module- and class-level variables remain indexable.
+	if kind == extract.KindVariable && insideCallable {
+		kind = ""
+	}
+
+	callable := isIndexedCallableKind(kind)
+	// Language servers report inline anonymous functions as symbols, named after
+	// their call site ("map() callback") or as angle-bracket placeholders. They
+	// have no durable graph identity, so neither extraction nor callHierarchy may
+	// treat them as indexed definitions. We still recurse through them below.
+	anonymous := callable && isAnonymousCallable(s.Name)
+	if anonymous {
+		kind = ""
+		callable = false
+	} else if callable && isTestFilePath(relPath) {
+		// P2-03 (O29): callable declarations in test files are test nodes, but they
+		// remain callHierarchy roots just like ordinary functions and methods.
+		kind = extract.KindTest
+	}
+	return indexedSymbolClass{kind: kind, callable: callable, anonymous: anonymous}
+}
+
+func isIndexedCallableKind(kind string) bool {
+	return kind == extract.KindFunction || kind == extract.KindMethod || kind == extract.KindTest
 }
 
 // isAnonymousCallable reports whether a language-server symbol name is a synthesized

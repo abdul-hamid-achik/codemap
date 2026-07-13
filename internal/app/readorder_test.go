@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
@@ -143,5 +144,41 @@ func TestReadOrderUnindexed(t *testing.T) {
 	}
 	if rep.Indexed || len(rep.Entries) != 0 {
 		t.Errorf("unindexed → {indexed:false, entries:[]}, got %+v", rep)
+	}
+}
+
+func TestReadOrderTieBreaksByDurableSourceIdentity(t *testing.T) {
+	isolate(t)
+	root := t.TempDir()
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject("durable-read-order", root, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Allocate the later declaration first. Both exported roots have identical
+	// scores, so the bounded prefix must use source identity rather than node id.
+	for _, node := range []graph.Node{
+		{ProjectID: pid, FilePath: "api.go", Symbol: "Zulu", FQN: "p.Zulu", Kind: graph.KindFunction, Language: "go", StartLine: 20, EndLine: 20, SourceHash: "z"},
+		{ProjectID: pid, FilePath: "api.go", Symbol: "Alpha", FQN: "p.Alpha", Kind: graph.KindFunction, Language: "go", StartLine: 10, EndLine: 10, SourceHash: "a"},
+	} {
+		if _, err := g.AddNode(&node); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rep, err := NewService(sess).ReadOrder(root, ReadOrderOpts{Top: 1, EntrypointsOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Symbol != "Alpha" {
+		t.Fatalf("durable read-order prefix = %+v, want Alpha", rep.Entries)
 	}
 }

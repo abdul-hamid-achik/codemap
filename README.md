@@ -1,7 +1,8 @@
 # codemap
 
 Local-first code intelligence that gives AI agents and people **structural awareness** of
-codebases — combining a code graph (LSP + parsers) with semantic vector search (veclite),
+codebases — combining a code graph (LSP + parsers) with semantic retrieval
+(local veclite or the sibling vecgrep CLI),
 exposed through a CLI, an MCP server, and an interactive terminal UI.
 
 > Working on the code? Read [AGENTS.md](./AGENTS.md) first — it is the source of truth for
@@ -74,10 +75,11 @@ instead of dozens of file reads.
   `callers`/`callees` also take `--precise` (language-server `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider/model/dimension changes instead of corrupting the vector space.
-- **Three surfaces, one store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
+- **Three surfaces, one structural store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
   server**, and the **studio** TUI for humans.
-- **Graph analytics** — `hotspots` (hubs), `orphans` (dead-code candidates), and `path`
-  (shortest call path between two symbols).
+- **Graph analytics** — `map` (subsystems, directed bridges, entrypoints, hubs), `hotspots`
+  (hubs), `orphans` (dead-code candidates), `explore` (intent → bounded exact neighborhoods),
+  `traverse` (typed, heterogeneous graph walks), and `path` (shortest call path between two symbols).
 - **Local-first & private** — everything runs on your machine; no cloud, no uploads.
 - **Single binary** — pure-Go, `CGO_ENABLED=0`, cross-compiled and shipped via Homebrew.
 
@@ -137,7 +139,8 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for one-off `callers`/`callees --precise` Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-**Languages** — structure + semantic search work for all of these; a precise call graph
+**Indexed languages** — structure works for all of these; semantic retrieval is
+language-agnostic once the project is indexed. A precise call graph
 (`callers`/`callees`/`impact`/`hotspots`/`path`) needs `--precise`:
 
 | Language | How | Extensions | Call graph |
@@ -150,9 +153,14 @@ brew install abdul-hamid-achik/tap/codemap
 > Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is delegated to the same `typescript-language-server` connection that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns the server itself to serve the script blocks.
 
 The language servers auto-enable when installed — run [`codemap doctor`](docs/cli.md) to see which are
-detected, or `--no-lsp` to skip. HTML/CSS remain recognized-but-unindexed (planned); Vue SFCs
-  are now indexed (see above). Other recognized languages are reported as skipped.
-  Semantic search is language-agnostic.
+detected, or `--no-lsp` to skip. The next waves are tracked honestly at **T0 recognized**:
+Rust; Java/Kotlin/Scala; C/C++/CUDA; C#/VB; Ruby; PHP; Dart; Swift; Lua; Elixir;
+Svelte/Astro/Razor; shell; HCL/Terraform; SQL; YAML; HTML/CSS. T0 means the file is detected
+and reported with a planned/missing backend, but produces no graph nodes yet. Public support
+advances per relation domain (symbols, references/imports, resolved calls) only after its
+fixture and accuracy gates pass; optional SCIP import is the project-level path for several waves.
+See the [language support plan](docs/languages.md) for the T0–T4 admission gates,
+the Rust pilot, and the project-level SCIP importer design.
 
 ### From source
 
@@ -195,9 +203,11 @@ codemap callers --at auth.go:42    # exact definition from the indexed graph
 codemap callees authenticateUser   # what it calls
 codemap references authenticateUser # where it is stored/passed as a callback or handler
 codemap path     Handler Login     # shortest call path between two symbols
+codemap traverse --at auth.go:42 --direction both --edge-types calls,references --depth 2
 
 # 5. Analyze impact and structure
 codemap impact   authenticateUser --depth 3   # callers + blast radius + tests
+codemap map                              # architecture: subsystems + bridges + entrypoints + hubs
 codemap hotspots --top 20          # most-referenced symbols (hubs)
 codemap orphans                    # functions with no callers (dead-code candidates)
 codemap review                     # diff-scoped impact + tests to run
@@ -205,6 +215,8 @@ codemap status                     # stats + warns if the index is stale vs your
 
 # 6. Search by meaning (needs an embedded index)
 codemap semantic "jwt validation middleware" --top 10
+codemap semantic "jwt validation middleware" --backend vecgrep  # one semantic owner
+codemap explore "jwt validation middleware" --seeds 5 --edges 5 --depth 2
 
 # 7. Explore visually
 codemap studio
@@ -274,7 +286,8 @@ complete set.
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, value references, tests, blast radius |
-| Navigate | `read-order` | ranked reading list for an unfamiliar repo |
+| Navigate | `read-order` / `map` / `explore` | ranked reading list, bounded architecture overview, or intent-to-structure orientation |
+| Navigate | `traverse --at <file>:<line>` | bounded walk from one exact definition across selected edge types and directions |
 | Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact, file dependency evidence, or diff-scoped tests |
 | Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
 | Analyze | `coverage` | per-file precise call-graph coverage: rollups by language/directory + bounded per-file detail |
@@ -381,13 +394,16 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-`CODEMAP_MCP_PROFILE=core` trims this to a lean 22-tool set covering the taught agent workflow (see
-[MCP tool profiles](docs/mcp.md#tool-profiles)) — the default `full` profile registers all 39:
+`CODEMAP_MCP_PROFILE=agent` selects exactly the 22-tool surface derived from the taught agent
+workflow (21 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
+today; the default `full` profile remains the explicit 42-tool expert/admin surface. See
+[MCP tool profiles](docs/mcp.md#tool-profiles) for the measured schema cost and precedence rules.
 
-Tools (39): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+Tools (42): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
 `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
-`codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_read_order`, `codemap_path`,
+`codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_read_order`,
+`codemap_map`, `codemap_explore`, `codemap_traverse`, `codemap_path`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_grep`, `codemap_source`,
 `codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,
@@ -402,9 +418,12 @@ what's indexed; **`codemap_docs`** returns an agent guide so a harness can learn
 **`codemap_annotate` / `codemap_annotations`** pin notes and external data (DB rows, findings) to
 symbols and call paths — a knowledge layer over the graph (see below).
 
+`codemap_map`, `codemap_explore`, and `codemap_traverse` are extended orientation surfaces registered
+only in the default `full` MCP profile. The CLI commands remain available regardless of MCP profile.
+
 For same-named definitions, pass `selector:{file,start_line,fqn,kind}` to `codemap_source`,
 `codemap_context`, `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`,
-or `codemap_risk`.
+`codemap_risk`, or full-profile `codemap_traverse`.
 `codemap_path` accepts `from_selector` + `to_selector`. The fields are a direct projection of the
 symbol objects these tools already return, so chaining adds no database-ID contract.
 
@@ -440,9 +459,15 @@ index stays central (set `CODEMAP_DATA` to a path inside the repo for a repo-loc
 
 codemap is built on [veclite](https://github.com/abdul-hamid-achik/veclite) and shares
 conventions with [vecgrep](https://github.com/abdul-hamid-achik/vecgrep) (semantic code
-search) and [noted](https://github.com/abdul-hamid-achik/noted) (code notes). An agent can
-combine them: vecgrep/codemap to *find* code by meaning, codemap to learn *what calls it* and
-*what breaks* if it changes.
+search) and [noted](https://github.com/abdul-hamid-achik/noted) (code notes). Set
+`semantic.backend: vecgrep` to make vecgrep the sole retrieval owner while codemap keeps
+structural identity, freshness, relations and impact. The boundary is a versioned one-hop CLI
+contract—no shared packages or stores. In the other direction,
+`codemap structural-manifest --json` gives vecgrep a source-free identity/freshness
+preflight before `codemap export-symbols --json` emits the paginated
+`codemap.structural-export.v1` feed used by vecgrep's
+`structural_chunks: auto|off|required` modes; stale or unreadable symbol content is omitted
+explicitly instead of being embedded as if it were current.
 
 ## Documentation
 

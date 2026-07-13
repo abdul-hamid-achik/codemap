@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,7 +64,9 @@ type Options struct {
 	OnEmbed func(done, total int)
 }
 
-// FileError records a per-file failure that didn't abort the whole run.
+// FileError records a per-file failure that didn't abort the whole run. It may
+// describe extraction (the file was structurally skipped) or precise coverage
+// degradation (structure remains indexed, but the file is not marked resolved).
 type FileError struct {
 	File string `json:"file"`
 	Err  string `json:"error"`
@@ -73,7 +76,7 @@ type FileError struct {
 type Result struct {
 	FilesScanned   int         `json:"files_scanned"`
 	FilesIndexed   int         `json:"files_indexed"`           // new or changed
-	FilesSkipped   int         `json:"files_skipped"`           // oversized, generated, or errored (see Oversized/Errors) — NOT unchanged (those are FilesUnchanged)
+	FilesSkipped   int         `json:"files_skipped"`           // oversized, generated, or extraction-errored — NOT unchanged or precise-only degradation
 	FilesUnchanged int         `json:"files_unchanged"`         // P2-07 (O108): hash-matched files that were skipped because they're up-to-date (not a failure)
 	FilesDeleted   int         `json:"files_deleted,omitempty"` // pruned: indexed before, now gone from disk
 	Nodes          int         `json:"nodes"`
@@ -723,21 +726,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// Pass 3 (opt-in): exact call edges.
 	if opts.Precise {
 		preciseStart = time.Now()
-		if res.Languages["go"] > 0 {
-			ix.resolvePreciseEdgesFromIndex(ctx, projectID, root, res, ni)
-		}
-		// Pin P0-06: wrap the LSP precise pass in a transaction so a partial
-		// failure (server died mid-call, DB error, etc.) never leaves a
-		// half-written set of precise edges. Roll back on any error.
-		lsptx, lspErr := ix.graph.BeginTx(ctx)
-		if lspErr != nil {
-			return res, lspErr
-		}
-		if err := ix.resolveLSPCallEdgesWith(ctx, lsptx, projectID, root, res, ni); err != nil {
-			_ = lsptx.Rollback()
-			return res, err
-		}
-		if err := lsptx.Commit(); err != nil {
+		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni); err != nil {
 			return res, err
 		}
 		res.PreciseMs = int(time.Since(preciseStart).Milliseconds())
@@ -789,6 +778,51 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	var pending []extract.Reference
 	var embedAcc []embedItem
 	var importFiles []fileTask
+	preciseRelevant, goTouched := false, false
+	for _, rel := range rels {
+		lang := extract.LanguageForPath(rel)
+		ext, ok := ix.extractors[lang]
+		if !ok {
+			continue
+		}
+		if lang == "go" {
+			goTouched = true
+			preciseRelevant = true
+			continue
+		}
+		if _, ok := ext.(extract.CallResolver); ok {
+			preciseRelevant = true
+		}
+	}
+
+	// A Go edit can make every other file in its package stop type-checking.
+	// Mirror IndexProject's precise downgrade path: force every previously
+	// resolved Go file through parser extraction first, restoring fresh name
+	// edges, then let go/types supersede only the packages that remain clean.
+	// Without this, an unchanged package mate could retain stale precise edges
+	// after the edited file introduced a package-wide type error.
+	if opts.Precise && goTouched {
+		resolved, err := ix.graph.CallGraphResolvedFiles(projectID)
+		if err != nil {
+			return res, err
+		}
+		seen := make(map[string]bool, len(rels)+len(resolved))
+		for _, rel := range rels {
+			seen[rel] = true
+		}
+		for rel := range resolved {
+			if extract.LanguageForPath(rel) != "go" {
+				continue
+			}
+			if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
+				return res, err
+			}
+			if !seen[rel] {
+				rels = append(rels, rel)
+				seen[rel] = true
+			}
+		}
+	}
 
 	// Match IndexProject's structure-only contract for direct/watcher callers:
 	// unchanged files must not retain vectors from an earlier embedded run.
@@ -888,6 +922,13 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	}
 	if _, err := ix.resolveEdgesWith(projectID, pending, ni); err != nil {
 		return res, err
+	}
+	if opts.Precise && preciseRelevant {
+		start := time.Now()
+		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni); err != nil {
+			return res, err
+		}
+		res.PreciseMs = int(time.Since(start).Milliseconds())
 	}
 	if err := ix.embedAndStore(ctx, projectName, embedAcc, opts, res); err != nil {
 		return res, err
@@ -1377,10 +1418,48 @@ const (
 	preciseResolverLSP     = "lsp"
 )
 
+// resolveAllPreciseEdges is the shared project-wide exact-resolution pass used
+// by both a one-shot index and the daemon's incremental IndexFiles path. Precise
+// resolution is deliberately project-wide: go/types checks packages as a unit,
+// while LSP callHierarchy coverage must delete and rebuild the complete set for
+// every registered language atomically so an edit cannot leave stale exact
+// edges in an unchanged package mate.
+func (ix *Indexer) resolveAllPreciseEdges(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex) error {
+	hasGo := false
+	for _, n := range ni.nodes {
+		if n.Language == "go" && n.Kind == graph.KindFile {
+			hasGo = true
+			break
+		}
+	}
+	if hasGo {
+		if err := ix.resolvePreciseEdgesFromIndex(ctx, projectID, root, res, ni); err != nil {
+			return err
+		}
+	}
+
+	// Pin P0-06: wrap the LSP precise pass in a transaction so a partial
+	// failure (server died mid-call, DB error, etc.) never leaves a
+	// half-written set of precise edges. Roll back on any error.
+	lsptx, err := ix.graph.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin LSP precise transaction: %w", err)
+	}
+	defer func() { _ = lsptx.Rollback() }()
+	if err := ix.resolveLSPCallEdgesWith(ctx, lsptx, projectID, root, res, ni); err != nil {
+		return err
+	}
+	if err := lsptx.Commit(); err != nil {
+		return fmt.Errorf("commit LSP precise transaction: %w", err)
+	}
+	return nil
+}
+
 // resolveLSPCallEdges adds exact call edges for LSP-backed languages (TypeScript)
 // by driving each registered CallResolver's callHierarchy over its files, joining
-// callees to nodes by declaration position. Edges are written ProvPrecise (there's
-// no name-based call extraction for these languages to supersede). Best-effort:
+// both callers and callees to nodes by declaration position. Edges are written
+// ProvPrecise (there's no name-based call extraction for these languages to
+// supersede). Best-effort:
 // callHierarchy errors downgrade that file's coverage and continue; database
 // errors abort and roll back the pass. The servers remain alive until Indexer.Close.
 // resolveLSPCallEdgesWith is the shared resolver that takes a pre-built nodeIndex.
@@ -1394,8 +1473,9 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 	if len(resolvers) == 0 {
 		return nil
 	}
-	// Rebuild posTo/fqnTo from the shared nodeIndex, scoped to LSP-language nodes.
-	fqnTo := make(map[string]int64, len(ni.nodes))
+	// Build an exact declaration-position index, scoped to LSP-language nodes.
+	// FQN alone is not an identity here: legal flat documentSymbol responses may
+	// produce the same unqualified FQN in several files.
 	posTo := make(map[precisePos]int64, len(ni.nodes))
 	posCollide := map[precisePos]bool{}
 	filesByLang := map[string]map[string]bool{}
@@ -1410,9 +1490,6 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 		if n.Kind == graph.KindFile {
 			continue // a file node shares line 1 with the first symbol; never a call target
 		}
-		if n.FQN != "" {
-			fqnTo[n.FQN] = n.ID
-		}
 		key := precisePos{n.FilePath, n.StartLine}
 		if _, dup := posTo[key]; dup {
 			posCollide[key] = true
@@ -1424,89 +1501,161 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 		delete(posTo, k) // ambiguous (same-line decls) — drop, don't mis-route
 	}
 
-	// Pin P0-05: collect the LSP-language source node ids so we can delete any
-	// PRIOR ProvPrecise call edges for them. The LSP languages have no
-	// name-based call edges to supersede (they live entirely in --precise), but
-	// without this delete-first every --precise run still doubled the
-	// precise-edge count via the same bare-INSERT path the Go pass uses.
-	var lspSourceIDs []int64
-	for _, n := range ni.nodes {
-		if _, isLSP := resolvers[n.Language]; !isLSP {
-			continue
-		}
-		if n.Kind == graph.KindFile {
-			continue
-		}
-		lspSourceIDs = append(lspSourceIDs, n.ID)
+	type preciseFile struct {
+		lang string
+		file string
 	}
-	if len(lspSourceIDs) > 0 {
-		if dErr := graph.DeleteCallEdgesBySourceTx(tx, lspSourceIDs, graph.ProvPrecise); dErr != nil {
-			res.PreciseNote = "LSP precise supersede (delete prior) failed: " + dErr.Error()
-			return dErr
+	files := make([]preciseFile, 0)
+	for lang, byFile := range filesByLang {
+		for file := range byFile {
+			files = append(files, preciseFile{lang: lang, file: file})
 		}
 	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].lang != files[j].lang {
+			return files[i].lang < files[j].lang
+		}
+		return files[i].file < files[j].file
+	})
 
-	upgraded := 0
-	for lang, cr := range resolvers {
-		for file := range filesByLang[lang] {
-			// Supersede prior coverage for this file, then re-mark it only after
-			// CallEdges succeeds. An empty result is still a successful precise
-			// resolution for a leaf file.
-			if clearErr := graph.ClearCallGraphResolvedTx(tx, projectID, file); clearErr != nil {
-				res.PreciseNote = "LSP precise coverage clear failed: " + clearErr.Error()
-				return clearErr
+	type preciseEdgeIDs struct{ from, to int64 }
+	upgraded, skipped, failedFiles := 0, 0, 0
+	for _, current := range files {
+		cr := resolvers[current.lang]
+		file := current.file
+		// Supersede prior coverage for this file, then re-mark it only after
+		// every indexed callable and every internal position join succeeds. An
+		// empty result remains a successful precise resolution for a leaf file.
+		if clearErr := graph.ClearCallGraphResolvedTx(tx, projectID, file); clearErr != nil {
+			res.PreciseNote = "LSP precise coverage clear failed: " + clearErr.Error()
+			return clearErr
+		}
+		// Replace outgoing exact calls file-by-file in the same transaction as
+		// coverage. This includes unchanged files whose nodes were not re-extracted:
+		// if their callHierarchy request now fails, stale confirmed edges must not
+		// survive while the file itself is correctly downgraded to uncovered.
+		if clearErr := deleteLSPPreciseCallsInFileTx(tx, projectID, file); clearErr != nil {
+			res.PreciseNote = "LSP precise supersede failed: " + clearErr.Error()
+			return clearErr
+		}
+		edges, cErr := cr.CallEdges(ctx, file)
+		if cErr != nil {
+			appendPreciseFileError(res, file, fmt.Errorf("LSP call hierarchy: %w", cErr))
+			failedFiles++
+			continue
+		}
+		pending := make([]preciseEdgeIDs, 0, len(edges))
+		joinFailures := 0
+		joinSamples := make([]string, 0, 3)
+		for _, e := range edges {
+			if e.External {
+				skipped++
+				continue // callee outside the project — no node
 			}
-			edges, cErr := cr.CallEdges(ctx, file)
-			if cErr != nil {
+			if filepath.Clean(e.FromFile) != filepath.Clean(file) {
+				joinFailures++
+				skipped++
+				if len(joinSamples) < cap(joinSamples) {
+					joinSamples = append(joinSamples, fmt.Sprintf("source %s:%d belongs to %s", e.FromFile, e.FromLine, file))
+				}
 				continue
 			}
-			for _, e := range edges {
-				if e.External {
-					continue // callee outside the project — no node
+			from, ok := posTo[precisePos{e.FromFile, e.FromLine}]
+			if !ok {
+				joinFailures++
+				skipped++
+				if len(joinSamples) < cap(joinSamples) {
+					joinSamples = append(joinSamples, fmt.Sprintf("source %s:%d (%s)", e.FromFile, e.FromLine, e.FromFQN))
 				}
-				from, ok := fqnTo[e.FromFQN]
-				if !ok {
-					continue
-				}
-				to, ok := posTo[precisePos{e.ToFile, e.ToLine}]
-				if !ok || to == from {
-					continue
-				}
-				if _, aErr := graph.AddEdgeProvTx(tx, from, to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); aErr != nil {
-					res.PreciseNote = "LSP precise edge insert failed: " + aErr.Error()
-					res.PreciseUpgraded += upgraded
-					return aErr
-				}
-				upgraded++
+				continue
 			}
-			if markErr := graph.MarkCallGraphResolvedTx(tx, projectID, file, preciseResolverLSP); markErr != nil {
-				res.PreciseNote = "LSP precise coverage mark failed: " + markErr.Error()
+			to, ok := posTo[precisePos{e.ToFile, e.ToLine}]
+			if !ok {
+				joinFailures++
+				skipped++
+				if len(joinSamples) < cap(joinSamples) {
+					joinSamples = append(joinSamples, fmt.Sprintf("target %s:%d", e.ToFile, e.ToLine))
+				}
+				continue
+			}
+			if to == from {
+				continue
+			}
+			pending = append(pending, preciseEdgeIDs{from: from, to: to})
+		}
+		if joinFailures > 0 {
+			appendPreciseFileError(res, file, fmt.Errorf(
+				"LSP precise coverage incomplete: %d internal call edge(s) did not join indexed definitions (%s)",
+				joinFailures, strings.Join(joinSamples, "; ")))
+			failedFiles++
+			continue
+		}
+		// Stage before writing so one missing internal join cannot leave a
+		// partially rebuilt exact graph for a file whose coverage is unresolved.
+		for _, edge := range pending {
+			if _, aErr := graph.AddEdgeProvTx(tx, edge.from, edge.to, graph.EdgeCalls, graph.WeightLSP, graph.ProvPrecise); aErr != nil {
+				res.PreciseNote = "LSP precise edge insert failed: " + aErr.Error()
 				res.PreciseUpgraded += upgraded
-				return markErr
+				return aErr
 			}
+			upgraded++
+		}
+		if markErr := graph.MarkCallGraphResolvedTx(tx, projectID, file, preciseResolverLSP); markErr != nil {
+			res.PreciseNote = "LSP precise coverage mark failed: " + markErr.Error()
+			res.PreciseUpgraded += upgraded
+			return markErr
 		}
 	}
 	res.PreciseUpgraded += upgraded
+	res.PreciseSkipped += skipped
+	if failedFiles > 0 {
+		appendPreciseNote(res, fmt.Sprintf("LSP precise coverage incomplete for %d file(s); see errors", failedFiles))
+	}
 	return nil
+}
+
+func deleteLSPPreciseCallsInFileTx(tx *sql.Tx, projectID int64, file string) error {
+	_, err := tx.Exec(`
+		DELETE FROM edges
+		WHERE edge_type = ? AND provenance = ?
+		  AND source_id IN (
+			SELECT id FROM nodes WHERE project_id = ? AND file_path = ?
+		  )`, graph.EdgeCalls, graph.ProvPrecise, projectID, file)
+	if err != nil {
+		return fmt.Errorf("delete prior precise calls for %s: %w", file, err)
+	}
+	return nil
+}
+
+func appendPreciseFileError(res *Result, file string, err error) {
+	res.Errors = append(res.Errors, FileError{File: file, Err: "precise: " + err.Error()})
+}
+
+func appendPreciseNote(res *Result, note string) {
+	if res.PreciseNote == "" {
+		res.PreciseNote = note
+		return
+	}
+	res.PreciseNote += "; " + note
 }
 
 // resolvePreciseEdges runs the go/types pass and supersedes name-based call edges
 // resolvePreciseEdgesFromIndex is the shared-node-index path: it does the
 // go/types resolve, then calls resolvePreciseEdgesWith using the already-built
 // nodeIndex (avoiding a redundant ProjectNodes call when the caller built one).
-func (ix *Indexer) resolvePreciseEdgesFromIndex(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex) {
+func (ix *Indexer) resolvePreciseEdgesFromIndex(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		res.PreciseNote = "precise skipped: the 'go' toolchain is required for --precise but is not on PATH; kept name-based edges"
-		return
+		return nil
 	}
 	pr, err := typesrc.Resolve(ctx, root)
 	if err != nil {
 		res.PreciseNote = "precise unavailable: " + err.Error() + "; kept name-based edges"
-		return
+		return nil
 	}
 	if pr == nil || !pr.Available {
 		res.PreciseNote = "precise unavailable: project is not a buildable Go module; kept name-based edges"
-		return
+		return nil
 	}
 	if pr.ErrorPkgs > 0 {
 		res.PreciseNote = fmt.Sprintf("precise skipped for %d package(s) with type errors; kept name-based edges for those packages", pr.ErrorPkgs)
@@ -1514,15 +1663,17 @@ func (ix *Indexer) resolvePreciseEdgesFromIndex(ctx context.Context, projectID i
 	tx, err := ix.graph.BeginTx(ctx)
 	if err != nil {
 		res.PreciseNote = "precise transaction failed: " + err.Error()
-		return
+		return fmt.Errorf("begin Go precise transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := ix.resolvePreciseEdgesWith(tx, projectID, res, ni, pr); err != nil {
-		return
+		return fmt.Errorf("write Go precise graph: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		res.PreciseNote = "precise commit failed: " + err.Error()
+		return fmt.Errorf("commit Go precise transaction: %w", err)
 	}
+	return nil
 }
 
 // resolvePreciseEdgesWith is the shared resolver that takes a pre-built nodeIndex

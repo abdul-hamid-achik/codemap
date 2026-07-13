@@ -43,8 +43,9 @@ func registerConfigFlags(root, index, daemonStart, semantic, serve *cobra.Comman
 	df.Int("embed-cache-size", 4096, "embedding dedup cache size (entries)")
 
 	semantic.Flags().String("fusion", "auto", "hybrid-search fusion weighting: auto (classify query shape) or balanced (equal weights, pre-F7 behavior)")
+	semantic.Flags().String("backend", "fallback", "semantic owner: fallback (local then vecgrep when absent), local, or vecgrep")
 
-	serve.Flags().String("profile", "full", "MCP tool profile: core (lean set covering the taught agent workflow) or full (every tool)")
+	serve.Flags().String("profile", "full", "MCP tool profile: agent (exact taught workflow), core (compatible lean set), or full (every tool)")
 }
 
 // applyConfigFlags overlays explicitly-set CLI flags onto cfg, giving flags the
@@ -98,6 +99,9 @@ func applyConfigFlags(cmd *cobra.Command, cfg *config.Config) {
 		d, _ := fs.GetDuration("idle-timeout")
 		cfg.Daemon.IdleTimeoutMin = idleTimeoutMinutes(d)
 	}
+	if changed("precise") {
+		cfg.Daemon.Precise, _ = fs.GetBool("precise")
+	}
 	if changed("embed-rps") {
 		cfg.Daemon.EmbedRPS, _ = fs.GetFloat64("embed-rps")
 	}
@@ -109,6 +113,9 @@ func applyConfigFlags(cmd *cobra.Command, cfg *config.Config) {
 	}
 	if changed("fusion") {
 		cfg.Semantic.Fusion, _ = fs.GetString("fusion")
+	}
+	if changed("backend") {
+		cfg.Semantic.Backend, _ = fs.GetString("backend")
 	}
 	if changed("profile") {
 		cfg.MCP.Profile, _ = fs.GetString("profile")

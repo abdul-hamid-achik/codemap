@@ -1,0 +1,86 @@
+version: 1
+name: mcp_semantic_vecgrep_failure
+intent: |
+    An explicit `semantic.backend=vecgrep` makes vecgrep the sole retrieval
+    owner. This drives real MCP initialize + `codemap_semantic` calls over
+    newline-delimited stdio against a structure-only index whose exact symbol
+    name matches the query. Both an explicitly missing vecgrep binary and a
+    launched vecgrep process that returns invalid JSON must become actionable
+    MCP tool errors (`isError:true`, operational metadata) while the server
+    itself disconnects cleanly. Neither failure may silently turn into the
+    otherwise-available name match. The fixture is hermetic: no network,
+    Ollama, LSP, or installed vecgrep is used.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - >-
+          ROOT=$(pwd); TMP=$(mktemp -d); export HOME="$TMP/home"; export CODEMAP_DATA="$TMP/data"; export CODEMAP_MCP_PROFILE=agent; export CODEMAP_SEMANTIC_BACKEND=vecgrep; export CODEMAP_VECGREP_ENABLED=true; P="$TMP/proj"; CM="$ROOT/bin/codemap"; mkdir -p "$HOME" "$P"; printf '%s\n' 'package app' '' 'func ParseSelector(s string) string { return s }' > "$P/a.go"; "$CM" index -C "$P" --no-embed --no-lsp >/dev/null 2>&1; echo "index exit: $?"; printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"flow","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' > "$TMP/reqs"; printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"codemap_semantic","arguments":{"query":"ParseSelector","path":"%s"}}}\n' "$P" >> "$TMP/reqs"; export CODEMAP_VECGREP_BIN="$TMP/vecgrep-missing"; (cat "$TMP/reqs"; sleep 1) | "$CM" serve > "$TMP/missing_out" 2>"$TMP/missing_err"; echo "missing serve exit: $?"; grep -q '"isError":true' "$TMP/missing_out" && echo MISSING_IS_MCP_ERROR; grep -q '"code":"operational"' "$TMP/missing_out" && echo MISSING_HAS_ERROR_CODE; grep -q 'install vecgrep or set semantic.backend to fallback or local' "$TMP/missing_out" && echo MISSING_HAS_REMEDIATION; grep -q '"mode":"name"' "$TMP/missing_out" || echo MISSING_NO_NAME_FALLBACK; BAD="$TMP/vecgrep-bad"; printf '%s\n' '#!/bin/sh' "printf 'not-json\\n'" > "$BAD"; chmod +x "$BAD"; export CODEMAP_VECGREP_BIN="$BAD"; (cat "$TMP/reqs"; sleep 1) | "$CM" serve > "$TMP/invalid_out" 2>"$TMP/invalid_err"; echo "invalid serve exit: $?"; grep -q '"isError":true' "$TMP/invalid_out" && echo INVALID_IS_MCP_ERROR; grep -q '"code":"operational"' "$TMP/invalid_out" && echo INVALID_HAS_ERROR_CODE; grep -q 'parse vecgrep semantic output' "$TMP/invalid_out" && echo INVALID_NAMES_CONTRACT_FAILURE; grep -q '"mode":"name"' "$TMP/invalid_out" || echo INVALID_NO_NAME_FALLBACK; exit 0
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 20000
+    - snapshot: mcp_semantic_vecgrep_failure
+outcomes:
+    - id: structure_only_index_is_hermetic
+      description: the Go fixture indexes without embeddings or language servers
+      verify:
+        screen:
+            contains: "index exit: 0"
+    - id: missing_binary_is_tool_error
+      description: a missing explicit vecgrep owner is returned as an MCP tool error
+      verify:
+        screen:
+            contains: "MISSING_IS_MCP_ERROR"
+    - id: missing_binary_has_stable_code
+      description: the missing-binary result carries operational error metadata
+      verify:
+        screen:
+            contains: "MISSING_HAS_ERROR_CODE"
+    - id: missing_binary_is_actionable
+      description: the visible error names both installation and backend-switch remediation
+      verify:
+        screen:
+            contains: "MISSING_HAS_REMEDIATION"
+    - id: missing_binary_never_name_falls_back
+      description: the exact symbol-name match is not returned from a different retrieval owner
+      verify:
+        screen:
+            contains: "MISSING_NO_NAME_FALLBACK"
+    - id: missing_binary_server_disconnects_cleanly
+      description: a tool-level adapter failure does not crash the MCP stdio server
+      verify:
+        screen:
+            contains: "missing serve exit: 0"
+    - id: invalid_json_is_tool_error
+      description: invalid JSON from a launched vecgrep process is returned as an MCP tool error
+      verify:
+        screen:
+            contains: "INVALID_IS_MCP_ERROR"
+    - id: invalid_json_has_stable_code
+      description: the invalid-response result carries operational error metadata
+      verify:
+        screen:
+            contains: "INVALID_HAS_ERROR_CODE"
+    - id: invalid_json_names_boundary_failure
+      description: the visible error identifies vecgrep's response contract as the failure
+      verify:
+        screen:
+            contains: "INVALID_NAMES_CONTRACT_FAILURE"
+    - id: invalid_json_never_name_falls_back
+      description: an invalid sibling response never turns into a successful local name result
+      verify:
+        screen:
+            contains: "INVALID_NO_NAME_FALLBACK"
+    - id: invalid_json_server_disconnects_cleanly
+      description: an invalid sibling response stays a tool error and the stdio server exits cleanly
+      verify:
+        screen:
+            contains: "invalid serve exit: 0"
+contractHash: sha256:3d7d3c6475b1f06af1660ef1c405ab605758d1c6292590c153a4a56f0b3a0903

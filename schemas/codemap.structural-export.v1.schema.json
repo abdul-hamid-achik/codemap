@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:codemap:structural-export:v1",
+  "title": "codemap structural symbol export v1",
+  "description": "One deterministic, bounded page emitted by codemap export-symbols --json. Hard-failure envelopes are outside this schema.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project",
+    "project_key",
+    "index_fingerprint",
+    "offset",
+    "limit",
+    "max_content_bytes",
+    "total_records",
+    "returned_records",
+    "complete",
+    "records"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "project": { "type": "string", "minLength": 1 },
+    "project_key": { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+    "index_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "offset": { "type": "integer", "minimum": 0 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 5000 },
+    "max_content_bytes": { "type": "integer", "minimum": 1, "maximum": 262144 },
+    "total_records": { "type": "integer", "minimum": 0 },
+    "returned_records": { "type": "integer", "minimum": 0, "maximum": 5000 },
+    "complete": { "type": "boolean" },
+    "next_offset": { "type": "integer", "minimum": 1 },
+    "records": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": { "$ref": "#/$defs/symbol_record" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "complete": { "const": false } } },
+      "then": { "required": ["next_offset"] }
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "symbol_record": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "ordinal",
+        "project",
+        "project_key",
+        "index_fingerprint",
+        "file",
+        "start_line",
+        "end_line",
+        "symbol",
+        "fqn",
+        "kind",
+        "language",
+        "signature",
+        "docstring",
+        "source_hash",
+        "content"
+      ],
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "ordinal": { "type": "integer", "minimum": 1 },
+        "project": { "type": "string", "minLength": 1 },
+        "project_key": { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+        "index_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "file": { "type": "string", "minLength": 1 },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "symbol": { "type": "string" },
+        "fqn": { "type": "string" },
+        "kind": { "type": "string", "minLength": 1 },
+        "language": { "type": "string", "minLength": 1 },
+        "signature": { "type": "string", "maxLength": 262144 },
+        "docstring": { "type": "string", "maxLength": 262144 },
+        "source_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "content": { "type": "string", "maxLength": 262144 },
+        "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "signature_truncated": { "type": "boolean" },
+        "docstring_truncated": { "type": "boolean" },
+        "content_truncated": { "type": "boolean" },
+        "content_omitted": { "type": "boolean" },
+        "omission_reason": {
+          "type": "string",
+          "enum": ["unsafe_path", "file_missing", "file_unreadable", "index_hash_unavailable", "index_hash_missing", "stale_index"]
+        },
+        "file_stale": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "content_omitted": { "const": true } }, "required": ["content_omitted"] },
+          "then": { "required": ["omission_reason"] }
+        }
+      ],
+      "additionalProperties": true
+    }
+  }
+}

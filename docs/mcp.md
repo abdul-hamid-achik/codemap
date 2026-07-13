@@ -48,17 +48,20 @@ index → understand → read workflow on its own.
 
 ## Tool profiles
 
-By default `codemap serve` registers all 39 tools. That's a real cost: a
+By default `codemap serve` registers all 42 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
 measured **+95% input tokens** on the codemap arm, driven by 39 tool schemas riding
 in every session's context — and some clients (Cursor) cap total MCP tools at ~40
 *across all servers combined*, so a full codemap registration can crowd out every
 other server.
 
-Set `CODEMAP_MCP_PROFILE=core` (env), `mcp.profile: core` (`codemap.yaml`), or pass
-`--profile core` to `codemap serve` for a lean **22-tool** profile covering the
-whole taught agent workflow — orient, locate, understand, edit, verify — plus
-`codemap_docs` (self-discovery) and `codemap_status` (staleness):
+Set `CODEMAP_MCP_PROFILE=agent` (env), `mcp.profile: agent` (`codemap.yaml`), or pass
+`--profile agent` to `codemap serve` for the exact **22-tool** surface derived from
+the canonical taught workflow: the 21 tools it names plus `codemap_docs` for
+self-discovery. The shipped `core` profile remains compatible and currently has
+the same 22-tool inventory; its contract stays stable while `agent` is pinned to
+what the playbook actually teaches. `full` remains the default for backwards
+compatibility and is the explicit expert/admin surface.
 
 `codemap_index`, `codemap_status`, `codemap_docs`, `codemap_read_order`,
 `codemap_semantic`, `codemap_find`, `codemap_grep`, `codemap_context`,
@@ -67,13 +70,25 @@ whole taught agent workflow — orient, locate, understand, edit, verify — plu
 `codemap_file_impact`, `codemap_review`, `codemap_path`, `codemap_hotspots`,
 `codemap_orphans`, `codemap_coverage`.
 
+The current offline microbenchmark drives real `tools/list` calls through the Go
+MCP SDK's in-memory transport, with no model, network, embeddings, or language
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **26,116
+schema characters (≈6,529 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **40,855 characters (≈10,214 estimated tokens)**. That is about
+36% less schema context for the taught surface. Reproduce it with:
+
+```bash
+go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime=100x -benchmem
+```
+
 Everything else — `codemap_init`, `codemap_doctor`, `codemap_projects`,
 `codemap_symbols`, `codemap_symbol_at`, `codemap_related_files`,
 `codemap_secret_impact`, `codemap_required_keys`, `codemap_annotate` /
 `codemap_annotations` / `codemap_unannotate`, `codemap_branch_status` /
 `codemap_branch_switch`, and `codemap_cache_save` / `codemap_cache_restore` /
-`codemap_cache_list` / `codemap_cache_drop` — is admin/ecosystem surface, available
-under the default `full` profile. Precedence is the same three-way order as every
+`codemap_cache_list` / `codemap_cache_drop`, plus the full-profile orientation surfaces
+`codemap_map`, `codemap_explore`, and `codemap_traverse` — is admin/ecosystem/extended surface, available
+under the default `full` profile and excluded from both current lean profiles. Precedence is the same three-way order as every
 other codemap setting: config file < environment < CLI flag. An unrecognized value
 is a startup error, not a silent fallback. [`codemap agent setup
 cursor`](/agents#one-command-setup) defaults its generated `.cursor/mcp.json` entry
@@ -91,7 +106,7 @@ directory) and return JSON.
 | `codemap_index` | Index/reindex a project (`reindex`, `no_embed`, `precise` → exact call edges via go/types for Go) |
 | `codemap_status` | Index statistics **plus freshness** — a `stale` count of files changed/added/removed since indexing, so an agent reindexes before trusting results |
 | `codemap_doctor` | Check the environment (go toolchain, gopls, TS/JS + Python language servers, Ollama) with install hints — diagnose why a language isn't indexed or semantic search is off |
-| `codemap_semantic` | Semantic search by meaning (`query`, `top_k`). Adaptively balances the vector/BM25 hybrid-search fusion by query shape — an identifier-looking query leans BM25, a natural-language question leans vector — and reports the chosen profile as `fusion` (`identifier`/`natural_language`/`balanced`). Pass `fusion: "balanced"` for the exact equal-weighted behavior |
+| `codemap_semantic` | Semantic search by meaning (`query`, `top_k`). Adaptively balances the vector/BM25 hybrid-search fusion by query shape — an identifier-looking query leans BM25, a natural-language question leans vector — and reports the chosen profile as `fusion` (`identifier`/`natural_language`/`balanced`). Set `semantic.fusion: balanced` (or `CODEMAP_SEMANTIC_FUSION=balanced`) on the server for exact equal weighting |
 | `codemap_callers` | Functions/methods that call a symbol (`precise: true` → language-server resolution; `selector` → one exact definition). Carries a stable `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) |
 | `codemap_callees` | Functions/methods a symbol calls; accepts the same `precise` and exact `selector` inputs. Same `call_graph` enum |
 | `codemap_references` | Places a function/method is used as a value rather than called (callbacks, handlers, registrations). Accepts an exact `selector`; returns capped source sites with totals plus independent `coverage` and confirmed/candidate confidence. Go coverage is partial and name fan-out remains candidate, so an empty result is not proof of no runtime wiring. |
@@ -106,6 +121,9 @@ directory) and return JSON.
 | `codemap_orphans` | Dead-code candidates (`top`), with project-wide `call_graph`/`resolution` so an unresolved graph never reads as proven dead code |
 | `codemap_coverage` | **Per-file precise call-graph coverage** — rollups by language/directory (worst-covered first) always included; `prefix`/`language`/`uncovered` filters or `files:true` add the bounded per-file list (`top`, default/max 200/2000; `files_total`/`files_truncated` disclose the real count). Each file reports `resolver`/`resolved_at`/`stale`. Complements the per-query `call_graph` enum — use it to calibrate trust per package before asking a symbol question. |
 | `codemap_read_order` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/`, module index files, exported API) + call-graph hubs into a reading guide, each with a reason and score. Optional `query` narrows it. Run on first contact with an unfamiliar repo, then drill the top entries with `codemap_context` |
+| `codemap_map` | **Architecture overview** (full profile) — bounded source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and hubs. Independent `top_subsystems`/`top_bridges`/`top_hubs`/`top_entrypoints` caps; response carries totals/truncation plus freshness and call-graph honesty. |
+| `codemap_explore` | **Intent to exact neighborhoods** (full profile) — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (name fallback otherwise), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. |
+| `codemap_traverse` | **Typed heterogeneous graph walk** (full profile) — requires `selector:{file,start_line,fqn,kind}` and never accepts an ambiguous name union. `direction` is `outgoing`, `incoming`, or `both`; `edge_types` is a list drawn from `calls`, `references`, `imports`, `implements`, `overrides`, `depends_on`, `tests`, and `defines`; `depth` is 1–10 and `limit` is 1–500 nodes. Each hop returns durable child/parent selectors, edge provenance, and confirmed/candidate confidence; the report is cycle-safe, bounded, and exposes truncation/domain totals. |
 | `codemap_path` | Shortest call path (`from`, `to`, or paired `from_selector`/`to_selector`), with endpoint-scoped `call_graph`/`resolution` distinguishing disconnected from unresolved. Unique FQNs are exact endpoints too |
 | `codemap_related_files` | Files structurally related to a `file` via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence. Graph-accurate alternative to import-text heuristics |
 | `codemap_symbols` | List the symbols defined in a `file` (structured alternative to reading it) |
@@ -163,15 +181,16 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
 
 - **`candidates`** — on `codemap_callers`/`codemap_callees`/`codemap_impact`/`codemap_risk`/`codemap_source`/`codemap_context`, an ambiguous name-only query returns its merged result *and* `candidates:[{selector,signature,file,start_line}]` — the exact same merged set, already shaped as selectors. Re-query with `candidates[i].selector` to pin one definition without a separate `codemap_find`/`codemap_symbols` round-trip.
 - **`matched_in`** — on `codemap_find` in no-embeddings/degraded mode, each hit reports whether it matched the query on `"symbol"`, `"fqn"`, or `"docstring"`, so a docstring-only hit (ranked below a name match) is distinguishable from an exact name hit.
-- **`fusion`** — on `codemap_semantic`, the hybrid vector/BM25 weighting profile actually used (`"identifier"`, `"natural_language"`, or `"balanced"`), chosen adaptively from the query's shape unless `fusion: "balanced"` is passed to pin the pre-adaptive equal-weighted behavior.
+- **`fusion`** — on `codemap_semantic`, the hybrid vector/BM25 weighting profile actually used (`"identifier"`, `"natural_language"`, or `"balanced"`), chosen adaptively from the query's shape unless the server is configured with `semantic.fusion: balanced` (or `CODEMAP_SEMANTIC_FUSION=balanced`).
 - **`next`** — at most two executable `{tool,args,why}` follow-ups on `context`, `context_batch`, `impact`, `risk`, `file_impact`, and `review`. These are conditional recommendations, not a generic tool list: reindex when resolution is weak, run selected tests after a diff, or inspect risk for an untested hub.
-- **`partial_errors`** — non-fatal optional-component failures on `context`/`context_batch` (`callers`, `callees`, `references`, `impact`, or `memory_recall`). Definition/source lookup remains a hard prerequisite; otherwise usable context is returned alongside the bounded error entries.
+- **`partial_errors`** — non-fatal optional-component failures on `context`/`context_batch` (`callers`, `callees`, `references`, `impact`, or `memory_recall`) and on the composed `map`/`explore` orientation reports. Hard prerequisites still fail the tool; otherwise usable sections are returned alongside bounded error entries.
 - **`source_budget` / `source_truncations`** — explicit context-batch body budgeting. The aggregate source limit is 64 KiB; signatures, docs, and locations remain complete when bodies are shortened.
 - **`source_omitted`** — on `codemap_source`/`codemap_context`/`codemap_context_batch`, set per definition when `brief:true` dropped its `source` body. Signature/doc/location stay; call `codemap_source` (without `brief`) for the one definition you actually need the body of. Pass `brief:true` any time a hub symbol's response feels heavy — it's the response-side counterpart to `mcp.profile` (which trims the *tool list*, not individual response bodies).
 - **Structured errors** — MCP failures preserve stable `{code,message,hint}` metadata when the service returns a `CodedError`, while the visible text includes the remediation hint for clients that only render text.
 
 - **`call_graph`** — a stable enum on `codemap_impact`/`codemap_callers`/`codemap_callees`/`codemap_references`/
-  `codemap_review`/`codemap_context`/`codemap_hotspots`/`codemap_orphans`/`codemap_path`
+  `codemap_review`/`codemap_context`/`codemap_hotspots`/`codemap_orphans`/`codemap_path`/
+  `codemap_map`/`codemap_traverse`
   that a consumer switches on (no prose parsing):
   - `resolved` — every matched definition file has precise coverage (go/types for Go, language-server callHierarchy for TS/JS/Python/Vue)
   - `name` — name-based call graph (Go default; same-named methods may over-match)

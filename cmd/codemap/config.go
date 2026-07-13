@@ -56,10 +56,11 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("config_file: %s\n", config.ConfigFile())
 	fmt.Printf("embedding:\n  provider: %s\n  model: %s\n  ollama_url: %s\n  api_key: %s\n  dimensions: %d\n  distance: %s\n",
 		cfg.Embedding.Provider, cfg.Embedding.Model, cfg.Embedding.OllamaURL, cfg.Embedding.APIKey, cfg.Embedding.Dimensions, cfg.Embedding.Distance)
+	fmt.Printf("semantic:\n  backend: %s\n  fusion: %s\n", cfg.Semantic.Backend, cfg.Semantic.Fusion)
 	fmt.Printf("index:\n  max_file_bytes: %d\n  embed_batch_size: %d\n  embed_concurrency: %d\n  extract_concurrency: %d\n  embed_max_chars: %d\n",
 		cfg.Index.MaxFileBytes, cfg.Index.EmbedBatchSize, cfg.Index.EmbedConcurrency, cfg.Index.ExtractConcurrency, cfg.Index.EmbedMaxChars)
-	fmt.Printf("daemon:\n  debounce_ms: %d\n  idle_timeout_min: %d\n  embed_rps: %.0f\n  embed_max_in_flight: %d\n  embed_cache_size: %d\n",
-		cfg.Daemon.DebounceMS, cfg.Daemon.IdleTimeoutMin, cfg.Daemon.EmbedRPS, cfg.Daemon.EmbedMaxInFlight, cfg.Daemon.EmbedCacheSize)
+	fmt.Printf("daemon:\n  debounce_ms: %d\n  idle_timeout_min: %d\n  precise: %t\n  embed_rps: %.0f\n  embed_max_in_flight: %d\n  embed_cache_size: %d\n",
+		cfg.Daemon.DebounceMS, cfg.Daemon.IdleTimeoutMin, cfg.Daemon.Precise, cfg.Daemon.EmbedRPS, cfg.Daemon.EmbedMaxInFlight, cfg.Daemon.EmbedCacheSize)
 	if len(cfg.Index.Exclude) > 0 {
 		fmt.Printf("exclude: %v\n", cfg.Index.Exclude)
 	}

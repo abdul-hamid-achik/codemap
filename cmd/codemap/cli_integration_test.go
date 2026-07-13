@@ -184,6 +184,127 @@ func TestCLIContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("structural symbol export is versioned and paginated", func(t *testing.T) {
+		res := runCLI(t, bin, runner, env, "init", "-C", project, "--json")
+		if res.exit != 0 {
+			t.Fatalf("export setup init exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		res = runCLI(t, bin, runner, env, "index", "-C", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
+		if res.exit != 0 {
+			t.Fatalf("export setup index exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		res = runCLI(t, bin, runner, env, "export-symbols", "-C", project, "--limit", "2", "--max-content-bytes", "64", "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("export-symbols exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var rep struct {
+			SchemaVersion    int    `json:"schema_version"`
+			ProjectKey       string `json:"project_key"`
+			IndexFingerprint string `json:"index_fingerprint"`
+			TotalRecords     int    `json:"total_records"`
+			ReturnedRecords  int    `json:"returned_records"`
+			Complete         bool   `json:"complete"`
+			NextOffset       int    `json:"next_offset"`
+			Records          []struct {
+				SchemaVersion    int    `json:"schema_version"`
+				Ordinal          int    `json:"ordinal"`
+				Project          string `json:"project"`
+				ProjectKey       string `json:"project_key"`
+				IndexFingerprint string `json:"index_fingerprint"`
+				File             string `json:"file"`
+				StartLine        int    `json:"start_line"`
+				EndLine          int    `json:"end_line"`
+				FQN              string `json:"fqn"`
+				Kind             string `json:"kind"`
+				SourceHash       string `json:"source_hash"`
+				Content          string `json:"content"`
+			} `json:"records"`
+		}
+		mustJSON(t, res.stdout, &rep)
+		if rep.SchemaVersion != 1 || rep.ReturnedRecords != 2 || rep.TotalRecords <= 2 || rep.Complete || rep.NextOffset != 2 {
+			t.Fatalf("unexpected export page metadata: %+v", rep)
+		}
+		for i, record := range rep.Records {
+			if record.SchemaVersion != 1 || record.Ordinal != i+1 || record.Project == "" || record.ProjectKey == "" || record.IndexFingerprint == "" || record.File == "" || record.StartLine < 1 || record.EndLine < record.StartLine || record.FQN == "" || record.Kind == "" || record.SourceHash == "" || record.Content == "" {
+				t.Fatalf("incomplete structural record: %+v", record)
+			}
+			if len(record.Content) > 64 {
+				t.Fatalf("record content exceeds --max-content-bytes: %d", len(record.Content))
+			}
+		}
+
+		res = runCLI(t, bin, runner, env, "structural-manifest", "-C", project, "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("structural-manifest exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var manifest struct {
+			SchemaVersion       int    `json:"schema_version"`
+			ExportSchemaVersion int    `json:"export_schema_version"`
+			ProjectKey          string `json:"project_key"`
+			IndexFingerprint    string `json:"index_fingerprint"`
+			TotalRecords        int    `json:"total_records"`
+			Complete            bool   `json:"complete"`
+			Freshness           struct {
+				Checked bool `json:"checked"`
+				Fresh   bool `json:"fresh"`
+			} `json:"freshness"`
+		}
+		mustJSON(t, res.stdout, &manifest)
+		if manifest.SchemaVersion != 1 || manifest.ExportSchemaVersion != rep.SchemaVersion || manifest.ProjectKey != rep.ProjectKey || manifest.IndexFingerprint != rep.IndexFingerprint || manifest.TotalRecords != rep.TotalRecords || !manifest.Complete || !manifest.Freshness.Checked || !manifest.Freshness.Fresh {
+			t.Fatalf("manifest/export mismatch: manifest=%+v export=%+v", manifest, rep)
+		}
+
+		res = runCLI(t, bin, runner, env, "export-symbols", "-C", project, "--offset", "2", "--limit", "5001", "--json")
+		assertCLIEnvelope(t, res, exitOperational, "operational")
+		if !strings.Contains(res.stdout, "limit") || res.stderr != "" {
+			t.Fatalf("invalid export limit must be a JSON operational error: stdout=%q stderr=%q", res.stdout, res.stderr)
+		}
+	})
+
+	t.Run("architecture map has stable json and readable text", func(t *testing.T) {
+		res := runCLI(t, bin, runner, env, "init", "-C", project, "--json")
+		if res.exit != 0 {
+			t.Fatalf("map setup init exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		res = runCLI(t, bin, runner, env, "index", "-C", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
+		if res.exit != 0 {
+			t.Fatalf("map setup index exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		mapArgs := []string{"map", "-C", project, "--top-subsystems", "1", "--top-bridges", "1", "--top-hubs", "1", "--top-entrypoints", "1"}
+		res = runCLI(t, bin, runner, env, append(mapArgs, "--json")...)
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("map --json exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var rep struct {
+			SchemaVersion int    `json:"schema_version"`
+			Project       string `json:"project"`
+			Indexed       bool   `json:"indexed"`
+			Strategy      string `json:"strategy"`
+			Subsystems    []any  `json:"subsystems"`
+			Bridges       []any  `json:"bridges"`
+			Hubs          []any  `json:"hubs"`
+			Entrypoints   []any  `json:"entrypoints"`
+			CallGraph     string `json:"call_graph"`
+		}
+		mustJSON(t, res.stdout, &rep)
+		if rep.SchemaVersion != 1 || rep.Project == "" || !rep.Indexed || rep.Strategy != "source_path" || rep.CallGraph == "" {
+			t.Fatalf("unexpected map identity/confidence: %+v", rep)
+		}
+		if len(rep.Subsystems) != 1 || len(rep.Bridges) > 1 || len(rep.Hubs) > 1 || len(rep.Entrypoints) > 1 {
+			t.Fatalf("map ignored a --top-* bound: %+v", rep)
+		}
+
+		res = runCLI(t, bin, runner, env, mapArgs...)
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("map text exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		for _, want := range []string{"Architecture map for", "Subsystems (", "Bridges (", "Entrypoints (", "Hubs ("} {
+			if !strings.Contains(res.stdout, want) {
+				t.Errorf("human map output missing %q:\n%s", want, res.stdout)
+			}
+		}
+	})
+
 	t.Run("precise is canonical and lsp stays hidden", func(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "callers", "--help")
 		if res.exit != 0 {

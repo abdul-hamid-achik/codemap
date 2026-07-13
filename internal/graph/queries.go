@@ -422,6 +422,20 @@ type Hotspot struct {
 	InDegree int
 }
 
+// HotspotCount returns the exact number of callable nodes with at least one
+// incoming call edge. It complements the bounded Hotspots page so callers can
+// report truncation without fetching every hub.
+func (s *Store) HotspotCount(projectID int64) (int, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(DISTINCT e.target_id)
+		FROM edges e JOIN nodes n ON e.target_id = n.id
+		WHERE n.project_id = ? AND n.kind != ? AND e.edge_type = ?`,
+		projectID, KindFile, EdgeCalls,
+	).Scan(&count)
+	return count, err
+}
+
 // Hotspots returns the most-called nodes (highest incoming `calls` count) — the
 // hubs of the call graph. File nodes are excluded. Counts only `calls`, not
 // `references` (function values wired as handlers): a hub is something many
@@ -436,7 +450,7 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 		FROM edges e JOIN nodes n ON e.target_id = n.id
 		WHERE n.project_id = ? AND n.kind != ? AND e.edge_type = ?
 		GROUP BY e.target_id
-		ORDER BY indeg DESC, e.target_id
+		ORDER BY indeg DESC, n.file_path, n.start_line, n.fqn, n.kind, n.symbol, e.target_id
 		LIMIT ?`, projectID, KindFile, EdgeCalls, limit)
 	if err != nil {
 		return nil, err

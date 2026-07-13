@@ -37,9 +37,10 @@ comment, writes the job summary, and optionally gates the check on the JSON body
    works when step 5 doesn't apply: push events (no PR to comment on), forks without PR-write
    permission, or `skip-comment: true`. It reuses step 4's rendered file rather than re-deriving
    Markdown from the JSON, so there is exactly one rendering code path for both surfaces.
-7. **Gate** (optional) — `fail-on-untested`/`fail-on-risk` fail the *Action's own step* by reading
-   the JSON body directly. **This does not use `codemap review`'s process exit code** — see
-   [Gotcha](#gotcha-codemap-reviews-exit-code-is-not-a-gate-signal) below.
+7. **Gate** (optional) — `fail-on-untested`/`fail-on-risk` fail the *Action's final step* by reading
+   the JSON body directly. The Action deliberately invokes `codemap review` without its native
+   gate flags, so rendering, the sticky comment, the job summary, and outputs are all produced
+   before the check fails. See [Gate sequencing](#gate-sequencing-vs-codemaps-native-exit-6) below.
 
 ## Adoption: reusable workflow vs. direct action
 
@@ -138,23 +139,20 @@ Semantic search needs a local Ollama; there isn't one in CI, and `review`'s JSON
 semantic fields regardless — omitting `--no-embed` would just make `index` hang/fail trying to
 reach `http://localhost:11434`.
 
-### Gotcha: `codemap review`'s exit code is not a gate signal
+### Gate sequencing vs. codemap's native exit 6
 
-`Review()` (`internal/app/review.go` in the codemap repo) is explicitly documented to degrade
-gracefully and return `ok:true` even for a high-risk, fully-untested, non-indexed, or non-repo
-diff — "*Never errors on a non-repo or unindexed project — it degrades to a plain changed-file
-list with a Note so an agent always gets an actionable answer.*" A fully-untested, high-risk diff
-is still a **successful** `codemap review` call. Confirmed against `cmd/codemap/main.go`: there is
-no `--fail-on-risk`/`--fail-on-untested` flag on `codemap review` itself today. So `gate.sh` reads
-`.risk.level` and `.untested_symbols | length` straight out of the JSON body — never the process
-exit code. `run-review.sh` only treats a `codemap review` invocation as an *operational* failure
-when it prints a structured `{"ok":false,...}` envelope (a real crash/bad-flag/git-failure case,
-per `cmd/codemap/errors.go`'s exit taxonomy), which is a completely separate concept from the
-risk/untested gate.
+`Review()` (`internal/app/review.go` in the codemap repo) still degrades gracefully and returns a
+normal success report for high-risk, fully-untested, non-indexed, or non-repo diffs. The CLI now
+adds native `--fail-on-risk <low|medium|high>` and `--fail-on-untested` gates: after printing that
+same unchanged success report (including under `--json`), it exits **6** when a configured gate
+trips. Exit 6 is deliberately not an `{"ok":false,...}` operational-error envelope.
 
-> **TODO(I10)**: if/when codemap ships native `--fail-on-risk`/`--fail-on-untested` exit codes on
-> `codemap review` itself, `gate.sh`'s jq-based threshold check becomes a one-line swap to reading
-> codemap's own exit code, and this whole section goes away.
+This composite Action does not pass those native gate flags to `codemap review`. It needs the
+successful JSON body first so it can render/post the report, write the summary, and expose outputs;
+then its final `gate.sh` step applies the same risk/untested contract and fails the Action. Keeping
+the gate last also means `risk-level`, `risk-score`, and count outputs are available even when the
+check fails. `run-review.sh` treats a structured `{"ok":false,...}` envelope as an operational
+failure; with native gates intentionally absent from that invocation, exit 6 is not expected there.
 
 ### The risk-level ordinal is explicit, not lexical
 

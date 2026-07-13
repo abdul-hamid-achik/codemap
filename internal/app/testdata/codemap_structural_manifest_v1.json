@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "export_schema_version": 1,
+  "project": "sample",
+  "project_key": "0123456789ab",
+  "index_fingerprint": "42b21d9ac2b7dc180d0d780967732502790294c0a0a83e4eb01c2d8a9e1dba3d",
+  "total_records": 1,
+  "complete": true,
+  "freshness": {
+    "checked": true,
+    "fresh": true,
+    "changed": 0,
+    "new": 0,
+    "deleted": 0
+  }
+}

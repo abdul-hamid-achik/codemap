@@ -14,6 +14,43 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
 )
 
+type stubLanguageClient struct {
+	documentSymbols bool
+	callHierarchy   bool
+	syms            []lsp.DocumentSymbol
+	prepareItems    []lsp.CallHierarchyItem
+	prepareErr      error
+	prepareFn       func(lsp.Position) ([]lsp.CallHierarchyItem, error)
+	prepared        []lsp.Position
+	outgoingFn      func(lsp.CallHierarchyItem) ([]lsp.CallHierarchyOutgoingCall, error)
+	outgoingErr     error
+}
+
+func (s *stubLanguageClient) SupportsDocumentSymbols() bool { return s.documentSymbols }
+func (s *stubLanguageClient) SupportsCallHierarchy() bool   { return s.callHierarchy }
+func (s *stubLanguageClient) DidOpen(string, string, string) error {
+	return nil
+}
+func (s *stubLanguageClient) DocumentSymbols(context.Context, string) ([]lsp.DocumentSymbol, error) {
+	return s.syms, nil
+}
+
+func (s *stubLanguageClient) PrepareCallHierarchy(_ context.Context, _ string, pos lsp.Position) ([]lsp.CallHierarchyItem, error) {
+	s.prepared = append(s.prepared, pos)
+	if s.prepareFn != nil {
+		return s.prepareFn(pos)
+	}
+	return s.prepareItems, s.prepareErr
+}
+func (s *stubLanguageClient) OutgoingCalls(_ context.Context, item lsp.CallHierarchyItem) ([]lsp.CallHierarchyOutgoingCall, error) {
+	if s.outgoingFn != nil {
+		return s.outgoingFn(item)
+	}
+	return nil, s.outgoingErr
+}
+func (s *stubLanguageClient) Shutdown(context.Context) error { return nil }
+func (s *stubLanguageClient) Exit() error                    { return nil }
+
 func TestMapKind(t *testing.T) {
 	ds := func(kind int, detail string) lsp.DocumentSymbol {
 		return lsp.DocumentSymbol{Kind: kind, Detail: detail}
@@ -128,6 +165,76 @@ func TestAppendSymbolsSkipsAnonymousCallbacks(t *testing.T) {
 	}
 	if got["handler.defineEventHandler() callback.realHelper"] {
 		t.Error("realHelper should be reparented to handler, not the junk callback FQN")
+	}
+}
+
+func TestCallEdgesUsesExactlyTheIndexedCallableSet(t *testing.T) {
+	at := func(name string, kind, line int, detail string, kids ...lsp.DocumentSymbol) lsp.DocumentSymbol {
+		pos := lsp.Position{Line: line}
+		return lsp.DocumentSymbol{
+			Name: name, Kind: kind, Detail: detail,
+			Range: lsp.Range{Start: pos, End: pos}, SelectionRange: lsp.Range{Start: pos, End: pos},
+			Children: kids,
+		}
+	}
+	callback := at("map() callback", lsp.SymbolFunction, 1, "")
+	syms := []lsp.DocumentSymbol{
+		at("handler", lsp.SymbolConstant, 0, "() => number", callback),
+		at("helper", lsp.SymbolFunction, 3, ""),
+	}
+	client := &stubLanguageClient{
+		documentSymbols: true,
+		callHierarchy:   true,
+		syms:            syms,
+		prepareFn: func(pos lsp.Position) ([]lsp.CallHierarchyItem, error) {
+			if pos.Line == 1 {
+				return nil, errors.New("anonymous callback must not be queried")
+			}
+			name := "helper"
+			if pos.Line == 0 {
+				name = "handler"
+			}
+			return []lsp.CallHierarchyItem{{Name: name}}, nil
+		},
+		outgoingFn: func(item lsp.CallHierarchyItem) ([]lsp.CallHierarchyOutgoingCall, error) {
+			if item.Name != "handler" {
+				return nil, nil
+			}
+			return []lsp.CallHierarchyOutgoingCall{{To: lsp.CallHierarchyItem{
+				Name: "helper", URI: "file:///project/src/app.ts",
+				Range: lsp.Range{Start: lsp.Position{Line: 3}, End: lsp.Position{Line: 3}},
+			}}}, nil
+		},
+	}
+	e := &Extractor{
+		ctx: context.Background(), lang: "typescript", langID: "typescript",
+		root: "/project", client: client,
+	}
+
+	res, err := e.ExtractFile("src/app.ts", []byte("const handler = () => 1\n// callback\n\nfunction helper() {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed := map[string]string{}
+	for _, sym := range res.Symbols {
+		indexed[sym.FQN] = sym.Kind
+	}
+	if indexed["handler"] != extract.KindFunction || indexed["helper"] != extract.KindFunction {
+		t.Fatalf("indexed callables = %v, want handler arrow + helper", indexed)
+	}
+	if indexed["handler.map() callback"] != "" {
+		t.Fatalf("anonymous callback was indexed: %v", indexed)
+	}
+
+	edges, err := e.CallEdges(context.Background(), "src/app.ts")
+	if err != nil {
+		t.Fatalf("CallEdges queried a non-indexed callback or missed an indexed arrow: %v", err)
+	}
+	if len(client.prepared) != 2 || client.prepared[0].Line != 0 || client.prepared[1].Line != 3 {
+		t.Fatalf("prepared positions = %+v, want exactly indexed callables at lines 0 and 3", client.prepared)
+	}
+	if len(edges) != 1 || edges[0].FromFQN != "handler" || edges[0].FromFile != "src/app.ts" || edges[0].FromLine != 1 || edges[0].ToFile != "src/app.ts" || edges[0].ToLine != 4 || edges[0].External {
+		t.Fatalf("arrow-function call edge = %+v, want handler:1 -> helper:4", edges)
 	}
 }
 
@@ -317,10 +424,80 @@ func TestCallEdgesTypeScript(t *testing.T) {
 	for _, ed := range edges {
 		if ed.FromFQN == "caller" && !ed.External && ed.ToFile == "callee.ts" {
 			found = true
+			if ed.FromFile != "caller.ts" || ed.FromLine != 3 || ed.ToLine != 1 {
+				t.Errorf("call edge positions = %+v, want caller.ts:3 -> callee.ts:1", ed)
+			}
 		}
 	}
 	if !found {
 		t.Errorf("expected caller -> callee.ts edge, got %+v", edges)
+	}
+}
+
+func TestCallEdgesRequireAdvertisedCapability(t *testing.T) {
+	e := &Extractor{
+		lang:   "rust",
+		root:   "/project",
+		client: &stubLanguageClient{documentSymbols: true},
+	}
+	_, err := e.CallEdges(context.Background(), "src/lib.rs")
+	if err == nil || !strings.Contains(err.Error(), "does not advertise callHierarchy") {
+		t.Fatalf("CallEdges error = %v, want capability admission failure", err)
+	}
+}
+
+func TestCallEdgesPropagatePerSymbolFailure(t *testing.T) {
+	want := errors.New("server could not prepare hierarchy")
+	e := &Extractor{
+		lang: "rust",
+		root: "/project",
+		client: &stubLanguageClient{
+			documentSymbols: true,
+			callHierarchy:   true,
+			syms: []lsp.DocumentSymbol{{
+				Name: "run",
+				Kind: lsp.SymbolFunction,
+			}},
+			prepareErr: want,
+		},
+	}
+	_, err := e.CallEdges(context.Background(), "src/lib.rs")
+	if !errors.Is(err, want) {
+		t.Fatalf("CallEdges error = %v, want wrapped per-symbol failure", err)
+	}
+}
+
+func TestCallEdgesRejectEmptyPrepareForCallable(t *testing.T) {
+	e := &Extractor{
+		lang: "rust",
+		root: "/project",
+		client: &stubLanguageClient{
+			documentSymbols: true,
+			callHierarchy:   true,
+			syms: []lsp.DocumentSymbol{{
+				Name: "leaf",
+				Kind: lsp.SymbolFunction,
+			}},
+		},
+	}
+	_, err := e.CallEdges(context.Background(), "src/lib.rs")
+	if err == nil || !strings.Contains(err.Error(), "returned no item") {
+		t.Fatalf("CallEdges error = %v, want incomplete coverage failure", err)
+	}
+}
+
+func TestCallEdgesRejectEmptyDocumentSymbols(t *testing.T) {
+	e := &Extractor{
+		lang: "rust",
+		root: "/project",
+		client: &stubLanguageClient{
+			documentSymbols: true,
+			callHierarchy:   true,
+		},
+	}
+	_, err := e.CallEdges(context.Background(), "src/lib.rs")
+	if err == nil || !strings.Contains(err.Error(), "documentSymbol returned no symbols") {
+		t.Fatalf("CallEdges error = %v, want conservative empty-document failure", err)
 	}
 }
 

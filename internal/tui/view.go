@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -715,8 +716,12 @@ func (m Model) renderMetrics(w, h int) string {
 	}
 
 	vec := "no embeddings — name search only"
-	if m.status.Vectors > 0 {
+	if m.status.SemanticBackend == "vecgrep" {
+		vec = "semantic owner: vecgrep · local vectors disabled"
+	} else if m.status.Vectors > 0 {
 		vec = fmt.Sprintf("%d embedded · semantic search ready", m.status.Vectors)
+	} else if m.status.SemanticBackend == "fallback" && slices.Contains(m.status.Siblings, "vecgrep") {
+		vec = "no local embeddings · vecgrep fallback available"
 	}
 	edges := fmt.Sprintf("%d edges", m.status.Edges)
 	if m.status.PreciseEdges > 0 { // go/types-resolved; vs name-based default
@@ -973,7 +978,7 @@ func (m Model) renderSearch(w, h int) string {
 	hdr := title("Search")
 	if m.searchMode != "" {
 		badge := m.searchMode + " mode"
-		if m.searchMode == "name" && m.status != nil && m.status.Vectors == 0 {
+		if m.searchMode == "name" && m.status != nil && m.status.Vectors == 0 && m.status.SemanticBackend != "vecgrep" {
 			badge += " (no embeddings)" // why it isn't semantic; see Metrics for how to enable
 		}
 		if n := len(m.searchHits); n > 0 { // how many matches, so you needn't scroll to find out

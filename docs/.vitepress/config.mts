@@ -46,6 +46,7 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/' },
           { text: 'Quick Start', link: '/quick-start' },
+          { text: 'Language support', link: '/languages' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Branches & caching', link: '/branches' },
         ],

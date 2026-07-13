@@ -13,8 +13,9 @@ import (
 // ReadOrderOpts selects how many entries to rank and an optional case-insensitive
 // name/path filter (so "read order for http handling" narrows to matching symbols).
 type ReadOrderOpts struct {
-	Top   int
-	Query string
+	Top             int
+	Query           string
+	EntrypointsOnly bool // internal orientation mode: exclude pure hubs before applying Top
 }
 
 // ReadEntry is one ranked symbol in a suggested reading order, with the reason it
@@ -38,12 +39,14 @@ type ReadEntry struct {
 // call. Resolution is set when there's no call graph (importance is unavailable, so
 // the ranking leans on entrypoint heuristics only).
 type ReadOrderReport struct {
-	Project    string      `json:"project"`
-	Indexed    bool        `json:"indexed"`
-	Query      string      `json:"query,omitempty"`
-	Entries    []ReadEntry `json:"entries"`
-	Resolution string      `json:"resolution,omitempty"`
-	Note       string      `json:"note,omitempty"`
+	Project      string      `json:"project"`
+	Indexed      bool        `json:"indexed"`
+	Query        string      `json:"query,omitempty"`
+	Entries      []ReadEntry `json:"entries"`
+	Resolution   string      `json:"resolution,omitempty"`
+	Note         string      `json:"note,omitempty"`
+	totalEntries int
+	truncated    bool
 }
 
 // Read-order scoring weights. Importance (call-graph centrality) and
@@ -111,6 +114,9 @@ func (svc *Service) ReadOrder(cwd string, opts ReadOrderOpts) (*ReadOrderReport,
 			imp = float64(deg) / float64(maxDeg)
 		}
 		ep, epReason := entrypointScore(n, deg)
+		if opts.EntrypointsOnly && ep <= 0 {
+			continue
+		}
 		score := readWeightImportance*imp + readWeightEntrypoint*ep
 		if n.Kind == graph.KindFunction && n.Symbol == "main" {
 			score += 1.0 // the program's entrypoint always leads the reading order
@@ -132,10 +138,24 @@ func (svc *Service) ReadOrder(cwd string, opts ReadOrderOpts) (*ReadOrderReport,
 		if entries[i].InDegree != entries[j].InDegree {
 			return entries[i].InDegree > entries[j].InDegree
 		}
-		return entries[i].File < entries[j].File
+		if entries[i].File != entries[j].File {
+			return entries[i].File < entries[j].File
+		}
+		if entries[i].StartLine != entries[j].StartLine {
+			return entries[i].StartLine < entries[j].StartLine
+		}
+		if entries[i].FQN != entries[j].FQN {
+			return entries[i].FQN < entries[j].FQN
+		}
+		if entries[i].Kind != entries[j].Kind {
+			return entries[i].Kind < entries[j].Kind
+		}
+		return entries[i].Symbol < entries[j].Symbol
 	})
+	rep.totalEntries = len(entries)
 	if len(entries) > top {
 		entries = entries[:top]
+		rep.truncated = true
 	}
 	for i := range entries {
 		entries[i].Rank = i + 1

@@ -9,8 +9,9 @@ Local-first code intelligence: a structural code graph (Go via stdlib `go/parser
 `--precise` go/types; TypeScript **+ JavaScript** via one `typescript-language-server` — calls
 resolving across the `.ts`↔`.js` boundary — **Python** via `pyright-langserver`, and **Vue SFCs**
 (`.vue` → `<script>` blocks routed to the same TS server); tree-sitter still planned) fused with
-semantic vectors (veclite), exposed as a unified query layer. Three surfaces over one store: CLI
-(`--json` for agents), MCP server (`codemap serve`, 39 tools), and the `studio` TUI.
+semantic retrieval (local veclite or an explicit one-hop vecgrep CLI owner), exposed as a unified
+query layer. Three surfaces over the structural store: CLI
+(`--json` for agents), MCP server (`codemap serve`, 42 tools), and the `studio` TUI.
 
 Surfaces / key files:
 - CLI: `cmd/codemap/` — cobra CLI split per-command (main.go plus agent/annotate/branch/cache/
@@ -18,9 +19,11 @@ Surfaces / key files:
   calls `internal/app`.
 - Service layer (everything routes here): `internal/app/` (service_core / _init / _query /
   _relations / _impact / _context / _semantic / _annotations; plus session, review, file_impact,
-  risk, readorder, secret_impact, branchswitch, cache, doctor, docs, agentsetup, playbook,
+  risk, readorder, service_map, service_explore, service_traverse, secret_impact, branchswitch,
+  cache, doctor, docs, agentsetup, playbook,
   vecgrep_client).
-- MCP server (thin, 39 tools): `internal/mcp/server.go`
+- MCP server (thin, 42 full; agent/core 22): `internal/mcp/server.go`. `agent` is
+  pinned exactly to the taught workflow; `core` is the separate compatible lean contract.
 - studio TUI: `internal/tui/` (model.go/view.go/theme.go/run.go + anim.go [harmonica springs]
   + highlight.go [chroma syntax]; tabs graph/metrics/impact/search)
 - Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`

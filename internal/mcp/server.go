@@ -25,17 +25,19 @@ import (
 )
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
-// (the default, back-compat) registers every tool (39); ProfileCore
-// registers only coreTools — the lean set the canonical playbook (docs.go +
-// playbook.go, rendered via app.RenderPlaybook) actually teaches an agent to
-// call, plus codemap_docs for self-discovery. This exists because a lean MCP
-// server matters to schema-token budgets and to harnesses that cap total
-// tool count (Cursor caps ~40 across ALL servers; see bench/README.md's
-// "two runs disagree" measurement of +95% input tokens from 39 tool schemas
-// riding in every session).
+// (the default, back-compat) registers every tool (42). ProfileCore preserves
+// the shipped lean 22-tool contract. ProfileAgent is a separately pinned
+// 22-tool contract containing exactly the tools named by the canonical
+// playbook plus codemap_docs for self-discovery. Core and agent intentionally
+// start with the same inventory: keeping separate sets lets the taught agent
+// workflow evolve without silently changing the backwards-compatible core
+// surface. A lean MCP server matters to schema-token budgets and to harnesses
+// that cap total tool count (Cursor caps ~40 across ALL servers; see
+// bench/README.md's measurement of schema overhead).
 const (
-	ProfileFull = "full"
-	ProfileCore = "core"
+	ProfileFull  = "full"
+	ProfileCore  = "core"
+	ProfileAgent = "agent"
 )
 
 // coreTools is the ProfileCore tool set. Every name here is either taught by
@@ -46,9 +48,41 @@ const (
 // guide) and codemap_status (index staleness — already taught, kept for
 // clarity). Everything else (init, doctor, projects, symbols, symbol_at,
 // related_files, secret_impact, required_keys, annotate/annotations/
-// unannotate, branch_status/branch_switch, cache_save/restore/list/drop) is
-// admin/ecosystem surface, available only under ProfileFull.
+// unannotate, branch_status/branch_switch, cache_save/restore/list/drop, map,
+// explore, and traverse) is admin/ecosystem/extended surface, available only
+// under ProfileFull.
 var coreTools = map[string]bool{
+	"codemap_callees":       true,
+	"codemap_callers":       true,
+	"codemap_context":       true,
+	"codemap_context_batch": true,
+	"codemap_coverage":      true,
+	"codemap_dependencies":  true,
+	"codemap_docs":          true,
+	"codemap_file_impact":   true,
+	"codemap_find":          true,
+	"codemap_grep":          true,
+	"codemap_hotspots":      true,
+	"codemap_impact":        true,
+	"codemap_index":         true,
+	"codemap_orphans":       true,
+	"codemap_path":          true,
+	"codemap_read_order":    true,
+	"codemap_references":    true,
+	"codemap_review":        true,
+	"codemap_risk":          true,
+	"codemap_semantic":      true,
+	"codemap_source":        true,
+	"codemap_status":        true,
+}
+
+// agentTools is the ProfileAgent tool set. Unlike coreTools, its invariant is
+// exact rather than inclusive: it is every codemap_<tool> token taught by
+// RenderPlaybook/Docs("workflow"), plus codemap_docs and nothing else. See
+// TestAgentProfileExactlyMatchesTaughtWorkflow. Keep this literal separate
+// from coreTools so neither public profile changes as a side effect of editing
+// the other.
+var agentTools = map[string]bool{
 	"codemap_callees":       true,
 	"codemap_callers":       true,
 	"codemap_context":       true,
@@ -89,12 +123,12 @@ func resolveProfile(cfg *config.Config) string {
 }
 
 const instructions = `codemap is a local code knowledge graph: code structure (calls, types,
-tests) fused with semantic vectors, queried offline. Index a project once with codemap_index,
+tests) plus semantic retrieval owned by local veclite or the sibling vecgrep CLI. Index a project once with codemap_index,
 then query it — until you do, query tools return {"indexed": false} with a hint to index first.
 Every tool takes an optional "path" (project dir; defaults to cwd) and returns JSON.
 
 Find code:
-- codemap_semantic — by meaning ("jwt validation middleware"); needs an embedded index.
+- codemap_semantic — by meaning ("jwt validation middleware"); needs an embedded index in the configured semantic owner.
 - codemap_find — by name; fast and offline (no embeddings).
 - codemap_grep — by exact text content (a string literal, error message, route, env-var
   name); fast and offline, joins each hit onto its enclosing symbol.
@@ -105,7 +139,7 @@ Understand a symbol:
 - codemap_callers / codemap_callees — who calls a symbol / what it calls.
 - codemap_references — where a function/method is stored or passed as a callback value;
   enclosing scopes, not callers or exact expression lines. It has its own coverage/confidence.
-- codemap_source — a symbol's source code; codemap_symbols — a file's outline.
+- codemap_source — a symbol's source code.
 - codemap_context — the one-call bundle for a symbol (def+callers+callees+value refs+tests+blast+notes);
   codemap_context_batch — the same for several symbols at once, plus the callers they share
   (coupling), so you model a whole component in one round-trip.
@@ -138,7 +172,7 @@ An unavailable call graph is unknown, never low. Triage which edit is riskiest.
 Survey a codebase: codemap_read_order (where to START — entrypoints + hubs ranked into a reading
 guide; run this on first contact with an unfamiliar repo, then drill the top entries with
 codemap_context), codemap_hotspots (hubs), codemap_orphans (dead-code candidates), codemap_status
-(index size), codemap_projects (what's indexed).
+(index size and freshness).
 
 Accuracy: the graph is name-based, so a cross-package method call (x.Foo()) matches every method
 named Foo — codemap_callers/codemap_impact note when a name is ambiguous and codemap_hotspots flags
@@ -151,9 +185,10 @@ project precise:true is what gives codemap_callers/impact/hotspots/path a call g
 one-off exact answer on Go without reindexing, pass precise:true to codemap_callers/codemap_callees
 (gopls; Go only — on the LSP languages, reindex with codemap_index precise:true instead). Precise
 resolution degrades to name-based (with a "note" in the result) when the toolchain or module is
-unavailable, so precise:true is never a hard failure. Likewise
-codemap_semantic returns a "note" (not an error) when the project has no embeddings — fall back to
-codemap_find.
+unavailable, so precise:true is never a hard failure. In fallback/local mode codemap_semantic
+returns a "note" (not an error) when the permitted owner has no embeddings — fall back to
+codemap_find. An explicitly configured vecgrep owner instead surfaces a missing binary, execution
+failure, or invalid response as an error; a valid zero-hit response stays empty.
 
 Value references are independent of call precision: codemap_references follows stored callback/
 registration 'references' edges, and never accepts precise:true. Its partial/unavailable coverage,
@@ -162,21 +197,25 @@ stale flag, and per-site confidence remain authoritative even after a precise ca
 Call codemap_docs for the full guide (workflow, every tool, accuracy, and how codemap fits the
 local toolchain) — useful when wiring codemap into a harness.`
 
-// instructionsFor appends one sentence under ProfileCore noting that admin/
-// ecosystem tools are trimmed from this session, without forking the
-// playbook prose above.
+// instructionsFor appends one sentence under a lean profile noting that admin/
+// ecosystem tools are trimmed from this session, without forking the playbook
+// prose above.
 func instructionsFor(profile string) string {
-	if profile != ProfileCore {
+	switch profile {
+	case ProfileCore:
+		return instructions + "\n\nprofile: core — admin and extended tools (init, doctor, projects, symbols, symbol_at, map, explore, traverse, related_files, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
+	case ProfileAgent:
+		return instructions + "\n\nprofile: agent — this session exposes exactly 21 taught workflow tools plus codemap_docs for self-discovery (22 total); use CODEMAP_MCP_PROFILE=full for admin and extended tools."
+	default:
 		return instructions
 	}
-	return instructions + "\n\nprofile: core — admin and ecosystem tools (init, doctor, projects, symbols, symbol_at, related_files, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
 }
 
 // Server wraps the go-sdk MCP server over a codemap session.
 type Server struct {
 	svc     *app.Service
 	srv     *sdkmcp.Server
-	profile string // ProfileFull or ProfileCore; gates which tools register()
+	profile string // ProfileFull, ProfileCore, or ProfileAgent; gates register()
 
 	// operationMu lets ordinary tool calls run concurrently, but gives index
 	// exclusive ownership of Session's graph/vector handles for its full
@@ -199,11 +238,17 @@ func NewServer(sess *app.Session) *Server {
 }
 
 // include reports whether tool name should be registered under the server's
-// current profile: everything registers under ProfileFull; only coreTools
-// register under ProfileCore. Registration-time only — a tool that IS
-// registered behaves identically under either profile.
+// current profile. Registration-time only — a tool that IS registered behaves
+// identically under every profile.
 func (s *Server) include(name string) bool {
-	return s.profile != ProfileCore || coreTools[name]
+	switch s.profile {
+	case ProfileCore:
+		return coreTools[name]
+	case ProfileAgent:
+		return agentTools[name]
+	default:
+		return true
+	}
 }
 
 // coordinateToolOperations serializes codemap_index against every other tool
@@ -287,6 +332,31 @@ type readOrderInput struct {
 	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Query string `json:"query,omitempty" jsonschema:"optional case-insensitive name/path filter to narrow the ranking (e.g. 'http')"`
 	Top   int    `json:"top,omitempty" jsonschema:"maximum entries to rank (default 20)"`
+}
+
+type mapInput struct {
+	Path           string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	TopSubsystems  int    `json:"top_subsystems,omitempty" jsonschema:"maximum source-path subsystems to include (default 50)"`
+	TopBridges     int    `json:"top_bridges,omitempty" jsonschema:"maximum directed cross-subsystem bridges to include (default 100)"`
+	TopHubs        int    `json:"top_hubs,omitempty" jsonschema:"maximum call-graph hubs to include (default 20)"`
+	TopEntrypoints int    `json:"top_entrypoints,omitempty" jsonschema:"maximum likely entrypoints to include (default 10)"`
+}
+
+type exploreInput struct {
+	Query string `json:"query" jsonschema:"intent or concept to search for before joining hits to exact graph neighborhoods"`
+	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Seeds int    `json:"seeds,omitempty" jsonschema:"maximum semantic/name seeds (default 5, max 10)"`
+	Edges int    `json:"edges,omitempty" jsonschema:"maximum callers/callees/references/tests retained per seed (default 5, max 20)"`
+	Depth int    `json:"depth,omitempty" jsonschema:"maximum blast-radius depth per exact seed (default 2, max 10)"`
+}
+
+type traverseInput struct {
+	Selector  app.SymbolSelector `json:"selector" jsonschema:"required exact starting definition projected from file/start_line/fqn/kind; bare symbol-name unions are deliberately unsupported"`
+	Path      string             `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Direction string             `json:"direction,omitempty" jsonschema:"relation direction: outgoing, incoming, or both (default both)"`
+	EdgeTypes []string           `json:"edge_types,omitempty" jsonschema:"relation types to follow; defaults to calls,references,imports,implements,overrides,depends_on,tests"`
+	Depth     int                `json:"depth,omitempty" jsonschema:"maximum traversal depth (default 2, max 10)"`
+	Limit     int                `json:"limit,omitempty" jsonschema:"maximum reached nodes (default 100, max 500)"`
 }
 
 type relatedFilesInput struct {
@@ -522,6 +592,24 @@ func (s *Server) register() {
 			Name:        "codemap_read_order",
 			Description: "Where to START reading an unfamiliar codebase — a ranked reading guide. Blends call-graph importance (in-degree hubs) with entrypoint heuristics (main(), cmd/ packages, module index files, exported public API) so the symbols that orient you fastest come first, each with a reason and score. Optional 'query' narrows it (name/path substring). Use this on first contact with a repo instead of guessing where to look; pair with codemap_context to then drill the top entries. Resolution is set when there's no call graph (ranking falls back to entrypoint heuristics).",
 		}, s.handleReadOrder)
+	}
+	if s.include("codemap_map") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_map",
+			Description: "Bounded architecture overview for an unfamiliar project: deterministic source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and call-graph hubs. Returns totals/truncation plus call_graph, resolution, stale, and partial_errors honesty signals. Use the selectors in the entrypoint/hub rows with codemap_context to drill down. Available in the full MCP profile.",
+		}, s.handleMap)
+	}
+	if s.include("codemap_explore") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_explore",
+			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source.",
+		}, s.handleExplore)
+	}
+	if s.include("codemap_traverse") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_traverse",
+			Description: "Bounded heterogeneous graph walk (full profile) from one REQUIRED durable selector:{file,start_line,fqn,kind}; bare name unions are not accepted. Filters by outgoing|incoming|both and edge_types, remains cycle-safe, and returns per-hop type/provenance/confirmed|candidate confidence plus domain summaries, call_graph honesty, and truncation.",
+		}, s.handleTraverse)
 	}
 	if s.include("codemap_related_files") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
@@ -974,6 +1062,40 @@ func (s *Server) handleReadOrder(_ context.Context, _ *sdkmcp.CallToolRequest, i
 		return r, v, nil
 	}
 	rep, err := s.svc.ReadOrder(cwdOf(in.Path), app.ReadOrderOpts{Top: in.Top, Query: in.Query})
+	return result(rep, err)
+}
+
+func (s *Server) handleMap(_ context.Context, _ *sdkmcp.CallToolRequest, in mapInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.ArchitectureMap(cwdOf(in.Path), app.ArchitectureMapOptions{
+		TopSubsystems: in.TopSubsystems, TopBridges: in.TopBridges,
+		TopHubs: in.TopHubs, TopEntrypoints: in.TopEntrypoints,
+	})
+	return result(rep, err)
+}
+
+func (s *Server) handleExplore(ctx context.Context, _ *sdkmcp.CallToolRequest, in exploreInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	if strings.TrimSpace(in.Query) == "" {
+		return result(nil, fmt.Errorf("explore needs a query"))
+	}
+	rep, err := s.svc.Explore(ctx, cwdOf(in.Path), in.Query, app.ExploreOptions{
+		Seeds: in.Seeds, Edges: in.Edges, Depth: in.Depth,
+	})
+	return result(rep, err)
+}
+
+func (s *Server) handleTraverse(_ context.Context, _ *sdkmcp.CallToolRequest, in traverseInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.TraverseBySelector(cwdOf(in.Path), in.Selector, app.TraverseOptions{
+		Direction: in.Direction, EdgeTypes: in.EdgeTypes, Depth: in.Depth, Limit: in.Limit,
+	})
 	return result(rep, err)
 }
 

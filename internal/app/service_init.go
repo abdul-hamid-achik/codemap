@@ -60,17 +60,18 @@ type IndexReport struct {
 
 // StatusReport is returned by Status.
 type StatusReport struct {
-	Project      string         `json:"project"`
-	Root         string         `json:"root"`
-	Registered   bool           `json:"registered"`
-	Path         string         `json:"path,omitempty"`
-	Nodes        int            `json:"nodes"`
-	Edges        int            `json:"edges"`
-	Files        int            `json:"files"`
-	Vectors      int            `json:"vectors"`       // embedded nodes (0 = no semantic index)
-	PreciseEdges int            `json:"precise_edges"` // go/types-resolved call edges (0 = name-based index)
-	Languages    map[string]int `json:"languages,omitempty"`
-	Kinds        map[string]int `json:"kinds,omitempty"`
+	Project         string         `json:"project"`
+	Root            string         `json:"root"`
+	Registered      bool           `json:"registered"`
+	Path            string         `json:"path,omitempty"`
+	Nodes           int            `json:"nodes"`
+	Edges           int            `json:"edges"`
+	Files           int            `json:"files"`
+	Vectors         int            `json:"vectors"`          // locally embedded nodes (0 is expected when semantic_backend=vecgrep)
+	SemanticBackend string         `json:"semantic_backend"` // configured retrieval owner: fallback|local|vecgrep
+	PreciseEdges    int            `json:"precise_edges"`    // go/types-resolved call edges (0 = name-based index)
+	Languages       map[string]int `json:"languages,omitempty"`
+	Kinds           map[string]int `json:"kinds,omitempty"`
 	// Stale, when set, reports how far the index has drifted from the working tree
 	// (changed/new/deleted files). Status does not compute it (keeps studio fast);
 	// the CLI `status` and MCP codemap_status populate it via Staleness so an agent
@@ -138,6 +139,15 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep := &IndexReport{Project: name, Root: root}
 	var vec *vector.Store
 	emb := svc.s.Embedder()
+	if strings.EqualFold(strings.TrimSpace(svc.s.Config.Semantic.Backend), "vecgrep") && withEmbed {
+		// An explicit semantic owner is also an indexing decision: writing a
+		// second local vector space that no query will read wastes embed time and
+		// can leave two stores disagreeing about freshness. Structure remains in
+		// codemap; vecgrep owns retrieval. The fallback/local modes preserve the
+		// existing local-vector behavior during migration.
+		withEmbed = false
+		rep.Warning = "local embeddings disabled: semantic.backend=vecgrep delegates retrieval to vecgrep"
+	}
 
 	if !withEmbed {
 		emb = nil
@@ -231,17 +241,15 @@ func indexAdvisory(res *index.Result) string {
 		msgs = append(msgs, fmt.Sprintf("%d %s file(s) skipped — install %q to index them (or run with --no-lsp)",
 			res.Unsupported[lang], lang, res.MissingServers[lang]))
 	}
-	if res.FilesScanned == 0 {
-		planned := map[string]int{}
-		for lang, n := range res.Unsupported {
-			if _, hasServer := res.MissingServers[lang]; !hasServer {
-				planned[lang] = n
-			}
+	planned := map[string]int{}
+	for lang, n := range res.Unsupported {
+		if _, hasServer := res.MissingServers[lang]; !hasServer {
+			planned[lang] = n
 		}
-		if len(planned) > 0 {
-			msgs = append(msgs, "skipped "+summarizeUnsupported(planned)+
-				" — codemap indexes Go, TypeScript, JavaScript, and Python; more languages planned (run 'codemap doctor' to see language servers)")
-		}
+	}
+	if len(planned) > 0 {
+		msgs = append(msgs, "skipped "+summarizeUnsupported(planned)+
+			" — recognized at T0 only (structural backend planned, not shipped); codemap currently indexes Go, TypeScript, JavaScript, Python, and Vue script blocks")
 	}
 	return strings.Join(msgs, "; ")
 }
@@ -284,7 +292,11 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep := &StatusReport{Project: name, Root: root, ProjectKey: git.RepoHash(root)}
+	backend := strings.ToLower(strings.TrimSpace(svc.s.Config.Semantic.Backend))
+	if backend == "" {
+		backend = "fallback"
+	}
+	rep := &StatusReport{Project: name, Root: root, ProjectKey: git.RepoHash(root), SemanticBackend: backend}
 	// Best-effort: note ecosystem siblings that also index this project (a richer
 	// semantic view may live there). Set before the not-registered return so it
 	// shows even when codemap itself hasn't indexed the project yet.

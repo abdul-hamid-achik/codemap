@@ -18,6 +18,8 @@ anything else.
 | `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python, Vue SFC via the same `typescript-language-server`), Ollama embeddings, and the [background daemon](#background-daemon) — with install hints (`--json`) |
 | `codemap projects` | List all registered projects and their index sizes |
 | `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, annotations, accuracy, ecosystem) |
+| `codemap structural-manifest --json` | Emit the single-response `codemap.structural-manifest.v1` preflight for `export-symbols`: explicit export schema version, project identity, the exact export fingerprint, total records, completeness, and working-tree freshness counters. It streams indexed metadata without reading source bodies or loading the full export. |
+| `codemap export-symbols [--offset N] [--limit N] [--max-content-bytes N] --json` | Export deterministic, paginated structural records under `codemap.structural-export.v1`: a contiguous global ordinal, durable selectors, hashes, signature/doc, and bounded current content. Stale/missing/unsafe content is omitted explicitly. This is the CLI-only boundary consumed by vecgrep `structural_chunks` modes `auto`, `off`, and `required`; it never shares codemap's DB or Go packages. |
 | `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`) |
 | `codemap annotations [<sym> \| <from> <to>]` | List annotations (all/node/path); `--rm <id>` to remove |
 
@@ -96,6 +98,8 @@ it is, and — for `review` — what your current diff already touched.
 | `codemap orphans [--top N]` | Functions/methods with no callers (dead-code candidates) |
 | `codemap coverage [--prefix P] [--lang L] [--uncovered] [--files] [--top N]` | Per-file precise call-graph coverage: rollups by language and by directory (worst-covered first), plus a bounded per-file list (`--files`, or any filter, includes it; capped at `--top`, default 200) showing each file's `resolver`, `resolved_at`, and whether it's gone `stale` since the last index. Complements, does not replace, the per-query `call_graph` enum. |
 | `codemap read-order [query] [--top N]` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/` packages, module index files, exported public API) and load-bearing hubs (call-graph in-degree) into a newcomer's reading guide, each with the reason it ranked. Optional `query` narrows by name/path. The agent-facing answer to "I just landed in this repo — what do I read first?" |
+| `codemap map [--top-subsystems N] [--top-bridges N] [--top-hubs N] [--top-entrypoints N]` | **Architecture overview** — deterministic source-path subsystems, directed cross-subsystem bridges with relationship provenance, likely entrypoints, and hubs. JSON includes `schema_version`, totals/truncation, `call_graph`, `resolution`, `stale`, and `partial_errors`. |
+| `codemap traverse --at <file>:<line> [--direction outgoing\|incoming\|both] [--edge-types calls,references,...] [--depth N] [--limit N]` | **Exact heterogeneous walk** — starts from the one indexed definition enclosing `--at` (no ambiguous positional name), resolves it to the durable `{file,start_line,fqn,kind}` identity, then walks selected relationship domains cycle-safely. `--edge-types` is CSV from `calls`, `references`, `imports`, `implements`, `overrides`, `depends_on`, `tests`, and `defines`; depth is 1–10 (default 2), node limit is 1–500 (default 100). JSON v1 includes every hop's parent selector, direction, edge type/provenance, and confirmed/candidate confidence. MCP counterpart `codemap_traverse` is full-profile only and requires the typed durable `selector`. |
 
 ## Semantic
 
@@ -104,14 +108,23 @@ name fragment, or by literal text.
 
 | Command | Description |
 |---|---|
-| `codemap semantic <query> [--top N] [--fusion auto\|balanced]` | Meaning-based search across the indexed graph (alias: `codemap search`) |
+| `codemap semantic <query> [--top N] [--backend fallback\|local\|vecgrep] [--fusion auto\|balanced]` | Meaning-based search across the indexed graph (alias: `codemap search`); the backend flag explicitly selects the semantic owner |
+| `codemap explore <query> [--seeds N] [--edges N] [--depth N]` | **Intent to structure** — finds semantic/name seeds, joins each usable hit to an exact durable selector, then returns bounded caller/callee/reference/test neighborhoods without source bodies. Seeds are 1–10 (default 5), edges per neighborhood are 1–20 (default 5), and depth is 1–10 (default 2). MCP counterpart `codemap_explore` is full-profile only. |
 | `codemap find <query> [--top N]` | Find symbols by name, with signatures (offline; no embeddings needed) |
 | `codemap grep <pattern> [--regex] [-i] [--top N]` | Exact text search over indexed file content, each hit resolved to its enclosing symbol (offline, no embeddings) |
 
-On a structure-only project (indexed with `--no-embed`, or before Ollama was available), `codemap semantic`
-returns no hits with a short note explaining there are no embeddings — and the JSON carries `"mode": "none"`
-plus that `"note"` — so you know to embed the index or fall back to `codemap find`. It never calls the
-embedder or creates an empty vector store in that case.
+The default backend is `fallback`: codemap reads its local vectors when present,
+then asks vecgrep only for a structure-only project. Use `--backend local` to
+forbid that adapter, or `--backend vecgrep` to make vecgrep the sole semantic
+owner. Explicit vecgrep mode treats a missing binary, execution failure, or bad
+JSON as an error and preserves a genuine zero-hit answer; it never silently
+switches back to local vectors. Indexing with that backend keeps the graph but
+skips/removes codemap's unused local vectors.
+
+On a structure-only project where neither permitted owner has embeddings,
+`codemap semantic` returns no hits with a short note and JSON `"mode": "none"`.
+It never invokes the embedder or creates an empty vector store on that query
+path; `codemap find` remains the offline name-search floor.
 
 **`codemap find` in degraded (no-Ollama) mode**: it's the offline search floor, not a semantic
 replacement — it tokenizes the query on whitespace and camelCase boundaries (query side only) and
@@ -148,7 +161,7 @@ interactive TUI, or just check what's installed.
 
 | Command | Description |
 |---|---|
-| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile core\|full` selects the [tool profile](/mcp#tool-profiles) (default `full`, all 39 tools; `core` is a lean 22-tool set) — same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting |
+| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile agent\|core\|full` selects the [tool profile](/mcp#tool-profiles): `agent` is exactly 21 taught workflow tools plus `codemap_docs` (22 total), `core` preserves the compatible 22-tool surface, and default `full` exposes all 42. Same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting. |
 | `codemap studio` | Open the interactive [TUI](/studio) |
 | `codemap version` | Print version information |
 
@@ -199,7 +212,7 @@ below (see [Configuration](/configuration)).
 
 | Command | Description |
 |---|---|
-| `codemap daemon start [path]` | Run the daemon in the foreground (watches the project; background it with `&`, stop with Ctrl-C). Flags: `--no-embed` (structure only, no Ollama), `--debounce`, `--idle-timeout`, `--embed-rps`, `--embed-max-in-flight`, `--embed-cache-size` |
+| `codemap daemon start [path]` | Run the daemon in the foreground (watches the project; background it with `&`, stop with Ctrl-C). Flags: `--precise` (rerun exact Go/LSP resolution after watched edits), `--no-embed` (structure only, no Ollama), `--debounce`, `--idle-timeout`, `--embed-rps`, `--embed-max-in-flight`, `--embed-cache-size` |
 | `codemap daemon status` | Show whether a daemon is running and what it's watching |
 | `codemap daemon stop` | Stop the running daemon |
 
@@ -214,6 +227,12 @@ collide with the daemon's exclusive database lock). The output is the normal
 `--reindex` / `--precise` / `--no-lsp` / `--no-embed`. `--watch` is a no-op in
 this case (the daemon is already watching); `--exclude-extra` is not forwarded
 (stop + restart the daemon to change excludes).
+
+Exactness is persistent daemon state, not a one-shot label. Start with
+`--precise` (or `daemon.precise: true` / `CODEMAP_DAEMON_PRECISE=true`) to run
+the exact Go `go/types` and LSP `callHierarchy` pass on the initial index and
+every changed batch. If a package stops type-checking or an LSP request fails,
+the affected files lose precise coverage instead of retaining ghost confidence.
 
 ## Example
 

@@ -47,7 +47,11 @@ planned write. For any harness not listed, `codemap agent playbook` prints the g
 
 Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
 [MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
-*all* servers combined; every other harness above stays on the full 39-tool default.
+*all* servers combined; every other harness above stays on the full 42-tool default.
+For a manually configured harness, choose `CODEMAP_MCP_PROFILE=agent` to bind its
+surface exactly to this page's taught loop. `agent` and the backwards-compatible
+`core` profile both contain 22 tools today; `full` is the explicit expert/admin
+surface and remains the default for compatibility.
 
 ### Claude Code plugin
 
@@ -86,6 +90,12 @@ callback evidence; `codemap_hotspots`/`codemap_orphans` support a **Gate**-time 
 answers to trust before you lean on them; `codemap_path` traces the shortest call chain
 between two symbols anywhere in the loop. Run `read_order` once per repo and `review`
 after every change — those two bookend the loop.
+
+The default `full` profile also exposes three bounded orientation tools outside the lean taught
+loop: `codemap_map` surveys subsystems, `codemap_explore` turns an intent query into exact context
+neighborhoods (`seeds`/`edges`/`depth`), and `codemap_traverse` walks selected relation types from
+a required durable selector (`direction`/`edge_types`/`depth`/`limit`). They are intentionally not
+registered in the current 22-tool `agent` or `core` profiles.
 
 ## Honesty signals — why an agent can trust the answers
 
@@ -126,7 +136,8 @@ calibrate its confidence:
   matched on `"symbol"`, `"fqn"`, or `"docstring"`, so you know why it surfaced.
 - **`fusion`** — `codemap_semantic` reports which hybrid vector/BM25 weighting it used
   (`"identifier"`, `"natural_language"`, `"balanced"`), adaptively chosen from the query's shape
-  unless pinned with `fusion: "balanced"`.
+  unless the server is configured with `semantic.fusion: balanced` (or
+  `CODEMAP_SEMANTIC_FUSION=balanced`).
 - **`untested` / `heuristic`** — a symbol has no covering tests, or a test was matched
   by name-scan rather than the call graph (flag it, don't trust it blindly).
 - **`*_total`** — true counts behind a capped list, so you know when to drill with
@@ -144,7 +155,8 @@ answer without reindexing, pass `precise: true` to `codemap_callers`/`codemap_ca
 
 Every symbol result already has `file`, `start_line`, `fqn`, and `kind`. Project those
 same fields into `selector` for `codemap_source`, `codemap_context`, `codemap_callers`,
-`codemap_callees`, `codemap_references`, `codemap_impact`, or `codemap_risk`; path accepts `from_selector`
+`codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_risk`, or full-profile
+`codemap_traverse`; path accepts `from_selector`
 and `to_selector`. This scopes the whole query to one definition even when a short
 name is shared. File+FQN+kind is preferred, so a declaration can shift lines across
 a reindex. A move or rename can invalidate the selector and returns a miss; codemap

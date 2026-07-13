@@ -3,7 +3,7 @@ layout: home
 hero:
   name: codemap
   text: Your agent greps. codemap knows.
-  tagline: A local-first code graph + semantic search your coding agent calls over MCP — who calls this, what breaks, which tests cover it. One pure-Go binary, fully offline, 39 tools.
+  tagline: A local-first code graph + semantic search your coding agent calls over MCP — who calls this, what breaks, which tests cover it. One pure-Go binary, fully offline, 42 tools.
   image:
     src: /hero-card.svg
     alt: "codemap_impact(\"Store.NodeAtLine\") returning a cited answer in a studio terminal pane"

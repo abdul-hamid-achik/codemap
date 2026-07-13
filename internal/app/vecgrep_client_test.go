@@ -2,9 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
@@ -93,6 +97,129 @@ func TestSemanticVecgrepEmptyResult(t *testing.T) {
 	}
 	if rep.Mode != "none" {
 		t.Errorf("Mode = %q, want none when vecgrep returns no hits", rep.Mode)
+	}
+}
+
+func TestSemanticBackendVecgrepOwnsZeroHitAndUnavailableStates(t *testing.T) {
+	t.Run("zero hits remain a successful vecgrep query", func(t *testing.T) {
+		svc, proj := semanticProj(t, fakeVecgrep(t, `[]`))
+		svc.s.Config.Semantic.Backend = "vecgrep"
+		rep, err := svc.Semantic(context.Background(), proj, "anything", 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Mode != "vecgrep" || len(rep.Hits) != 0 {
+			t.Fatalf("explicit vecgrep backend = %+v", rep)
+		}
+		search, err := svc.Search(context.Background(), proj, "TargetFunc", 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if search.Mode != "vecgrep" || len(search.Hits) != 0 {
+			t.Fatalf("Search silently changed owners after a valid zero-hit: %+v", search)
+		}
+	})
+
+	t.Run("missing explicit backend is an error", func(t *testing.T) {
+		svc, proj := semanticProj(t, "")
+		svc.s.Config.Semantic.Backend = "vecgrep"
+		svc.s.Config.Vecgrep = config.VecgrepConfig{Enabled: true, Bin: "vecgrep-definitely-missing"}
+		if _, err := svc.Semantic(context.Background(), proj, "anything", 5); err == nil {
+			t.Fatal("explicit vecgrep backend should fail when its binary is unavailable")
+		}
+		if _, err := svc.Search(context.Background(), proj, "TargetFunc", 5); err == nil {
+			t.Fatal("Search should not hide an explicit vecgrep owner failure behind name fallback")
+		}
+	})
+}
+
+func TestSemanticBackendLocalNeverDelegates(t *testing.T) {
+	bin := fakeVecgrep(t, `[{"relative_path":"a.go","symbol_name":"TargetFunc","start_line":2,"end_line":2,"language":"go","score":0.91}]`)
+	svc, proj := semanticProj(t, bin)
+	svc.s.Config.Semantic.Backend = "local"
+	rep, err := svc.Semantic(context.Background(), proj, "the target function", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Mode != "none" || len(rep.Hits) != 0 {
+		t.Fatalf("local backend delegated unexpectedly: %+v", rep)
+	}
+}
+
+func TestVecgrepSubprocessLimits(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses hermetic POSIX helper executables")
+	}
+
+	writeHelper := func(t *testing.T, body string) string {
+		t.Helper()
+		bin := filepath.Join(t.TempDir(), "vecgrep")
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return bin
+	}
+
+	t.Run("default timeout bounds a caller without deadline", func(t *testing.T) {
+		bin := writeHelper(t, "while :; do :; done\n")
+		start := time.Now()
+		_, err := runVecgrepJSONWithLimits(context.Background(), bin, t.TempDir(), 75*time.Millisecond, 1024, "search")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("error = %v, want deadline exceeded", err)
+		}
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Fatalf("default subprocess timeout took %s", elapsed)
+		}
+	})
+
+	t.Run("caller deadline wins", func(t *testing.T) {
+		bin := writeHelper(t, "while :; do :; done\n")
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		_, err := runVecgrepJSONWithLimits(ctx, bin, t.TempDir(), 5*time.Second, 1024, "search")
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("error = %v, want caller deadline exceeded", err)
+		}
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Fatalf("caller cancellation took %s", elapsed)
+		}
+	})
+
+	t.Run("stdout is bounded and terminates producer", func(t *testing.T) {
+		bin := writeHelper(t, "while :; do printf '012345678901234567890123456789\\n'; done\n")
+		start := time.Now()
+		_, err := runVecgrepJSONWithLimits(context.Background(), bin, t.TempDir(), 5*time.Second, 1024, "search")
+		if err == nil || !strings.Contains(err.Error(), "stdout exceeds 1024 bytes") {
+			t.Fatalf("error = %v, want bounded stdout error", err)
+		}
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Fatalf("oversized producer took %s to terminate", elapsed)
+		}
+	})
+}
+
+func TestVecgrepTimeoutPreservesSemanticOwnerPolicy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a hermetic POSIX helper executable")
+	}
+	bin := filepath.Join(t.TempDir(), "vecgrep")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nwhile :; do :; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.VecgrepConfig{Enabled: true, Bin: bin}
+
+	explicitCtx, cancelExplicit := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelExplicit()
+	_, available, err := vecgrepSearchCommand(explicitCtx, cfg, t.TempDir(), "query", 5)
+	if !available || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("explicit adapter result: available=%v error=%v", available, err)
+	}
+
+	fallbackCtx, cancelFallback := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelFallback()
+	if hits := vecgrepSearch(fallbackCtx, cfg, t.TempDir(), "query", 5); hits != nil {
+		t.Fatalf("optional fallback should swallow adapter timeout, got %+v", hits)
 	}
 }
 

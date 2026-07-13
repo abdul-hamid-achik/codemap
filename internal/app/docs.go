@@ -11,8 +11,8 @@ type docTopic struct{ name, body string }
 
 var docTopics = []docTopic{
 	{"overview", `codemap is local-first code intelligence: a structural code graph (who calls
-what, types, tests, imports) fused with semantic vector search, queryable
-offline. It precomputes structure once, then answers narrow questions in a few
+what, types, tests, imports) plus semantic retrieval (local veclite or sibling
+vecgrep). It precomputes structure once, then answers narrow questions in a few
 calls instead of many file reads — for both people (CLI + the studio TUI) and
 agents (a stdio MCP server).
 
@@ -23,8 +23,9 @@ precise call graph under 'index --precise' so callers/impact/hotspots/path work
 for them. Other languages are recognized and reported as skipped (more in
 progress); --no-lsp disables the LSP backend. Semantic search is language-agnostic.
 
-Data lives under XDG paths (or ~/.codemap): the graph DB, the veclite vector
-store, and the project registry — so other tools can inspect the same store.`},
+Data lives under XDG paths (or ~/.codemap): the graph DB, optional local veclite
+store, and the project registry. semantic.backend=vecgrep leaves structural
+authority in codemap and delegates retrieval through a versioned one-hop CLI.`},
 
 	{"workflow", `Index once, then query. The typical agent loop for understanding or fixing code:
 
@@ -74,20 +75,29 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests + runnable test_commands
   review [--since R] [--staged]      diff-scoped: changed/deleted symbols, blast radius, tests to run, risk band
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
+  map [--top-subsystems N ...]       architecture overview: subsystems, directed bridges, entrypoints, hubs
+                                     (codemap_map is available in the full MCP profile)
+  explore <query> [--seeds N --edges N --depth N]
+                                     intent search → bounded exact context neighborhoods, no source bodies
+                                     (codemap_explore is available in the full MCP profile)
   dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage
   file-impact <file>                 file impact: confidence-aware evidence + coverage + conservative delete verdict
   risk <sym> [--at file:line]        change-risk: unknown when graph coverage is missing; otherwise low/medium/high
   context <sym> [<sym>...] [--at|--brief]  one-call bundle; pass several symbols for a batch + shared callers;
                                      --brief drops source bodies (signature+doc stay, source_omitted:true)
   path <from> <to>                   shortest call path between two symbols
+  traverse --at <file>:<line> [--direction outgoing|incoming|both]
+           [--edge-types calls,references,...] [--depth N] [--limit N]
+                                     bounded typed-edge walk from one exact definition; no name union
+                                     (codemap_traverse is available in the full MCP profile)
   symbols <file>                     a file's outline (signatures)
   find <query>                       name search (offline, no embeddings); tokenizes on
                                      whitespace/camelCase and also matches docstrings —
                                      each hit's matched_in says symbol/fqn/docstring
   grep <pattern> [--regex] [-i]      exact text search over indexed content, joined to symbol
-  semantic <query>                   meaning-based search (needs an embedded index;
-                                     on a structure-only project it returns mode
-                                     "none" with a note — use find instead)
+  semantic <query> [--backend fallback|local|vecgrep]
+                                     meaning search: local vectors, compatible fallback,
+                                     or explicit vecgrep owner (adapter failures stay errors)
   source <sym> [--at file:line] [--brief]  source for all same-named definitions, or one exact definition;
                                      --brief drops the body (signature+doc stay, source_omitted:true)
   hotspots / orphans [--top N]       hubs / dead-code candidates
@@ -96,13 +106,16 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      language/directory + bounded per-file detail
   annotate <sym> | <from> <to>       pin a note/data to a symbol or call path
   annotations [sym] | [from] [to]    list annotations (--rm <id> to remove)
+  structural-manifest               source-free identity/freshness preflight for export-symbols
+  export-symbols [--offset N --limit N --max-content-bytes N]
+                                     paginated structural-export v1 feed for vecgrep structural_chunks
   agent setup <harness> | list | playbook   wire codemap (MCP server + playbook) into an AI coding harness
-  serve                              run the MCP server (stdio)
+  serve [--profile agent|core|full]  run MCP: exact taught / compatible lean / expert surface
   studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
 callers, callees, references, impact, file_impact, dependencies, review, secret_impact,
-required_keys, risk, hotspots, orphans, coverage, read_order, path, related_files, symbols,
+required_keys, risk, hotspots, orphans, coverage, read_order, map, explore, traverse, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
@@ -113,11 +126,12 @@ surfaces report optional component failures in partial_errors;
 codemap_review is the post-edit query (diff, including retained deleted definitions → impact + tests to run + one aggregate risk band);
 callers/callees accept precise:true; references deliberately does not, because call precision
 does not upgrade value-reference edges. Agent-facing source/context/callers/callees/
-references/impact/risk accept selector:{file,start_line,fqn,kind}; path accepts from_selector
+references/impact/risk/traverse accept selector:{file,start_line,fqn,kind}; path accepts from_selector
 and to_selector. codemap_context_batch also accepts selectors:[{file,start_line,fqn,kind}]
 unioned with symbols (same 25-cap; MCP-only, no CLI batch form yet). codemap_symbol_at accepts
 positions:[{file,line}] as a batch alternative to file/line — a pasted multi-frame stack trace
-resolves in one call. codemap_docs returns this guide.`},
+resolves in one call. explore accepts query+seeds+edges+depth; traverse requires its selector and
+accepts direction+edge_types+depth+limit. Both MCP tools are full-profile only. codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
 external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a
@@ -213,12 +227,17 @@ area → codemap_impact / codemap_path to learn what a change would affect and
 what tests cover it → plan the fix → fcheap to persist the artifacts. All share
 local XDG storage, so findings can be cross-referenced.
 
-codemap ⇄ vecgrep is wired directly (when the vecgrep binary is on PATH): if a
-project has no codemap embeddings, codemap_semantic falls back to vecgrep's index
-and maps hits onto the graph (mode:"vecgrep"); codemap_context surfaces vecgrep
-agent-memories scoped to this project via status's project_key tag; and
-codemap_status reports sibling indexes. It degrades silently when vecgrep is
-absent. Disable with vecgrep.enabled=false.
+codemap ⇄ vecgrep uses versioned one-hop CLI contracts, never shared packages or
+stores. semantic.backend=fallback keeps compatibility: local vectors win and an
+absent local index may fall back silently to vecgrep. semantic.backend=local never
+delegates. semantic.backend=vecgrep makes the sibling the sole retrieval owner,
+skips codemap vector writes, and surfaces unavailable/exec/JSON adapter failures;
+zero hits remain a real empty answer. codemap_semantic maps usable vecgrep hits
+onto the graph; codemap_context surfaces project-scoped memories; and codemap_status
+reports sibling indexes. In the other direction, 'codemap structural-manifest --json'
+provides a source-free identity/freshness preflight before 'codemap export-symbols --json'
+pages structural-export v1 records for vecgrep structural_chunks=auto|off|required;
+unsafe/stale content is omitted explicitly.
 
 codemap ⇄ tinyvault answers secret rotation impact: codemap_secret_impact takes
 secret key NAMES (or --via-vault fetches them from tvault, value-free) and reports

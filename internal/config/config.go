@@ -23,20 +23,21 @@ type Config struct {
 // MCPConfig controls `codemap serve` (the MCP stdio server).
 type MCPConfig struct {
 	// Profile selects which set of MCP tools codemap_serve registers:
-	// "core" (a lean set covering the taught agent workflow — see
-	// internal/mcp's coreTools) or "full" (every tool; the default,
-	// back-compatible behavior). Reachable file < env
+	// "agent" (exactly the taught workflow plus self-discovery), "core"
+	// (the backwards-compatible lean set), or "full" (every tool; the
+	// default, back-compatible behavior). Reachable file < env
 	// (CODEMAP_MCP_PROFILE) < flag (--profile on `codemap serve`).
 	Profile string `yaml:"profile"`
 }
 
-// SemanticConfig controls how `codemap semantic`/`search` fuses vector and
-// BM25 (text) search. Fusion is reachable file < env (CODEMAP_SEMANTIC_FUSION)
-// < flag (--fusion); FusionWeights is a file-only advanced-tuning knob (no
-// env/flag), matching the exception pattern documented for
-// daemon.embed_cache_size/index.extract_concurrency.
+// SemanticConfig selects the semantic owner and, for the local owner, controls
+// how `codemap semantic`/`search` fuses vector and BM25 (text) search. Backend
+// and Fusion are reachable file < env < flag; FusionWeights is a file-only
+// advanced-tuning knob (no env/flag), matching the exception pattern documented
+// for daemon.embed_cache_size/index.extract_concurrency.
 type SemanticConfig struct {
-	Fusion        string              `yaml:"fusion"` // auto (default, classify query shape) | balanced (equal weights, pre-F7 behavior)
+	Backend       string              `yaml:"backend"` // fallback (default: local vectors, vecgrep only when absent) | local | vecgrep
+	Fusion        string              `yaml:"fusion"`  // auto (default, classify query shape) | balanced (equal weights, pre-F7 behavior)
 	FusionWeights FusionWeightsConfig `yaml:"fusion_weights"`
 }
 
@@ -53,8 +54,9 @@ type FusionWeightPair struct {
 	Text   float64 `yaml:"text"`
 }
 
-// VecgrepConfig controls the optional fallback to the sibling vecgrep tool for
-// semantic search when codemap has no local embeddings (structure-only index).
+// VecgrepConfig controls the optional CLI adapter to the sibling vecgrep tool.
+// It can be a fallback for structure-only indexes or the explicitly configured
+// semantic owner; codemap never imports vecgrep packages or shares its store.
 type VecgrepConfig struct {
 	Enabled bool   `yaml:"enabled"` // try vecgrep for semantic search when codemap has no vectors (default true)
 	Bin     string `yaml:"bin"`     // path to the vecgrep binary (resolved via $PATH if empty)
@@ -64,6 +66,7 @@ type VecgrepConfig struct {
 type DaemonConfig struct {
 	DebounceMS       int     `yaml:"debounce_ms"`         // watcher debounce (default 500)
 	IdleTimeoutMin   int     `yaml:"idle_timeout_min"`    // idle-shutdown after N minutes (0 = never)
+	Precise          bool    `yaml:"precise"`             // keep exact call edges current after watched edits
 	EmbedRPS         float64 `yaml:"embed_rps"`           // background embed rate to Ollama (0 = unlimited)
 	EmbedMaxInFlight int     `yaml:"embed_max_in_flight"` // max concurrent embed calls (default 2)
 	EmbedCacheSize   int     `yaml:"embed_cache_size"`    // dedup cache entries (default 4096)
@@ -175,7 +178,8 @@ func DefaultConfig() *Config {
 		},
 		Vecgrep: VecgrepConfig{Enabled: true},
 		Semantic: SemanticConfig{
-			Fusion: "auto",
+			Backend: "fallback",
+			Fusion:  "auto",
 			FusionWeights: FusionWeightsConfig{
 				Identifier:      FusionWeightPair{Vector: 0.5, Text: 1.5},
 				NaturalLanguage: FusionWeightPair{Vector: 1.5, Text: 0.5},
@@ -266,12 +270,23 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("semantic fusion %q is not a valid value; use auto or balanced", c.Semantic.Fusion)
 	}
+	backend := strings.ToLower(strings.TrimSpace(c.Semantic.Backend))
+	switch backend {
+	case "fallback", "local", "vecgrep", "":
+		// supported (empty defaults to fallback at read time)
+	default:
+		return fmt.Errorf("semantic backend %q is not a valid value; use fallback, local, or vecgrep", c.Semantic.Backend)
+	}
+	if backend == "vecgrep" && !c.Vecgrep.Enabled {
+		return fmt.Errorf("semantic backend vecgrep requires vecgrep.enabled: true")
+	}
+	c.Semantic.Backend = backend
 	profile := strings.ToLower(strings.TrimSpace(c.MCP.Profile))
 	switch profile {
-	case "core", "full", "":
+	case "agent", "core", "full", "":
 		// supported (empty defaults to full at read time)
 	default:
-		return fmt.Errorf("mcp profile %q is not a valid value; use core or full", c.MCP.Profile)
+		return fmt.Errorf("mcp profile %q is not a valid value; use agent, core, or full", c.MCP.Profile)
 	}
 	c.MCP.Profile = profile
 	return nil
@@ -328,6 +343,11 @@ func applyEnv(cfg *Config) {
 			cfg.Daemon.IdleTimeoutMin = n
 		}
 	}
+	if v := os.Getenv("CODEMAP_DAEMON_PRECISE"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Daemon.Precise = b
+		}
+	}
 	if v := os.Getenv("CODEMAP_DAEMON_EMBED_RPS"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			cfg.Daemon.EmbedRPS = f
@@ -375,6 +395,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODEMAP_SEMANTIC_FUSION"); v != "" {
 		cfg.Semantic.Fusion = v
+	}
+	if v := os.Getenv("CODEMAP_SEMANTIC_BACKEND"); v != "" {
+		cfg.Semantic.Backend = v
 	}
 	if v := os.Getenv("CODEMAP_MCP_PROFILE"); v != "" {
 		cfg.MCP.Profile = v

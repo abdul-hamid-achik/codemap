@@ -2,9 +2,12 @@ package index
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
@@ -47,6 +50,68 @@ func TestStaleness(t *testing.T) {
 	}
 	if st, _ = ix.Staleness(pid, dir, langs); st.Deleted != 1 {
 		t.Errorf("after delete: got %+v, want Deleted=1", st)
+	}
+}
+
+func TestStalenessFromSnapshotStrictPropagatesWalkError(t *testing.T) {
+	ix := New(nil, nil, nil, config.DefaultConfig().Index)
+	missingRoot := filepath.Join(t.TempDir(), "missing")
+
+	if st, err := ix.StalenessFromSnapshot(missingRoot, nil, nil); err != nil || st.Any() {
+		t.Fatalf("ordinary missing-root staleness = %+v err=%v, want conservative zero result", st, err)
+	}
+	if _, err := ix.StalenessFromSnapshotStrict(missingRoot, nil, nil); err == nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("strict missing-root error = %v, want wrapped not-exist walk error", err)
+	}
+}
+
+func TestStalenessFromSnapshotStrictRejectsUnreadableIndexedFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod does not reliably make files unreadable on Windows")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "sample.go")
+	if err := os.WriteFile(path, []byte("package sample\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Skipf("make source unreadable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("filesystem privileges still permit reading mode-000 file")
+	}
+
+	ix := New(nil, nil, nil, config.DefaultConfig().Index)
+	hashes := map[string]string{"sample.go": "indexed-hash"}
+	langs := map[string]bool{"go": true}
+	if st, err := ix.StalenessFromSnapshot(root, hashes, langs); err != nil || st.Any() {
+		t.Fatalf("ordinary unreadable-file staleness = %+v err=%v, want conservative zero result", st, err)
+	}
+	if _, err := ix.StalenessFromSnapshotStrict(root, hashes, langs); err == nil || !strings.Contains(err.Error(), "read indexed file sample.go") {
+		t.Fatalf("strict unreadable-file error = %v, want contextual read failure", err)
+	}
+}
+
+func TestStalenessFromSnapshotStrictFollowsRegularFileSymlink(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("package sample\n")
+	target := filepath.Join(t.TempDir(), "target.go")
+	if err := os.WriteFile(target, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "sample.go")); err != nil {
+		t.Skipf("create file symlink: %v", err)
+	}
+
+	ix := New(nil, nil, nil, config.DefaultConfig().Index)
+	st, err := ix.StalenessFromSnapshotStrict(
+		root,
+		map[string]string{"sample.go": sha256hex(content)},
+		map[string]bool{"go": true},
+	)
+	if err != nil || st.Any() {
+		t.Fatalf("regular-file symlink staleness = %+v err=%v, want fresh", st, err)
 	}
 }
 

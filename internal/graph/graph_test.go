@@ -714,6 +714,38 @@ func TestHotspotsCountsCallsNotReferences(t *testing.T) {
 	}
 }
 
+func TestHotspotsTieBreaksByDurableSourceIdentity(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("durable-hotspots", "/p", "go")
+	add := func(file, symbol string, line int) int64 {
+		t.Helper()
+		id, err := s.AddNode(&Node{
+			ProjectID: pid, FilePath: file, Symbol: symbol, FQN: "p." + symbol,
+			Kind: KindFunction, Language: "go", StartLine: line, EndLine: line, SourceHash: "h",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	callerA := add("callers/a.go", "CallerA", 1)
+	callerZ := add("callers/z.go", "CallerZ", 1)
+	// Allocate the lexically-later target first so an id-based tie-break would
+	// return the wrong deterministic prefix after a concurrent reindex.
+	targetZ := add("z/z.go", "Zulu", 1)
+	targetA := add("a/a.go", "Alpha", 1)
+	_, _ = s.AddEdge(callerA, targetA, EdgeCalls, WeightLSP)
+	_, _ = s.AddEdge(callerZ, targetZ, EdgeCalls, WeightLSP)
+
+	hs, err := s.Hotspots(pid, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hs) != 1 || hs[0].Node.Symbol != "Alpha" {
+		t.Fatalf("durable hotspot prefix = %+v, want Alpha", hs)
+	}
+}
+
 // TestOrphansExcludesInterfaceMethods pins that methods implementing well-known
 // stdlib interfaces (Error/String/Unwrap/Marshal*) aren't flagged as dead code —
 // they're dispatch-invoked, so always false positives — while a plain dead method

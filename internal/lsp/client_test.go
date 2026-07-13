@@ -40,7 +40,12 @@ func TestClientFakeServer(t *testing.T) {
 	serverHandler := func(method string, _ json.RawMessage) (any, error) {
 		switch method {
 		case "initialize":
-			return map[string]any{"capabilities": map[string]any{}}, nil
+			return map[string]any{"capabilities": map[string]any{
+				"documentSymbolProvider": true,
+				// Registration-options objects also mean supported in LSP.
+				"callHierarchyProvider": map[string]any{"workDoneProgress": true},
+				"referencesProvider":    false,
+			}}, nil
 		case "textDocument/documentSymbol":
 			return []DocumentSymbol{
 				{Name: "Foo", Kind: SymbolFunction, Range: Range{End: Position{Line: 2}}},
@@ -63,6 +68,15 @@ func TestClientFakeServer(t *testing.T) {
 	if err := cl.Initialize(ctx, "/tmp/proj"); err != nil {
 		t.Fatal(err)
 	}
+	if !cl.SupportsDocumentSymbols() {
+		t.Error("documentSymbol capability was advertised but not retained")
+	}
+	if !cl.SupportsCallHierarchy() {
+		t.Error("object-valued callHierarchy capability was advertised but not retained")
+	}
+	if cl.SupportsReferences() {
+		t.Error("false references capability must not be reported as supported")
+	}
 	syms, err := cl.DocumentSymbols(ctx, "file:///tmp/a.go")
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +94,13 @@ func TestClientFakeServer(t *testing.T) {
 	}
 	if len(refs) != 1 {
 		t.Errorf("references = %+v, want 1", refs)
+	}
+}
+
+func TestProviderCapabilityRejectsInvalidShape(t *testing.T) {
+	var p providerCapability
+	if err := json.Unmarshal([]byte(`[]`), &p); err == nil {
+		t.Fatal("array-valued provider capability should be rejected")
 	}
 }
 

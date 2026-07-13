@@ -60,6 +60,40 @@ untaught session that only sometimes reaches for the MCP tools — see "usage ra
 Opus. The harness prints the summed `total_cost_usd` at the end so spend is never a surprise.
 Subset with `--tasks` / `--reps` to iterate cheaply.
 
+## Offline profile and response microbenchmarks
+
+Two Go benchmarks cover the token/latency budgets without a model, API key, network,
+Ollama, or language server. `BenchmarkProfileSchemaTax` drives real MCP `tools/list`
+round-trips through the SDK's in-memory transport and serializes every advertised tool
+schema. `schema-approx-tokens` is explicitly a planning estimate (`Unicode chars / 4`),
+not a model-specific tokenizer. `BenchmarkOrientationReports` indexes a small Go fixture
+without embeddings/LSP, then measures the bounded map/explore/traverse report plus compact
+JSON serialization.
+
+```sh
+go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime=100x -benchmem
+go test ./internal/app -run '^$' -bench '^BenchmarkOrientationReports$' -benchtime=100x -benchmem
+```
+
+Reference run: Apple M5, darwin/arm64, 100 iterations, 2026-07-13. Latency is
+directional and machine-dependent; counts and payload sizes are deterministic for this build.
+
+| MCP profile | tools | schema chars | estimated tokens | `tools/list` |
+|---|---:|---:|---:|---:|
+| `agent` | 22 | 26,116 | 6,529 | 0.82 ms |
+| `core` | 22 | 26,116 | 6,529 | 0.82 ms |
+| `full` | 42 | 40,855 | 10,214 | 1.32 ms |
+
+`agent` is a separate contract derived exactly from the taught workflow; `core`
+preserves the shipped lean inventory. They intentionally match today. Both remove about
+36% of the current full-profile schema characters.
+
+| bounded report | compact JSON | service + JSON |
+|---|---:|---:|
+| `map` | 2,800 bytes | 0.81 ms |
+| `explore` | 3,692 bytes | 2.43 ms |
+| `traverse` | 4,039 bytes | 2.51 ms |
+
 ## The four runs tell a story — read this
 
 All four 60-session matrices are committed under `results/` and they differ in

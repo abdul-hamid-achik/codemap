@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
@@ -56,7 +57,7 @@ func enrichHitAnnotations(g *graph.Store, projectID int64, hits []SemanticHit) {
 type SemanticReport struct {
 	Query   string        `json:"query"`
 	Project string        `json:"project"`
-	Mode    string        `json:"mode"`             // "semantic", "name", or "none" (no embeddings)
+	Mode    string        `json:"mode"`             // "semantic", "vecgrep", "name", or "none"
 	Fusion  string        `json:"fusion,omitempty"` // hybrid-search weighting used: "identifier", "natural_language", or "balanced" (empty when no fusion happened, e.g. a pure-vector fallback)
 	Note    string        `json:"note,omitempty"`   // why there are no results, when applicable
 	Hits    []SemanticHit `json:"hits"`
@@ -93,6 +94,23 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if !found {
 		return rep, nil
 	}
+	backend := strings.ToLower(strings.TrimSpace(svc.s.Config.Semantic.Backend))
+	if backend == "" {
+		backend = "fallback"
+	}
+	if backend == "vecgrep" {
+		hits, searchErr := svc.semanticViaVecgrepStrict(ctx, cwd, pid, query, topK)
+		if searchErr != nil {
+			return nil, searchErr
+		}
+		rep.Mode = "vecgrep"
+		rep.Note = "semantic results delegated to vecgrep (configured semantic owner)"
+		if len(hits) == 0 {
+			rep.Note = "vecgrep completed the semantic query with no matches"
+		}
+		rep.Hits = hits
+		return rep, nil
+	}
 
 	// Structure-only projects have no vectors. Detect that up front so the answer is
 	// an accurate "no embeddings" instead of an empty "no matches" — and so we skip
@@ -102,14 +120,20 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 		// No local embeddings — but the sibling vecgrep may have embedded this same
 		// repo. Delegate to it and map its hits back onto the graph (FQN/kind), so
 		// semantic search works with no codemap embed pass. Degrades to the note below.
-		if hits := svc.semanticViaVecgrep(ctx, cwd, pid, query, topK); len(hits) > 0 {
-			rep.Mode = "vecgrep"
-			rep.Note = "semantic results via vecgrep (codemap has no local embeddings for this project)"
-			rep.Hits = hits
-			return rep, nil
+		if backend == "fallback" {
+			if hits := svc.semanticViaVecgrep(ctx, cwd, pid, query, topK); len(hits) > 0 {
+				rep.Mode = "vecgrep"
+				rep.Note = "semantic results via vecgrep (codemap has no local embeddings for this project)"
+				rep.Hits = hits
+				return rep, nil
+			}
 		}
 		rep.Mode = "none"
-		rep.Note = "no embeddings for this project — run 'codemap index' with Ollama running, index this repo in vecgrep, or use 'codemap find' for name search"
+		if backend == "local" {
+			rep.Note = "no local embeddings for this project — run 'codemap index' with Ollama running, set semantic.backend to fallback/vecgrep, or use 'codemap find'"
+		} else {
+			rep.Note = "no embeddings for this project — run 'codemap index' with Ollama running, index this repo in vecgrep, or use 'codemap find' for name search"
+		}
 		return rep, nil
 	}
 
@@ -206,8 +230,21 @@ func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, 
 // query always returns something useful.
 func (svc *Service) Search(ctx context.Context, cwd, query string, topK int) (*SemanticReport, error) {
 	rep, err := svc.Semantic(ctx, cwd, query, topK)
-	if err == nil && rep != nil && len(rep.Hits) > 0 {
-		return rep, nil
+	explicitVecgrep := strings.EqualFold(strings.TrimSpace(svc.s.Config.Semantic.Backend), "vecgrep")
+	if err == nil && rep != nil {
+		if len(rep.Hits) > 0 || explicitVecgrep {
+			// A valid zero-hit response from an explicit owner is authoritative;
+			// falling through to names would silently switch retrieval semantics.
+			return rep, nil
+		}
+	}
+	// Search is the convenience semantic→name floor used by Explore and the
+	// studio. Preserve that degradation for local/fallback mode, including an
+	// unavailable embedder. An explicitly selected vecgrep owner is different:
+	// its execution/contract errors are observable by design and must not be
+	// hidden behind a name match from a different retrieval path.
+	if err != nil && explicitVecgrep {
+		return nil, err
 	}
 	return svc.FindSymbols(cwd, query, topK)
 }

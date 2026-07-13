@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -115,8 +116,12 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	edges := fmt.Sprintf("%d", rep.Edges) + preciseEdgeNote(rep.PreciseEdges, rep.Languages)
 	fmt.Printf("Project: %s\n  path:  %s\n  nodes: %d\n  edges: %s\n  files: %d\n",
 		rep.Project, rep.Path, rep.Nodes, edges, rep.Files)
-	if rep.Vectors > 0 {
+	if rep.SemanticBackend == "vecgrep" {
+		fmt.Println("  vectors: 0 local (semantic owner: vecgrep)")
+	} else if rep.Vectors > 0 {
 		fmt.Printf("  vectors: %d (semantic search ready)\n", rep.Vectors)
+	} else if rep.SemanticBackend == "fallback" && slices.Contains(rep.Siblings, "vecgrep") {
+		fmt.Println("  vectors: 0 local (semantic fallback: vecgrep has this project indexed)")
 	} else {
 		fmt.Println("  vectors: 0 (structure-only — run 'codemap index' with Ollama for semantic search)")
 	}

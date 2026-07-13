@@ -1,8 +1,10 @@
 package lsp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -52,6 +54,31 @@ type DocumentSymbol struct {
 	Range          Range            `json:"range"`
 	SelectionRange Range            `json:"selectionRange"`
 	Children       []DocumentSymbol `json:"children,omitempty"`
+	// ContainerName is populated when a server returns the legacy flat
+	// SymbolInformation[] variant. It is not part of DocumentSymbol on the wire,
+	// but preserves enough ownership to build the same FQN as a nested response.
+	ContainerName string `json:"-"`
+}
+
+type documentSymbolWire struct {
+	Name           string               `json:"name"`
+	Detail         string               `json:"detail,omitempty"`
+	Kind           int                  `json:"kind"`
+	Range          *Range               `json:"range"`
+	SelectionRange *Range               `json:"selectionRange"`
+	Children       []documentSymbolWire `json:"children,omitempty"`
+}
+
+type locationWire struct {
+	URI   string `json:"uri"`
+	Range *Range `json:"range"`
+}
+
+type symbolInformationWire struct {
+	Name          string        `json:"name"`
+	Kind          int           `json:"kind"`
+	Location      *locationWire `json:"location"`
+	ContainerName string        `json:"containerName,omitempty"`
 }
 
 // CallHierarchyItem identifies a symbol in the call hierarchy.
@@ -75,12 +102,46 @@ type CallHierarchyOutgoingCall struct {
 	FromRanges []Range           `json:"fromRanges"`
 }
 
+// providerCapability is the LSP "boolean | registration options" shape used
+// by server capabilities such as documentSymbolProvider and
+// callHierarchyProvider. An options object means the provider is available;
+// false, null, or an omitted field means it is not advertised.
+type providerCapability bool
+
+func (p *providerCapability) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	switch {
+	case bytes.Equal(data, []byte("true")):
+		*p = true
+		return nil
+	case bytes.Equal(data, []byte("false")), bytes.Equal(data, []byte("null")):
+		*p = false
+		return nil
+	case len(data) > 0 && data[0] == '{':
+		*p = true
+		return nil
+	default:
+		return fmt.Errorf("invalid lsp provider capability %q", data)
+	}
+}
+
+type serverCapabilities struct {
+	DocumentSymbols providerCapability `json:"documentSymbolProvider"`
+	CallHierarchy   providerCapability `json:"callHierarchyProvider"`
+	References      providerCapability `json:"referencesProvider"`
+}
+
+type initializeResult struct {
+	Capabilities serverCapabilities `json:"capabilities"`
+}
+
 // Client is a headless LSP client over one language-server connection.
 type Client struct {
-	conn      *conn
-	cmd       *exec.Cmd
-	ready     chan struct{} // signalled when a $/progress "end" arrives
-	stderrBuf *cappedBuffer // last 8KB of the server's stderr; surfaced on connection-close errors
+	conn         *conn
+	cmd          *exec.Cmd
+	ready        chan struct{} // signalled when a $/progress "end" arrives
+	stderrBuf    *cappedBuffer // last 8KB of the server's stderr; surfaced on connection-close errors
+	capabilities serverCapabilities
 }
 
 func newClient(r io.Reader, w io.Writer, closer func() error) *Client {
@@ -182,14 +243,42 @@ func (c *Client) Initialize(ctx context.Context, rootPath string) error {
 				"documentSymbol": map[string]any{
 					"hierarchicalDocumentSymbolSupport": true,
 				},
-				"callHierarchy": map[string]any{"dynamicRegistration": true},
+				// codemap does not implement client/registerCapability. Request a
+				// static declaration so a backend can be admitted (or rejected)
+				// before precise coverage is recorded.
+				"callHierarchy": map[string]any{"dynamicRegistration": false},
 			},
 		},
 	}
-	if _, err := c.conn.Call(ctx, "initialize", params); err != nil {
+	raw, err := c.conn.Call(ctx, "initialize", params)
+	if err != nil {
 		return err
 	}
+	var result initializeResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode initialize capabilities: %w", err)
+	}
+	c.capabilities = result.Capabilities
 	return c.conn.Notify("initialized", map[string]any{})
+}
+
+// SupportsDocumentSymbols reports whether the server advertised the structural
+// primitive required by every LSP-backed codemap extractor.
+func (c *Client) SupportsDocumentSymbols() bool {
+	return bool(c.capabilities.DocumentSymbols)
+}
+
+// SupportsCallHierarchy reports whether the server advertised the primitive
+// required before codemap may claim resolved call-graph coverage.
+func (c *Client) SupportsCallHierarchy() bool {
+	return bool(c.capabilities.CallHierarchy)
+}
+
+// SupportsReferences reports whether the server advertised reference lookup.
+// Reference extraction is not wired for every backend yet, but exposing the
+// negotiated capability keeps future language onboarding honest.
+func (c *Client) SupportsReferences() bool {
+	return bool(c.capabilities.References)
 }
 
 // DidOpen tells the server about a document's content.
@@ -215,11 +304,147 @@ func (c *Client) DocumentSymbols(ctx context.Context, uri string) ([]DocumentSym
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
-	var syms []DocumentSymbol
-	if err := json.Unmarshal(raw, &syms); err != nil {
-		return nil, err
+	return decodeDocumentSymbols(raw)
+}
+
+// decodeDocumentSymbols normalizes the two response shapes permitted by LSP:
+// hierarchical DocumentSymbol[] and flat SymbolInformation[]. A response must
+// use one shape consistently. Flat containerName is retained on the normalized
+// symbol so extractors can construct stable nested FQNs.
+func decodeDocumentSymbols(raw json.RawMessage) ([]DocumentSymbol, error) {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, fmt.Errorf("decode document symbols: %w", err)
 	}
-	return syms, nil
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	const (
+		shapeDocument = "documentSymbol"
+		shapeFlat     = "symbolInformation"
+	)
+	shape := ""
+	for i, item := range items {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(item, &fields); err != nil {
+			return nil, fmt.Errorf("decode document symbol %d: %w", i, err)
+		}
+		_, hasRange := fields["range"]
+		_, hasLocation := fields["location"]
+		var current string
+		switch {
+		case hasRange && !hasLocation:
+			current = shapeDocument
+		case hasLocation && !hasRange:
+			current = shapeFlat
+		case hasRange && hasLocation:
+			return nil, fmt.Errorf("decode document symbol %d: response item mixes range and location", i)
+		default:
+			return nil, fmt.Errorf("decode document symbol %d: missing range or location", i)
+		}
+		if shape != "" && shape != current {
+			return nil, fmt.Errorf("decode document symbols: mixed %s and %s response", shape, current)
+		}
+		shape = current
+	}
+
+	if shape == shapeDocument {
+		var wire []documentSymbolWire
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return nil, fmt.Errorf("decode hierarchical document symbols: %w", err)
+		}
+		out := make([]DocumentSymbol, 0, len(wire))
+		for i := range wire {
+			sym, err := normalizeDocumentSymbol(wire[i], fmt.Sprintf("symbol %d", i))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, sym)
+		}
+		return out, nil
+	}
+
+	var wire []symbolInformationWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, fmt.Errorf("decode flat document symbols: %w", err)
+	}
+	out := make([]DocumentSymbol, 0, len(wire))
+	for i := range wire {
+		w := wire[i]
+		where := fmt.Sprintf("symbol %d", i)
+		if err := validateSymbolHeader(w.Name, w.Kind, where); err != nil {
+			return nil, err
+		}
+		if w.Location == nil || w.Location.Range == nil || w.Location.URI == "" {
+			return nil, fmt.Errorf("decode %s %q: missing location uri or range", where, w.Name)
+		}
+		if err := validateRange(*w.Location.Range, where+" "+w.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, DocumentSymbol{
+			Name:           w.Name,
+			Kind:           w.Kind,
+			Range:          *w.Location.Range,
+			SelectionRange: *w.Location.Range,
+			ContainerName:  w.ContainerName,
+		})
+	}
+	return out, nil
+}
+
+func normalizeDocumentSymbol(w documentSymbolWire, where string) (DocumentSymbol, error) {
+	if err := validateSymbolHeader(w.Name, w.Kind, where); err != nil {
+		return DocumentSymbol{}, err
+	}
+	if w.Range == nil || w.SelectionRange == nil {
+		return DocumentSymbol{}, fmt.Errorf("decode %s %q: missing range or selectionRange", where, w.Name)
+	}
+	if err := validateRange(*w.Range, where+" "+w.Name); err != nil {
+		return DocumentSymbol{}, err
+	}
+	if err := validateRange(*w.SelectionRange, where+" "+w.Name+" selection"); err != nil {
+		return DocumentSymbol{}, err
+	}
+	out := DocumentSymbol{
+		Name:           w.Name,
+		Detail:         w.Detail,
+		Kind:           w.Kind,
+		Range:          *w.Range,
+		SelectionRange: *w.SelectionRange,
+		Children:       make([]DocumentSymbol, 0, len(w.Children)),
+	}
+	for i := range w.Children {
+		child, err := normalizeDocumentSymbol(w.Children[i], fmt.Sprintf("%s %q child %d", where, w.Name, i))
+		if err != nil {
+			return DocumentSymbol{}, err
+		}
+		out.Children = append(out.Children, child)
+	}
+	if len(out.Children) == 0 {
+		out.Children = nil
+	}
+	return out, nil
+}
+
+func validateSymbolHeader(name string, kind int, where string) error {
+	if name == "" {
+		return fmt.Errorf("decode %s: missing symbol name", where)
+	}
+	if kind <= 0 {
+		return fmt.Errorf("decode %s %q: invalid symbol kind %d", where, name, kind)
+	}
+	return nil
+}
+
+func validateRange(r Range, where string) error {
+	if r.Start.Line < 0 || r.Start.Character < 0 || r.End.Line < 0 || r.End.Character < 0 {
+		return fmt.Errorf("decode %s: negative range position", where)
+	}
+	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Character < r.Start.Character) {
+		return fmt.Errorf("decode %s: range ends before it starts", where)
+	}
+	return nil
 }
 
 // References returns all references to the symbol at a position.

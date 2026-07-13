@@ -17,6 +17,7 @@ func clearEnv(t *testing.T) {
 		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
 		"CODEMAP_EMBEDDING_PROVIDER", "CODEMAP_EMBEDDING_MODEL",
 		"CODEMAP_OLLAMA_URL", "CODEMAP_OLLAMA_API_KEY", "CODEMAP_EMBEDDING_DIMENSIONS", "CODEMAP_EMBEDDING_DISTANCE",
+		"CODEMAP_DAEMON_PRECISE", "CODEMAP_SEMANTIC_BACKEND",
 	} {
 		t.Setenv(k, "")
 	}
@@ -41,6 +42,33 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if len(c.Index.Exclude) == 0 {
 		t.Error("expected non-empty default exclude list")
+	}
+	if c.Daemon.Precise {
+		t.Error("daemon precise mode should remain opt-in by default")
+	}
+}
+
+func TestDaemonPreciseFileEnvPrecedence(t *testing.T) {
+	clearEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "codemap.yaml"), []byte("daemon:\n  precise: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".codemap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	t.Setenv("CODEMAP_DAEMON_PRECISE", "true")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Daemon.Precise {
+		t.Fatal("CODEMAP_DAEMON_PRECISE=true should override daemon.precise=false from the project file")
 	}
 }
 
@@ -409,6 +437,31 @@ func TestSemanticFusionDefault(t *testing.T) {
 	}
 }
 
+func TestSemanticBackendDefaultEnvAndValidation(t *testing.T) {
+	clearEnv(t)
+	if got := DefaultConfig().Semantic.Backend; got != "fallback" {
+		t.Fatalf("default semantic backend = %q, want fallback", got)
+	}
+	t.Setenv("CODEMAP_SEMANTIC_BACKEND", "vecgrep")
+	t.Setenv("CODEMAP_VECGREP_ENABLED", "true")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Semantic.Backend != "vecgrep" {
+		t.Fatalf("semantic backend env = %q, want vecgrep", cfg.Semantic.Backend)
+	}
+	cfg.Semantic.Backend = "mystery"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "semantic backend") {
+		t.Fatalf("invalid semantic backend error = %v", err)
+	}
+	cfg.Semantic.Backend = "vecgrep"
+	cfg.Vecgrep.Enabled = false
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "vecgrep.enabled") {
+		t.Fatalf("disabled vecgrep backend error = %v", err)
+	}
+}
+
 // TestSemanticFusionEnvOverride pins F7: CODEMAP_SEMANTIC_FUSION overrides
 // the config-file/default value via applyEnv.
 func TestSemanticFusionEnvOverride(t *testing.T) {
@@ -471,8 +524,8 @@ func TestConfigProjectFirstMatchWins(t *testing.T) {
 }
 
 // TestMCPProfileDefault pins I01: mcp.profile defaults to "full" — every
-// existing MCP registration keeps back-compat behavior (39 tools) unless a
-// project/user opts into "core".
+// existing MCP registration keeps back-compat behavior (42 tools) unless a
+// project/user opts into "agent" or "core".
 func TestMCPProfileDefault(t *testing.T) {
 	c := DefaultConfig()
 	if c.MCP.Profile != "full" {
@@ -510,20 +563,21 @@ func TestMCPProfileFileEnvPrecedence(t *testing.T) {
 		t.Errorf("file-only: MCP.Profile = %q, want core", cfg.MCP.Profile)
 	}
 
-	// Env overrides the file (env is higher precedence than a project file).
-	t.Setenv("CODEMAP_MCP_PROFILE", "full")
+	// Env overrides the file (env is higher precedence than a project file),
+	// including the exact taught-workflow profile.
+	t.Setenv("CODEMAP_MCP_PROFILE", "agent")
 	cfg, err = Load("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.MCP.Profile != "full" {
-		t.Errorf("env-over-file: MCP.Profile = %q, want full", cfg.MCP.Profile)
+	if cfg.MCP.Profile != "agent" {
+		t.Errorf("env-over-file: MCP.Profile = %q, want agent", cfg.MCP.Profile)
 	}
 }
 
 // TestMCPProfileValidate pins I01's clean-startup-error contract: an
 // unrecognized mcp.profile value is a hard, lowercase, no-trailing-
-// punctuation error (not a silent fallback), while "core"/"full"/"" are
+// punctuation error (not a silent fallback), while "agent"/"core"/"full"/"" are
 // all accepted (empty normalizes to "full" at read time) and Validate
 // lowercases/trims a valid value in place.
 func TestMCPProfileValidate(t *testing.T) {
@@ -540,7 +594,7 @@ func TestMCPProfileValidate(t *testing.T) {
 	if strings.HasSuffix(msg, ".") {
 		t.Errorf("error message should have no trailing punctuation: %q", msg)
 	}
-	for _, v := range []string{"core", "full", "", "  CORE  "} {
+	for _, v := range []string{"agent", "core", "full", "", "  AGENT  ", "  CORE  "} {
 		cfg.MCP.Profile = v
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("Validate should accept %q: %v", v, err)

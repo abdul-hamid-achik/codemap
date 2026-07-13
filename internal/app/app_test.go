@@ -475,6 +475,12 @@ func TestIndexAdvisory(t *testing.T) {
 	if adv := indexAdvisory(r2); !strings.Contains(adv, "ruby") || !strings.Contains(adv, "planned") {
 		t.Errorf("planned advisory = %q", adv)
 	}
+	// T0 languages stay visible in a mixed project; successfully indexed Go
+	// must not reduce Rust to an unexplained numeric skipped count.
+	r3 := &index.Result{FilesScanned: 5, Unsupported: map[string]int{"rust": 1}}
+	if adv := indexAdvisory(r3); !strings.Contains(adv, "1 rust") || !strings.Contains(adv, "T0") {
+		t.Errorf("mixed-project T0 advisory = %q", adv)
+	}
 	// Everything indexed — nothing to say.
 	if adv := indexAdvisory(&index.Result{FilesScanned: 5}); adv != "" {
 		t.Errorf("expected no advisory, got %q", adv)
@@ -1102,6 +1108,37 @@ func TestStatusReportsVectors(t *testing.T) {
 	}
 	if st, _ := maintenanceSvc.Status(proj); st.Vectors != 0 {
 		t.Errorf("structure-only rebuild left %d stale vectors, want 0", st.Vectors)
+	}
+}
+
+func TestVecgrepSemanticOwnerSkipsAndClearsLocalEmbeddings(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "main.go", "package app\n\nfunc Authenticate() {}\n")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sess.SetEmbedder(fakeEmbedder{dims: 8})
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, true); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := svc.Status(proj); st.Vectors == 0 {
+		t.Fatal("test setup did not create local vectors")
+	}
+
+	sess.Config.Semantic.Backend = "vecgrep"
+	rep, err := svc.Index(context.Background(), proj, index.Options{Reindex: true}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Embedded || !strings.Contains(rep.Warning, "semantic.backend=vecgrep") {
+		t.Fatalf("vecgrep-owned index report = %+v", rep)
+	}
+	if st, _ := svc.Status(proj); st.Vectors != 0 || st.SemanticBackend != "vecgrep" {
+		t.Fatalf("vecgrep semantic owner status = vectors:%d backend:%q", st.Vectors, st.SemanticBackend)
 	}
 }
 

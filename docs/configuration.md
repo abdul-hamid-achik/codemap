@@ -28,7 +28,7 @@ Most config-file settings are reachable all three ways — config file, env var,
 with the flag winning when explicitly set. Four knobs are exceptions: `daemon.embed_cache_size`
 is file + flag only (no env var), `index.extract_concurrency` is file + env only (no flag),
 `semantic.fusion_weights.*` (the per-profile weight floats) is file-only (no env var, no flag) —
-`semantic.fusion` itself (the `auto`/`balanced` switch) is reachable all three ways — and
+`semantic.backend` and `semantic.fusion` are reachable all three ways — and
 `embedding.api_key` is file + env only (**no flag, deliberately**): flag values show up in
 `ps`/shell history, which a secret should never do. Use the config file or
 `CODEMAP_OLLAMA_API_KEY` instead (see [Authenticated Ollama endpoints / Ollama Cloud](#authenticated-ollama-endpoints-ollama-cloud)).
@@ -58,10 +58,12 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_VECGREP_BIN` | `vecgrep.bin` |
 | `CODEMAP_DAEMON_DEBOUNCE_MS` | `daemon.debounce_ms` |
 | `CODEMAP_DAEMON_IDLE_TIMEOUT_MIN` | `daemon.idle_timeout_min` |
+| `CODEMAP_DAEMON_PRECISE` | `daemon.precise` (keep exact call edges current after watched edits) |
 | `CODEMAP_DAEMON_EMBED_RPS` | `daemon.embed_rps` |
 | `CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT` | `daemon.embed_max_in_flight` |
+| `CODEMAP_SEMANTIC_BACKEND` | `semantic.backend` (`fallback`, `local`, or `vecgrep`) |
 | `CODEMAP_SEMANTIC_FUSION` | `semantic.fusion` (`auto` or `balanced`) |
-| `CODEMAP_MCP_PROFILE` | `mcp.profile` (`core` or `full` — see [MCP tool profiles](/mcp#tool-profiles)) |
+| `CODEMAP_MCP_PROFILE` | `mcp.profile` (`agent`, `core`, or `full` — see [MCP tool profiles](/mcp#tool-profiles)) |
 
 ## Command-line flags
 
@@ -74,10 +76,11 @@ Each config knob also has a flag, which wins over the file and env when set:
 | `--exclude-extra` | `index.exclude_extra` (appended) | `index`, `daemon start` |
 | `--max-file-bytes` | `index.max_file_bytes` | `index` |
 | `--embed-batch-size` / `--embed-concurrency` / `--embed-max-chars` | `index.embed_*` | `index` |
-| `--debounce` / `--idle-timeout` | `daemon.debounce_ms` / `daemon.idle_timeout_min` | `daemon start` |
+| `--debounce` / `--idle-timeout` / `--precise` | `daemon.debounce_ms` / `daemon.idle_timeout_min` / `daemon.precise` | `daemon start` |
 | `--embed-rps` / `--embed-max-in-flight` / `--embed-cache-size` | `daemon.embed_*` | `daemon start` |
+| `--backend` | `semantic.backend` | `semantic`, `search` |
 | `--fusion` | `semantic.fusion` | `semantic`, `search` |
-| `--profile` | `mcp.profile` (`core` or `full`) | `serve` |
+| `--profile` | `mcp.profile` (`agent`, `core`, or `full`) | `serve` |
 
 ```bash
 codemap index --exclude-extra migrations,db/migrations,**/testdata
@@ -115,13 +118,15 @@ index:
 daemon:                   # background indexer (codemap daemon)
   debounce_ms: 500        # coalesce a burst of edits into one reindex
   idle_timeout_min: 0     # shut down after N minutes idle (0 = never)
+  precise: false          # opt in to exact Go/LSP edges on every watched edit
   embed_rps: 0            # background embed rate to Ollama (0 = unlimited)
   embed_max_in_flight: 2  # max concurrent embed calls
   embed_cache_size: 4096  # embedding dedup cache (entries)
 vecgrep:                  # sibling-tool integration (see Ecosystem)
-  enabled: true           # use vecgrep for semantic search when codemap has no embeddings, + memory recall
+  enabled: true           # allow the one-hop vecgrep search/memory adapter
   bin: ""                 # path to the vecgrep binary (resolved via $PATH if empty)
 semantic:
+  backend: fallback       # fallback (local, then vecgrep if absent) | local | vecgrep
   fusion: auto            # auto (classify query shape) | balanced (equal weights, pre-F7 behavior)
   fusion_weights:          # file-only (no env/flag) — advanced tuning
     identifier:
@@ -131,8 +136,26 @@ semantic:
       vector: 1.5
       text: 0.5
 mcp:
-  profile: full            # full (default, all 39 tools) | core (lean 22-tool set; see /mcp#tool-profiles)
+  profile: full            # full (default, 42) | agent (21 taught + docs = 22) | core (compatible 22)
 ```
+
+### Semantic owner
+
+`semantic.backend` makes retrieval ownership explicit while keeping migration
+back-compatible:
+
+- `fallback` (default) reads codemap's local veclite collection and asks vecgrep
+  only when this project has no local embeddings.
+- `local` never invokes vecgrep and preserves codemap's original embedded-index
+  behavior.
+- `vecgrep` delegates every semantic query to the sibling CLI. In this mode
+  `codemap index` skips and removes unused local vectors while continuing to
+  index the structural graph; a missing vecgrep binary or invalid response is a
+  visible error, not a silent owner switch.
+
+The adapter is one process hop (`vecgrep search ... --format json`), not shared
+packages, shared databases, or MCP-to-MCP recursion. `find` and `grep` remain
+offline structural/text fallbacks in every mode.
 
 The full built-in default list is:
 

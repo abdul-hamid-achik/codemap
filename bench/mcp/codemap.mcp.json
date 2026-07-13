@@ -1,12 +1,12 @@
 {
-  "_comment": "Template for the codemap arm. ${CODEMAP_REPO} is expanded to the repo root at runtime (bench writes a resolved copy under bench/results/); claude runs with cwd=fixture, so paths must be absolute. CODEMAP_DATA is the isolated benchmark index so it never collides with the developer's real index. CODEMAP_MCP_PROFILE=core benchmarks the recommended lean profile (22 taught tools) — the pre-profile runs (2026-07-12, 39 schemas) measured +95% input tokens from schema overhead.",
+  "_comment": "Template for future codemap-arm runs. ${CODEMAP_REPO} is expanded to the repo root at runtime (bench writes a resolved copy under bench/results/); claude runs with cwd=fixture, so paths must be absolute. CODEMAP_DATA is isolated. CODEMAP_MCP_PROFILE=agent is pinned exactly to the 22 taught/discovery tools; historical committed runs used the compatible core inventory, and the pre-profile 2026-07-12 run used 39 schemas.",
   "mcpServers": {
     "codemap": {
       "command": "${CODEMAP_REPO}/bin/codemap",
       "args": ["serve"],
       "env": {
         "CODEMAP_DATA": "${CODEMAP_REPO}/bench/results/index",
-        "CODEMAP_MCP_PROFILE": "core"
+        "CODEMAP_MCP_PROFILE": "agent"
       }
     }
   }

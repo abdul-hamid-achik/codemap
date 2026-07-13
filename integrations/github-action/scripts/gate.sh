@@ -9,10 +9,10 @@
 # template doesn't surface job outputs, but the script still runs there for
 # its pass/fail exit code).
 #
-# codemap review's own process exit code is NEVER the failure signal here —
-# see run-review.sh's header comment and the codemap-action README. This
-# script is the one place that decides pass/fail for the whole Action, and it
-# does so purely from the JSON fields:
+# codemap review supports native gate flags and exit 6, but run-review.sh
+# deliberately invokes it without those flags so the Action can render/post
+# and set outputs first. This final script decides pass/fail for the whole
+# Action from the already-produced JSON fields:
 #   - FAIL_ON_UNTESTED trips when (.untested_symbols // []) | length > 0
 #   - FAIL_ON_RISK trips when .risk.level's ordinal is >= the threshold's
 #     ordinal — via an EXPLICIT ordinal table, not lexical `>=` string

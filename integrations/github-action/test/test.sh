@@ -3,8 +3,9 @@
 # assumed to be installed; this runs anywhere bash+jq do). Exercises
 # render-comment.sh and gate.sh against every fixture in testdata/, gate.sh's
 # outputs (risk-level/risk-score/untested-count/changed-symbols-count) and
-# ordinal table explicitly, write-summary.sh's $GITHUB_STEP_SUMMARY fallback
-# path, resolve-version.sh's archive-name construction for linux/amd64,
+# ordinal table explicitly, the composite Action's gate-last sequencing,
+# write-summary.sh's $GITHUB_STEP_SUMMARY fallback path,
+# resolve-version.sh's archive-name construction for linux/amd64,
 # darwin/arm64, and windows/amd64 (+ the windows/arm64 rejection), and
 # install-codemap.sh's checksum verification (both the real happy path,
 # network permitting, and a mocked mismatch).
@@ -217,6 +218,19 @@ assert_contains "$GATE_OUT" "changed-symbols-count=1" "gate.sh: changed-symbols-
 gate unknown-schema-version false ""
 assert_contains "$GATE_OUT" "risk-score=0" "gate.sh: unrecognized schema_version still sets risk-score (fail-soft default '0')"
 assert_contains "$GATE_OUT" "changed-symbols-count=0" "gate.sh: unrecognized schema_version still sets changed-symbols-count (fail-soft default '0')"
+
+echo
+echo "== action gate sequencing: report and outputs exist before failure =="
+review_invocation="$(grep -E '^codemap review --since ' "${SCRIPTS}/run-review.sh")"
+assert_not_contains "$review_invocation" "--fail-on-" "run-review.sh deliberately omits native gate flags so a success JSON is always available to render"
+
+summary_step_line="$(grep -nF -- '    - name: Write job summary' "${ROOT_DIR}/action.yml" | cut -d: -f1)"
+gate_step_line="$(grep -nF -- '    - name: Gate on risk / untested' "${ROOT_DIR}/action.yml" | cut -d: -f1)"
+if [[ -n "$summary_step_line" && -n "$gate_step_line" && "$gate_step_line" -gt "$summary_step_line" ]]; then
+  ok "action.yml runs its gate after the job summary, so reporting survives a tripped gate"
+else
+  bad "action.yml must keep the gate after the job summary (summary=${summary_step_line:-missing}, gate=${gate_step_line:-missing})"
+fi
 
 echo
 echo "== write-summary.sh: \$GITHUB_STEP_SUMMARY fallback path =="

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:codemap:structural-manifest:v1",
+  "title": "codemap structural manifest v1",
+  "description": "Lightweight structural-index identity and freshness preflight emitted by codemap structural-manifest --json. Hard-failure envelopes are outside this schema.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "export_schema_version",
+    "project",
+    "project_key",
+    "index_fingerprint",
+    "total_records",
+    "complete",
+    "freshness"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "export_schema_version": { "type": "integer", "const": 1 },
+    "project": { "type": "string", "minLength": 1 },
+    "project_key": { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+    "index_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "total_records": { "type": "integer", "minimum": 0 },
+    "complete": { "type": "boolean", "const": true },
+    "freshness": {
+      "type": "object",
+      "required": ["checked", "fresh", "changed", "new", "deleted"],
+      "properties": {
+        "checked": { "type": "boolean", "const": true },
+        "fresh": { "type": "boolean" },
+        "changed": { "type": "integer", "minimum": 0 },
+        "new": { "type": "integer", "minimum": 0 },
+        "deleted": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
