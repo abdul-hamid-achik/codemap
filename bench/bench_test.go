@@ -118,9 +118,10 @@ func TestSpliceTable_IdempotentAndDirectional(t *testing.T) {
 	sum := suite.Summary{
 		SchemaVersion: 1, Directional: true, GeneratedAt: "2026-07-11T00:00:00Z",
 		Model: "claude-sonnet-5", FixtureRepo: "go-git/go-git", FixtureSHA: "48a1ae05eec4fff", Reps: 3,
+		Playbook: true,
 		Arms: []suite.ArmSummary{
-			{Arm: "baseline", ToolCalls: suite.Stat{Mean: 14.2, Std: 3.1}, InputTokens: suite.Stat{Mean: 38000, Std: 9000}, WallClockS: suite.Stat{Mean: 41, Std: 11}, CostUSD: suite.Stat{Mean: 0.12, Std: 0.03}, TasksCorrect: 7, TasksTotal: 10},
-			{Arm: "codemap", ToolCalls: suite.Stat{Mean: 3.4, Std: 0.8}, InputTokens: suite.Stat{Mean: 11000, Std: 2000}, WallClockS: suite.Stat{Mean: 12, Std: 3}, CostUSD: suite.Stat{Mean: 0.05, Std: 0.01}, TasksCorrect: 9, TasksTotal: 10},
+			{Arm: "baseline", ToolCalls: suite.Stat{Mean: 14.2, Std: 3.1}, MCPToolCalls: suite.Stat{Mean: 0, Std: 0}, InputTokens: suite.Stat{Mean: 38000, Std: 9000}, WallClockS: suite.Stat{Mean: 41, Std: 11}, CostUSD: suite.Stat{Mean: 0.12, Std: 0.03}, TasksCorrect: 7, TasksTotal: 10, Sessions: 30, MCPSessions: 0},
+			{Arm: "codemap", ToolCalls: suite.Stat{Mean: 3.4, Std: 0.8}, MCPToolCalls: suite.Stat{Mean: 2.1, Std: 0.5}, InputTokens: suite.Stat{Mean: 11000, Std: 2000}, WallClockS: suite.Stat{Mean: 12, Std: 3}, CostUSD: suite.Stat{Mean: 0.05, Std: 0.01}, TasksCorrect: 9, TasksTotal: 10, Sessions: 30, MCPSessions: 24},
 		},
 	}
 	readme := "intro\n" + markerStart + "\nOLD\n" + markerEnd + "\ntail\n"
@@ -131,8 +132,22 @@ func TestSpliceTable_IdempotentAndDirectional(t *testing.T) {
 	if !strings.Contains(once, "DIRECTIONAL") {
 		t.Error("table must carry the DIRECTIONAL banner")
 	}
+	if !strings.Contains(once, "playbook-injected") {
+		t.Errorf("banner must note playbook injection when Summary.Playbook is true:\n%s", once)
+	}
 	if !strings.Contains(once, "tool calls") || !strings.Contains(once, "14.2 ± 3.1") {
 		t.Errorf("table missing expected rows:\n%s", once)
+	}
+	if !strings.Contains(once, "mcp tool calls") || !strings.Contains(once, "2.1 ± 0.5") {
+		t.Errorf("table missing mcp tool calls row:\n%s", once)
+	}
+	if !strings.Contains(once, "sessions using codemap tools") || !strings.Contains(once, "24/30") {
+		t.Errorf("table missing sessions-using-codemap-tools row:\n%s", once)
+	}
+	// baseline never calls MCP tools (0 non-error sessions with a call) — the
+	// cell still renders 0/30, not "—", since it did run 30 real sessions.
+	if !strings.Contains(once, "0/30") {
+		t.Errorf("baseline mcp-sessions cell should render 0/30:\n%s", once)
 	}
 	if strings.Contains(once, "OLD") {
 		t.Error("old content between markers should be replaced")
@@ -146,6 +161,21 @@ func TestSpliceTable_IdempotentAndDirectional(t *testing.T) {
 	}
 	if once != twice {
 		t.Error("SpliceTable should be idempotent")
+	}
+}
+
+func TestRenderTable_NoPlaybookBanner(t *testing.T) {
+	sum := suite.Summary{
+		Model: "claude-sonnet-5", FixtureRepo: "go-git/go-git", FixtureSHA: "48a1ae05eec4fff", Reps: 3,
+		Playbook: false,
+		Arms: []suite.ArmSummary{
+			{Arm: "baseline", Sessions: 10},
+			{Arm: "codemap", Sessions: 10},
+		},
+	}
+	table := RenderTable(sum)
+	if strings.Contains(table, "playbook-injected") {
+		t.Errorf("banner should not mention playbook injection when Summary.Playbook is false:\n%s", table)
 	}
 }
 

@@ -85,6 +85,7 @@ type Session struct {
 	Arm             string  `json:"arm"`
 	Rep             int     `json:"rep"`
 	ToolCalls       int     `json:"tool_calls"`
+	MCPToolCalls    int     `json:"mcp_tool_calls"`
 	InputTokens     int     `json:"input_tokens"`
 	OutputTokens    int     `json:"output_tokens"`
 	CacheReadTokens int     `json:"cache_read_tokens"`
@@ -109,6 +110,7 @@ type Stat struct {
 type ArmSummary struct {
 	Arm          string `json:"arm"`
 	ToolCalls    Stat   `json:"tool_calls"`
+	MCPToolCalls Stat   `json:"mcp_tool_calls"`
 	InputTokens  Stat   `json:"input_tokens"`
 	OutputTokens Stat   `json:"output_tokens"`
 	WallClockS   Stat   `json:"wall_clock_s"`
@@ -116,6 +118,7 @@ type ArmSummary struct {
 	TasksCorrect int    `json:"tasks_correct"` // distinct tasks passing in a majority of reps
 	TasksTotal   int    `json:"tasks_total"`
 	Sessions     int    `json:"sessions"`
+	MCPSessions  int    `json:"mcp_sessions"`     // non-failed sessions with >= 1 MCP tool call
 	Failed       int    `json:"failed,omitempty"` // sessions that errored; excluded from the metric stats
 }
 
@@ -131,6 +134,7 @@ type Summary struct {
 	FixtureSHA    string       `json:"fixture_sha"`
 	Reps          int          `json:"reps"`
 	AuthMode      string       `json:"auth_mode,omitempty"` // api-key (hermetic --bare) | subscription (--strict-mcp-config)
+	Playbook      bool         `json:"playbook,omitempty"`  // codemap arm ran with the tool-selection playbook appended
 	IndexSeconds  float64      `json:"index_seconds"`       // one-time codemap index cost, reported separately
 	TotalCostUSD  float64      `json:"total_cost_usd"`
 	Arms          []ArmSummary `json:"arms"`
@@ -163,10 +167,11 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 		if len(ss) == 0 {
 			continue
 		}
-		var tc, in, outp, wall, cost []float64
+		var tc, mtc, in, outp, wall, cost []float64
 		type pc struct{ pass, total int }
 		perTask := map[string]*pc{}
 		failed := 0
+		mcpSessions := 0
 		for _, s := range ss {
 			// An errored session (harness/CLI failure, no complete transcript)
 			// still counts against correctness but must not drag the metric
@@ -175,12 +180,16 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 				failed++
 			} else {
 				tc = append(tc, float64(s.ToolCalls))
+				mtc = append(mtc, float64(s.MCPToolCalls))
 				// input includes cache reads: fresh-only input_tokens hides the
 				// context the session actually consumed (cache reads dominate).
 				in = append(in, float64(s.InputTokens+s.CacheReadTokens))
 				outp = append(outp, float64(s.OutputTokens))
 				wall = append(wall, float64(s.WallClockMs)/1000.0)
 				cost = append(cost, s.CostUSD)
+				if s.MCPToolCalls > 0 {
+					mcpSessions++
+				}
 			}
 			p := perTask[s.Task]
 			if p == nil {
@@ -201,6 +210,7 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 		out = append(out, ArmSummary{
 			Arm:          arm,
 			ToolCalls:    MeanStd(tc),
+			MCPToolCalls: MeanStd(mtc),
 			InputTokens:  MeanStd(in),
 			OutputTokens: MeanStd(outp),
 			WallClockS:   MeanStd(wall),
@@ -208,6 +218,7 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 			TasksCorrect: correct,
 			TasksTotal:   len(perTask),
 			Sessions:     len(ss),
+			MCPSessions:  mcpSessions,
 			Failed:       failed,
 		})
 	}

@@ -49,3 +49,42 @@ func TestAggregate_TasksCorrectMajority(t *testing.T) {
 		t.Errorf("codemap sessions = %d, want 6", cm.Sessions)
 	}
 }
+
+func TestAggregate_MCPToolCallsAndSessions(t *testing.T) {
+	sessions := []Session{
+		// codemap: one session calls MCP tools twice, one calls none, and one
+		// errors out with 5 MCP calls recorded before the failure — the errored
+		// session must be excluded from BOTH the MCPToolCalls stat pool and the
+		// MCPSessions "used codemap tools" count (its transcript is incomplete).
+		{Task: "A", Arm: "codemap", ToolCalls: 4, MCPToolCalls: 2, Pass: true},
+		{Task: "B", Arm: "codemap", ToolCalls: 3, MCPToolCalls: 0, Pass: true},
+		{Task: "C", Arm: "codemap", ToolCalls: 1, MCPToolCalls: 5, Error: "boom"},
+		// baseline never has MCP tools available at all.
+		{Task: "A", Arm: "baseline", ToolCalls: 12, MCPToolCalls: 0, Pass: false},
+	}
+	arms := Aggregate(sessions, []string{"baseline", "codemap"})
+	base := arms[0]
+	cm := arms[1]
+
+	if cm.Sessions != 3 {
+		t.Errorf("codemap sessions = %d, want 3 (incl. the failed one)", cm.Sessions)
+	}
+	if cm.Failed != 1 {
+		t.Errorf("codemap failed = %d, want 1", cm.Failed)
+	}
+	// Stat pool excludes the failed session: mean of {2, 0} = 1, n=2.
+	if cm.MCPToolCalls.N != 2 || cm.MCPToolCalls.Mean != 1 {
+		t.Errorf("codemap MCPToolCalls = %+v, want mean=1 n=2", cm.MCPToolCalls)
+	}
+	// Only the one non-failed session with >=1 MCP call counts.
+	if cm.MCPSessions != 1 {
+		t.Errorf("codemap MCPSessions = %d, want 1", cm.MCPSessions)
+	}
+
+	if base.MCPToolCalls.Mean != 0 || base.MCPToolCalls.N != 1 {
+		t.Errorf("baseline MCPToolCalls = %+v, want mean=0 n=1", base.MCPToolCalls)
+	}
+	if base.MCPSessions != 0 {
+		t.Errorf("baseline MCPSessions = %d, want 0", base.MCPSessions)
+	}
+}

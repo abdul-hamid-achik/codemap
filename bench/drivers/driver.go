@@ -17,17 +17,21 @@ var ErrNotImplemented = errors.New("driver not implemented in v1 (Claude-only)")
 
 // Arm describes one side of the A/B comparison.
 type Arm struct {
-	Name         string // "baseline" | "codemap"
-	AllowedTools string // e.g. "Read,Grep,Glob" or "Read,Grep,Glob,mcp__codemap"
-	MCPConfig    string // path to an MCP config JSON, or "" for none
-	MCPServer    string // MCP server name to assert loaded (e.g. "codemap"), or ""
-	WorkDir      string // fixture repo root — cwd for the agent
-	Model        string
+	Name               string // "baseline" | "codemap"
+	AllowedTools       string // e.g. "Read,Grep,Glob" or "Read,Grep,Glob,mcp__codemap"
+	MCPConfig          string // path to an MCP config JSON, or "" for none
+	MCPServer          string // MCP server name to assert loaded (e.g. "codemap"), or ""
+	WorkDir            string // fixture repo root — cwd for the agent
+	Model              string
+	AppendSystemPrompt string // when set, appended via claude's --append-system-prompt (the
+	// codemap tool-selection playbook, injected on the codemap arm only when
+	// --playbook is passed; empty for the baseline arm and for un-playbooked runs)
 }
 
 // Metrics is what a driver extracts from one session's transcript.
 type Metrics struct {
 	ToolCalls       int
+	MCPToolCalls    int // subset of ToolCalls whose tool name starts with "mcp__"
 	InputTokens     int
 	OutputTokens    int
 	CacheReadTokens int

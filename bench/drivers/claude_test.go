@@ -21,10 +21,15 @@ func TestFoldEvents_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FoldEvents: %v", err)
 	}
-	// Three tool_use blocks across two assistant turns (2 parallel + 1). This is
+	// Four tool_use blocks across two assistant turns (3 parallel + 1). This is
 	// the headline metric; num_turns (3) would undercount the parallel turn.
-	if m.ToolCalls != 3 {
-		t.Errorf("ToolCalls = %d, want 3", m.ToolCalls)
+	if m.ToolCalls != 4 {
+		t.Errorf("ToolCalls = %d, want 4", m.ToolCalls)
+	}
+	// Two of the four are mcp__ tools: mcp__codemap__callers and
+	// mcp__codemap__impact. Grep and Read are plain file tools, not MCP.
+	if m.MCPToolCalls != 2 {
+		t.Errorf("MCPToolCalls = %d, want 2", m.MCPToolCalls)
 	}
 	if m.InputTokens != 15230 || m.OutputTokens != 842 || m.CacheReadTokens != 4096 {
 		t.Errorf("token totals wrong: in=%d out=%d cache=%d", m.InputTokens, m.OutputTokens, m.CacheReadTokens)
@@ -99,6 +104,31 @@ func TestClaudeArgs_RequiredFlags(t *testing.T) {
 	base := d.Args("q", Arm{Name: "baseline", AllowedTools: "Read,Grep,Glob", Model: "m"})
 	if strings.Contains(strings.Join(base, " "), "--mcp-config") {
 		t.Error("baseline must not pass --mcp-config")
+	}
+}
+
+func TestClaudeArgs_AppendSystemPrompt(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key-1234")
+	d := ClaudeDriver{}
+
+	// codemap arm with a playbook set: the flag must appear, verbatim.
+	cm := Arm{Name: "codemap", AllowedTools: "Read,Grep,Glob,mcp__codemap", MCPConfig: "/x/mcp.json", Model: "m", AppendSystemPrompt: "USE CODEMAP FIRST"}
+	joined := strings.Join(d.Args("q", cm), " ")
+	if !strings.Contains(joined, "--append-system-prompt USE CODEMAP FIRST") {
+		t.Errorf("codemap arm with playbook set should pass --append-system-prompt: %v", d.Args("q", cm))
+	}
+
+	// codemap arm without a playbook (the default, --playbook not passed): no flag at all.
+	cmNoPlaybook := Arm{Name: "codemap", AllowedTools: "Read,Grep,Glob,mcp__codemap", MCPConfig: "/x/mcp.json", Model: "m"}
+	if strings.Contains(strings.Join(d.Args("q", cmNoPlaybook), " "), "--append-system-prompt") {
+		t.Error("codemap arm without AppendSystemPrompt set should not pass --append-system-prompt")
+	}
+
+	// baseline arm never carries a playbook, even if somehow set — but the
+	// realistic case is main.go never sets it on baseline; assert that absence.
+	base := Arm{Name: "baseline", AllowedTools: "Read,Grep,Glob", Model: "m"}
+	if strings.Contains(strings.Join(d.Args("q", base), " "), "--append-system-prompt") {
+		t.Error("baseline arm should never pass --append-system-prompt")
 	}
 }
 

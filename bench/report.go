@@ -91,6 +91,9 @@ func RenderTable(sum suite.Summary) string {
 	if sum.AuthMode != "" {
 		auth = ", " + sum.AuthMode + " auth"
 	}
+	if sum.Playbook {
+		auth += ", playbook-injected"
+	}
 	fmt.Fprintf(&b, "> **DIRECTIONAL** — %s @ `%s`, %s, N=%d (mean ± σ)%s, %s. Not a controlled study; see [bench/README.md](bench/README.md).\n>\n",
 		sum.FixtureRepo, shortSHA(sum.FixtureSHA), sum.Model, sum.Reps, auth, dateOf(sum.GeneratedAt))
 
@@ -100,6 +103,8 @@ func RenderTable(sum suite.Summary) string {
 	fmt.Fprintf(&b, "> | metric (mean ± σ, per session) | baseline (Read/Grep/Glob) | with codemap | Δ |\n")
 	fmt.Fprintf(&b, "> |---|---|---|---|\n")
 	rowStat(&b, "tool calls", base, cm, func(a suite.ArmSummary) suite.Stat { return a.ToolCalls }, fmtNum, true)
+	rowStat(&b, "mcp tool calls", base, cm, func(a suite.ArmSummary) suite.Stat { return a.MCPToolCalls }, fmtNum, true)
+	rowMCPSessions(&b, base, cm)
 	rowStat(&b, "input tokens (incl. cache reads)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.InputTokens }, fmtK, true)
 	rowStat(&b, "output tokens", base, cm, func(a suite.ArmSummary) suite.Stat { return a.OutputTokens }, fmtK, true)
 	rowStat(&b, "wall-clock (s)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.WallClockS }, fmtNum, true)
@@ -125,6 +130,24 @@ func rowStat(b *strings.Builder, label string, base, cm *suite.ArmSummary, pick 
 		}
 	}
 	fmt.Fprintf(b, "> | %s | %s | %s | %s |\n", label, bc, cc, delta)
+}
+
+// rowMCPSessions renders "sessions using codemap tools" as N/M per arm, where
+// M is the arm's non-failed session count. An arm with zero non-failed
+// sessions (all errored, or the arm didn't run) renders as "—".
+func rowMCPSessions(b *strings.Builder, base, cm *suite.ArmSummary) {
+	fmt.Fprintf(b, "> | sessions using codemap tools | %s | %s | — |\n", mcpSessionsCell(base), mcpSessionsCell(cm))
+}
+
+func mcpSessionsCell(a *suite.ArmSummary) string {
+	if a == nil {
+		return "—"
+	}
+	m := a.Sessions - a.Failed
+	if m <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d/%d", a.MCPSessions, m)
 }
 
 func rowCorrect(b *strings.Builder, base, cm *suite.ArmSummary) {

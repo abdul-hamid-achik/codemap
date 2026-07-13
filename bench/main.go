@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ type config struct {
 	mcpConfig    string
 	readme       string
 	indexSeconds float64
+	playbook     bool
 }
 
 func defaultModel() string {
@@ -76,6 +78,7 @@ func run() error {
 	flag.StringVar(&c.mcpConfig, "mcp-config", "bench/mcp/codemap.mcp.json", "codemap arm MCP config")
 	flag.StringVar(&c.readme, "readme", "README.md", "README to splice the results table into")
 	flag.Float64Var(&c.indexSeconds, "index-seconds", 0, "one-time codemap index cost (reported separately)")
+	flag.BoolVar(&c.playbook, "playbook", false, "inject the codemap tool-selection playbook into the codemap arm's system prompt (measures codemap as actually deployed via `codemap agent setup`, not bare-and-untaught)")
 	flag.Parse()
 
 	if c.reportOnly {
@@ -148,6 +151,7 @@ func orchestrate(c config) error {
 		Driver:        driver.Name(),
 		Model:         c.model,
 		AuthMode:      drivers.AuthMode(),
+		Playbook:      c.playbook,
 		FixtureRepo:   fixtureRepo(c.fixture),
 		FixtureSHA:    fixtureSHA(c.fixture),
 		Reps:          c.reps,
@@ -176,6 +180,7 @@ func runOne(d drivers.Driver, t suite.Task, arm drivers.Arm, rep int, transcript
 	defer cancel()
 	m, err := d.Run(ctx, t.Prompt, arm, transcript)
 	s.ToolCalls = m.ToolCalls
+	s.MCPToolCalls = m.MCPToolCalls
 	s.InputTokens = m.InputTokens
 	s.OutputTokens = m.OutputTokens
 	s.CacheReadTokens = m.CacheReadTokens
@@ -216,6 +221,13 @@ func buildArms(names []string, c config) ([]drivers.Arm, error) {
 			}
 		}
 	}
+	var playbookText string
+	if c.playbook {
+		playbookText, err = loadPlaybook()
+		if err != nil {
+			return nil, err
+		}
+	}
 	var arms []drivers.Arm
 	for _, name := range names {
 		a := drivers.Arm{Name: name, WorkDir: fixtureAbs, Model: c.model}
@@ -226,12 +238,34 @@ func buildArms(names []string, c config) ([]drivers.Arm, error) {
 			a.AllowedTools = "Read,Grep,Glob,mcp__codemap"
 			a.MCPConfig = resolvedMCP
 			a.MCPServer = "codemap"
+			// Playbook injection is codemap-arm only: it measures codemap as
+			// actually deployed (tool-selection guidance taught), not the
+			// baseline's file tools, which need no playbook.
+			a.AppendSystemPrompt = playbookText
 		default:
 			return nil, fmt.Errorf("unknown arm %q (want baseline|codemap)", name)
 		}
 		arms = append(arms, a)
 	}
 	return arms, nil
+}
+
+// loadPlaybook obtains the canonical "when to use codemap" playbook text by
+// shelling the built codemap binary. bench must NOT import codemap packages
+// (see the circularity rule in bench/README.md), so this is the only way to
+// get the playbook; the binary is guaranteed to exist by `task bench`'s
+// `deps: [build]`. Fails loudly rather than silently running an untaught arm.
+func loadPlaybook() (string, error) {
+	bin := filepath.Join("bin", "codemap")
+	out, err := exec.Command(bin, "agent", "playbook", "--format", "markdown").Output()
+	if err != nil {
+		return "", fmt.Errorf("--playbook: run `%s agent playbook`: %w (did you run `task build`?)", bin, err)
+	}
+	text := strings.TrimSpace(string(out))
+	if text == "" {
+		return "", fmt.Errorf("--playbook: %s agent playbook produced empty output", bin)
+	}
+	return text, nil
 }
 
 // resolveMCPConfig expands ${CODEMAP_REPO} in the committed MCP template to the

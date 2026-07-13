@@ -1,5 +1,5 @@
 {"type": "system", "subtype": "init", "model": "claude-sonnet-5", "tools": ["Read", "Grep", "Glob", "mcp__codemap__callers", "mcp__codemap__context"], "mcp_servers": [{"name": "codemap", "status": "connected"}]}
-{"type": "assistant", "message": {"content": [{"type": "text", "text": "Let me look this up."}, {"type": "tool_use", "id": "t1", "name": "mcp__codemap__callers", "input": {"symbol": "ComputeHash"}}, {"type": "tool_use", "id": "t2", "name": "Grep", "input": {"pattern": "ComputeHash"}}]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Let me look this up."}, {"type": "tool_use", "id": "t1", "name": "mcp__codemap__callers", "input": {"symbol": "ComputeHash"}}, {"type": "tool_use", "id": "t2", "name": "Grep", "input": {"pattern": "ComputeHash"}}, {"type": "tool_use", "id": "t4", "name": "mcp__codemap__impact", "input": {"symbol": "ComputeHash"}}]}}
 {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "..."}]}}
 {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t3", "name": "Read", "input": {"file_path": "plumbing/hash.go"}}]}}
 {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t3", "content": "..."}]}}

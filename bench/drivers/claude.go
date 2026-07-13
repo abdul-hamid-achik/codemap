@@ -87,6 +87,13 @@ func (d ClaudeDriver) Args(prompt string, arm Arm) []string {
 	if arm.MCPConfig != "" {
 		args = append(args, "--mcp-config", arm.MCPConfig)
 	}
+	if arm.AppendSystemPrompt != "" {
+		// Flag name verified against `claude --help` (2026-07-13): "--append-system-prompt
+		// <prompt>  Append a system prompt to the default system prompt". Confirmed
+		// compatible with --bare, which explicitly documents --append-system-prompt[-file]
+		// as one of the flags that still layers on top of minimal mode.
+		args = append(args, "--append-system-prompt", arm.AppendSystemPrompt)
+	}
 	return args
 }
 
@@ -228,6 +235,9 @@ func FoldEvents(r io.Reader) (Metrics, InitInfo, error) {
 				for _, b := range ev.Message.Content {
 					if b.Type == "tool_use" {
 						m.ToolCalls++
+						if strings.HasPrefix(b.Name, "mcp__") {
+							m.MCPToolCalls++
+						}
 					}
 				}
 			}

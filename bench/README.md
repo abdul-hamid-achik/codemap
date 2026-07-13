@@ -46,7 +46,14 @@ CODEMAP_BENCH_MODEL=claude-opus-5 task bench    # override the model (default cl
 task bench:report                       # regenerate the README table from the newest run (no API)
 task bench:smoke                        # offline plumbing check (fabricated metrics, no API)
 go run ./bench --dry-run                # print the full plan + exact claude invocations, no API
+task bench CLI_ARGS="--playbook"        # inject the codemap tool-selection playbook into the codemap arm
 ```
+
+**`--playbook`** appends the canonical "when to use codemap" playbook (`./bin/codemap agent
+playbook --format markdown`) to the codemap arm's system prompt via `--append-system-prompt`
+(baseline is untouched — it has no codemap tools to be taught about). It measures codemap as
+*actually deployed* (`codemap agent setup` installs this same playbook) instead of a bare,
+untaught session that only sometimes reaches for the MCP tools — see "usage rate" below.
 
 **Cost.** A full run is 10 tasks × 2 arms × 3 reps = ~60 sessions. Ballpark **$5–15** on
 `claude-sonnet-5` (baseline sessions read many files; codemap sessions are cheaper). ~5× on
@@ -116,6 +123,11 @@ Lessons, honestly stated:
   index. The harness asserts (via the `system/init` event) that the codemap MCP server actually
   loaded for the codemap arm — a broken config fails the session loudly instead of silently
   degrading to plain file tools.
+- **`--playbook` measures deployed usage, not bare availability.** Without it, the codemap arm
+  only has codemap tools *on the allowlist*; nothing teaches the agent when to reach for them
+  (see "usage rate" below). With it, the codemap arm's system prompt carries the same
+  tool-selection playbook `codemap agent setup` installs — the summary and README banner record
+  `playbook: true` so a run is never silently mixed with un-playbooked numbers.
 
 ## Layout
 
