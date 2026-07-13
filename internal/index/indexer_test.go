@@ -586,6 +586,42 @@ func TestIndexExcludesDependencyDirs(t *testing.T) {
 	}
 }
 
+// TestDefaultExcludesAreRootAnchoredNotAnySegment is the P1-11 (B66)
+// end-to-end regression: real Go subpackages that happen to share a name
+// with an ambiguous default exclude ("env", "build") must still be indexed
+// under the default config, while a root-level directory of the same name
+// is still excluded. Pre-fix, matchExclude trimmed the trailing slash off
+// "env/"/"build/" before checking for a slash, silently collapsing them
+// back to the any-segment/any-depth form and dropping internal/env and
+// pkg/build entirely — with no error, no warning, just missing symbols.
+func TestDefaultExcludesAreRootAnchoredNotAnySegment(t *testing.T) {
+	dir := t.TempDir()
+	// Real source that happens to live under a directory named like an
+	// ambiguous default exclude — must be indexed.
+	writeFile(t, dir, "internal/env/e.go", "package env\n\nfunc LoadEnv() {}\n")
+	writeFile(t, dir, "pkg/build/b.go", "package build\n\nfunc Compile() {}\n")
+	// A root-level dir of the same name is a real build artifact / venv —
+	// must still be excluded.
+	writeFile(t, dir, "env/generated.go", "package env\n\nfunc RootEnvArtifact() {}\n")
+	writeFile(t, dir, "build/generated.go", "package build\n\nfunc RootBuildArtifact() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, sym := range []string{"LoadEnv", "Compile"} {
+		if ns, _ := g.FindNodesBySymbol(pid, sym); len(ns) == 0 {
+			t.Errorf("P1-11 regression: %s under a real nested subpackage should be indexed, but it was excluded", sym)
+		}
+	}
+	for _, sym := range []string{"RootEnvArtifact", "RootBuildArtifact"} {
+		if ns, _ := g.FindNodesBySymbol(pid, sym); len(ns) != 0 {
+			t.Errorf("%s is under a root-level default-excluded dir — it should NOT be indexed", sym)
+		}
+	}
+}
+
 // TestIndexPrunesDeletedFiles checks that an incremental reindex removes the
 // nodes of a file deleted from disk — otherwise ghost symbols linger in
 // find/callers/search. Files still on disk are untouched.

@@ -92,8 +92,11 @@ type IndexConfig struct {
 	// Exclude fully REPLACES the built-in default skip list (.git, node_modules,
 	// vendor, …). Set it only to override those defaults wholesale. A pattern
 	// without a slash matches any path segment ("migrations" skips a migrations
-	// dir at any depth); a pattern with a slash anchors to the project root
-	// ("db/migrations"), and a "**/" prefix matches at any depth ("**/testdata").
+	// dir at any depth); a pattern with a slash ANYWHERE — including a lone
+	// trailing slash like "env/" — anchors to the project root ("db/migrations",
+	// "env/" skip only a root-level db/migrations or env/, not a nested
+	// internal/env/), and a "**/" prefix un-anchors, matching at any depth
+	// ("**/testdata"). See matchExclude in internal/index for the exact rules.
 	Exclude []string `yaml:"exclude"`
 	// ExcludeExtra is APPENDED to Exclude (whether default or overridden), so you
 	// can skip your own folders (migrations, fixtures, generated/) without
@@ -133,15 +136,33 @@ func DefaultConfig() *Config {
 			EmbedConcurrency:   4,
 			ExtractConcurrency: 4,
 			// P1-11 (B66): bare names like "env" matched any segment at any depth,
-			// silently excluding Go subpackages like go/build or internal/env.
-			// Anchor the build-output dirs with a trailing slash so they only
-			// match a same-level dir; keep node_modules/vendor/etc as any-depth.
+			// silently excluding real Go subpackages like go/build or internal/env
+			// (the stdlib itself ships a "go/build" package, and "internal/env" is
+			// a common config-package name). A first fix attempt anchored these with
+			// a trailing slash ("env/") but matchExclude trimmed that slash BEFORE
+			// deciding whether the pattern was anchored, so it silently collapsed
+			// back to the bare/any-depth form — matchExclude is now fixed (see its
+			// doc comment) so the trailing slash below is real root-anchoring.
+			//
+			// Split by ambiguity, not by "is it a build artifact":
+			//   - root-anchored (trailing slash): dist/, build/, target/, coverage/,
+			//     venv/, env/ — these collide with plausible source package/dir names
+			//     (go/build, internal/env, internal/coverage, a user "target" or
+			//     "dist" package) often enough that any-depth was a footgun. Trade-off:
+			//     a monorepo with a nested per-package build output (e.g.
+			//     packages/foo/dist/) will need its own exclude_extra entry — this is
+			//     bloat, not a correctness bug, so it's the acceptable side to err on.
+			//   - any-depth (bare, no slash): node_modules, vendor, .git, __pycache__,
+			//     site-packages — these are never legitimate source directory names in
+			//     Go/TS/JS/Python, so any-depth stays safe and also catches nested
+			//     dependency trees (e.g. a venv's own site-packages nested arbitrarily
+			//     deep, or a workspace's per-package node_modules).
 			Exclude: []string{
 				".git", "node_modules", "vendor",
 				"dist/", "build/", "target/", "coverage/",
 				"dist-*", "build-*",
 				".next", ".nuxt", "__pycache__",
-				"venv/", "env/", "site-packages/",
+				"venv/", "env/", "site-packages",
 				"*.min.js", "*.gen.go", "*_gen.go", "*.pb.go", "*_pb.go", "*.lock",
 			},
 		},

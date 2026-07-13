@@ -98,11 +98,11 @@ index:
   max_file_bytes: 1048576
   exclude:                # REPLACES the built-in defaults — set only to override wholesale
     - .git
-    - node_modules     # JS/TS deps
-    - venv             # Python virtualenvs (also env, site-packages)
-    - __pycache__
-    - vendor           # Go deps
-    - dist
+    - node_modules     # JS/TS deps (any depth)
+    - venv/            # Python virtualenvs — root-anchored (also env/, dist/, build/, target/, coverage/)
+    - __pycache__      # any depth
+    - vendor           # Go deps (any depth)
+    - dist/            # root-anchored
     - "*.min.js"
   exclude_extra:          # APPENDED to the defaults — add your own without restating them
     - migrations
@@ -134,10 +134,25 @@ mcp:
   profile: full            # full (default, all 39 tools) | core (lean 22-tool set; see /mcp#tool-profiles)
 ```
 
-The default exclude list also covers `build`, build-output variants (`dist-*`, `build-*`, e.g.
-`dist-chrome`/`build-web`), `coverage`, `.next`, `.nuxt`, `target`, `env`, `site-packages`, `*.gen.go`,
-`*.pb.go`, `*_pb.go`, and `*.lock`; any dot-prefixed directory (`.git`, `.venv`, `.tox`, …) is skipped
-automatically.
+The full built-in default list is:
+
+- **Any-depth** (bare, matches at every path level): `.git`, `node_modules`, `vendor`, `__pycache__`,
+  `site-packages`, `dist-*`, `build-*` (build-output variants like `dist-chrome`/`build-web`), `.next`,
+  `.nuxt`, `*.min.js`, `*.gen.go`, `*_gen.go`, `*.pb.go`, `*_pb.go`, `*.lock`. None of these are
+  plausible source-directory names in Go/TS/JS/Python, so matching them anywhere is safe — and it's
+  required to also catch nested cases like a workspace's per-package `node_modules` or a virtualenv's
+  deeply-nested `site-packages`.
+- **Root-anchored** (trailing slash, matches only at the project root): `dist/`, `build/`, `target/`,
+  `coverage/`, `venv/`, `env/`. These names collide with real source packages often enough to be a
+  footgun at any depth — Go's standard library ships `go/build`, a Go project commonly has
+  `internal/env` or `internal/coverage`, and `dist`/`target` are plausible package names too. Root
+  anchoring keeps the common build-output/venv case (at the project root) excluded while leaving a
+  same-named source subpackage alone. The trade-off: a monorepo with a nested per-package build
+  output (e.g. `packages/foo/dist/`) needs its own `exclude_extra: ["dist"]` (bare, any-depth) if it
+  wants that excluded too — that's opt-in bloat-avoidance, not a silently-dropped-code footgun.
+
+Any dot-prefixed directory (`.git`, `.venv`, `.tox`, …) is also skipped automatically by the walker,
+independent of the exclude list.
 
 ### exclude vs exclude_extra
 
@@ -147,11 +162,18 @@ without losing `node_modules`/`vendor`/`.git`.
 
 Both use the same **path-aware** glob semantics:
 
-- **Bare name** (`migrations`, `*.min.js`) — matches that file/dir name at **any depth**.
-- **Slash pattern** (`db/migrations`) — **anchored at the project root**; matches `db/migrations` and
-  everything under it, but not `app/db/migrations`.
+- **No slash anywhere** (`migrations`, `*.min.js`) — matches that file/dir name at **any depth**.
+- **A slash anywhere — leading, trailing, or embedded** (`db/migrations`, `env/`, `/dist`) —
+  **anchored at the project root**. `db/migrations` matches `db/migrations` and everything under it,
+  but not `app/db/migrations`. A *lone trailing slash* like `env/` anchors that single segment the
+  same way — it matches a root-level `env/` (and everything under it) but leaves a nested
+  `internal/env/` alone. This is the important gotcha the trailing slash exists to signal: writing
+  `env` (no slash) would match `internal/env` too, silently dropping real code — always use a
+  trailing slash to root-anchor a single directory name.
 - **`**/` prefix** (`**/testdata`, `**/gen/protobuf`) — un-anchors a slash pattern so it matches at
-  **any depth**.
+  **any depth**, including multi-segment patterns.
+- A leading `./` is stripped and treated as an explicit root marker, equivalent to a trailing slash
+  (`./env` behaves like `env/`). A pattern that normalizes to nothing (`/`, `./`, `**/`) is a no-op.
 
 ## Indexing performance
 

@@ -942,15 +942,31 @@ func (ix *Indexer) walk(root string) ([]fileTask, map[string]int, error) {
 func (ix *Indexer) excluded(rel string) bool { return matchExclude(ix.exclude, rel) }
 
 // matchExclude reports whether the (slash-normalized) relative path rel matches
-// any pattern. Semantics:
+// any pattern. Semantics (P1-11: the previous implementation trimmed a pattern's
+// slashes BEFORE deciding whether it "had a slash", so a root-anchoring pattern
+// written with only a trailing slash — e.g. "env/" — silently collapsed back to
+// the bare, any-depth form and matched internal/env, pkg/env, etc. The slash
+// check below now runs before any trimming, so a lone leading or trailing slash
+// still counts as "has a slash" and anchors the pattern):
 //
-//   - A pattern WITHOUT a slash matches any single path segment, so "node_modules"
-//     or "migrations" or "*.min.js" skips that file/dir at any depth.
-//   - A pattern WITH a slash matches a segment-wise path PREFIX anchored at the
-//     project root, so "db/migrations" skips db/migrations and everything under it
-//     but not app/db/migrations.
+//   - A pattern with NO slash anywhere matches any single path segment, so
+//     "node_modules" or "migrations" or "*.min.js" skips that file/dir at any depth.
+//   - A pattern with a slash ANYWHERE — leading, trailing, or embedded — anchors at
+//     the project root. "db/migrations" skips db/migrations and everything under it
+//     but not app/db/migrations. A lone trailing slash ("env/") or leading slash
+//     ("/env") anchors a single segment the same way: it skips a root-level env/
+//     and everything under it, but leaves internal/env/ alone. A pattern with both
+//     ("a/b/") anchors the full multi-segment prefix "a/b".
+//   - A leading "./" is stripped as a redundant "explicitly rooted" marker, so
+//     "./env" is equivalent to "env/" (root-anchored), NOT the bare/any-depth form.
 //   - A "**/" prefix un-anchors a slash pattern so it matches that prefix starting
-//     at any depth, so "**/db/migrations" also skips app/db/migrations.
+//     at any depth, so "**/db/migrations" also skips app/db/migrations, and
+//     "**/testdata" (single segment) matches testdata at any depth — same effect
+//     as the bare form but written explicitly.
+//   - An absolute-looking pattern ("/dist") is treated identically to a
+//     leading-slash-stripped root-anchored pattern ("dist/"); codemap excludes are
+//     always project-relative, so there is no meaningful "true absolute" form.
+//   - A pattern that normalizes to empty (e.g. "/", "**/", "./") is a no-op.
 //
 // A bare base name (one segment, no slash) is a valid rel and matches the no-slash
 // rules — so callers may pass either a full relative path or a base name.
@@ -960,12 +976,25 @@ func matchExclude(patterns []string, rel string) bool {
 		return false
 	}
 	segs := strings.Split(rel, "/")
-	for _, pat := range patterns {
-		pat = strings.Trim(filepath.ToSlash(pat), "/")
+	for _, raw := range patterns {
+		pat := filepath.ToSlash(raw)
 		if pat == "" {
 			continue
 		}
-		if !strings.ContainsRune(pat, '/') {
+		anyDepth := strings.HasPrefix(pat, "**/")
+		if anyDepth {
+			pat = strings.TrimPrefix(pat, "**/")
+		}
+		// hasSlash must be decided BEFORE trimming leading/trailing slashes —
+		// that trim is what previously erased the root-anchoring signal on a
+		// pattern like "env/" whose only slash was trailing.
+		hasSlash := anyDepth || strings.ContainsRune(pat, '/')
+		pat = strings.TrimPrefix(pat, "./")
+		pat = strings.Trim(pat, "/")
+		if pat == "" {
+			continue
+		}
+		if !hasSlash {
 			for _, s := range segs {
 				if ok, _ := filepath.Match(pat, s); ok {
 					return true
@@ -973,8 +1002,7 @@ func matchExclude(patterns []string, rel string) bool {
 			}
 			continue
 		}
-		anyDepth := strings.HasPrefix(pat, "**/")
-		parts := strings.Split(strings.TrimPrefix(pat, "**/"), "/")
+		parts := strings.Split(pat, "/")
 		last := 0 // anchored: only try matching the prefix at the root
 		if anyDepth {
 			last = len(segs) - 1 // un-anchored: try every starting segment
