@@ -1052,6 +1052,56 @@ func TestSearchSymbolsDocstringMatchRanksBelowName(t *testing.T) {
 	}
 }
 
+// TestSearchSymbolsLimitBoundsCandidatesByTier pins the fix for SearchSymbols
+// dropping its SQL LIMIT (I19 tokenized rewrite): a broad query used to
+// materialize every WHERE-matching node — across ALL tiers — before Go-side
+// ranking truncated to `limit`, so lower-tier (docstring-only) rows could
+// only be excluded AFTER being fully fetched. The SQL-side ORDER BY now
+// ranks by the same tier priority (name match, then docstring-only, then
+// legacy substring) before LIMIT is applied, so with more true tier-0
+// matches than the requested limit, not a single lower-tier row should ever
+// occupy a result slot.
+func TestSearchSymbolsLimitBoundsCandidatesByTier(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+
+	const limit = 5
+	// More tier-0 (name) matches than the limit.
+	for i := 0; i < limit+3; i++ {
+		sym := fmt.Sprintf("GopherHandler%02d", i)
+		if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: fmt.Sprintf("a%02d.go", i), Symbol: sym, FQN: "p." + sym,
+			Kind: KindFunction, Language: "go", SourceHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Decoys that only qualify at tier 1 (docstring-only) — named to sort
+	// alphabetically BEFORE the tier-0 "Gopher…" matches, so a naive
+	// SQL-side "LIMIT with no tier-aware ORDER BY" regression would let
+	// these leak into the result window ahead of real matches. They must
+	// never displace a tier-0 match once tier-0 alone already fills the limit.
+	for i := 0; i < limit; i++ {
+		sym := fmt.Sprintf("AaaDecoy%02d", i)
+		if _, err := s.AddNode(&Node{ProjectID: pid, FilePath: fmt.Sprintf("b%02d.go", i), Symbol: sym, FQN: "p." + sym,
+			Kind: KindFunction, Language: "go", Docstring: "mentions gopher in passing.", SourceHash: "h"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.SearchSymbols(pid, "gopher", limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != limit {
+		t.Fatalf("SearchSymbols('gopher', limit=%d) = %d hits, want exactly %d", limit, len(got), limit)
+	}
+	for _, m := range got {
+		if m.MatchedIn != "symbol" && m.MatchedIn != "fqn" {
+			t.Errorf("tier-1 docstring-only match %+v leaked into a limit=%d result set that has %d true tier-0 matches",
+				m, limit, limit+3)
+		}
+	}
+}
+
 // TestSearchSymbolsEmptyQuery asserts the degraded search floor behaves
 // gracefully on an empty/whitespace-only query: no panic, no full-table
 // dump (an empty LIKE '%%' would otherwise match everything).

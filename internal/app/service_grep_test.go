@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/index"
@@ -212,6 +213,52 @@ func TestServiceGrepSkipsFileDeletedSinceIndex(t *testing.T) {
 	}
 	if rep.FilesScanned != 1 {
 		t.Fatalf("FilesScanned = %d, want 1 (the deleted file is silently skipped, not an error)", rep.FilesScanned)
+	}
+}
+
+// TestServiceGrepScanAbortedFileCountsOnlyAsScanned pins the fix for
+// scanFileForHits double-counting a file whose scan aborts mid-way (a single
+// line exceeding the 1 MiB bufio.Scanner ceiling, despite the whole file
+// being well under the 4 MiB size cap): before the fix, GrepWithContext
+// incremented FilesScanned unconditionally, then scanFileForHits ALSO
+// incremented FilesSkipped on the scanner error — counting one file in both
+// fields, breaking the "skipped means never scanned" contract the size/
+// binary skip paths rely on. Hits found before the oversized line must
+// still survive.
+func TestServiceGrepScanAbortedFileCountsOnlyAsScanned(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+
+	// A single line well over the 1 MiB (1<<20) scanner ceiling, in a file
+	// well under the 4 MiB (maxGrepFileBytes) whole-file cap — deterministically
+	// triggers bufio.ErrTooLong partway through the scan.
+	oversized := strings.Repeat("x", 1_200_000)
+	src := "package app\n\nfunc Kept() {\n\t_ = \"scanabort-marker-xyz\"\n}\n\nfunc Oversized() {\n\t_ = \"" + oversized + "\"\n}\n"
+	if err := os.WriteFile(filepath.Join(proj, "big.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Grep(proj, "scanabort-marker-xyz", GrepOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Hits) != 1 || rep.Hits[0].Line != 4 {
+		t.Fatalf("Hits = %+v, want the hit found before the oversized line to survive", rep.Hits)
+	}
+	if rep.FilesScanned != 1 {
+		t.Errorf("FilesScanned = %d, want 1 (the file was genuinely opened and partially scanned)", rep.FilesScanned)
+	}
+	if rep.FilesSkipped != 0 {
+		t.Errorf("FilesSkipped = %d, want 0 (a scan-aborted file must not ALSO count as skipped)", rep.FilesSkipped)
 	}
 }
 

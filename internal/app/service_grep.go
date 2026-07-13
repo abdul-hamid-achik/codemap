@@ -72,16 +72,23 @@ type GrepHit struct {
 // deleted from disk since the last index is silently skipped, not reflected in
 // Stale.
 type GrepReport struct {
-	Project      string    `json:"project"`
-	Pattern      string    `json:"pattern"`
-	Regex        bool      `json:"regex"`
-	IgnoreCase   bool      `json:"ignore_case"`
-	Hits         []GrepHit `json:"hits"`
-	Total        int       `json:"total"`
-	Truncated    bool      `json:"truncated,omitempty"`
-	FilesScanned int       `json:"files_scanned"`
-	FilesSkipped int       `json:"files_skipped,omitempty"`
-	Stale        bool      `json:"stale,omitempty"`
+	Project    string    `json:"project"`
+	Pattern    string    `json:"pattern"`
+	Regex      bool      `json:"regex"`
+	IgnoreCase bool      `json:"ignore_case"`
+	Hits       []GrepHit `json:"hits"`
+	Total      int       `json:"total"`
+	Truncated  bool      `json:"truncated,omitempty"`
+	// FilesScanned and FilesSkipped are mutually exclusive per indexed file
+	// (every considered file lands in exactly one of the two, never both):
+	// FilesScanned counts a file that was opened and scanned — including a
+	// file that hit the scanner's per-line ceiling partway through, since it
+	// still contributed whatever hits were found before the error (see
+	// scanFileForHits). FilesSkipped counts a file that was never scanned at
+	// all (too large, or detected binary).
+	FilesScanned int  `json:"files_scanned"`
+	FilesSkipped int  `json:"files_skipped,omitempty"`
+	Stale        bool `json:"stale,omitempty"`
 }
 
 // Grep searches the indexed file set for pattern (literal substring by default,
@@ -243,12 +250,14 @@ func scanFileForHits(f *os.File, rel string, pid int64, g *graph.Store, re *rege
 		}
 		rep.Hits = append(rep.Hits, hit)
 	}
-	if err := scanner.Err(); err != nil {
-		// bufio.ErrTooLong (or any other scan failure) stops scanning THIS file
-		// only; hits already found in it stay in rep.Hits — one pathological
-		// file must never abort the whole grep run.
-		rep.FilesSkipped++
-	}
+	// A scanner.Err() here (bufio.ErrTooLong, or any other scan failure)
+	// stops scanning THIS file only; hits already found in it stay in
+	// rep.Hits — one pathological file must never abort the whole grep run.
+	// The caller already counted this file in FilesScanned before calling
+	// in — it was genuinely opened and (partially) scanned, so a scan error
+	// must NOT also increment FilesSkipped (that would double-count it and
+	// break the "skipped means never scanned" contract the size/binary skip
+	// paths rely on). No further accounting is needed on this path.
 }
 
 // looksBinary reports whether head (a file's leading bytes) contains a NUL

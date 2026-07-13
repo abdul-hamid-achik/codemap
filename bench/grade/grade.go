@@ -214,17 +214,35 @@ func numeric(key string, answer, truth map[string]any, tol float64) Result {
 }
 
 // containsPath verifies the answer's ordered path is a valid walk over the
-// ground-truth edge set: every consecutive (a, b) pair must be a truth edge.
+// ground-truth edge set FROM truth["from"] TO truth["to"] (when the truth
+// fixture carries those keys — some older/synthetic fixtures may not, so
+// the endpoint check is skippable rather than required): every consecutive
+// (a, b) pair must be a truth edge, path[0] must equal truth["from"], and
+// path[len-1] must equal truth["to"]. Without the endpoint check, any single
+// truth edge (or short walk) anywhere in the edge set graded PASS even when
+// it never reaches the symbol the task actually asked about.
 // truth["edges"] is [[from,to], ...]; answer[key] is [n0, n1, ...].
 func containsPath(key string, answer, truth map[string]any) Result {
 	pathAny, ok := answer[key].([]any)
 	if !ok || len(pathAny) < 2 {
 		return Result{Pass: false, Detail: "answer path missing or too short"}
 	}
-	var path []string
+	path := make([]string, 0, len(pathAny))
 	for _, e := range pathAny {
-		if s, ok := e.(string); ok {
-			path = append(path, strings.TrimSpace(s))
+		s, ok := e.(string)
+		if !ok {
+			return Result{Pass: false, Detail: fmt.Sprintf("answer path contains a non-string entry: %v", e)}
+		}
+		path = append(path, strings.TrimSpace(s))
+	}
+	if from, ok := truth["from"].(string); ok {
+		if from = strings.TrimSpace(from); path[0] != from {
+			return Result{Pass: false, Detail: fmt.Sprintf("path starts at %q, want %q", path[0], from)}
+		}
+	}
+	if to, ok := truth["to"].(string); ok {
+		if to = strings.TrimSpace(to); path[len(path)-1] != to {
+			return Result{Pass: false, Detail: fmt.Sprintf("path ends at %q, want %q", path[len(path)-1], to)}
 		}
 	}
 	edges := map[string]bool{}

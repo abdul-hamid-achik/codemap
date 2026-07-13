@@ -129,6 +129,18 @@ func (d ClaudeDriver) Run(ctx context.Context, prompt string, arm Arm, transcrip
 	}
 	// Tee stdout to the transcript file while folding.
 	m, init, foldErr := FoldEvents(io.TeeReader(stdout, sink))
+	if foldErr != nil {
+		// FoldEvents can return early without reading stdout to EOF (e.g.
+		// bufio.ErrTooLong on a single stream-json line over its 16 MiB
+		// buffer). os/exec requires the StdoutPipe to be fully drained
+		// before Wait is called, or a still-writing child blocks on a full
+		// OS pipe buffer and cmd.Wait() never returns on its own — stalling
+		// this session until the caller's context timeout kills the
+		// process. Drain and discard whatever is left so Wait can return
+		// promptly instead; the transcript is already unusable past the
+		// parse failure.
+		_, _ = io.Copy(io.Discard, stdout)
+	}
 	waitErr := cmd.Wait()
 	m.WallClockMs = time.Since(start).Milliseconds()
 	m.RawTranscript = transcriptPath

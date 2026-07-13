@@ -79,7 +79,23 @@ func (d SmokeDriver) answerFor(st smokeTask) map[string]any {
 		return st.truth
 	case "contains_path":
 		out := map[string]any{}
-		if edges, ok := st.truth["edges"].([]any); ok && len(edges) > 0 {
+		edges, _ := st.truth["edges"].([]any)
+		from, hasFrom := st.truth["from"].(string)
+		to, hasTo := st.truth["to"].(string)
+		// contains_path now also checks the answer's endpoints against
+		// truth["from"]/truth["to"] (when present) — walk the truth edges to
+		// build a REAL path between them instead of echoing an arbitrary
+		// edge, which no longer reliably satisfies the grader.
+		if hasFrom && hasTo {
+			if path := bfsPath(edges, from, to); path != nil {
+				out[t.AnswerKey] = path
+				return out
+			}
+		}
+		// Fallback for a contains_path task whose truth carries no from/to
+		// (or where from/to are unreachable over the recorded edges): echo
+		// the first edge, matching what the grader checks in that case.
+		if len(edges) > 0 {
 			if first, ok := edges[0].([]any); ok && len(first) == 2 {
 				out[t.AnswerKey] = []any{first[0], first[1]}
 			}
@@ -88,6 +104,59 @@ func (d SmokeDriver) answerFor(st smokeTask) map[string]any {
 	default: // set_equal, numeric
 		return map[string]any{t.AnswerKey: st.truth[t.AnswerKey]}
 	}
+}
+
+// bfsPath finds a shortest directed path from "from" to "to" over edges
+// (each element [a,b] as loaded from truth["edges"]), returning it as
+// []any{from, ..., to} in the shape a JSON answer path uses, or nil if "to"
+// is unreachable from "from".
+func bfsPath(edges []any, from, to string) []any {
+	adj := map[string][]string{}
+	for _, e := range edges {
+		pair, ok := e.([]any)
+		if !ok || len(pair) != 2 {
+			continue
+		}
+		a, _ := pair[0].(string)
+		b, _ := pair[1].(string)
+		if a == "" || b == "" {
+			continue
+		}
+		adj[a] = append(adj[a], b)
+	}
+	type node struct {
+		name string
+		prev *node
+	}
+	if from == to {
+		return []any{from}
+	}
+	visited := map[string]bool{from: true}
+	queue := []*node{{name: from}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, next := range adj[cur.name] {
+			if visited[next] {
+				continue
+			}
+			n := &node{name: next, prev: cur}
+			if next == to {
+				var rev []string
+				for p := n; p != nil; p = p.prev {
+					rev = append(rev, p.name)
+				}
+				out := make([]any, len(rev))
+				for i, s := range rev {
+					out[len(rev)-1-i] = s
+				}
+				return out
+			}
+			visited[next] = true
+			queue = append(queue, n)
+		}
+	}
+	return nil
 }
 
 func jitter(s string) int {

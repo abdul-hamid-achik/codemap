@@ -244,11 +244,21 @@ func (svc *Service) CacheImport(_ context.Context, cwd, inPath string, force boo
 	}
 	name = project.Name
 
+	// Always resolve the vector store here, regardless of whether the
+	// ARCHIVE carries vectors (sm.Vectors > 0): snapshot.Import only clears
+	// the project's EXISTING vectors when vec != nil (see its
+	// vec.DeleteByProject call, gated the same way). Gating vec on
+	// sm.Vectors>0 left an already-embedded project's stale vectors in place
+	// whenever a vector-less archive (e.g. exported with --no-embed, the
+	// typical CI export) was imported over it: WipeProject still replaces
+	// every node with a fresh id, so the untouched vectors become orphaned —
+	// dangling Meta.NodeID — yet keep answering semantic queries with
+	// stale/mismatched results. Passing vec unconditionally lets
+	// snapshot.Import's existing wipe-then-restore path clear them even when
+	// there are zero rows to re-insert.
 	var vec *vector.Store
-	if sm.Vectors > 0 {
-		if v, verr := svc.s.Vectors(); verr == nil {
-			vec = v
-		}
+	if v, verr := svc.s.Vectors(); verr == nil {
+		vec = v
 	}
 	m, ierr := snapshot.Import(g, vec, pid, name, tmp, curProfile)
 	if ierr != nil {
@@ -329,13 +339,28 @@ func tarGzDir(srcDir, outPath string) (err error) {
 	return gz.Close()
 }
 
+// maxUntarGzDecompressedBytes bounds the TOTAL bytes untarGz will write
+// across every entry of one archive. It is generous — I30's own committed
+// exports run a few MB — but stops a maliciously crafted or corrupt tarball
+// (a classic "zip bomb": a tiny gzip stream that decompresses to gigabytes,
+// e.g. a multi-GB run of NUL bytes that compresses to a few MB) from
+// exhausting local disk before extraction ever fails. Enforced two ways:
+// per-entry, against the tar header's declared Size (trivially attacker-
+// controlled, but catches the common case outright before a single byte is
+// written), and cumulatively, against what untarGz actually writes —
+// independent of what any header claims.
+// Not a const: tests shrink it temporarily to exercise the cumulative-cap
+// path deterministically without writing gigabytes of fixture data.
+var maxUntarGzDecompressedBytes int64 = 4 << 30 // 4 GiB
+
 // untarGz extracts inPath into destDir. Every entry is validated to resolve
 // INSIDE destDir before anything is written — the classic "tar-slip" path-
 // traversal attack packs a "../../etc/cron.d/evil" (or an absolute path) into
 // an archive entry name so naive extraction writes outside the intended
 // directory. Non-regular entries (symlinks, devices, hardlinks) are skipped
 // rather than followed, since a portable index archive never legitimately
-// contains one.
+// contains one. Total decompressed output is capped at
+// maxUntarGzDecompressedBytes (see its doc) against a zip-bomb-style archive.
 func untarGz(inPath, destDir string) error {
 	f, err := os.Open(inPath)
 	if err != nil {
@@ -351,6 +376,7 @@ func untarGz(inPath, destDir string) error {
 
 	cleanDest := filepath.Clean(destDir)
 	tr := tar.NewReader(gz)
+	var totalWritten int64
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -361,6 +387,10 @@ func untarGz(inPath, destDir string) error {
 		}
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir {
 			continue // skip symlinks/hardlinks/devices — never legitimate here
+		}
+		if hdr.Typeflag == tar.TypeReg && (hdr.Size < 0 || hdr.Size > maxUntarGzDecompressedBytes) {
+			return coded(CodeOperational, "the archive may be corrupt or maliciously crafted — re-export it",
+				fmt.Errorf("tar entry %q declares an implausible size (%d bytes, cap %d)", hdr.Name, hdr.Size, maxUntarGzDecompressedBytes))
 		}
 		name := filepath.Clean(hdr.Name)
 		if name == "." {
@@ -386,9 +416,21 @@ func untarGz(inPath, destDir string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, tr); err != nil { //nolint:gosec // size is bounded by the archive itself, a local trusted-provenance artifact
+		// LimitReader caps THIS copy at (remaining+1) bytes: a copy that reads
+		// exactly remaining+1 proves the entry needed more than the budget
+		// left, distinguishing "hit the cap" from "happened to end exactly at
+		// the boundary".
+		remaining := maxUntarGzDecompressedBytes - totalWritten
+		n, cerr := io.Copy(out, io.LimitReader(tr, remaining+1)) //nolint:gosec // bounded by maxUntarGzDecompressedBytes, enforced immediately below
+		totalWritten += n
+		if cerr != nil {
 			_ = out.Close()
-			return fmt.Errorf("write %s (archive corrupt or truncated): %w", name, err)
+			return fmt.Errorf("write %s (archive corrupt or truncated): %w", name, cerr)
+		}
+		if n > remaining {
+			_ = out.Close()
+			return coded(CodeOperational, "the archive may be corrupt or maliciously crafted — re-export it",
+				fmt.Errorf("tarball decompressed past the %d-byte safety cap while writing %q — refusing to extract further (possible zip bomb)", maxUntarGzDecompressedBytes, name))
 		}
 		if err := out.Close(); err != nil {
 			return err

@@ -791,3 +791,58 @@ func mustJSON(t *testing.T, text string, dst any) {
 		t.Fatalf("invalid JSON: %v\n%s", err, text)
 	}
 }
+
+// TestGrepJSONStaysPureJSONWhenStale pins the fix for runGrep printing the
+// "⚠ index is stale" line to stdout unconditionally, ahead of the --json
+// gate: a stale index (any file added/changed/deleted since the last index,
+// the common state mid-edit) used to corrupt the machine-readable stdout
+// stream for `codemap grep --json` with a leading non-JSON line.
+func TestGrepJSONStaysPureJSONWhenStale(t *testing.T) {
+	root := t.TempDir()
+	binName := "codemap"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	bin := filepath.Join(root, binName)
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = "."
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, out)
+	}
+
+	runner := filepath.Join(root, "runner")
+	project := filepath.Join(root, "project")
+	for _, dir := range []string{runner, project} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := isolatedCLIEnv(root)
+
+	writeTestFile(t, filepath.Join(project, "go.mod"), "module example.com/stale\n\ngo 1.25\n")
+	writeTestFile(t, filepath.Join(project, "a.go"), "package stale\n\nfunc Needle() {}\n")
+
+	res := runCLI(t, bin, runner, env, "index", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
+	if res.exit != 0 {
+		t.Fatalf("index exit=%d stderr=%s stdout=%s", res.exit, res.stderr, res.stdout)
+	}
+
+	// Add a new file without reindexing — the index is now stale (New > 0).
+	writeTestFile(t, filepath.Join(project, "b.go"), "package stale\n\nfunc Other() { Needle() }\n")
+
+	res = runCLI(t, bin, runner, env, "grep", "Needle", "-C", project, "--json")
+	if res.exit != 0 || res.stderr != "" {
+		t.Fatalf("grep exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+	}
+	if strings.HasPrefix(strings.TrimSpace(res.stdout), "⚠") {
+		t.Fatalf("stdout must be pure JSON, got a leading warning line:\n%s", res.stdout)
+	}
+	var rep app.GrepReport
+	mustJSON(t, res.stdout, &rep)
+	if !rep.Stale {
+		t.Fatalf("fixture must produce a stale report (New file added post-index), got %+v", rep)
+	}
+	if len(rep.Hits) == 0 {
+		t.Fatalf("grep report = %+v, want at least one hit", rep)
+	}
+}

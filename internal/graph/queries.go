@@ -603,9 +603,55 @@ func (s *Store) SearchSymbols(projectID int64, query string, limit int) ([]Symbo
 		args = append(args, like, like, like)
 	}
 	rawLike := "%" + likeEscape(query) + "%"
-	q := "SELECT " + nodeColsAs("n") + " FROM nodes n WHERE n.project_id = ? AND n.kind != ? AND ((" +
-		strings.Join(conds, " AND ") + ") OR n.symbol LIKE ? ESCAPE '\\' OR n.fqn LIKE ? ESCAPE '\\')"
+	lowerQuery := strings.ToLower(query)
+	prefixLike := likeEscape(query) + "%"
+
 	args = append(args, rawLike, rawLike)
+
+	// fieldAllTokensCond builds "col LIKE ? AND col LIKE ? ..." (one per
+	// token) plus its bind args, so the same all-tokens-in-one-field rule the
+	// Go-side ranking below applies can be evaluated in SQL too.
+	fieldAllTokensCond := func(col string) (string, []any) {
+		cs := make([]string, len(tokens))
+		as := make([]any, len(tokens))
+		for i, t := range tokens {
+			cs[i] = col + " LIKE ? ESCAPE '\\'"
+			as[i] = "%" + likeEscape(t) + "%"
+		}
+		return strings.Join(cs, " AND "), as
+	}
+	symCond, symArgs := fieldAllTokensCond("n.symbol")
+	fqnCond, fqnArgs := fieldAllTokensCond("n.fqn")
+	docCond, docArgs := fieldAllTokensCond("n.docstring")
+
+	// tierExpr mirrors the Go-side tier switch below directly in SQL (tier 0:
+	// symbol or fqn alone contains every token; tier 1: docstring alone does;
+	// tier 2: legacy untokenized substring on symbol/fqn; else last), so
+	// ORDER BY + LIMIT can bound how many full node rows (docstring/signature
+	// included) cross the driver boundary instead of materializing every
+	// WHERE-matched candidate before Go can rank and truncate it. A row that
+	// satisfies the broad WHERE clause but no real tier (e.g. different
+	// tokens matching different fields) sorts last (tier 3) and is filtered
+	// by the existing Go-side "default: continue" guard below — it only
+	// displaces a genuine match if the true match count already reached
+	// limit, which is the same bound the query had before tokenization.
+	tierExpr := "CASE WHEN (" + symCond + ") THEN 0 WHEN (" + fqnCond + ") THEN 0 WHEN (" + docCond +
+		") THEN 1 WHEN n.symbol LIKE ? ESCAPE '\\' THEN 2 WHEN n.fqn LIKE ? ESCAPE '\\' THEN 2 ELSE 3 END"
+	exactExpr := "CASE WHEN LOWER(n.symbol) = ? THEN 0 ELSE 1 END"
+	prefixExpr := "CASE WHEN n.symbol LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END"
+
+	orderArgs := make([]any, 0, len(symArgs)+len(fqnArgs)+len(docArgs)+4)
+	orderArgs = append(orderArgs, symArgs...)
+	orderArgs = append(orderArgs, fqnArgs...)
+	orderArgs = append(orderArgs, docArgs...)
+	orderArgs = append(orderArgs, rawLike, rawLike, lowerQuery, prefixLike)
+
+	q := "SELECT " + nodeColsAs("n") + " FROM nodes n WHERE n.project_id = ? AND n.kind != ? AND ((" +
+		strings.Join(conds, " AND ") + ") OR n.symbol LIKE ? ESCAPE '\\' OR n.fqn LIKE ? ESCAPE '\\')" +
+		" ORDER BY " + tierExpr + " ASC, " + exactExpr + " ASC, " + prefixExpr +
+		" ASC, LENGTH(n.symbol) ASC, n.symbol ASC, n.file_path ASC LIMIT ?"
+	args = append(args, orderArgs...)
+	args = append(args, limit)
 
 	nodes, err := s.queryNodes(q, args...)
 	if err != nil {
@@ -616,7 +662,6 @@ func (s *Store) SearchSymbols(projectID int64, query string, limit int) ([]Symbo
 	for i, t := range tokens {
 		lowerTokens[i] = strings.ToLower(t)
 	}
-	lowerQuery := strings.ToLower(query)
 	allTokensIn := func(hay string) bool {
 		if hay == "" {
 			return false

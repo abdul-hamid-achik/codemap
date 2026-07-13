@@ -171,6 +171,69 @@ func TestCacheImportTreeHashMismatch(t *testing.T) {
 	}
 }
 
+// TestCacheImportClearsOrphanedVectorsWhenArchiveHasNone pins the fix for
+// CacheImport leaving a project's PRE-EXISTING vectors untouched when the
+// imported archive itself carries zero vectors (e.g. exported via
+// --no-embed — the typical CI export). Before the fix, CacheImport only
+// opened/passed the vector store into snapshot.Import when sm.Vectors > 0;
+// with vec==nil, snapshot.Import's WipeProject still replaced every node
+// with a fresh id, but the OLD vectors were never cleared — they survived
+// with dangling Meta.NodeID and kept answering semantic queries with stale
+// results after the import. This reproduces the cross-machine scenario from
+// the finding: an already-embedded project imports a vector-less archive
+// whose tree hash happens to match (e.g. a --no-embed CI export of the same
+// commit).
+func TestCacheImportClearsOrphanedVectorsWhenArchiveHasNone(t *testing.T) {
+	svc, root, cleanup := setupCacheProject(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	svc.s.SetEmbedder(fakeEmbedder{dims: 4})
+	if _, err := svc.Index(ctx, root, index.Options{}, true); err != nil {
+		t.Fatalf("Index (embedded): %v", err)
+	}
+	_, rootName, err := svc.resolveProject(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := svc.embeddedCount(rootName); !ok || n == 0 {
+		t.Fatalf("fixture must produce embedded vectors before import, embeddedCount=%d ok=%v", n, ok)
+	}
+
+	// A "donor" directory with byte-identical content to root, indexed
+	// WITHOUT embeddings, so exporting it produces a vector-less archive
+	// whose tree hash matches root's current working tree — the same
+	// tarball a --no-embed CI export of this exact commit would produce.
+	donor := t.TempDir()
+	writeGoFile(t, filepath.Join(donor, "main.go"), "package main\n\nfunc main() {}\n")
+	if _, err := svc.Index(ctx, donor, index.Options{}, false); err != nil {
+		t.Fatalf("Index (donor, no-embed): %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "no-vectors.tar.gz")
+	exp, err := svc.CacheExport(ctx, donor, out)
+	if err != nil {
+		t.Fatalf("CacheExport (donor): %v", err)
+	}
+	if exp.Vectors != 0 {
+		t.Fatalf("fixture must export zero vectors, got %d", exp.Vectors)
+	}
+
+	imp, err := svc.CacheImport(ctx, root, out, false)
+	if err != nil {
+		t.Fatalf("CacheImport: %v", err)
+	}
+	if !imp.TreeHashMatched {
+		t.Fatalf("fixture must produce a matching tree hash (donor content == root content), got %+v", imp)
+	}
+	if imp.Vectors != 0 {
+		t.Errorf("imported report Vectors = %d, want 0 (archive carried none)", imp.Vectors)
+	}
+
+	if n, ok := svc.embeddedCount(rootName); !ok || n != 0 {
+		t.Errorf("embeddedCount(%q) after importing a vector-less archive = %d, want 0 (stale vectors must be cleared, not orphaned)", rootName, n)
+	}
+}
+
 // TestCacheExportNotIndexed verifies exporting an unindexed project fails
 // with the stable index_missing code (rather than silently writing an empty
 // tarball).
@@ -361,6 +424,77 @@ func TestUntarGzExtractsValidArchive(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "schema_version") {
 		t.Errorf("extracted snapshot.json content = %q, want schema_version", b)
+	}
+}
+
+// TestUntarGzRejectsImplausibleDeclaredSize pins the fix for untarGz's
+// unbounded gzip decompression (a "zip bomb": a tiny gzip stream whose tar
+// header declares a multi-gigabyte entry — e.g. a run of NUL bytes that
+// compresses ~1000:1 — can fill the local disk before extraction ever
+// fails). The declared size alone must be rejected before a single content
+// byte is read, so the fixture here deliberately never supplies (or needs)
+// the declared bytes: it writes a lying tar header directly (bypassing
+// writeTarGz/tar.Writer's own "missed writing N bytes" accounting, which
+// would refuse to let a legitimate writer build an inconsistent archive)
+// and finalizes the gzip stream immediately after.
+func TestUntarGzRejectsImplausibleDeclaredSize(t *testing.T) {
+	archive := filepath.Join(t.TempDir(), "lying-size.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	hdr := &tar.Header{Name: "snapshot.json", Mode: 0o644, Size: maxUntarGzDecompressedBytes + 1}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("write lying header: %v", err)
+	}
+	// Deliberately no tw.Write/tw.Close (Close would refuse an entry short of
+	// its declared Size) — finalize the gzip stream directly so the archive
+	// is still a valid, readable gzip file carrying just the one lying header.
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := t.TempDir()
+	if err := untarGz(archive, dest); err == nil {
+		t.Fatal("untarGz should reject a tar entry whose declared size exceeds the decompression cap")
+	} else if !strings.Contains(err.Error(), "implausible size") {
+		t.Errorf("error = %v, want an implausible-size rejection", err)
+	}
+	entries, rerr := os.ReadDir(dest)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("destination dir has %d entries after a rejected archive, want 0: %v", len(entries), entries)
+	}
+}
+
+// TestUntarGzCapsCumulativeDecompressedBytes pins untarGz's second line of
+// defense: even when every individual entry's declared size is well under
+// the cap, the TOTAL bytes actually written across all entries must still be
+// bounded (independent of what any one header claims). The cap is shrunk to
+// a tiny value for the duration of the test so this is fast and
+// deterministic without gigabyte-scale fixtures.
+func TestUntarGzCapsCumulativeDecompressedBytes(t *testing.T) {
+	orig := maxUntarGzDecompressedBytes
+	maxUntarGzDecompressedBytes = 1024
+	defer func() { maxUntarGzDecompressedBytes = orig }()
+
+	archive := filepath.Join(t.TempDir(), "cumulative.tar.gz")
+	writeTarGz(t, archive, map[string]string{
+		"a.jsonl": strings.Repeat("a", 700),
+		"b.jsonl": strings.Repeat("b", 700), // neither alone exceeds the cap, but 700+700 > 1024 together
+	})
+	dest := t.TempDir()
+	if err := untarGz(archive, dest); err == nil {
+		t.Fatal("untarGz should refuse once cumulative decompressed bytes exceed the cap")
+	} else if !strings.Contains(err.Error(), "safety cap") {
+		t.Errorf("error = %v, want a safety-cap rejection", err)
 	}
 }
 

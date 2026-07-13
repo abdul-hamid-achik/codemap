@@ -203,7 +203,7 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 		}
 		correct := 0
 		for _, p := range perTask {
-			if p.pass*2 >= p.total { // majority of reps correct
+			if p.pass*2 > p.total { // strict majority of reps correct — a tie is not a majority
 				correct++
 			}
 		}

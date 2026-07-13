@@ -127,6 +127,50 @@ func TestContainsPath_SubsequenceOfEdges(t *testing.T) {
 	}
 }
 
+// TestContainsPath_ChecksEndpoints pins the fix for containsPath never
+// validating the answer's path against truth["from"]/truth["to"]: before the
+// fix, any single truth edge (or short walk) anywhere in the edge set graded
+// PASS even when it didn't start/end at the symbols the task actually asked
+// about (bench/tasks/truth/07_call_path.json carries "from"/"to" alongside
+// "edges").
+func TestContainsPath_ChecksEndpoints(t *testing.T) {
+	truth := obj(t, `{"edges":[["A","B"],["B","C"],["A","D"],["D","E"]],"from":"A","to":"C"}`)
+
+	if r := containsPath("path", obj(t, `{"path":["A","B","C"]}`), truth); !r.Pass {
+		t.Fatalf("A->B->C connects the required endpoints and should pass: %+v", r)
+	}
+	// A valid truth edge, but it doesn't start at "from" — must fail even
+	// though every consecutive pair is a real edge.
+	if r := containsPath("path", obj(t, `{"path":["A","D"]}`), truth); r.Pass {
+		t.Fatal("A->D is a real edge but doesn't reach \"to\":\"C\" — should fail")
+	}
+	if r := containsPath("path", obj(t, `{"path":["D","E"]}`), truth); r.Pass {
+		t.Fatal("D->E is a real edge but doesn't start at \"from\":\"A\" — should fail")
+	}
+}
+
+// TestContainsPath_NoEndpointsInTruthSkipsCheck keeps the pre-fix behavior
+// for fixtures that don't carry "from"/"to" — the endpoint check is
+// skippable, not required, so older/synthetic truth files without those
+// keys still grade purely on edge membership.
+func TestContainsPath_NoEndpointsInTruthSkipsCheck(t *testing.T) {
+	truth := obj(t, `{"edges":[["A","B"],["B","C"]]}`)
+	if r := containsPath("path", obj(t, `{"path":["A","B"]}`), truth); !r.Pass {
+		t.Fatalf("truth without from/to should not enforce endpoints: %+v", r)
+	}
+}
+
+// TestContainsPath_NonStringEntryFails pins that a malformed (non-string)
+// path entry now fails the grade instead of being silently dropped, which
+// previously could turn an invalid answer into a shorter — sometimes
+// accidentally valid — path.
+func TestContainsPath_NonStringEntryFails(t *testing.T) {
+	truth := obj(t, `{"edges":[["A","B"],["B","C"]],"from":"A","to":"C"}`)
+	if r := containsPath("path", obj(t, `{"path":["A",42,"C"]}`), truth); r.Pass {
+		t.Fatalf("a non-string path entry must fail the grade, not be silently dropped: %+v", r)
+	}
+}
+
 func TestGradeDispatch_UnknownGrader(t *testing.T) {
 	if _, err := Grade("bogus", "k", nil, nil, 0); err == nil {
 		t.Fatal("expected error for unknown grader")

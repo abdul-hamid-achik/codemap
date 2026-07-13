@@ -1091,11 +1091,11 @@ func (s *Server) handleFind(_ context.Context, _ *sdkmcp.CallToolRequest, in fin
 	return result(rep, err)
 }
 
-func (s *Server) handleGrep(_ context.Context, _ *sdkmcp.CallToolRequest, in grepInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleGrep(ctx context.Context, _ *sdkmcp.CallToolRequest, in grepInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.Grep(cwdOf(in.Path), in.Pattern, app.GrepOptions{Regex: in.Regex, IgnoreCase: in.IgnoreCase, Top: in.Top})
+	rep, err := s.svc.GrepWithContext(ctx, cwdOf(in.Path), in.Pattern, app.GrepOptions{Regex: in.Regex, IgnoreCase: in.IgnoreCase, Top: in.Top})
 	return result(rep, err)
 }
 

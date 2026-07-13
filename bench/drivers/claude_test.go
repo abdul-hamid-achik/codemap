@@ -3,8 +3,11 @@ package drivers
 import (
 	"context"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These tests lock the stream-json parser against Claude Code output-format
@@ -155,5 +158,46 @@ func TestStubDriversNotImplemented(t *testing.T) {
 		if _, err := d.Run(context.Background(), "q", Arm{}, ""); err != ErrNotImplemented {
 			t.Errorf("%s.Run should return ErrNotImplemented, got %v", d.Name(), err)
 		}
+	}
+}
+
+// TestRun_DrainsStdoutOnFoldEventsParseFailure pins the fix for
+// ClaudeDriver.Run calling cmd.Wait() with an undrained StdoutPipe after
+// FoldEvents returns early on a parse failure (e.g. bufio.ErrTooLong on a
+// stream-json line over its 16 MiB buffer). Before the fix, a still-writing
+// child would block on the OS pipe once its kernel buffer filled — and
+// cmd.Wait() would block right along with it until the caller's context
+// killed the process (bench's real 10-minute session timeout). The fake
+// "claude" here writes one oversized line (forcing FoldEvents to fail fast)
+// and then several more MB well past any OS pipe buffer size; Run must
+// still return promptly by draining the pipe on the error path.
+func TestRun_DrainsStdoutOnFoldEventsParseFailure(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not installed")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fake-claude.sh")
+	content := "#!/bin/sh\n" +
+		"head -c 17000000 /dev/zero | tr '\\0' 'a'\n" +
+		"echo\n" +
+		"head -c 8000000 /dev/zero | tr '\\0' 'b'\n" +
+		"echo\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	d := ClaudeDriver{Bin: script}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := d.Run(ctx, "prompt", Arm{WorkDir: dir, Model: "x", AllowedTools: "Read"}, "")
+	elapsed := time.Since(start)
+
+	if err == nil || !strings.Contains(err.Error(), "parse stream-json") {
+		t.Fatalf("Run error = %v, want a \"parse stream-json\" error (fixture's first line exceeds FoldEvents' 16 MiB buffer)", err)
+	}
+	if elapsed > 8*time.Second {
+		t.Fatalf("Run took %s — an undrained stdout pipe stalled cmd.Wait() instead of returning promptly after the parse failure", elapsed)
 	}
 }

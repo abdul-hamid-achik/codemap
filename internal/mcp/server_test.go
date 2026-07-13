@@ -483,6 +483,55 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 	}
 }
 
+// TestHandleGrepThreadsRequestContext pins the fix for handleGrep discarding
+// its request context.Context and calling the non-cancellable Service.Grep
+// wrapper (context.Background() under the hood), so an MCP client
+// cancellation/disconnect could not stop an in-flight grep — the scan ran to
+// completion holding the server's operation lock regardless of the caller
+// abandoning the call. GrepWithContext checks ctx.Err() once per indexed
+// file (internal/app/service_grep.go), so a context canceled BEFORE the call
+// must surface as a cancellation error on the very first file instead of a
+// normal (possibly empty) grep report.
+func TestHandleGrepThreadsRequestContext(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run() { _ = \"grep-ctx-marker-xyz\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := app.NewService(sess).Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(sess)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel: the handler must observe THIS ctx, not context.Background()
+
+	res, _, err := srv.handleGrep(ctx, nil, grepInput{Path: proj, Pattern: "grep-ctx-marker-xyz"})
+	if err != nil {
+		t.Fatalf("handleGrep returned a Go error instead of an error CallToolResult: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("a pre-canceled context must surface as an error result, got: %s", textOf(res))
+	}
+	if !strings.Contains(textOf(res), context.Canceled.Error()) {
+		t.Errorf("error result = %q, want it to mention %q (proves the request ctx reached GrepWithContext)", textOf(res), context.Canceled.Error())
+	}
+}
+
 func TestMCPAnnotateUnknownTarget(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

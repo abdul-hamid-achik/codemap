@@ -80,13 +80,31 @@ func PlaybookMarkdown() string {
 // mcpToolRe matches a codemap_<tool> MCP token so the CLI renderer can rewrite it.
 var mcpToolRe = regexp.MustCompile(`codemap_([a-z][a-z_]*)`)
 
+// cliToolOverrides maps codemap_<tool> MCP names whose CLI form is NOT a
+// mechanical dash-rename of the tool name onto the real `codemap <cmd>` to
+// use instead. Every other taught tool name matches an actual registered
+// cobra command 1:1 after underscores become dashes (pinned by
+// TestCliifyMapsToRegisteredCommands in cmd/codemap); this table exists only
+// for the exceptions.
+//
+//   - context_batch: there is no `codemap context-batch` command — the batch
+//     form is the multi-arg `codemap context <s1> <s2> …` (see contextCmd's
+//     Use: "context [<symbol>...]" in cmd/codemap/query.go).
+var cliToolOverrides = map[string]string{
+	"context_batch": "context",
+}
+
 // cliify rewrites every codemap_<tool> MCP token into its `codemap <name>` CLI
-// command form (underscores become dashes) so the no-MCP playbook never mentions
-// a tool the harness can't call, while still sourcing its wording from the one
-// canonical body. A final sweep guarantees no stray "codemap_" survives.
+// command form (underscores become dashes, unless cliToolOverrides says
+// otherwise) so the no-MCP playbook never mentions a tool the harness can't
+// call, while still sourcing its wording from the one canonical body. A final
+// sweep guarantees no stray "codemap_" survives.
 func cliify(s string) string {
 	s = mcpToolRe.ReplaceAllStringFunc(s, func(m string) string {
 		name := strings.TrimPrefix(m, "codemap_")
+		if cmd, ok := cliToolOverrides[name]; ok {
+			return "codemap " + cmd
+		}
 		return "codemap " + strings.ReplaceAll(name, "_", "-")
 	})
 	return strings.ReplaceAll(s, "codemap_", "codemap ")

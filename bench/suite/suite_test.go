@@ -50,6 +50,27 @@ func TestAggregate_TasksCorrectMajority(t *testing.T) {
 	}
 }
 
+// TestAggregate_TiedRepsAreNotMajority pins the fix for Aggregate counting a
+// task that passes exactly half its reps as "majority correct" (p.pass*2 >=
+// p.total instead of the strict > the doc comment and ArmSummary.TasksCorrect
+// both promise). With -reps 2, a task passing 1 of 2 reps is a tie, not a
+// majority, and must not inflate TasksCorrect.
+func TestAggregate_TiedRepsAreNotMajority(t *testing.T) {
+	sessions := []Session{
+		// task A: 1/2 reps pass — a tie, must NOT count as correct.
+		{Task: "A", Arm: "codemap", ToolCalls: 3, Pass: true},
+		{Task: "A", Arm: "codemap", ToolCalls: 4, Pass: false},
+		// task B: 2/2 reps pass — a real (unanimous) majority, must count.
+		{Task: "B", Arm: "codemap", ToolCalls: 3, Pass: true},
+		{Task: "B", Arm: "codemap", ToolCalls: 3, Pass: true},
+	}
+	arms := Aggregate(sessions, []string{"codemap"})
+	cm := arms[0]
+	if cm.TasksTotal != 2 || cm.TasksCorrect != 1 {
+		t.Errorf("tied-rep task counted as correct: TasksCorrect=%d/%d, want 1/2", cm.TasksCorrect, cm.TasksTotal)
+	}
+}
+
 func TestAggregate_MCPToolCallsAndSessions(t *testing.T) {
 	sessions := []Session{
 		// codemap: one session calls MCP tools twice, one calls none, and one

@@ -1316,14 +1316,14 @@ func runGrep(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if rep.Stale {
-		fmt.Println("⚠ index is stale — files added since the last index are not in the searched set (run codemap index)")
-	}
 	if len(rep.Hits) == 0 {
 		return notFoundError(fmt.Sprintf("no matches for %q", rep.Pattern), "try --regex, --ignore-case, or a broader pattern")
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
+	}
+	if rep.Stale {
+		fmt.Println("⚠ index is stale — files added since the last index are not in the searched set (run codemap index)")
 	}
 	for _, h := range rep.Hits {
 		sym := h.Symbol
