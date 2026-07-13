@@ -3,7 +3,8 @@
 Instructions for AI agents (and humans) working on the **codemap** codebase. This is the
 canonical source-of-truth doc; `CLAUDE.md` defers to it. `README.md` is the public-facing
 intro. The design rationale (architecture, why-it-is-what-it-is) lives in the Obsidian
-vault at `~/notes/projects/codemap/design-rationale.md`. `BACKLOG.md` tracks live work.
+vault at `~/notes/projects/codemap/design-rationale.md`. Live work is tracked in the
+vault's `BACKLOG.md` (`~/notes/projects/codemap/BACKLOG.md`) — not in the repo.
 
 ## Project Overview
 
@@ -131,7 +132,7 @@ codemap/
 │                              #   review_deletion/references/studio_annotations/agent_setup/review_gate
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml .pre-commit-hooks.yaml
 ├── .github/workflows/         # ci.yml + release.yml
-└── README.md AGENTS.md CLAUDE.md BACKLOG.md LICENSE
+└── README.md AGENTS.md CLAUDE.md LICENSE
 ```
 
 **Package boundaries are part of the contract.** The dependency direction is one-way:
@@ -144,17 +145,18 @@ for its own MCP package.)
 
 - `docs/` is a **deployed VitePress site** for product documentation **only**. Single
   hosting path: **Vercel** — no GitHub Pages.
-- Repo root carries exactly these markdown files: `README.md`, `AGENTS.md`, `CLAUDE.md`,
-  `BACKLOG.md`. **Do not** create scratch / handoff / TODO / design `.md` files
-  anywhere in the repo. (Design rationale lives in the vault: `design-rationale.md`.)
+- Repo root carries exactly these markdown files: `README.md`, `AGENTS.md`, `CLAUDE.md`.
+  **Do not** create scratch / handoff / TODO / design `.md` files anywhere in the repo.
+  (Design rationale lives in the vault: `design-rationale.md`.)
   The discipline restricts only root `.md` files: `.claude-plugin/marketplace.json` at the
   repo root is the documented Claude Code plugin-marketplace mechanism (a JSON directory, not
   a `.md`), and the `integrations/claude-code/` plugin's `SKILL.md`/`commands/*.md` are
   checked-in generated product artifacts (pinned by `TestPlaybookSyncClaudeSkill`), not notes.
-- Working notes, handoffs, investigations, and design exploration go to the **Obsidian
-  vault** at `~/notes/projects/codemap/` (use the `obsidian-cli` skill), not the repo.
-- `BACKLOG.md` is the one exception to "no working-notes in repo": it is the explicit,
-  user-requested state file for the build loop. Keep it terse and current.
+- Working notes, handoffs, investigations, design exploration, AND the build-loop
+  backlog go to the **Obsidian vault** at `~/notes/projects/codemap/` (use the
+  `obsidian-cli` skill), not the repo. The backlog lives at
+  `~/notes/projects/codemap/BACKLOG.md` (moved out of the repo 2026-07-13); keep it
+  terse and current there.
 
 ## Development Commands (Taskfile, version 3)
 

@@ -39,7 +39,8 @@ Surfaces / key files:
 - `docs/` → VitePress **product docs**, deployed to **Vercel** (no GitHub Pages).
 - `~/notes/projects/codemap/` → Obsidian vault for **working notes / handoffs**, via the
   `obsidian-cli` skill. **Never** write scratch `.md` into the repo. Repo root `.md` is
-  limited to: README, AGENTS, CLAUDE, BACKLOG. (Design rationale lives in the vault:
+  limited to: README, AGENTS, CLAUDE — the backlog lives in the vault
+  (`~/notes/projects/codemap/BACKLOG.md`), not the repo. (Design rationale lives in the vault:
   `~/notes/projects/codemap/design-rationale.md`.)
 
 ## Gotchas (learned the hard way)
