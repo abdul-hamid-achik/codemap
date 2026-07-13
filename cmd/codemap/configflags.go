@@ -3,6 +3,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -94,7 +96,7 @@ func applyConfigFlags(cmd *cobra.Command, cfg *config.Config) {
 	}
 	if changed("idle-timeout") {
 		d, _ := fs.GetDuration("idle-timeout")
-		cfg.Daemon.IdleTimeoutMin = int(d / time.Minute)
+		cfg.Daemon.IdleTimeoutMin = idleTimeoutMinutes(d)
 	}
 	if changed("embed-rps") {
 		cfg.Daemon.EmbedRPS, _ = fs.GetFloat64("embed-rps")
@@ -111,4 +113,26 @@ func applyConfigFlags(cmd *cobra.Command, cfg *config.Config) {
 	if changed("profile") {
 		cfg.MCP.Profile, _ = fs.GetString("profile")
 	}
+}
+
+// idleTimeoutMinutes converts a --idle-timeout duration into the whole
+// minutes stored in Daemon.IdleTimeoutMin (the daemon config's persisted
+// resolution — see internal/daemon.Config.IdleTimeout, which multiplies it
+// back out by time.Minute). P1-12 (B69): the previous int(d / time.Minute)
+// truncated toward zero, so `--idle-timeout 30s` silently became 0 minutes —
+// which daemon.go reads as "never shut down", the exact opposite of what was
+// requested. Round up instead so any positive duration keeps a positive
+// (non-"never") timeout, and warn on stderr when the requested duration isn't
+// an exact multiple of a minute, since the value actually applied is coarser
+// than what was asked for.
+func idleTimeoutMinutes(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	minutes := d / time.Minute
+	if d%time.Minute != 0 {
+		minutes++
+		fmt.Fprintf(os.Stderr, "warning: --idle-timeout %s rounded up to %d minute(s) (daemon idle timeout has 1-minute resolution)\n", d, minutes)
+	}
+	return int(minutes)
 }
