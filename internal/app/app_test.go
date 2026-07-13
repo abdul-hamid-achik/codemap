@@ -2145,6 +2145,142 @@ func TestPreciseCalleesGopls(t *testing.T) {
 	}
 }
 
+// TestPreciseRelationsSoftMissUnregisteredProject pins P1-06 (B1): a soft miss
+// from preciseRelations (here, a project that was never indexed) must return the
+// errPreciseUnresolved sentinel, not a nil error with empty results. A nil error
+// is what autoUpgradeRelation reads as "genuinely resolved" — conflating the two
+// is exactly how a soft miss used to get reported as a confidently-wrong
+// "resolved on demand" with zero callers. No language server is needed: the
+// project lookup fails before any server is spawned.
+func TestPreciseRelationsSoftMissUnregisteredProject(t *testing.T) {
+	isolate(t)
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	callers, callees, _, err := svc.preciseRelations(ctx, t.TempDir(), "Anything", "", 0)
+	if !errors.Is(err, errPreciseUnresolved) {
+		t.Fatalf("preciseRelations on an unregistered project err = %v, want errPreciseUnresolved", err)
+	}
+	if callers != nil || callees != nil {
+		t.Errorf("soft miss should return nil callers/callees, got %+v / %+v", callers, callees)
+	}
+}
+
+// TestCallersSoftMissKeepsHonestNote pins P1-06 (B1) end-to-end through
+// autoUpgradeRelation: when the live file no longer has a documentSymbol
+// matching the queried name (findSymbolPos misses — the symbol was renamed
+// after indexing, simulating a stale/racing index), preciseRelations returns
+// errPreciseUnresolved and Callers must keep the honest "unresolved" note
+// instead of overwriting it with "resolved on demand" and an empty result.
+func TestCallersSoftMissKeepsHonestNote(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not installed")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "tsconfig.json"), []byte(`{"compilerOptions":{"strict":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tsFile := filepath.Join(proj, "main.ts")
+	if err := os.WriteFile(tsFile,
+		[]byte("export function foo(): void {}\n\nexport function run(): void { foo(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// The graph still knows "foo" at its indexed position, but the live file on
+	// disk no longer declares anything named "foo" — preciseRelations reads the
+	// file fresh, so its documentSymbol pass can't find "foo" any more.
+	if err := os.WriteFile(tsFile,
+		[]byte("export function renamedAwayFromFoo(): void {}\n\nexport function run(): void { renamedAwayFromFoo(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Callers(proj, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Resolution == "" {
+		t.Error("a soft miss (renamed-away symbol) must keep the honest unresolved note, got empty Resolution")
+	}
+	if rep.Note == "resolved on demand via the language server's callHierarchy (no --precise needed)" {
+		t.Error("a soft miss must not claim it was resolved on demand")
+	}
+	if rep.CallGraph == CallGraphResolved {
+		t.Errorf("call_graph = %q, want anything but resolved on a soft miss", rep.CallGraph)
+	}
+	if len(rep.Results) != 0 {
+		t.Errorf("a soft miss must not fabricate results, got %+v", rep.Results)
+	}
+}
+
+// TestCallersAutoUpgradeGenuineZero pins the other half of P1-06 (B1): a symbol
+// the server DID locate and prepare a call hierarchy for, but which genuinely has
+// no callers, must be reported as resolved (honest zero) — not conflated with a
+// soft miss. orphan() is a real, well-formed function with no call sites.
+func TestCallersAutoUpgradeGenuineZero(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not installed")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "tsconfig.json"), []byte(`{"compilerOptions":{"strict":true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "main.ts"),
+		[]byte("export function orphan(): void {}\n\nexport function run(): void {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Callers(proj, "orphan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Resolution != "" {
+		t.Errorf("a genuinely-resolved zero must clear the unresolved note, got %q", rep.Resolution)
+	}
+	if rep.CallGraph != CallGraphResolved {
+		t.Errorf("call_graph = %q, want %q for a genuinely-resolved symbol", rep.CallGraph, CallGraphResolved)
+	}
+	if !rep.Found {
+		t.Error("orphan is a real, indexed symbol — Found should be true")
+	}
+	if len(rep.Results) != 0 {
+		t.Errorf("orphan has no callers — expected an honest empty, got %+v", rep.Results)
+	}
+}
+
 func TestServiceSymbols(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()

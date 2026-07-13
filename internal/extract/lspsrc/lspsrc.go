@@ -206,8 +206,17 @@ func isCallable(kind int) bool {
 
 // relOf turns a callee's file:// URI into a root-relative path; external=true when
 // the callee is outside the project (a dependency / lib, with no graph node).
+//
+// P1-02 (residual): this used to do TrimPrefix(uri, "file://") with no
+// percent-decoding, so any callee under a path containing a space (or any
+// other %-escaped character — common on macOS) never matched e.root and was
+// silently marked External, dropping the precise call edge. lsp.PathFromURI
+// decodes the URI properly before computing the relative path.
 func (e *Extractor) relOf(uri string) (rel string, external bool) {
-	p := strings.TrimPrefix(uri, "file://")
+	p, err := lsp.PathFromURI(uri)
+	if err != nil || p == "" {
+		p = strings.TrimPrefix(uri, "file://") // best-effort fallback for a malformed URI
+	}
 	r, err := filepath.Rel(e.root, p)
 	if err != nil || strings.HasPrefix(r, "..") {
 		return "", true

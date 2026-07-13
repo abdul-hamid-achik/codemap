@@ -242,6 +242,12 @@ func (svc *Service) CalleesBySelector(cwd string, selector SymbolSelector) (*Rel
 	return svc.autoUpgradeSelectorRelation(rep, cwd, false), nil
 }
 
+// autoUpgradeSelectorRelation is the selector-scoped twin of autoUpgradeRelation
+// (see its doc comment for the P1-06 / B1 three-way resolution contract):
+// preciseRelations' errPreciseUnresolved sentinel already makes a soft miss
+// indistinguishable from a hard failure here, so this `err != nil` check keeps
+// the honest note on both, and only a genuine nil-error result (which may still
+// be legitimately empty) claims resolution below.
 func (svc *Service) autoUpgradeSelectorRelation(base *RelationReport, cwd string, wantCallers bool) *RelationReport {
 	if base == nil || base.Resolution == "" || base.Selector == nil || !base.Found {
 		return base
@@ -250,7 +256,7 @@ func (svc *Service) autoUpgradeSelectorRelation(base *RelationReport, cwd string
 	defer cancel()
 	callers, callees, _, err := svc.preciseRelations(ctx, cwd, base.Symbol, base.Selector.File, base.Selector.StartLine)
 	if err != nil {
-		return base
+		return base // soft miss (errPreciseUnresolved) or hard failure — keep the honest "unresolved" note
 	}
 	results := callees
 	if wantCallers {
