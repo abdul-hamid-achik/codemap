@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -466,5 +467,90 @@ func TestConfigProjectFirstMatchWins(t *testing.T) {
 	}
 	if cfg.Embedding.Model != "from-yaml" {
 		t.Errorf("first-match-wins: model = %q, want from-yaml (codemap.yaml at root)", cfg.Embedding.Model)
+	}
+}
+
+// TestMCPProfileDefault pins I01: mcp.profile defaults to "full" — every
+// existing MCP registration keeps back-compat behavior (39 tools) unless a
+// project/user opts into "core".
+func TestMCPProfileDefault(t *testing.T) {
+	c := DefaultConfig()
+	if c.MCP.Profile != "full" {
+		t.Errorf("MCP.Profile = %q, want full", c.MCP.Profile)
+	}
+}
+
+// TestMCPProfileFileEnvPrecedence pins I01's file < env precedence for
+// mcp.profile (flag precedence, on top of env, is covered in cmd/codemap
+// since the --profile flag lives on `codemap serve`).
+func TestMCPProfileFileEnvPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("CODEMAP_MCP_PROFILE", "")
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "codemap.yaml"), []byte("mcp:\n  profile: core\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".codemap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	// File alone: codemap.yaml wins over the DefaultConfig() "full".
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCP.Profile != "core" {
+		t.Errorf("file-only: MCP.Profile = %q, want core", cfg.MCP.Profile)
+	}
+
+	// Env overrides the file (env is higher precedence than a project file).
+	t.Setenv("CODEMAP_MCP_PROFILE", "full")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCP.Profile != "full" {
+		t.Errorf("env-over-file: MCP.Profile = %q, want full", cfg.MCP.Profile)
+	}
+}
+
+// TestMCPProfileValidate pins I01's clean-startup-error contract: an
+// unrecognized mcp.profile value is a hard, lowercase, no-trailing-
+// punctuation error (not a silent fallback), while "core"/"full"/"" are
+// all accepted (empty normalizes to "full" at read time) and Validate
+// lowercases/trims a valid value in place.
+func TestMCPProfileValidate(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MCP.Profile = "bogus"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate should reject mcp.profile 'bogus'")
+	}
+	msg := err.Error()
+	if msg != strings.ToLower(msg) {
+		t.Errorf("error message should be lowercase: %q", msg)
+	}
+	if strings.HasSuffix(msg, ".") {
+		t.Errorf("error message should have no trailing punctuation: %q", msg)
+	}
+	for _, v := range []string{"core", "full", "", "  CORE  "} {
+		cfg.MCP.Profile = v
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Validate should accept %q: %v", v, err)
+		}
+	}
+	cfg.MCP.Profile = "  CORE  "
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCP.Profile != "core" {
+		t.Errorf("Validate should normalize profile to lowercase/trimmed, got %q", cfg.MCP.Profile)
 	}
 }

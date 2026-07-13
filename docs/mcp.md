@@ -46,6 +46,40 @@ copilot mcp add codemap -- codemap serve
 Once connected, an agent can call **`codemap_docs`** to learn the tools and the
 index → understand → read workflow on its own.
 
+## Tool profiles
+
+By default `codemap serve` registers all 39 tools. That's a real cost: a
+[hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
+measured **+95% input tokens** on the codemap arm, driven by 39 tool schemas riding
+in every session's context — and some clients (Cursor) cap total MCP tools at ~40
+*across all servers combined*, so a full codemap registration can crowd out every
+other server.
+
+Set `CODEMAP_MCP_PROFILE=core` (env), `mcp.profile: core` (`codemap.yaml`), or pass
+`--profile core` to `codemap serve` for a lean **22-tool** profile covering the
+whole taught agent workflow — orient, locate, understand, edit, verify — plus
+`codemap_docs` (self-discovery) and `codemap_status` (staleness):
+
+`codemap_index`, `codemap_status`, `codemap_docs`, `codemap_read_order`,
+`codemap_semantic`, `codemap_find`, `codemap_grep`, `codemap_context`,
+`codemap_context_batch`, `codemap_impact`, `codemap_source`, `codemap_callers`,
+`codemap_callees`, `codemap_references`, `codemap_risk`, `codemap_dependencies`,
+`codemap_file_impact`, `codemap_review`, `codemap_path`, `codemap_hotspots`,
+`codemap_orphans`, `codemap_coverage`.
+
+Everything else — `codemap_init`, `codemap_doctor`, `codemap_projects`,
+`codemap_symbols`, `codemap_symbol_at`, `codemap_related_files`,
+`codemap_secret_impact`, `codemap_required_keys`, `codemap_annotate` /
+`codemap_annotations` / `codemap_unannotate`, `codemap_branch_status` /
+`codemap_branch_switch`, and `codemap_cache_save` / `codemap_cache_restore` /
+`codemap_cache_list` / `codemap_cache_drop` — is admin/ecosystem surface, available
+under the default `full` profile. Precedence is the same three-way order as every
+other codemap setting: config file < environment < CLI flag. An unrecognized value
+is a startup error, not a silent fallback. [`codemap agent setup
+cursor`](/agents#one-command-setup) defaults its generated `.cursor/mcp.json` entry
+to `CODEMAP_MCP_PROFILE=core` for exactly this reason; every other harness stays on
+`full` since only Cursor has the tool-count ceiling.
+
 ## Tools
 
 All tools take an optional `path` (the project directory; defaults to the server's working

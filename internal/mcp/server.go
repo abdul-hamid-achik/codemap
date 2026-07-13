@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,6 +23,70 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/abdul-hamid-achik/codemap/internal/version"
 )
+
+// Profile selects which subset of MCP tools NewServer registers. ProfileFull
+// (the default, back-compat) registers every tool (39); ProfileCore
+// registers only coreTools — the lean set the canonical playbook (docs.go +
+// playbook.go, rendered via app.RenderPlaybook) actually teaches an agent to
+// call, plus codemap_docs for self-discovery. This exists because a lean MCP
+// server matters to schema-token budgets and to harnesses that cap total
+// tool count (Cursor caps ~40 across ALL servers; see bench/README.md's
+// "two runs disagree" measurement of +95% input tokens from 39 tool schemas
+// riding in every session).
+const (
+	ProfileFull = "full"
+	ProfileCore = "core"
+)
+
+// coreTools is the ProfileCore tool set. Every name here is either taught by
+// the canonical playbook/docs (see TestCoreProfileCoversTaughtTools, which
+// pins the invariant that a taught tool can never be missing here) or added
+// because honesty requires it even though it isn't explicitly taught:
+// codemap_docs (so a core-profile agent can still self-discover the full
+// guide) and codemap_status (index staleness — already taught, kept for
+// clarity). Everything else (init, doctor, projects, symbols, symbol_at,
+// related_files, secret_impact, required_keys, annotate/annotations/
+// unannotate, branch_status/branch_switch, cache_save/restore/list/drop) is
+// admin/ecosystem surface, available only under ProfileFull.
+var coreTools = map[string]bool{
+	"codemap_callees":       true,
+	"codemap_callers":       true,
+	"codemap_context":       true,
+	"codemap_context_batch": true,
+	"codemap_coverage":      true,
+	"codemap_dependencies":  true,
+	"codemap_docs":          true,
+	"codemap_file_impact":   true,
+	"codemap_find":          true,
+	"codemap_grep":          true,
+	"codemap_hotspots":      true,
+	"codemap_impact":        true,
+	"codemap_index":         true,
+	"codemap_orphans":       true,
+	"codemap_path":          true,
+	"codemap_read_order":    true,
+	"codemap_references":    true,
+	"codemap_review":        true,
+	"codemap_risk":          true,
+	"codemap_semantic":      true,
+	"codemap_source":        true,
+	"codemap_status":        true,
+}
+
+// resolveProfile normalizes cfg.MCP.Profile the same way config.Validate
+// does (lowercase, trimmed, empty means full) so a Server built from a
+// Config that skipped Validate (rare, e.g. a hand-built test Config) still
+// behaves sanely instead of silently registering zero tools.
+func resolveProfile(cfg *config.Config) string {
+	if cfg == nil {
+		return ProfileFull
+	}
+	p := strings.ToLower(strings.TrimSpace(cfg.MCP.Profile))
+	if p == "" {
+		return ProfileFull
+	}
+	return p
+}
 
 const instructions = `codemap is a local code knowledge graph: code structure (calls, types,
 tests) fused with semantic vectors, queried offline. Index a project once with codemap_index,
@@ -97,10 +162,21 @@ stale flag, and per-site confidence remain authoritative even after a precise ca
 Call codemap_docs for the full guide (workflow, every tool, accuracy, and how codemap fits the
 local toolchain) — useful when wiring codemap into a harness.`
 
+// instructionsFor appends one sentence under ProfileCore noting that admin/
+// ecosystem tools are trimmed from this session, without forking the
+// playbook prose above.
+func instructionsFor(profile string) string {
+	if profile != ProfileCore {
+		return instructions
+	}
+	return instructions + "\n\nprofile: core — admin and ecosystem tools (init, doctor, projects, symbols, symbol_at, related_files, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
+}
+
 // Server wraps the go-sdk MCP server over a codemap session.
 type Server struct {
-	svc *app.Service
-	srv *sdkmcp.Server
+	svc     *app.Service
+	srv     *sdkmcp.Server
+	profile string // ProfileFull or ProfileCore; gates which tools register()
 
 	// operationMu lets ordinary tool calls run concurrently, but gives index
 	// exclusive ownership of Session's graph/vector handles for its full
@@ -108,16 +184,26 @@ type Server struct {
 	operationMu sync.RWMutex
 }
 
-// NewServer builds an MCP server backed by the given session.
+// NewServer builds an MCP server backed by the given session. The tool set
+// registered is gated by sess.Config.MCP.Profile (see Profile/coreTools).
 func NewServer(sess *app.Session) *Server {
-	s := &Server{svc: app.NewService(sess)}
+	profile := resolveProfile(sess.Config)
+	s := &Server{svc: app.NewService(sess), profile: profile}
 	s.srv = sdkmcp.NewServer(
 		&sdkmcp.Implementation{Name: "codemap", Version: version.Version},
-		&sdkmcp.ServerOptions{Instructions: instructions},
+		&sdkmcp.ServerOptions{Instructions: instructionsFor(profile)},
 	)
 	s.srv.AddReceivingMiddleware(s.coordinateToolOperations)
 	s.register()
 	return s
+}
+
+// include reports whether tool name should be registered under the server's
+// current profile: everything registers under ProfileFull; only coreTools
+// register under ProfileCore. Registration-time only — a tool that IS
+// registered behaves identically under either profile.
+func (s *Server) include(name string) bool {
+	return s.profile != ProfileCore || coreTools[name]
 }
 
 // coordinateToolOperations serializes codemap_index against every other tool
@@ -374,162 +460,240 @@ type cacheDropInput struct {
 }
 
 func (s *Server) register() {
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_init",
-		Description: "Register a project directory with codemap.",
-	}, s.handleInit)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_index",
-		Description: "Index (or reindex) a project: extract its code graph and embed nodes. Incremental by default.",
-	}, s.handleIndex)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_status",
-		Description: "Show index statistics for a project (nodes, edges, languages, kinds) AND index freshness: a 'stale' field counts files changed/new/deleted since the last index. Check it first — if stale is non-zero, call codemap_index before trusting query results, which are computed from the indexed snapshot, not live files. A 'daemon' object is present when a background daemon is auto-reindexing the project (so stale is unlikely to drift).",
-	}, s.handleStatus)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_semantic",
-		Description: "Semantic search across the code graph: find code by meaning, ranked by similarity. The result carries a \"fusion\" field naming the vector/BM25 weighting profile used (\"identifier\", \"natural_language\", or \"balanced\").",
-	}, s.handleSemantic)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_callers",
-		Description: "List functions/methods that call a symbol. Name-only queries remain backward-compatible and may merge same-named definitions — when ambiguous, the result's candidates:[{selector,signature,file,start_line}] gives the exact merged set so you can re-query one definition without a separate find/symbols lookup. For one exact definition, pass selector:{file,start_line,fqn,kind} projected from any codemap symbol result; the source selector survives reindex and line shifts when file+fqn+kind still match. precise=true optionally resolves it on demand through the language server.",
-	}, s.handleCallers)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_callees",
-		Description: "List functions/methods called by a symbol. Pass selector:{file,start_line,fqn,kind} projected from a prior result to select one exact definition instead of merging same-named definitions. An ambiguous name-only query's candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Pass precise=true for an on-demand language-server resolution.",
-	}, s.handleCallees)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_references",
-		Description: "List bounded enclosing function/method/file scopes that store or pass a function/method as a callback value. This follows references edges, never calls; source.start_line is the enclosing declaration line, not the exact expression line. Returns definitions, references_total/truncation, stale, reference-specific confirmed|candidate confidence and partial|unavailable coverage, plus independent call_graph honesty. Pass selector:{file,start_line,fqn,kind} for one exact target. Missing sites do not prove no wiring; precise call indexing does not upgrade this evidence.",
-	}, s.handleReferences)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_impact",
-		Description: "Impact analysis: definition sites, direct callers, transitive blast radius, and covering tests. Pass selector:{file,start_line,fqn,kind} projected from a find/symbols/context result to analyze one exact definition; name-only input remains supported and honestly reports when same-named definitions are merged, surfacing candidates:[{selector,signature,file,start_line}] — the exact merged set — so you can re-query one definition.",
-	}, s.handleImpact)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_review",
-		Description: "Diff-scoped impact + regression test selection — the query to run AFTER editing. Maps your git diff (whole working tree by default; staged=true for the index; since=<ref> for everything since a branch point) to the symbols it touches, then returns their union blast_radius, the covering_tests to run (regression test selection), the changed symbols that are untested or are hotspots (many callers), plus stale/resolution honesty signals. Answers 'what did I just affect, and what should I run?' in one call instead of chaining diff parsing + per-symbol codemap_impact. Degrades to a plain changed-file list with a note when the project isn't indexed or isn't a git repo.",
-	}, s.handleReview)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_read_order",
-		Description: "Where to START reading an unfamiliar codebase — a ranked reading guide. Blends call-graph importance (in-degree hubs) with entrypoint heuristics (main(), cmd/ packages, module index files, exported public API) so the symbols that orient you fastest come first, each with a reason and score. Optional 'query' narrows it (name/path substring). Use this on first contact with a repo instead of guessing where to look; pair with codemap_context to then drill the top entries. Resolution is set when there's no call graph (ranking falls back to entrypoint heuristics).",
-	}, s.handleReadOrder)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_related_files",
-		Description: "Files structurally related to a file via the call/test graph: the files of its callers, its callees, and the tests covering its symbols, each with a reason (caller|callee|test) and a confidence. Graph-accurate alternative to import-text heuristics; returns {indexed:false} when the project isn't indexed.",
-	}, s.handleRelatedFiles)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_dependencies",
-		Description: "Direct inbound dependency evidence for one file, grouped and capped by dependent file and edge kind (calls, value references, imports). Returns stable source→target locations, file-vs-package scope, totals/truncation, stale/call_graph, and complete|partial|unavailable coverage for calls, references, imports, runtime wiring, and external consumers. Use it before a move/delete/split when you need the evidence without the blast/test work of codemap_file_impact. Missing evidence is never proof of safety.",
-	}, s.handleDependencies)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_file_impact",
-		Description: "File-level impact — 'what happens if I change or DELETE this file?' Returns dependency_evidence grouped by dependent file and edge kind (calls/references/imports), bounded source→target samples with totals/truncation, per-domain coverage, blast radius, tests, and a conservative delete_verdict. File-scoped calls/references prove unsafe; Go imports are package-scoped hints and remain unknown for the exact file. Missing evidence never proves safety while type/value uses, runtime wiring, and external consumers are incomplete; legacy safe_to_delete remains false.",
-	}, s.handleFileImpact)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_risk",
-		Description: "Change-risk score in one number (0..1) + level (unknown/low/medium/high), combining coverage, fan-in, cross-package spread, and ambiguity. Pass selector:{file,start_line,fqn,kind} to score one exact definition. An ambiguous name-only query's candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. An unresolved call graph returns unknown, never a reassuring low.",
-	}, s.handleRisk)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_symbol_at",
-		Description: "Resolve a file:line position to its enclosing symbol (FQN, kind, line range). The entry point for joining external file:line results (search hits, stack traces, diffs) onto the code graph. resolution is exact|enclosing|none. Pass positions:[{file,line}] instead of file/line to resolve several positions (e.g. a pasted stack trace) in one call — up to 25, each self-reporting resolution:none on a miss.",
-	}, s.handleSymbolAt)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_secret_impact",
-		Description: fmt.Sprintf("Code blast radius of rotating secret keys: for each key NAME, the symbols that read it (os.Getenv/os.environ/process.env), the transitive callers affected, and the covering tests (untested=true is a loud warning). Operates on key NAMES only — never reads, requests, or returns secret values. Inputs, including tinyvault inventory, are bounded to %d unique names of at most %d bytes each. blast radius is name-based unless the index is precise (precise:false note); reindex --precise for exact figures.", app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
-	}, s.handleSecretImpact)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_required_keys",
-		Description: fmt.Sprintf("Return the minimal set of secret key NAMES an entrypoint's transitive call tree actually reads — for tinyvault least-privilege sealing (seal/inject only these). Supply keys directly or use via_vault plus optional prefix to read tinyvault's value-free inventory. Inputs are bounded to %d unique names of at most %d bytes each. Only key names and positions are handled, never secret values.", app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
-	}, s.handleRequiredKeys)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_hotspots",
-		Description: "List the most-referenced symbols (hubs) in a project.",
-	}, s.handleHotspots)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_orphans",
-		Description: "List functions/methods with no callers (dead-code candidates). Follows functions wired by value (handlers like cobra RunE / mux.HandleFunc) and excludes methods that implement well-known stdlib interfaces (error/Stringer/Unwrap/json.Marshaler), so those aren't falsely flagged; still blind to custom-interface-dispatch/reflection callers, so treat results as candidates.",
-	}, s.handleOrphans)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_coverage",
-		Description: "Per-file precise call-graph coverage: which files have exact resolution (go/types or language-server callHierarchy) recorded, when, and whether that coverage is stale (this file's on-disk content changed since the last index — independent of codemap_status's project-wide drift count). Rollups by language and by directory (worst-covered first) are always included; pass prefix/language/uncovered filters or files:true for the bounded per-file list (default/max 200/2000 rows, files_total/files_truncated disclose the real count). Complements, does not replace, the per-query call_graph enum: use this to calibrate trust per package BEFORE asking a symbol question, instead of assuming the project's single worst-file confidence everywhere.",
-	}, s.handleCoverage)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_path",
-		Description: "Find the shortest call path between two symbols. For exact same-name-safe endpoints, pass both from_selector and to_selector as file/start_line/fqn/kind projections from prior results.",
-	}, s.handlePath)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_symbols",
-		Description: "List the symbols defined in a file (functions, types, methods, tests) with line ranges — a structured alternative to reading the file.",
-	}, s.handleSymbols)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_find",
-		Description: "Find symbols by name (case-insensitive substring over names/FQNs). Fast and offline — no embeddings needed, unlike codemap_semantic.",
-	}, s.handleFind)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_grep",
-		Description: "Search the content of every indexed file for a literal substring (or, with regex:true, a Go RE2 pattern) and resolve each hit to its enclosing symbol — file, line, matched_line, symbol, fqn, kind, and a chainable selector. Distinct from codemap_semantic (meaning search) and codemap_find (name search): this is exact text content search. Only covers the indexed file set (same scope as the index, not every file in the repo); reads are live from disk. Capped results carry total/truncated.",
-	}, s.handleGrep)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_source",
-		Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition, plus candidates:[{selector,signature,file,start_line}] (redundant with matches, present for uniformity with impact/context/callers/callees/risk).",
-	}, s.handleSource)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_context",
-		Description: "Everything about a symbol in ONE call: source, callers, callees, callback/value references, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported; when ambiguous, candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Uses the indexed graph only; capped lists carry true *_total counts, reference coverage/staleness stays independent of call_graph, and optional failures appear in partial_errors.",
-	}, s.handleContext)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_context_batch",
-		Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Also accepts selectors:[{file,start_line,fqn,kind}] (e.g. from a prior ambiguous call's candidates) unioned with symbols, same 25-item cap — MCP-only, no CLI batch form for selectors; a malformed selector lands in not_found/partial_errors rather than failing the whole call. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures.",
-	}, s.handleContextBatch)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_projects",
-		Description: "List every project registered with codemap and its index size (nodes, edges, files) — discover what's indexed. Queries target one project at a time (via path/cwd).",
-	}, s.handleProjects)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_docs",
-		Description: "Learn how to use codemap effectively: an agent guide covering the index-first workflow, which tool to use for what, the accuracy model (when to pass precise:true), and how codemap fits the local toolchain. Optional 'topic' (overview/workflow/commands/annotations/accuracy/ecosystem).",
-	}, s.handleDocs)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_annotate",
-		Description: "Pin a note and/or external data (e.g. DB rows from mongosh/postgres, or a finding) to a symbol (pass 'symbol') or a call path (pass 'from'+'to'). 'data' is stored opaquely. Annotations persist across reindex — use them as the harness's knowledge layer over the graph.",
-	}, s.handleAnnotate)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_annotations",
-		Description: "List annotations: all in the project (no args), on a 'symbol', or on a 'from'→'to' call path. A 'dangling' list flags annotation ids whose target no longer matches an indexed symbol (renamed/removed) — prune them with codemap_unannotate or re-add.",
-	}, s.handleAnnotations)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_unannotate",
-		Description: "Remove an annotation by 'id' (from codemap_annotate's result or codemap_annotations) — so the knowledge layer can be corrected and pruned, not only appended to.",
-	}, s.handleUnannotate)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_doctor",
-		Description: "Check the environment codemap runs in — go toolchain, gopls, the language servers (TypeScript/JavaScript, Python), and Ollama embeddings — each with a present/missing flag and an install hint. Use it to diagnose why a language isn't being indexed or why semantic search is unavailable.",
-	}, s.handleDoctor)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_branch_status",
-		Description: "Show the git branch/commit state used to key per-branch index snapshots (read-only): current branch, HEAD sha, detached, and the stable repo/branch keys.",
-	}, s.handleBranchStatus)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_branch_switch",
-		Description: "Switch the code index to a git branch: snapshots the current branch's index into fcheap and restores the target branch's snapshot (or reindexes when stale/absent), so the graph follows the working tree with no full reindex. Defaults 'to' to the current git branch; a non-git dir or detached HEAD is a no-op.",
-	}, s.handleBranchSwitch)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_cache_save",
-		Description: "Save the current project index (graph + vectors) to the fcheap stash vault as a content-addressed cache entry. The cache key is a tree hash of all indexed file paths+content hashes, so two branches with identical code share one entry. Best-effort — returns a note if fcheap isn't available.",
-	}, s.handleCacheSave)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_cache_restore",
-		Description: "Restore a project index from a matching fcheap cache entry (same tree hash + embedding profile), skipping extraction and embedding entirely. Returns the restored stash ID and tree hash, or a 'no matching cache' note.",
-	}, s.handleCacheRestore)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_cache_list",
-		Description: "List cached indexes for a project in the fcheap vault, with stash IDs, tree hashes, and dates.",
-	}, s.handleCacheList)
-	sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-		Name:        "codemap_cache_drop",
-		Description: "Remove a cached index from the fcheap vault by stash_id, or all cached indexes for the project when all=true. Frees disk space when indexes are no longer needed.",
-	}, s.handleCacheDrop)
+	if s.include("codemap_init") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_init",
+			Description: "Register a project directory with codemap.",
+		}, s.handleInit)
+	}
+	if s.include("codemap_index") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_index",
+			Description: "Index (or reindex) a project: extract its code graph and embed nodes. Incremental by default.",
+		}, s.handleIndex)
+	}
+	if s.include("codemap_status") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_status",
+			Description: "Show index statistics for a project (nodes, edges, languages, kinds) AND index freshness: a 'stale' field counts files changed/new/deleted since the last index. Check it first — if stale is non-zero, call codemap_index before trusting query results, which are computed from the indexed snapshot, not live files. A 'daemon' object is present when a background daemon is auto-reindexing the project (so stale is unlikely to drift).",
+		}, s.handleStatus)
+	}
+	if s.include("codemap_semantic") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_semantic",
+			Description: "Semantic search across the code graph: find code by meaning, ranked by similarity. The result carries a \"fusion\" field naming the vector/BM25 weighting profile used (\"identifier\", \"natural_language\", or \"balanced\").",
+		}, s.handleSemantic)
+	}
+	if s.include("codemap_callers") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_callers",
+			Description: "List functions/methods that call a symbol. Name-only queries remain backward-compatible and may merge same-named definitions — when ambiguous, the result's candidates:[{selector,signature,file,start_line}] gives the exact merged set so you can re-query one definition without a separate find/symbols lookup. For one exact definition, pass selector:{file,start_line,fqn,kind} projected from any codemap symbol result; the source selector survives reindex and line shifts when file+fqn+kind still match. precise=true optionally resolves it on demand through the language server.",
+		}, s.handleCallers)
+	}
+	if s.include("codemap_callees") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_callees",
+			Description: "List functions/methods called by a symbol. Pass selector:{file,start_line,fqn,kind} projected from a prior result to select one exact definition instead of merging same-named definitions. An ambiguous name-only query's candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Pass precise=true for an on-demand language-server resolution.",
+		}, s.handleCallees)
+	}
+	if s.include("codemap_references") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_references",
+			Description: "List bounded enclosing function/method/file scopes that store or pass a function/method as a callback value. This follows references edges, never calls; source.start_line is the enclosing declaration line, not the exact expression line. Returns definitions, references_total/truncation, stale, reference-specific confirmed|candidate confidence and partial|unavailable coverage, plus independent call_graph honesty. Pass selector:{file,start_line,fqn,kind} for one exact target. Missing sites do not prove no wiring; precise call indexing does not upgrade this evidence.",
+		}, s.handleReferences)
+	}
+	if s.include("codemap_impact") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_impact",
+			Description: "Impact analysis: definition sites, direct callers, transitive blast radius, and covering tests. Pass selector:{file,start_line,fqn,kind} projected from a find/symbols/context result to analyze one exact definition; name-only input remains supported and honestly reports when same-named definitions are merged, surfacing candidates:[{selector,signature,file,start_line}] — the exact merged set — so you can re-query one definition.",
+		}, s.handleImpact)
+	}
+	if s.include("codemap_review") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_review",
+			Description: "Diff-scoped impact + regression test selection — the query to run AFTER editing. Maps your git diff (whole working tree by default; staged=true for the index; since=<ref> for everything since a branch point) to the symbols it touches, then returns their union blast_radius, the covering_tests to run (regression test selection), the changed symbols that are untested or are hotspots (many callers), plus stale/resolution honesty signals. Answers 'what did I just affect, and what should I run?' in one call instead of chaining diff parsing + per-symbol codemap_impact. Degrades to a plain changed-file list with a note when the project isn't indexed or isn't a git repo.",
+		}, s.handleReview)
+	}
+	if s.include("codemap_read_order") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_read_order",
+			Description: "Where to START reading an unfamiliar codebase — a ranked reading guide. Blends call-graph importance (in-degree hubs) with entrypoint heuristics (main(), cmd/ packages, module index files, exported public API) so the symbols that orient you fastest come first, each with a reason and score. Optional 'query' narrows it (name/path substring). Use this on first contact with a repo instead of guessing where to look; pair with codemap_context to then drill the top entries. Resolution is set when there's no call graph (ranking falls back to entrypoint heuristics).",
+		}, s.handleReadOrder)
+	}
+	if s.include("codemap_related_files") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_related_files",
+			Description: "Files structurally related to a file via the call/test graph: the files of its callers, its callees, and the tests covering its symbols, each with a reason (caller|callee|test) and a confidence. Graph-accurate alternative to import-text heuristics; returns {indexed:false} when the project isn't indexed.",
+		}, s.handleRelatedFiles)
+	}
+	if s.include("codemap_dependencies") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_dependencies",
+			Description: "Direct inbound dependency evidence for one file, grouped and capped by dependent file and edge kind (calls, value references, imports). Returns stable source→target locations, file-vs-package scope, totals/truncation, stale/call_graph, and complete|partial|unavailable coverage for calls, references, imports, runtime wiring, and external consumers. Use it before a move/delete/split when you need the evidence without the blast/test work of codemap_file_impact. Missing evidence is never proof of safety.",
+		}, s.handleDependencies)
+	}
+	if s.include("codemap_file_impact") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_file_impact",
+			Description: "File-level impact — 'what happens if I change or DELETE this file?' Returns dependency_evidence grouped by dependent file and edge kind (calls/references/imports), bounded source→target samples with totals/truncation, per-domain coverage, blast radius, tests, and a conservative delete_verdict. File-scoped calls/references prove unsafe; Go imports are package-scoped hints and remain unknown for the exact file. Missing evidence never proves safety while type/value uses, runtime wiring, and external consumers are incomplete; legacy safe_to_delete remains false.",
+		}, s.handleFileImpact)
+	}
+	if s.include("codemap_risk") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_risk",
+			Description: "Change-risk score in one number (0..1) + level (unknown/low/medium/high), combining coverage, fan-in, cross-package spread, and ambiguity. Pass selector:{file,start_line,fqn,kind} to score one exact definition. An ambiguous name-only query's candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. An unresolved call graph returns unknown, never a reassuring low.",
+		}, s.handleRisk)
+	}
+	if s.include("codemap_symbol_at") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_symbol_at",
+			Description: "Resolve a file:line position to its enclosing symbol (FQN, kind, line range). The entry point for joining external file:line results (search hits, stack traces, diffs) onto the code graph. resolution is exact|enclosing|none. Pass positions:[{file,line}] instead of file/line to resolve several positions (e.g. a pasted stack trace) in one call — up to 25, each self-reporting resolution:none on a miss.",
+		}, s.handleSymbolAt)
+	}
+	if s.include("codemap_secret_impact") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_secret_impact",
+			Description: fmt.Sprintf("Code blast radius of rotating secret keys: for each key NAME, the symbols that read it (os.Getenv/os.environ/process.env), the transitive callers affected, and the covering tests (untested=true is a loud warning). Operates on key NAMES only — never reads, requests, or returns secret values. Inputs, including tinyvault inventory, are bounded to %d unique names of at most %d bytes each. blast radius is name-based unless the index is precise (precise:false note); reindex --precise for exact figures.", app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
+		}, s.handleSecretImpact)
+	}
+	if s.include("codemap_required_keys") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_required_keys",
+			Description: fmt.Sprintf("Return the minimal set of secret key NAMES an entrypoint's transitive call tree actually reads — for tinyvault least-privilege sealing (seal/inject only these). Supply keys directly or use via_vault plus optional prefix to read tinyvault's value-free inventory. Inputs are bounded to %d unique names of at most %d bytes each. Only key names and positions are handled, never secret values.", app.MaxSecretKeyNames, app.MaxSecretKeyNameBytes),
+		}, s.handleRequiredKeys)
+	}
+	if s.include("codemap_hotspots") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_hotspots",
+			Description: "List the most-referenced symbols (hubs) in a project.",
+		}, s.handleHotspots)
+	}
+	if s.include("codemap_orphans") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_orphans",
+			Description: "List functions/methods with no callers (dead-code candidates). Follows functions wired by value (handlers like cobra RunE / mux.HandleFunc) and excludes methods that implement well-known stdlib interfaces (error/Stringer/Unwrap/json.Marshaler), so those aren't falsely flagged; still blind to custom-interface-dispatch/reflection callers, so treat results as candidates.",
+		}, s.handleOrphans)
+	}
+	if s.include("codemap_coverage") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_coverage",
+			Description: "Per-file precise call-graph coverage: which files have exact resolution (go/types or language-server callHierarchy) recorded, when, and whether that coverage is stale (this file's on-disk content changed since the last index — independent of codemap_status's project-wide drift count). Rollups by language and by directory (worst-covered first) are always included; pass prefix/language/uncovered filters or files:true for the bounded per-file list (default/max 200/2000 rows, files_total/files_truncated disclose the real count). Complements, does not replace, the per-query call_graph enum: use this to calibrate trust per package BEFORE asking a symbol question, instead of assuming the project's single worst-file confidence everywhere.",
+		}, s.handleCoverage)
+	}
+	if s.include("codemap_path") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_path",
+			Description: "Find the shortest call path between two symbols. For exact same-name-safe endpoints, pass both from_selector and to_selector as file/start_line/fqn/kind projections from prior results.",
+		}, s.handlePath)
+	}
+	if s.include("codemap_symbols") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_symbols",
+			Description: "List the symbols defined in a file (functions, types, methods, tests) with line ranges — a structured alternative to reading the file.",
+		}, s.handleSymbols)
+	}
+	if s.include("codemap_find") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_find",
+			Description: "Find symbols by name (case-insensitive substring over names/FQNs). Fast and offline — no embeddings needed, unlike codemap_semantic.",
+		}, s.handleFind)
+	}
+	if s.include("codemap_grep") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_grep",
+			Description: "Search the content of every indexed file for a literal substring (or, with regex:true, a Go RE2 pattern) and resolve each hit to its enclosing symbol — file, line, matched_line, symbol, fqn, kind, and a chainable selector. Distinct from codemap_semantic (meaning search) and codemap_find (name search): this is exact text content search. Only covers the indexed file set (same scope as the index, not every file in the repo); reads are live from disk. Capped results carry total/truncated.",
+		}, s.handleGrep)
+	}
+	if s.include("codemap_source") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_source",
+			Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition, plus candidates:[{selector,signature,file,start_line}] (redundant with matches, present for uniformity with impact/context/callers/callees/risk).",
+		}, s.handleSource)
+	}
+	if s.include("codemap_context") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_context",
+			Description: "Everything about a symbol in ONE call: source, callers, callees, callback/value references, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported; when ambiguous, candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Uses the indexed graph only; capped lists carry true *_total counts, reference coverage/staleness stays independent of call_graph, and optional failures appear in partial_errors.",
+		}, s.handleContext)
+	}
+	if s.include("codemap_context_batch") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_context_batch",
+			Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Also accepts selectors:[{file,start_line,fqn,kind}] (e.g. from a prior ambiguous call's candidates) unioned with symbols, same 25-item cap — MCP-only, no CLI batch form for selectors; a malformed selector lands in not_found/partial_errors rather than failing the whole call. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures.",
+		}, s.handleContextBatch)
+	}
+	if s.include("codemap_projects") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_projects",
+			Description: "List every project registered with codemap and its index size (nodes, edges, files) — discover what's indexed. Queries target one project at a time (via path/cwd).",
+		}, s.handleProjects)
+	}
+	if s.include("codemap_docs") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_docs",
+			Description: "Learn how to use codemap effectively: an agent guide covering the index-first workflow, which tool to use for what, the accuracy model (when to pass precise:true), and how codemap fits the local toolchain. Optional 'topic' (overview/workflow/commands/annotations/accuracy/ecosystem).",
+		}, s.handleDocs)
+	}
+	if s.include("codemap_annotate") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_annotate",
+			Description: "Pin a note and/or external data (e.g. DB rows from mongosh/postgres, or a finding) to a symbol (pass 'symbol') or a call path (pass 'from'+'to'). 'data' is stored opaquely. Annotations persist across reindex — use them as the harness's knowledge layer over the graph.",
+		}, s.handleAnnotate)
+	}
+	if s.include("codemap_annotations") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_annotations",
+			Description: "List annotations: all in the project (no args), on a 'symbol', or on a 'from'→'to' call path. A 'dangling' list flags annotation ids whose target no longer matches an indexed symbol (renamed/removed) — prune them with codemap_unannotate or re-add.",
+		}, s.handleAnnotations)
+	}
+	if s.include("codemap_unannotate") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_unannotate",
+			Description: "Remove an annotation by 'id' (from codemap_annotate's result or codemap_annotations) — so the knowledge layer can be corrected and pruned, not only appended to.",
+		}, s.handleUnannotate)
+	}
+	if s.include("codemap_doctor") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_doctor",
+			Description: "Check the environment codemap runs in — go toolchain, gopls, the language servers (TypeScript/JavaScript, Python), and Ollama embeddings — each with a present/missing flag and an install hint. Use it to diagnose why a language isn't being indexed or why semantic search is unavailable.",
+		}, s.handleDoctor)
+	}
+	if s.include("codemap_branch_status") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_branch_status",
+			Description: "Show the git branch/commit state used to key per-branch index snapshots (read-only): current branch, HEAD sha, detached, and the stable repo/branch keys.",
+		}, s.handleBranchStatus)
+	}
+	if s.include("codemap_branch_switch") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_branch_switch",
+			Description: "Switch the code index to a git branch: snapshots the current branch's index into fcheap and restores the target branch's snapshot (or reindexes when stale/absent), so the graph follows the working tree with no full reindex. Defaults 'to' to the current git branch; a non-git dir or detached HEAD is a no-op.",
+		}, s.handleBranchSwitch)
+	}
+	if s.include("codemap_cache_save") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_cache_save",
+			Description: "Save the current project index (graph + vectors) to the fcheap stash vault as a content-addressed cache entry. The cache key is a tree hash of all indexed file paths+content hashes, so two branches with identical code share one entry. Best-effort — returns a note if fcheap isn't available.",
+		}, s.handleCacheSave)
+	}
+	if s.include("codemap_cache_restore") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_cache_restore",
+			Description: "Restore a project index from a matching fcheap cache entry (same tree hash + embedding profile), skipping extraction and embedding entirely. Returns the restored stash ID and tree hash, or a 'no matching cache' note.",
+		}, s.handleCacheRestore)
+	}
+	if s.include("codemap_cache_list") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_cache_list",
+			Description: "List cached indexes for a project in the fcheap vault, with stash IDs, tree hashes, and dates.",
+		}, s.handleCacheList)
+	}
+	if s.include("codemap_cache_drop") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_cache_drop",
+			Description: "Remove a cached index from the fcheap vault by stash_id, or all cached indexes for the project when all=true. Frees disk space when indexes are no longer needed.",
+		}, s.handleCacheDrop)
+	}
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----

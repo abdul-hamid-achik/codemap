@@ -1003,3 +1003,158 @@ func TestMCPIndexCoordinatesSessionOwnership(t *testing.T) {
 		t.Fatalf("read after same-server reindex error: %s", textOf(after))
 	}
 }
+
+// ---- I01: MCP tool profiles ----
+
+// newProfileTestSession opens an isolated session (own XDG/data dirs) with
+// no project indexed — tools/list doesn't need one.
+func newProfileTestSession(t *testing.T) *app.Session {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	return sess
+}
+
+// listToolNames drives a real tools/list round-trip over an in-memory
+// transport and returns the registered tool names.
+func listToolNames(t *testing.T, srv *Server) map[string]bool {
+	t.Helper()
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	lt, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, tool := range lt.Tools {
+		got[tool.Name] = true
+	}
+	return got
+}
+
+// fullToolNames is the exhaustive, hand-maintained list of every tool
+// codemap ships under ProfileFull (39; AGENTS.md's "Current set (39)" line
+// must be updated alongside this list if it ever changes).
+var fullToolNames = []string{
+	"codemap_init", "codemap_index", "codemap_status", "codemap_semantic",
+	"codemap_callers", "codemap_callees", "codemap_references", "codemap_impact",
+	"codemap_review", "codemap_read_order", "codemap_related_files", "codemap_dependencies",
+	"codemap_file_impact", "codemap_risk", "codemap_symbol_at", "codemap_secret_impact",
+	"codemap_required_keys", "codemap_hotspots", "codemap_orphans", "codemap_coverage",
+	"codemap_path", "codemap_symbols", "codemap_find", "codemap_grep", "codemap_source",
+	"codemap_context", "codemap_context_batch", "codemap_projects", "codemap_docs",
+	"codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor",
+	"codemap_branch_status", "codemap_branch_switch", "codemap_cache_save",
+	"codemap_cache_restore", "codemap_cache_list", "codemap_cache_drop",
+}
+
+func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
+	t.Helper()
+	wantSet := map[string]bool{}
+	for _, w := range want {
+		wantSet[w] = true
+	}
+	var missing, extra []string
+	for w := range wantSet {
+		if !got[w] {
+			missing = append(missing, w)
+		}
+	}
+	for g := range got {
+		if !wantSet[g] {
+			extra = append(extra, g)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	if len(missing) > 0 {
+		t.Errorf("missing tools: %v", missing)
+	}
+	if len(extra) > 0 {
+		t.Errorf("unexpected tools: %v", extra)
+	}
+}
+
+// TestMCPToolsByProfile pins I01's exact registered-tool set for both
+// profiles: ProfileFull is unchanged back-compat behavior (all 39 tools,
+// zero fewer, zero more); ProfileCore is exactly coreTools (22) — the lean
+// set covering the taught agent workflow plus codemap_docs/codemap_status.
+func TestMCPToolsByProfile(t *testing.T) {
+	t.Run("full", func(t *testing.T) {
+		sess := newProfileTestSession(t)
+		sess.Config.MCP.Profile = ProfileFull
+		got := listToolNames(t, NewServer(sess))
+		assertExactToolSet(t, got, fullToolNames)
+	})
+	t.Run("core", func(t *testing.T) {
+		sess := newProfileTestSession(t)
+		sess.Config.MCP.Profile = ProfileCore
+		want := make([]string, 0, len(coreTools))
+		for name := range coreTools {
+			want = append(want, name)
+		}
+		got := listToolNames(t, NewServer(sess))
+		assertExactToolSet(t, got, want)
+	})
+	// The default (zero-value Config, as a hand-built test Config that never
+	// ran through config.Validate would produce) must behave as ProfileFull —
+	// the back-compat guarantee — not silently register zero tools.
+	t.Run("empty profile defaults to full", func(t *testing.T) {
+		sess := newProfileTestSession(t)
+		sess.Config.MCP.Profile = ""
+		got := listToolNames(t, NewServer(sess))
+		assertExactToolSet(t, got, fullToolNames)
+	})
+}
+
+// TestCoreProfileCoversTaughtTools is I01's hypothesis-2 invariant: every
+// codemap_<tool> token the canonical playbook (RenderPlaybook, which embeds
+// docs.go's workflow+accuracy topics verbatim — see playbook.go) and the
+// docs.go workflow topic actually teach an agent to call MUST be in
+// coreTools. If a future edit to docs.go/playbook.go starts teaching a new
+// tool without adding it to coreTools here, ProfileCore would silently break
+// the very loop it's supposed to preserve — this test fails first instead.
+func TestCoreProfileCoversTaughtTools(t *testing.T) {
+	toolRe := regexp.MustCompile(`codemap_([a-z][a-z_]*)`)
+	taught := map[string]bool{}
+	for _, src := range []string{
+		app.RenderPlaybook(app.FormatClaudeSkill), // preamble + workflow + accuracy
+		app.Docs("workflow"),
+	} {
+		for _, m := range toolRe.FindAllStringSubmatch(src, -1) {
+			taught["codemap_"+m[1]] = true
+		}
+	}
+	if len(taught) == 0 {
+		t.Fatal("no codemap_<tool> tokens found in the playbook/docs — regex or source drifted")
+	}
+	var missing []string
+	for name := range taught {
+		if !coreTools[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("tools taught by the playbook/docs but missing from coreTools (ProfileCore would silently break the taught workflow): %v", missing)
+	}
+}

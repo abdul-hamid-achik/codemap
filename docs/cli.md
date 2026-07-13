@@ -148,7 +148,7 @@ interactive TUI, or just check what's installed.
 
 | Command | Description |
 |---|---|
-| `codemap serve` | Run the [MCP server](/mcp) over stdio |
+| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile core\|full` selects the [tool profile](/mcp#tool-profiles) (default `full`, all 39 tools; `core` is a lean 22-tool set) — same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting |
 | `codemap studio` | Open the interactive [TUI](/studio) |
 | `codemap version` | Print version information |
 

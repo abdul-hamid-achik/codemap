@@ -16,7 +16,7 @@ import (
 // index and daemon flags live on the commands that index. Defaults mirror the
 // config defaults for readable --help, but behavior is gated on .Changed, so an
 // unset flag never overrides a config-file or env value.
-func registerConfigFlags(root, index, daemonStart, semantic *cobra.Command) {
+func registerConfigFlags(root, index, daemonStart, semantic, serve *cobra.Command) {
 	pf := root.PersistentFlags()
 	pf.String("embed-provider", "ollama", "embedding provider (currently only ollama)")
 	pf.String("embed-model", "nomic-embed-text", "embedding model")
@@ -41,6 +41,8 @@ func registerConfigFlags(root, index, daemonStart, semantic *cobra.Command) {
 	df.Int("embed-cache-size", 4096, "embedding dedup cache size (entries)")
 
 	semantic.Flags().String("fusion", "auto", "hybrid-search fusion weighting: auto (classify query shape) or balanced (equal weights, pre-F7 behavior)")
+
+	serve.Flags().String("profile", "full", "MCP tool profile: core (lean set covering the taught agent workflow) or full (every tool)")
 }
 
 // applyConfigFlags overlays explicitly-set CLI flags onto cfg, giving flags the
@@ -105,5 +107,8 @@ func applyConfigFlags(cmd *cobra.Command, cfg *config.Config) {
 	}
 	if changed("fusion") {
 		cfg.Semantic.Fusion, _ = fs.GetString("fusion")
+	}
+	if changed("profile") {
+		cfg.MCP.Profile, _ = fs.GetString("profile")
 	}
 }

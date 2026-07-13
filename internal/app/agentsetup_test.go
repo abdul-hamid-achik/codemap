@@ -81,6 +81,62 @@ func TestSetupJSONHarnesses(t *testing.T) {
 	}
 }
 
+// TestCursorDefaultsToCoreProfile pins I01: cursor is the one harness whose
+// registry entry sets CODEMAP_MCP_PROFILE=core in the merged server's env
+// block (cursor caps total MCP tools at ~40 across ALL servers), while every
+// other JSON harness stays on the full default (no env override at all).
+func TestCursorDefaultsToCoreProfile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := SetupHarness(dir, "cursor", SetupOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	m := readJSON(t, filepath.Join(dir, ".cursor", "mcp.json"))
+	sub, _ := m["mcpServers"].(map[string]any)
+	cm, _ := sub["codemap"].(map[string]any)
+	env, _ := cm["env"].(map[string]any)
+	if env["CODEMAP_MCP_PROFILE"] != "core" {
+		t.Errorf("cursor codemap server env = %v, want CODEMAP_MCP_PROFILE=core", cm["env"])
+	}
+	if cm["command"] != "codemap" {
+		t.Errorf("cursor codemap server command = %v, want codemap", cm["command"])
+	}
+
+	// A second identical run stays byte-idempotent, same as every other
+	// JSON-merge harness (TestSetupIdempotent covers cursor generically; this
+	// re-check pins that the added env block doesn't regress that guarantee).
+	before := snapshotTree(t, dir)
+	rep, err := SetupHarness(dir, "cursor", SetupOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range rep.Written {
+		if w.Action != "unchanged" {
+			t.Errorf("second cursor run: %s reported %q, want unchanged", w.Path, w.Action)
+		}
+	}
+	if after := snapshotTree(t, dir); after != before {
+		t.Errorf("second cursor run mutated the tree:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	// Other JSON harnesses must NOT get the cursor-only profile override.
+	for _, other := range []struct{ harness, configRel, topKey string }{
+		{"gemini", ".gemini/settings.json", "mcpServers"},
+		{"roo", ".roo/mcp.json", "mcpServers"},
+		{"vscode", ".vscode/mcp.json", "servers"},
+	} {
+		dir := t.TempDir()
+		if _, err := SetupHarness(dir, other.harness, SetupOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		m := readJSON(t, filepath.Join(dir, filepath.FromSlash(other.configRel)))
+		sub, _ := m[other.topKey].(map[string]any)
+		cm, _ := sub["codemap"].(map[string]any)
+		if _, ok := cm["env"]; ok {
+			t.Errorf("%s: codemap server should not carry an env override, got %v", other.harness, cm["env"])
+		}
+	}
+}
+
 // opencode's command must be an array, not the command+args split.
 func TestSetupOpencodeCommandIsArray(t *testing.T) {
 	dir := t.TempDir()

@@ -45,6 +45,10 @@ merges JSON and replaces only a marked `<!-- codemap:begin … end -->` block). 
 (Codex, Zed, Cline) print the exact snippet unless you pass `--global`; `--dry-run` shows every
 planned write. For any harness not listed, `codemap agent playbook` prints the guidance to paste.
 
+Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
+[MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
+*all* servers combined; every other harness above stays on the full 39-tool default.
+
 ### Claude Code plugin
 
 In Claude Code, add the marketplace and install the plugin (it references `codemap` on your PATH —

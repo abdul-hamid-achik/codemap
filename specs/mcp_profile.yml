@@ -1,0 +1,90 @@
+version: 1
+name: mcp_profile
+intent: |
+    `CODEMAP_MCP_PROFILE=core|full` (I01) gates which MCP tools `codemap serve`
+    registers: `core` is a lean set (22) covering the taught agent workflow plus
+    codemap_docs/codemap_status; `full` is the unchanged back-compat set (39).
+    This drives two real MCP handshakes over stdio — one per profile — and
+    counts tools/list, confirming core is strictly smaller than full, both
+    counts are exact, admin tools (codemap_annotate) are core-excluded but
+    full-included, the server instructions note the trimmed profile, and an
+    invalid CODEMAP_MCP_PROFILE value fails cleanly (nonzero exit, lowercase
+    error) before the stdio loop ever starts.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/h\"; mkdir -p \"$HOME\"; CM=\"$ROOT/bin/codemap\"; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"flow\",\"version\":\"0\"}}}' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' > \"$TMP/reqs\"; export CODEMAP_DATA=\"$TMP/d_core\"; export CODEMAP_MCP_PROFILE=core; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/core_out\" 2>/dev/null; echo \"core serve exit: $?\"; CORE_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/core_out\" | sort -u | wc -l | tr -d ' '); echo \"CORE_COUNT: $CORE_COUNT\"; grep -q 'profile: core' \"$TMP/core_out\" && echo CORE_INSTRUCTIONS_OK; grep -q '\"name\":\"codemap_docs\"' \"$TMP/core_out\" && echo CORE_HAS_DOCS; grep -q '\"name\":\"codemap_status\"' \"$TMP/core_out\" && echo CORE_HAS_STATUS; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/core_out\" || echo CORE_EXCLUDES_ADMIN; export CODEMAP_DATA=\"$TMP/d_full\"; export CODEMAP_MCP_PROFILE=full; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/full_out\" 2>/dev/null; echo \"full serve exit: $?\"; FULL_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/full_out\" | sort -u | wc -l | tr -d ' '); echo \"FULL_COUNT: $FULL_COUNT\"; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/full_out\" && echo FULL_HAS_ADMIN; export CODEMAP_DATA=\"$TMP/d_bad\"; export CODEMAP_MCP_PROFILE=bogus; \"$CM\" serve < /dev/null > \"$TMP/bad_out\" 2>\"$TMP/bad_err\"; echo \"bad profile exit: $?\"; grep -q 'Error: mcp profile' \"$TMP/bad_err\" && echo BAD_PROFILE_ERROR_OK; grep -q 'full\\.$' \"$TMP/bad_err\" && echo BAD_PROFILE_TRAILING_PERIOD || echo BAD_PROFILE_NO_TRAILING_PERIOD; exit 0"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 20000
+    - snapshot: mcp_profile
+outcomes:
+    - id: core_serve_clean_exit
+      description: serve under profile=core completes the handshake and exits 0
+      verify:
+        screen:
+            contains: "core serve exit: 0"
+    - id: core_count_exact
+      description: profile=core registers exactly 22 tools
+      verify:
+        screen:
+            contains: "CORE_COUNT: 22"
+    - id: full_serve_clean_exit
+      description: serve under profile=full completes the handshake and exits 0
+      verify:
+        screen:
+            contains: "full serve exit: 0"
+    - id: full_count_exact
+      description: profile=full registers exactly 39 tools (unchanged back-compat)
+      verify:
+        screen:
+            contains: "FULL_COUNT: 39"
+    - id: core_instructions_note
+      description: the server instructions mention the trimmed profile under core
+      verify:
+        screen:
+            contains: "CORE_INSTRUCTIONS_OK"
+    - id: core_keeps_self_discovery
+      description: core still ships codemap_docs and codemap_status (the honesty minimum)
+      verify:
+        screen:
+            contains: "CORE_HAS_DOCS"
+    - id: core_keeps_status
+      description: core still ships codemap_status
+      verify:
+        screen:
+            contains: "CORE_HAS_STATUS"
+    - id: core_excludes_admin
+      description: core does not register admin tools like codemap_annotate
+      verify:
+        screen:
+            contains: "CORE_EXCLUDES_ADMIN"
+    - id: full_includes_admin
+      description: full still registers admin tools like codemap_annotate
+      verify:
+        screen:
+            contains: "FULL_HAS_ADMIN"
+    - id: invalid_profile_fails_cleanly
+      description: an invalid CODEMAP_MCP_PROFILE value exits nonzero before the stdio loop starts
+      verify:
+        screen:
+            contains: "bad profile exit: 1"
+    - id: invalid_profile_error_message
+      description: the invalid-profile error names the setting, and the app-level message text (after cobra's "Error:" prefix) starts lowercase
+      verify:
+        screen:
+            contains: "BAD_PROFILE_ERROR_OK"
+    - id: invalid_profile_error_no_trailing_period
+      description: the invalid-profile error message has no trailing punctuation (house style)
+      verify:
+        screen:
+            contains: "BAD_PROFILE_NO_TRAILING_PERIOD"
+contractHash: sha256:20349e6d0d1ef561e3cb1939a241627ffa230624be07d1143a566772a1bf0abf

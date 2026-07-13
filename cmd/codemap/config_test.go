@@ -158,3 +158,71 @@ func TestConfigShowNoAPIKeyUnchanged(t *testing.T) {
 		t.Errorf("config show with no api_key configured should render an empty api_key line, got %q", text)
 	}
 }
+
+// newServeTestCmd builds a standalone command exposing exactly the flags
+// runServe/openSessionAt touch for the MCP profile: --path (targetDir),
+// --config (openSessionAt), and --profile (applyConfigFlags), mirroring
+// newConfigShowTestCmd's approach of registering flags directly rather than
+// going through cobra's Execute()/merge step.
+func newServeTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "serve"}
+	cmd.PersistentFlags().StringP("path", "C", "", "")
+	cmd.Flags().StringP("config", "c", "", "")
+	cmd.Flags().String("profile", "full", "")
+	return cmd
+}
+
+// TestMCPProfileFlagPrecedence pins I01's full file < env < flag chain at
+// the CLI layer (internal/config's own test covers file < env in
+// isolation): a project codemap.yaml sets core, CODEMAP_MCP_PROFILE=full
+// overrides the file, and an explicit --profile=core flag wins over both —
+// matching every other per-setting knob registered in configflags.go.
+func TestMCPProfileFlagPrecedence(t *testing.T) {
+	home := t.TempDir()
+	isolateConfigEnv(t, home)
+	t.Setenv("CODEMAP_MCP_PROFILE", "")
+	proj := t.TempDir()
+
+	openWithProfile := func(t *testing.T, setProfileFlag string) string {
+		t.Helper()
+		cmd := newServeTestCmd()
+		if err := cmd.PersistentFlags().Set("path", proj); err != nil {
+			t.Fatal(err)
+		}
+		if setProfileFlag != "" {
+			if err := cmd.Flags().Set("profile", setProfileFlag); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sess, err := openSessionAt(cmd, proj)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = sess.Close() }()
+		return sess.Config.MCP.Profile
+	}
+
+	// 1. no file, no env, no flag -> DefaultConfig's "full".
+	if got := openWithProfile(t, ""); got != "full" {
+		t.Errorf("no override: profile = %q, want full", got)
+	}
+
+	// 2. file sets core -> file wins over the default.
+	if err := os.WriteFile(filepath.Join(proj, "codemap.yaml"), []byte("mcp:\n  profile: core\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := openWithProfile(t, ""); got != "core" {
+		t.Errorf("file only: profile = %q, want core", got)
+	}
+
+	// 3. env overrides the file.
+	t.Setenv("CODEMAP_MCP_PROFILE", "full")
+	if got := openWithProfile(t, ""); got != "full" {
+		t.Errorf("env over file: profile = %q, want full", got)
+	}
+
+	// 4. an explicit --profile flag wins over env (and file).
+	if got := openWithProfile(t, "core"); got != "core" {
+		t.Errorf("flag over env: profile = %q, want core", got)
+	}
+}

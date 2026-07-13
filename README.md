@@ -379,6 +379,9 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
+`CODEMAP_MCP_PROFILE=core` trims this to a lean 22-tool set covering the taught agent workflow (see
+[MCP tool profiles](docs/mcp.md#tool-profiles)) — the default `full` profile registers all 39:
+
 Tools (39): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
 `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,

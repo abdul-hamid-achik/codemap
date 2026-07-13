@@ -61,6 +61,7 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_DAEMON_EMBED_RPS` | `daemon.embed_rps` |
 | `CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT` | `daemon.embed_max_in_flight` |
 | `CODEMAP_SEMANTIC_FUSION` | `semantic.fusion` (`auto` or `balanced`) |
+| `CODEMAP_MCP_PROFILE` | `mcp.profile` (`core` or `full` — see [MCP tool profiles](/mcp#tool-profiles)) |
 
 ## Command-line flags
 
@@ -76,6 +77,7 @@ Each config knob also has a flag, which wins over the file and env when set:
 | `--debounce` / `--idle-timeout` | `daemon.debounce_ms` / `daemon.idle_timeout_min` | `daemon start` |
 | `--embed-rps` / `--embed-max-in-flight` / `--embed-cache-size` | `daemon.embed_*` | `daemon start` |
 | `--fusion` | `semantic.fusion` | `semantic`, `search` |
+| `--profile` | `mcp.profile` (`core` or `full`) | `serve` |
 
 ```bash
 codemap index --exclude-extra migrations,db/migrations,**/testdata
@@ -128,6 +130,8 @@ semantic:
     natural_language:
       vector: 1.5
       text: 0.5
+mcp:
+  profile: full            # full (default, all 39 tools) | core (lean 22-tool set; see /mcp#tool-profiles)
 ```
 
 The default exclude list also covers `build`, build-output variants (`dist-*`, `build-*`, e.g.

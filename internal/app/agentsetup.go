@@ -73,10 +73,25 @@ type HarnessSetup struct {
 }
 
 // mcpServerValue is the codemap stdio-server value shared by the command+args
-// harnesses (Cursor, Gemini, Cline, Roo, VS Code). Fresh map per call so callers
+// harnesses (Gemini, Cline, Roo, VS Code). Fresh map per call so callers
 // never alias it into a config tree.
 func mcpServerValue() map[string]any {
 	return map[string]any{"command": "codemap", "args": []string{"serve"}}
+}
+
+// cursorServerValue is Cursor's codemap stdio-server value: same command+args
+// as mcpServerValue, plus CODEMAP_MCP_PROFILE=core (I01). Cursor is the one
+// harness in this registry that caps total MCP tools at ~40 across ALL
+// servers (see the "cursor caps tools" note in the cursor Setup below), so it
+// alone defaults to the lean core profile; every other harness here has no
+// such ceiling and stays on the full 39-tool set. Fresh map per call so
+// callers never alias it into a config tree.
+func cursorServerValue() map[string]any {
+	return map[string]any{
+		"command": "codemap",
+		"args":    []string{"serve"},
+		"env":     map[string]any{"CODEMAP_MCP_PROFILE": "core"},
+	}
 }
 
 // harnesses is the registry. DetectHarnesses/SetupHarness iterate/dispatch on it.
@@ -105,13 +120,19 @@ var harnesses = []HarnessSetup{
 			if opts.Global {
 				path = filepath.Join(homeDir(), ".cursor", "mcp.json")
 			}
-			if err := doJSONServer(&rep, path, "mcpServers", "codemap", mcpServerValue(), opts.DryRun); err != nil {
+			// I01: cursor is the one harness here with a hard tool-count ceiling
+			// (~40 across ALL MCP servers), so codemap defaults to the lean
+			// CODEMAP_MCP_PROFILE=core here (22 tools, not 39) to leave room for
+			// other servers — set CODEMAP_MCP_PROFILE=full in this env block for
+			// every tool. No other harness in this registry has that ceiling, so
+			// they all keep the full 39-tool default.
+			if err := doJSONServer(&rep, path, "mcpServers", "codemap", cursorServerValue(), opts.DryRun); err != nil {
 				return rep, err
 			}
 			if err := doPlaybook(&rep, opts, filepath.Join(dir, ".cursor", "rules", "codemap.mdc"), RenderPlaybook(FormatCursorRule), true); err != nil {
 				return rep, err
 			}
-			rep.Notes = append(rep.Notes, "cursor caps tools at ~40 across all MCP servers; codemap ships 39, so adding another server may hide tools")
+			rep.Notes = append(rep.Notes, "cursor caps tools at ~40 across all MCP servers; codemap defaults to CODEMAP_MCP_PROFILE=core here (22 tools) to leave room for other servers — set it to full for all 39")
 			return rep, nil
 		},
 	},

@@ -91,7 +91,8 @@ codemap/
 │   │   ├── staleness.go      #   hash-based drift detection (status/agent trust)
 │   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
 │   │   └── import_index.go   #   fcheap cache restore (skip extract+embed)
-│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app (39 tools)
+│   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app
+│   │                        #   (39 tools, full profile; core profile = 22 — CODEMAP_MCP_PROFILE)
 │   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
 │   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search)
 │   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
@@ -259,7 +260,18 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (39): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `coverage`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `grep`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path; `coverage` returns per-file precise call-graph coverage rolled up by language/directory — the project-wide, per-file signal behind the per-query `call_graph` enum.
+- Tool names are `codemap_`-prefixed. Current set (39, full profile; core = 22): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `coverage`, `read_order`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `grep`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Each takes an optional `path` (project dir, defaults to cwd) and returns JSON; callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path; `coverage` returns per-file precise call-graph coverage rolled up by language/directory — the project-wide, per-file signal behind the per-query `call_graph` enum.
+- **Tool profiles (I01)**: `CODEMAP_MCP_PROFILE=core|full` (env) / `mcp.profile` (config file) /
+  `--profile` on `codemap serve` (flag) gates the registered set at the go-sdk `mcp.AddTool` call
+  site (`Server.include`, `internal/mcp/server.go`) — registration-time only, zero behavior change
+  for any tool that IS registered. Default `full` (back-compat, all 39). `core` (22) is every tool
+  the canonical playbook (`RenderPlaybook`) and `docs.go`'s workflow topic actually teach, plus
+  `codemap_docs` (self-discovery); `TestCoreProfileCoversTaughtTools` pins that invariant so a
+  newly-taught tool can never silently go missing from `core`. Exists because a lean profile
+  matters to schema-token budgets (bench/README.md's hermetic run: +95% input tokens from 39 tool
+  schemas riding in every session) and to harnesses with a hard tool-count ceiling (Cursor caps
+  ~40 across ALL MCP servers — `codemap agent setup cursor` defaults its generated entry to
+  `core` for exactly this reason; every other harness stays `full`).
 - Exact-definition inputs use the durable source-selector projection
   `{file,start_line,fqn,kind}`, never a SQLite node id. `source`, `context`,
   `callers`, `callees`, `impact`, and `risk` accept `selector`; `path` accepts

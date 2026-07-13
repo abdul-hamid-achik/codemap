@@ -17,6 +17,17 @@ type Config struct {
 	Daemon    DaemonConfig    `yaml:"daemon"`
 	Vecgrep   VecgrepConfig   `yaml:"vecgrep"`
 	Semantic  SemanticConfig  `yaml:"semantic"`
+	MCP       MCPConfig       `yaml:"mcp"`
+}
+
+// MCPConfig controls `codemap serve` (the MCP stdio server).
+type MCPConfig struct {
+	// Profile selects which set of MCP tools codemap_serve registers:
+	// "core" (a lean set covering the taught agent workflow — see
+	// internal/mcp's coreTools) or "full" (every tool; the default,
+	// back-compatible behavior). Reachable file < env
+	// (CODEMAP_MCP_PROFILE) < flag (--profile on `codemap serve`).
+	Profile string `yaml:"profile"`
 }
 
 // SemanticConfig controls how `codemap semantic`/`search` fuses vector and
@@ -149,6 +160,7 @@ func DefaultConfig() *Config {
 				NaturalLanguage: FusionWeightPair{Vector: 1.5, Text: 0.5},
 			},
 		},
+		MCP: MCPConfig{Profile: "full"},
 	}
 }
 
@@ -233,6 +245,14 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("semantic fusion %q is not a valid value; use auto or balanced", c.Semantic.Fusion)
 	}
+	profile := strings.ToLower(strings.TrimSpace(c.MCP.Profile))
+	switch profile {
+	case "core", "full", "":
+		// supported (empty defaults to full at read time)
+	default:
+		return fmt.Errorf("mcp profile %q is not a valid value; use core or full", c.MCP.Profile)
+	}
+	c.MCP.Profile = profile
 	return nil
 }
 
@@ -334,6 +354,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODEMAP_SEMANTIC_FUSION"); v != "" {
 		cfg.Semantic.Fusion = v
+	}
+	if v := os.Getenv("CODEMAP_MCP_PROFILE"); v != "" {
+		cfg.MCP.Profile = v
 	}
 }
 
