@@ -158,7 +158,7 @@ func Wire() { register(Left{}.Shared) }
 		stale.References[0].ConfidenceReason != DependencyReasonStale {
 		t.Fatalf("stale reference was not downgraded: %+v", stale)
 	}
-	ctxRep, err := svc.ContextBySelectorWithContext(context.Background(), proj, selector, 2)
+	ctxRep, err := svc.ContextBySelectorWithContext(context.Background(), proj, selector, 2, false)
 	if err != nil {
 		t.Fatal(err)
 	}

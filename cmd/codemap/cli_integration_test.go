@@ -54,6 +54,14 @@ func TestCLIContracts(t *testing.T) {
 	writeTestFile(t, filepath.Join(project, "candidate.go"), "package main\n\nfunc Candidate() { Item{}.Touch() }\n")
 	writeTestFile(t, filepath.Join(project, "handler.go"), "package main\n\nfunc Handler() {}\n")
 	writeTestFile(t, filepath.Join(project, "hooks.go"), "package main\n\nvar Hook = struct{ Run func() }{Run: Handler}\n\nfunc Register(func()) {}\nfunc Setup() { Register(Handler) }\n")
+	// A multi-line body big enough that dropping it (brief mode) measurably
+	// shrinks the response despite the added source_omitted metadata field —
+	// unlike a one-line stub, where the field can outweigh the body. Deliberately
+	// calls nothing else in the project so it doesn't perturb the dependency/call
+	// counts other subtests assert on.
+	writeTestFile(t, filepath.Join(project, "bulky.go"), "package main\n\n"+
+		"// Bulky does a lot of unremarkable work.\n"+
+		"func Bulky() {\n"+strings.Repeat("\t_ = 0\n", 40)+"}\n")
 	// A project-local value proves that -C affects config discovery too, not only
 	// the final service call.
 	writeTestFile(t, filepath.Join(project, "codemap.yaml"), "embedding:\n  dimensions: 321\n")
@@ -219,6 +227,61 @@ func TestCLIContracts(t *testing.T) {
 		mustJSON(t, res.stdout, &rep)
 		if rep.Symbol != "Helper" || rep.Selector.File != "main.go" || rep.Selector.StartLine != 4 || len(rep.Matches) != 1 || !strings.Contains(rep.Matches[0].Source, "func Helper") {
 			t.Fatalf("source --at report = %+v", rep)
+		}
+	})
+
+	// I05: --brief drops the source body (signature/doc stay, source_omitted:true)
+	// on both `source` and `context`, and the resulting JSON is strictly smaller.
+	// Uses "Bulky" (a deliberately multi-line body) rather than a one-line stub:
+	// on a trivial function, the added source_omitted field can outweigh the tiny
+	// body it replaces, so the size assertion needs a body worth dropping.
+	t.Run("brief drops source bodies on source and context", func(t *testing.T) {
+		full := runCLI(t, bin, runner, env, "source", "Bulky", "-C", project, "--json")
+		if full.exit != 0 || full.stderr != "" {
+			t.Fatalf("source exit=%d stderr=%q", full.exit, full.stderr)
+		}
+		brief := runCLI(t, bin, runner, env, "source", "Bulky", "--brief", "-C", project, "--json")
+		if brief.exit != 0 || brief.stderr != "" {
+			t.Fatalf("source --brief exit=%d stderr=%q", brief.exit, brief.stderr)
+		}
+		var briefRep struct {
+			Matches []struct {
+				Symbol        string `json:"symbol"`
+				Signature     string `json:"signature"`
+				Source        string `json:"source"`
+				SourceOmitted bool   `json:"source_omitted"`
+			} `json:"matches"`
+		}
+		mustJSON(t, brief.stdout, &briefRep)
+		if len(briefRep.Matches) != 1 || briefRep.Matches[0].Source != "" || !briefRep.Matches[0].SourceOmitted || briefRep.Matches[0].Signature == "" {
+			t.Fatalf("source --brief report = %+v", briefRep)
+		}
+		if len(brief.stdout) >= len(full.stdout) {
+			t.Fatalf("source --brief (%d bytes) should be smaller than source (%d bytes)", len(brief.stdout), len(full.stdout))
+		}
+
+		fullCtx := runCLI(t, bin, runner, env, "context", "Bulky", "-C", project, "--json")
+		if fullCtx.exit != 0 || fullCtx.stderr != "" {
+			t.Fatalf("context exit=%d stderr=%q", fullCtx.exit, fullCtx.stderr)
+		}
+		briefCtx := runCLI(t, bin, runner, env, "context", "Bulky", "--brief", "-C", project, "--json")
+		if briefCtx.exit != 0 || briefCtx.stderr != "" {
+			t.Fatalf("context --brief exit=%d stderr=%q", briefCtx.exit, briefCtx.stderr)
+		}
+		var briefCtxRep struct {
+			Definitions []struct {
+				Signature     string `json:"signature"`
+				Source        string `json:"source"`
+				SourceOmitted bool   `json:"source_omitted"`
+			} `json:"definitions"`
+			CallersTotal int `json:"callers_total"`
+		}
+		mustJSON(t, briefCtx.stdout, &briefCtxRep)
+		if len(briefCtxRep.Definitions) != 1 || briefCtxRep.Definitions[0].Source != "" || !briefCtxRep.Definitions[0].SourceOmitted || briefCtxRep.Definitions[0].Signature == "" {
+			t.Fatalf("context --brief report = %+v", briefCtxRep)
+		}
+		if len(briefCtx.stdout) >= len(fullCtx.stdout) {
+			t.Fatalf("context --brief (%d bytes) should be smaller than context (%d bytes)", len(briefCtx.stdout), len(fullCtx.stdout))
 		}
 	})
 

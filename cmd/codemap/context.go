@@ -30,6 +30,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 	defer func() { _ = sess.Close() }()
 	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
+	brief, _ := cmd.Flags().GetBool("brief")
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
@@ -45,13 +46,13 @@ func runContext(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("context --at selects one definition and cannot be combined with a symbol batch")
 	}
 	if len(args) > 1 {
-		return runContextBatch(cmd, svc, cwd, args, depth)
+		return runContextBatch(cmd, svc, cwd, args, depth, brief)
 	}
 	var rep *app.ContextReport
 	if selector != nil {
-		rep, err = svc.ContextBySelectorWithContext(cmd.Context(), cwd, *selector, depth)
+		rep, err = svc.ContextBySelectorWithContext(cmd.Context(), cwd, *selector, depth, brief)
 	} else {
-		rep, err = svc.ContextWithContext(cmd.Context(), cwd, args[0], depth)
+		rep, err = svc.ContextWithContext(cmd.Context(), cwd, args[0], depth, brief)
 	}
 	if err != nil {
 		return err
@@ -140,8 +141,8 @@ func runContext(cmd *cobra.Command, args []string) error {
 
 // runContextBatch renders the one-call bundle for several symbols plus the callers
 // they share (likely shared entrypoints / coupling). --json carries the full batch.
-func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, depth int) error {
-	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, nil, depth)
+func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, depth int, brief bool) error {
+	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, nil, depth, brief)
 	if err != nil {
 		return err
 	}

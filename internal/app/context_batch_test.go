@@ -34,7 +34,7 @@ func contextBatchProj(t *testing.T) (*Service, string) {
 
 func TestContextBatchSharedCaller(t *testing.T) {
 	svc, proj := contextBatchProj(t)
-	rep, err := svc.ContextBatch(proj, []string{"A", "B", "DoesNotExist"}, nil, 3)
+	rep, err := svc.ContextBatch(proj, []string{"A", "B", "DoesNotExist"}, nil, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,10 +53,38 @@ func TestContextBatchSharedCaller(t *testing.T) {
 	}
 }
 
+// TestContextBatchBriefPropagates is the I05 batch contract: brief:true
+// propagates to every per-symbol Context call, dropping each definition's
+// source body (source_omitted:true) instead of spending the aggregate
+// source_budget — since brief already drops the bodies, nothing is left to
+// truncate.
+func TestContextBatchBriefPropagates(t *testing.T) {
+	svc, proj := contextBatchProj(t)
+	rep, err := svc.ContextBatch(proj, []string{"A", "B"}, nil, 3, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Results) != 2 {
+		t.Fatalf("expected 2 results, got %+v", rep.Results)
+	}
+	for _, r := range rep.Results {
+		if len(r.Definitions) != 1 {
+			t.Fatalf("%s: expected 1 definition, got %+v", r.Symbol, r.Definitions)
+		}
+		d := r.Definitions[0]
+		if d.Source != "" || !d.SourceOmitted {
+			t.Errorf("%s: brief batch should drop source and set source_omitted:true, got %+v", r.Symbol, d)
+		}
+	}
+	if rep.SourceBudget.TruncatedDefinitions != 0 || len(rep.SourceTruncations) != 0 {
+		t.Errorf("brief batch has nothing left for the source budget to truncate, got budget=%+v truncations=%+v", rep.SourceBudget, rep.SourceTruncations)
+	}
+}
+
 func TestContextBatchDedupAndUnindexed(t *testing.T) {
 	svc, proj := contextBatchProj(t)
 	// Duplicate symbols collapse to one result.
-	rep, err := svc.ContextBatch(proj, []string{"A", "A", ""}, nil, 3)
+	rep, err := svc.ContextBatch(proj, []string{"A", "A", ""}, nil, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +95,7 @@ func TestContextBatchDedupAndUnindexed(t *testing.T) {
 	isolate(t)
 	sess, _ := Open("")
 	defer sess.Close()
-	un, err := NewService(sess).ContextBatch(t.TempDir(), []string{"X"}, nil, 3)
+	un, err := NewService(sess).ContextBatch(t.TempDir(), []string{"X"}, nil, 3, false)
 	if err != nil {
 		t.Fatalf("unindexed must not error: %v", err)
 	}
@@ -82,7 +110,7 @@ func TestContextBatchCapsAt25(t *testing.T) {
 	for i := range syms {
 		syms[i] = fmt.Sprintf("Sym%d", i)
 	}
-	rep, err := svc.ContextBatch(proj, syms, nil, 3)
+	rep, err := svc.ContextBatch(proj, syms, nil, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +157,7 @@ func TestContextBatchSelectorsUnionAndDedup(t *testing.T) {
 	selForA := selectorForSymbol(t, svc, proj, "A")
 	selForB := selectorForSymbol(t, svc, proj, "B")
 
-	rep, err := svc.ContextBatch(proj, []string{"A"}, []SymbolSelector{selForA, selForA, selForB}, 3)
+	rep, err := svc.ContextBatch(proj, []string{"A"}, []SymbolSelector{selForA, selForA, selForB}, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +198,7 @@ func TestContextBatchSelectorsCap(t *testing.T) {
 	for i := range selectors {
 		selectors[i] = SymbolSelector{File: fmt.Sprintf("nofile%d.go", i), StartLine: 1}
 	}
-	rep, err := svc.ContextBatch(proj, syms, selectors, 3)
+	rep, err := svc.ContextBatch(proj, syms, selectors, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +226,7 @@ func TestContextBatchMalformedSelectorIsPartialNotFatal(t *testing.T) {
 	// start_line or an fqn").
 	bad := SymbolSelector{File: "a.go"}
 
-	rep, err := svc.ContextBatch(proj, nil, []SymbolSelector{selForA, bad}, 3)
+	rep, err := svc.ContextBatch(proj, nil, []SymbolSelector{selForA, bad}, 3, false)
 	if err != nil {
 		t.Fatalf("a malformed selector must not fail the whole batch: %v", err)
 	}

@@ -162,8 +162,9 @@ func selectorPaths(root, cwd, file string) ([]string, error) {
 
 // SourceBySelector returns exactly one definition body when the selector still
 // resolves. This closes the find/symbols -> source chain without reintroducing
-// name-based merging.
-func (svc *Service) SourceBySelector(cwd string, selector SymbolSelector) (*SourceReport, error) {
+// name-based merging. brief drops the Source body (keeping signature/doc/
+// location) and sets SourceOmitted, skipping the disk read entirely.
+func (svc *Service) SourceBySelector(cwd string, selector SymbolSelector, brief bool) (*SourceReport, error) {
 	res, err := svc.resolveSourceSelector(cwd, selector)
 	if err != nil {
 		return nil, err
@@ -178,18 +179,27 @@ func (svc *Service) SourceBySelector(cwd string, selector SymbolSelector) (*Sour
 	n := res.node
 	rep.Symbol = n.Symbol
 	rep.Selector = selectorForNode(n)
-	src, _ := readLineRange(filepath.Join(res.project.Path, n.FilePath), n.StartLine, n.EndLine)
-	rep.Matches = append(rep.Matches, sourceMatchForNode(n, src))
+	var src string
+	if !brief {
+		src, _ = readLineRange(filepath.Join(res.project.Path, n.FilePath), n.StartLine, n.EndLine)
+	}
+	rep.Matches = append(rep.Matches, sourceMatchForNode(n, src, brief))
 	rep.Annotations = nodeAnnotationsFor(res.graph, res.project.ID, n.FQN, n.Symbol)
 	return rep, nil
 }
 
-func sourceMatchForNode(n graph.Node, source string) SourceMatch {
-	return SourceMatch{
+func sourceMatchForNode(n graph.Node, source string, brief bool) SourceMatch {
+	m := SourceMatch{
 		Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
 		StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature,
-		Doc: n.Docstring, Source: source,
+		Doc: n.Docstring,
 	}
+	if brief {
+		m.SourceOmitted = true
+	} else {
+		m.Source = source
+	}
+	return m
 }
 
 type nodeRelationQuery func(*graph.Store, int64, int64) ([]graph.Node, error)

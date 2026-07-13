@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -666,7 +667,7 @@ func TestServiceContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, err := svc.Context(proj, "A", 3)
+	rep, err := svc.Context(proj, "A", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,10 +712,79 @@ func TestServiceContext(t *testing.T) {
 	}
 
 	// Unknown symbol → not found, no error.
-	if miss, err := svc.Context(proj, "NotASymbol", 3); err != nil {
+	if miss, err := svc.Context(proj, "NotASymbol", 3, false); err != nil {
 		t.Fatal(err)
 	} else if miss.Found {
 		t.Errorf("unknown symbol should report Found=false, got %+v", miss)
+	}
+}
+
+// TestServiceContextBrief is the I05 contract: brief:true drops each
+// definition's Source body (keeping signature/doc/location) and sets
+// SourceOmitted, while everything else in the bundle — callers, callees,
+// tests, blast radius, references, notes — is byte-identical to the
+// non-brief bundle.
+func TestServiceContextBrief(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\n// A does the thing.\nfunc A() { B() }\n\nfunc B() {}\n\nfunc C() { A() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "a_test.go"),
+		[]byte("package app\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) { A() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := svc.Context(proj, "A", 3, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Definitions) != 1 || full.Definitions[0].Source == "" {
+		t.Fatalf("non-brief context should carry a source body, got %+v", full.Definitions)
+	}
+	if full.Definitions[0].SourceOmitted {
+		t.Errorf("non-brief context should never set source_omitted, got %+v", full.Definitions[0])
+	}
+
+	brief, err := svc.Context(proj, "A", 3, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(brief.Definitions) != 1 {
+		t.Fatalf("brief context definitions = %d, want 1: %+v", len(brief.Definitions), brief.Definitions)
+	}
+	bd := brief.Definitions[0]
+	if bd.Source != "" {
+		t.Errorf("brief context should drop the source body, got %q", bd.Source)
+	}
+	if !bd.SourceOmitted {
+		t.Errorf("brief context should set source_omitted:true, got %+v", bd)
+	}
+	if bd.Signature != full.Definitions[0].Signature || bd.Doc != full.Definitions[0].Doc {
+		t.Errorf("brief context should keep signature/doc, got %+v want signature/doc of %+v", bd, full.Definitions[0])
+	}
+
+	// Byte-compare: everything outside Definitions[].Source/SourceOmitted stays
+	// unchanged by brief mode. Normalize brief's Definitions to full's Source/
+	// SourceOmitted values, then the two reports must be deep-equal.
+	normalized := *brief
+	normalized.Definitions = append([]SourceMatch(nil), brief.Definitions...)
+	for i := range normalized.Definitions {
+		normalized.Definitions[i].Source = full.Definitions[i].Source
+		normalized.Definitions[i].SourceOmitted = full.Definitions[i].SourceOmitted
+	}
+	if !reflect.DeepEqual(&normalized, full) {
+		t.Errorf("brief context changed a field other than Definitions[].Source/SourceOmitted:\nbrief(normalized)=%+v\nfull=%+v", normalized, full)
 	}
 }
 
@@ -742,7 +812,7 @@ func TestContextCapsLargeLists(t *testing.T) {
 	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := svc.Context(proj, "Target", 3)
+	rep, err := svc.Context(proj, "Target", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,7 +890,7 @@ func TestSourceAndCallersSurfaceAnnotations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sr, err := svc.Source(proj, "B")
+	sr, err := svc.Source(proj, "B", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -942,7 +1012,7 @@ func TestServiceSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, err := svc.Source(proj, "Add")
+	rep, err := svc.Source(proj, "Add", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -955,6 +1025,29 @@ func TestServiceSource(t *testing.T) {
 	}
 	if m.Signature != "func Add(a, b int) int" || m.Doc != "Add sums two ints." {
 		t.Errorf("source match missing signature/doc: %+v", m)
+	}
+	if m.SourceOmitted {
+		t.Errorf("non-brief source should not set source_omitted: %+v", m)
+	}
+
+	// I05: brief mode drops the body but keeps signature/doc/location, and
+	// flags what it dropped so an agent knows to re-call without brief.
+	brief, err := svc.Source(proj, "Add", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(brief.Matches) != 1 {
+		t.Fatalf("brief Source(Add) matches = %d, want 1: %+v", len(brief.Matches), brief.Matches)
+	}
+	bm := brief.Matches[0]
+	if bm.Source != "" {
+		t.Errorf("brief source should drop the body, got %q", bm.Source)
+	}
+	if !bm.SourceOmitted {
+		t.Errorf("brief source should set source_omitted:true: %+v", bm)
+	}
+	if bm.Signature != m.Signature || bm.Doc != m.Doc || bm.File != m.File || bm.StartLine != m.StartLine || bm.EndLine != m.EndLine {
+		t.Errorf("brief source should keep signature/doc/location identical to non-brief: brief=%+v full=%+v", bm, m)
 	}
 }
 
@@ -1630,7 +1723,7 @@ func ambiguousCloseProject(t *testing.T) (*Service, string) {
 func TestContextCandidatesOnAmbiguousName(t *testing.T) {
 	svc, proj := ambiguousCloseProject(t)
 
-	amb, err := svc.Context(proj, "Close", 2)
+	amb, err := svc.Context(proj, "Close", 2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1639,7 +1732,7 @@ func TestContextCandidatesOnAmbiguousName(t *testing.T) {
 	}
 	assertPlausibleCandidates(t, amb.Candidates)
 
-	solo, err := svc.Context(proj, "Solo", 2)
+	solo, err := svc.Context(proj, "Solo", 2, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1675,7 +1768,7 @@ func TestRiskCandidatesOnAmbiguousName(t *testing.T) {
 func TestSourceCandidatesOnAmbiguousName(t *testing.T) {
 	svc, proj := ambiguousCloseProject(t)
 
-	amb, err := svc.Source(proj, "Close")
+	amb, err := svc.Source(proj, "Close", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1684,7 +1777,7 @@ func TestSourceCandidatesOnAmbiguousName(t *testing.T) {
 	}
 	assertPlausibleCandidates(t, amb.Candidates)
 
-	solo, err := svc.Source(proj, "Solo")
+	solo, err := svc.Source(proj, "Solo", false)
 	if err != nil {
 		t.Fatal(err)
 	}

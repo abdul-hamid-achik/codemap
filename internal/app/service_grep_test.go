@@ -66,7 +66,7 @@ func TestServiceGrepResolvesHitsToEnclosingSymbol(t *testing.T) {
 		}
 		// The selector must round-trip through the same selector-based entry
 		// points other tools use to re-resolve a grep hit onto the graph.
-		if _, err := svc.SourceBySelector(proj, *h.Selector); err != nil {
+		if _, err := svc.SourceBySelector(proj, *h.Selector, false); err != nil {
 			t.Errorf("SourceBySelector(hit.Selector) failed: %v", err)
 		}
 		if _, err := svc.CallersBySelector(proj, *h.Selector); err != nil {

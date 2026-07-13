@@ -114,6 +114,15 @@ func TestMCPServer(t *testing.T) {
 		[]byte("package app\n\nvar Hook = struct{ Run func() }{Run: Handler}\n\nfunc register(func()) {}\nfunc Setup() { register(Handler) }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A multi-line body big enough that dropping it (brief mode) measurably
+	// shrinks the response despite the added source_omitted metadata field —
+	// unlike a one-line stub, where the field can outweigh the body. Deliberately
+	// calls nothing else in the project so it doesn't perturb the dependency/call
+	// counts other subtests assert on.
+	if err := os.WriteFile(filepath.Join(proj, "bulky.go"),
+		[]byte("package app\n\n// Bulky does a lot of unremarkable work.\nfunc Bulky() {\n"+strings.Repeat("\t_ = 0\n", 40)+"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	sess, err := app.Open("")
 	if err != nil {
@@ -355,6 +364,63 @@ func TestMCPServer(t *testing.T) {
 	}
 	if exactSource.IsError || !strings.Contains(textOf(exactSource), `"selector"`) || !strings.Contains(textOf(exactSource), "func Helper") {
 		t.Fatalf("selector-only source failed: %s", textOf(exactSource))
+	}
+
+	// I05: brief:true drops the source body (keeping signature) and sets
+	// source_omitted:true, on both codemap_source and codemap_context; the
+	// resulting payload is smaller than the non-brief call. Uses "Bulky" (a
+	// deliberately multi-line body) rather than a one-line stub: on a trivial
+	// function, the added source_omitted field can outweigh the tiny body it
+	// replaces, so the size assertion needs a body worth dropping.
+	fullSource, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_source",
+		Arguments: map[string]any{"path": proj, "symbol": "Bulky"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fullSource.IsError {
+		t.Fatalf("source(Bulky) failed: %s", textOf(fullSource))
+	}
+	briefSource, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_source",
+		Arguments: map[string]any{"path": proj, "symbol": "Bulky", "brief": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	briefSourceTxt := textOf(briefSource)
+	if briefSource.IsError || !strings.Contains(briefSourceTxt, `"source_omitted":true`) ||
+		!strings.Contains(briefSourceTxt, `"source":""`) || !strings.Contains(briefSourceTxt, `"signature":"func Bulky`) {
+		t.Fatalf("brief source should omit the body but keep the signature: %s", briefSourceTxt)
+	}
+	if len(briefSourceTxt) >= len(textOf(fullSource)) {
+		t.Errorf("brief source (%d bytes) should be smaller than full source (%d bytes)", len(briefSourceTxt), len(textOf(fullSource)))
+	}
+
+	fullContext, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_context",
+		Arguments: map[string]any{"path": proj, "symbol": "Bulky"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fullContext.IsError {
+		t.Fatalf("context(Bulky) failed: %s", textOf(fullContext))
+	}
+	briefContext, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_context",
+		Arguments: map[string]any{"path": proj, "symbol": "Bulky", "brief": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	briefContextTxt := textOf(briefContext)
+	if briefContext.IsError || !strings.Contains(briefContextTxt, `"source_omitted":true`) {
+		t.Fatalf("brief context should set source_omitted:true: %s", briefContextTxt)
+	}
+	if len(briefContextTxt) >= len(textOf(fullContext)) {
+		t.Errorf("brief context (%d bytes) should be smaller than full context (%d bytes)", len(briefContextTxt), len(textOf(fullContext)))
 	}
 }
 

@@ -725,7 +725,7 @@ func (m Model) annotationSaveCmd(op uint64, c graphCenter, note string) tea.Cmd 
 		if err != nil {
 			return annotationSavedMsg{op: op, center: c, target: target, saveErr: err}
 		}
-		rep, refreshErr := svc.SourceBySelector(dir, selector)
+		rep, refreshErr := svc.SourceBySelector(dir, selector, false)
 		if refreshErr != nil {
 			return annotationSavedMsg{op: op, center: c, target: target, id: id, matched: matched, refreshErr: refreshErr}
 		}
@@ -825,9 +825,9 @@ func (m Model) sourceViewCmd(c graphCenter) tea.Cmd {
 			err error
 		)
 		if selector, exact := c.selector(); exact {
-			rep, err = svc.SourceBySelector(dir, selector)
+			rep, err = svc.SourceBySelector(dir, selector, false)
 		} else {
-			rep, err = svc.Source(dir, c.sym)
+			rep, err = svc.Source(dir, c.sym, false)
 		}
 		if err != nil {
 			return sourceMsg{err: err}
@@ -877,9 +877,9 @@ func (m Model) contextViewCmd(c graphCenter) tea.Cmd {
 			err error
 		)
 		if selector, exact := c.selector(); exact {
-			rep, err = svc.ContextBySelectorWithContext(ctx, dir, selector, 0)
+			rep, err = svc.ContextBySelectorWithContext(ctx, dir, selector, 0, false)
 		} else {
-			rep, err = svc.ContextWithContext(ctx, dir, c.sym, 0)
+			rep, err = svc.ContextWithContext(ctx, dir, c.sym, 0, false)
 		}
 		if err != nil {
 			return sourceMsg{err: err}

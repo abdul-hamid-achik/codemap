@@ -388,6 +388,7 @@ type sourceInput struct {
 	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol whose source code to return; omit when selector is provided"`
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
 	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Brief    bool                `json:"brief,omitempty" jsonschema:"drop each match's source body, keeping signature/doc/location; sets source_omitted:true so you know to re-call without brief for the one definition you actually need"`
 }
 
 type contextBatchInput struct {
@@ -395,6 +396,7 @@ type contextBatchInput struct {
 	Selectors []app.SymbolSelector `json:"selectors,omitempty" jsonschema:"exact definitions to include, unioned with symbols and deduped; union with symbols is capped at 25 total"`
 	Path      string               `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Depth     int                  `json:"depth,omitempty" jsonschema:"max hops for each symbol's blast-radius count (default 3)"`
+	Brief     bool                 `json:"brief,omitempty" jsonschema:"drop every definition's source body across the batch, keeping signature/doc/location; sets source_omitted:true per definition instead of spending the source_budget"`
 }
 
 type contextInput struct {
@@ -402,6 +404,7 @@ type contextInput struct {
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
 	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
+	Brief    bool                `json:"brief,omitempty" jsonschema:"drop each definition's source body, keeping signature/doc/location; sets source_omitted:true so you know to call codemap_source for the one definition you actually need — everything else in the bundle is unchanged"`
 }
 
 // emptyInput is for tools that take no arguments (e.g. codemap_projects).
@@ -607,19 +610,19 @@ func (s *Server) register() {
 	if s.include("codemap_source") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_source",
-			Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition, plus candidates:[{selector,signature,file,start_line}] (redundant with matches, present for uniformity with impact/context/callers/callees/risk).",
+			Description: "Return source code from the indexed line range. Pass selector:{file,start_line,fqn,kind} projected from a result to fetch exactly one definition; a name-only query still returns every same-named definition, plus candidates:[{selector,signature,file,start_line}] (redundant with matches, present for uniformity with impact/context/callers/callees/risk). brief:true drops each match's source body (keeping signature/doc/location) and sets source_omitted:true — use it to confirm a definition's shape before paying for the full body.",
 		}, s.handleSource)
 	}
 	if s.include("codemap_context") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_context",
-			Description: "Everything about a symbol in ONE call: source, callers, callees, callback/value references, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported; when ambiguous, candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Uses the indexed graph only; capped lists carry true *_total counts, reference coverage/staleness stays independent of call_graph, and optional failures appear in partial_errors.",
+			Description: "Everything about a symbol in ONE call: source, callers, callees, callback/value references, tests, blast radius, and pinned notes. Pass selector:{file,start_line,fqn,kind} projected from a prior result to keep the entire bundle scoped to one exact definition. Name-only input remains supported; when ambiguous, candidates:[{selector,signature,file,start_line}] gives the exact merged set to re-query with. Uses the indexed graph only; capped lists carry true *_total counts, reference coverage/staleness stays independent of call_graph, and optional failures appear in partial_errors. brief:true drops each definition's source body (keeping signature/doc/location) and sets source_omitted:true on it — everything else in the bundle is unchanged; follow up with codemap_source for the one definition you actually need the body of.",
 		}, s.handleContext)
 	}
 	if s.include("codemap_context_batch") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_context_batch",
-			Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Also accepts selectors:[{file,start_line,fqn,kind}] (e.g. from a prior ambiguous call's candidates) unioned with symbols, same 25-item cap — MCP-only, no CLI batch form for selectors; a malformed selector lands in not_found/partial_errors rather than failing the whole call. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures.",
+			Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Also accepts selectors:[{file,start_line,fqn,kind}] (e.g. from a prior ambiguous call's candidates) unioned with symbols, same 25-item cap — MCP-only, no CLI batch form for selectors; a malformed selector lands in not_found/partial_errors rather than failing the whole call. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures. brief:true drops every definition's source body across the whole batch (keeping signature/doc/location) and sets source_omitted:true on each instead of spending the source_budget — the cheapest way to orient across many symbols at once.",
 		}, s.handleContextBatch)
 	}
 	if s.include("codemap_projects") {
@@ -1101,13 +1104,13 @@ func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in s
 		return r, v, nil
 	}
 	if in.Selector != nil {
-		rep, err := s.svc.SourceBySelector(cwdOf(in.Path), *in.Selector)
+		rep, err := s.svc.SourceBySelector(cwdOf(in.Path), *in.Selector, in.Brief)
 		return result(rep, err)
 	}
 	if in.Symbol == "" {
 		return result(nil, fmt.Errorf("source needs symbol or selector"))
 	}
-	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol)
+	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol, in.Brief)
 	return result(rep, err)
 }
 
@@ -1116,13 +1119,13 @@ func (s *Server) handleContext(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return r, v, nil
 	}
 	if in.Selector != nil {
-		rep, err := s.svc.ContextBySelectorWithContext(ctx, cwdOf(in.Path), *in.Selector, in.Depth)
+		rep, err := s.svc.ContextBySelectorWithContext(ctx, cwdOf(in.Path), *in.Selector, in.Depth, in.Brief)
 		return result(rep, err)
 	}
 	if in.Symbol == "" {
 		return result(nil, fmt.Errorf("context needs symbol or selector"))
 	}
-	rep, err := s.svc.ContextWithContext(ctx, cwdOf(in.Path), in.Symbol, in.Depth)
+	rep, err := s.svc.ContextWithContext(ctx, cwdOf(in.Path), in.Symbol, in.Depth, in.Brief)
 	return result(rep, err)
 }
 
@@ -1130,7 +1133,7 @@ func (s *Server) handleContextBatch(ctx context.Context, _ *sdkmcp.CallToolReque
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.ContextBatchWithContext(ctx, cwdOf(in.Path), in.Symbols, in.Selectors, in.Depth)
+	rep, err := s.svc.ContextBatchWithContext(ctx, cwdOf(in.Path), in.Symbols, in.Selectors, in.Depth, in.Brief)
 	return result(rep, err)
 }
 

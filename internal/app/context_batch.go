@@ -122,8 +122,8 @@ func dedupSelectors(xs []SymbolSelector) []SymbolSelector {
 // ContextBatch fetches Context for each symbol and aggregates them. Reuses the
 // flagship Context bundle per symbol; never errors on a missing symbol (it lands in
 // NotFound). Dedups and bounds the input so the response stays usable.
-func (svc *Service) ContextBatch(cwd string, symbols []string, selectors []SymbolSelector, depth int) (*ContextBatchReport, error) {
-	return svc.ContextBatchWithContext(context.Background(), cwd, symbols, selectors, depth)
+func (svc *Service) ContextBatch(cwd string, symbols []string, selectors []SymbolSelector, depth int, brief bool) (*ContextBatchReport, error) {
+	return svc.ContextBatchWithContext(context.Background(), cwd, symbols, selectors, depth, brief)
 }
 
 // ContextBatchWithContext is the cancellable form of ContextBatch. It reuses
@@ -132,8 +132,10 @@ func (svc *Service) ContextBatch(cwd string, symbols []string, selectors []Symbo
 // upgrades and zero duplicate caller queries. selectors is unioned with
 // symbols (not cross-deduped against it) so an agent can pass exact
 // definitions — e.g. from a prior ambiguous call's candidates — alongside
-// plain names.
-func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, symbols []string, selectors []SymbolSelector, depth int) (*ContextBatchReport, error) {
+// plain names. brief propagates to every per-symbol Context call (each
+// definition's Source dropped, SourceOmitted set) — when brief, the source
+// budget below has nothing left to truncate.
+func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, symbols []string, selectors []SymbolSelector, depth int, brief bool) (*ContextBatchReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -168,7 +170,7 @@ func (svc *Service) ContextBatchWithContext(ctx context.Context, cwd string, sym
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		cr, callers, cerr := svc.contextForTarget(ctx, memoryCtx, cwd, item.name, item.selector, depth)
+		cr, callers, cerr := svc.contextForTarget(ctx, memoryCtx, cwd, item.name, item.selector, depth, brief)
 		if cerr != nil {
 			// A selector's own validation (blank file, ambiguous selector, no
 			// start_line/fqn) is a bad individual input, not a broken batch —

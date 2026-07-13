@@ -125,6 +125,10 @@ type SourceMatch struct {
 	Signature string `json:"signature,omitempty"`
 	Doc       string `json:"doc,omitempty"`
 	Source    string `json:"source"`
+	// SourceOmitted is set when brief mode dropped Source to keep the response
+	// small — Signature/Doc still stand in for a first look; call codemap_source
+	// (without brief) for this exact definition's body when it's actually needed.
+	SourceOmitted bool `json:"source_omitted,omitempty"`
 }
 
 // SourceReport is returned by Source.
@@ -141,8 +145,10 @@ type SourceReport struct {
 // indexed file at its recorded line range — the implementation behind the
 // signature/docstring, without the caller having to open the file. The graph
 // only stores line ranges (not source), so this reads from disk; reindex if a
-// file changed since indexing.
-func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
+// file changed since indexing. brief drops each match's Source body (keeping
+// signature/doc/location) and sets SourceOmitted, and skips the disk read
+// entirely since the body would be discarded anyway.
+func (svc *Service) Source(cwd, name string, brief bool) (*SourceReport, error) {
 	pid, projName, found, err := svc.project(cwd)
 	if err != nil {
 		return nil, err
@@ -167,8 +173,11 @@ func (svc *Service) Source(cwd, name string) (*SourceReport, error) {
 		if n.Kind == graph.KindFile {
 			continue
 		}
-		src, _ := readLineRange(filepath.Join(p.Path, n.FilePath), n.StartLine, n.EndLine)
-		rep.Matches = append(rep.Matches, sourceMatchForNode(n, src))
+		var src string
+		if !brief {
+			src, _ = readLineRange(filepath.Join(p.Path, n.FilePath), n.StartLine, n.EndLine)
+		}
+		rep.Matches = append(rep.Matches, sourceMatchForNode(n, src, brief))
 		kept = append(kept, n)
 	}
 	rep.Candidates = candidatesFromNodes(kept)
