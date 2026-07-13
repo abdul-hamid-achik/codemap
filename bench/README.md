@@ -60,21 +60,23 @@ untaught session that only sometimes reaches for the MCP tools — see "usage ra
 Opus. The harness prints the summed `total_cost_usd` at the end so spend is never a surprise.
 Subset with `--tasks` / `--reps` to iterate cheaply.
 
-## The three runs tell a story — read this
+## The four runs tell a story — read this
 
-All three 60-session matrices are committed under `results/` and they differ in
+All four 60-session matrices are committed under `results/` and they differ in
 exactly instructive ways:
 
-| Δ (codemap vs baseline) | subscription (full) | hermetic (full, 39 tools) | **hermetic (core, 22 tools)** |
-|---|---|---|---|
-| tool calls | −59% | −26% | **−40%** |
-| input tokens (incl. cache) | −30% | **+95%** | **+12%** |
-| wall-clock | +65% | −23% | **−40%** |
-| cost | −43% | +6% | **−22%** |
-| correctness | 8/10 both | 10/10 vs 9/10 | **8/10 vs 9/10 (codemap +1)** |
+| Δ (codemap vs baseline) | subscription (full) | hermetic (full, 39) | hermetic (core, 22) | **hermetic (core + playbook)** |
+|---|---|---|---|---|
+| tool calls | −59% | −26% | −40% | **−44%** |
+| input tokens (incl. cache) | −30% | **+95%** | +12% | +25% |
+| wall-clock | +65% | −23% | −40% | **−40%** |
+| cost | −43% | +6% | −22% | −13% |
+| correctness | 8/10 both | 10/10 vs 9/10 | 8/10 vs 9/10 (+1) | 8/10 both |
+| sessions using MCP tools | 15/30 | 15/30 | 16/30 | **14/30** |
 
 (`20260712-182434` subscription/full · `20260712-203241` api-key/full ·
-`20260713-001943` api-key/core — the **reference run**, and the repo README table.)
+`20260713-001943` api-key/core · `20260713-014512` api-key/core/`--playbook` — the
+**reference run** (it models codemap as deployed), and the repo README table.)
 
 Lessons, honestly stated:
 1. The subscription run's wall-clock penalty was plan throttling, not codemap —
@@ -82,13 +84,18 @@ Lessons, honestly stated:
    user config loading into both arms.
 2. The full profile's +95% input tokens was the 39-tool schema tax. Cutting to the
    22-tool `core` profile (`CODEMAP_MCP_PROFILE=core`, shipped as a direct result of
-   this measurement) collapsed it to +12% and flipped cost to −22%.
-3. **Usage rate**: only ~half the codemap-arm sessions actually called an MCP tool
-   (15/30 full, 16/30 core) — `--bare` sessions carry no playbook teaching *when* to
-   reach for codemap, so these numbers measure "codemap available but untaught." Real
-   deployments install the tool-selection playbook (`codemap agent setup` / the Claude
-   Code plugin); a playbook-injected arm is the obvious next methodology improvement
-   and would likely widen the deltas further.
+   this measurement) collapsed it to +12% and flipped cost negative.
+3. **Usage rate is ~50% regardless of teaching** — a negative result we publish
+   anyway. Injecting the deployed playbook did NOT lift MCP adoption (14/30 vs 16/30
+   untaught, flat at this N) and its text costs input tokens (+12% → +25%). The
+   playbook's trigger ("about to read >2 files for a structural question") rarely
+   fires on this suite's short, single-question tasks — sonnet often solves them with
+   a couple of greps, which is the *correct* choice. What this bench cannot see is
+   long multi-task sessions where the reflex compounds; testing that requires
+   multi-step task chains (documented follow-up), not more reps of this suite.
+4. When the codemap arm does engage, wins are consistent across every hermetic run:
+   fewer calls, less output, ~40% faster, cheaper or par — with correctness at or
+   above baseline.
 
 ## Methodology (read before trusting a number)
 
