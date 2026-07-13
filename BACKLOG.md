@@ -69,10 +69,23 @@ DIRECTIONAL: −59% tool calls, −43% cost, correctness tied, wall-clock higher
   default full, `agent setup cursor` opts into core. Benchmark run #3 (hermetic, core):
   schema tax +95%→+12%, cost +6%→−22%, wall-clock −40%, correctness +1. Full three-run
   story in bench/README.md.
-- [ ] **Bench methodology: playbook-injected arm.** Only ~half of codemap-arm sessions
-  call MCP tools (bare sessions have no tool-selection guidance) — current numbers
-  measure "available but untaught." Inject the playbook into the codemap arm's system
-  prompt to measure codemap as actually deployed.
+- [x] **Bench methodology: playbook-injected arm — DONE** (run #4, negative result
+  published: playbook did not lift MCP adoption on short single-question tasks; four-run
+  story in bench/README.md). Remaining methodology follow-up: multi-step task chains.
+
+**v0.44.0 (2026-07-13) — hardening round:** re-audit of the July bug backlog (17/32
+plans verified fixed; verdicts in the vault README) + fixes for the top residuals —
+**P1-11** exclude anchoring (the earlier fix never worked; slash-anywhere now truly
+root-anchors, behavior-tested across indexer/staleness/watcher), P1-06/B1 auto-upgrade
+honesty (soft-miss no longer claims "resolved on demand"), P1-02 residual (lspsrc URI
+decode — precise edges survive paths with spaces), P1-12/B69 idle-timeout round-up,
+P1-14/B37 session lazy-open race. Plus a 20-agent adversarial review of the sprint diff:
+14 confirmed findings fixed (grep --json stdout corruption, cliify context-batch,
+SearchSymbols LIMIT regression, cache-import orphaned vectors, zip-bomb cap, bench
+grader endpoint checks, + 4 more). New feature: **brief mode** (`--brief`/`brief:true`
+on source/context/context_batch — drops bodies with `source_omitted:true`; −43% on
+source responses). Still-valid backlog residuals ranked in the vault README (P1-20 CI
+gating, P1-13 perf, P1-19 JSON types, B36 TUI stale responses lead).
 
 ## ✅ v0.21.0 — P0 correctness sweep (unreleased, 2026-07-01)
 All 11 P0 trust-damaging defects from the 20-reviewer deep review closed (see
