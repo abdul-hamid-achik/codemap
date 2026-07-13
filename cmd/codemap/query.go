@@ -1386,11 +1386,12 @@ func runSource(cmd *cobra.Command, args []string) error {
 	if selector == nil && len(args) == 0 {
 		return fmt.Errorf("source needs a <symbol> argument or --at <file>:<line>")
 	}
+	brief, _ := cmd.Flags().GetBool("brief")
 	var rep *app.SourceReport
 	if selector != nil {
-		rep, err = svc.SourceBySelector(cwd, *selector)
+		rep, err = svc.SourceBySelector(cwd, *selector, brief)
 	} else {
-		rep, err = svc.Source(cwd, args[0])
+		rep, err = svc.Source(cwd, args[0], brief)
 	}
 	if err != nil {
 		return err
@@ -1411,6 +1412,10 @@ func runSource(cmd *cobra.Command, args []string) error {
 			fmt.Println()
 		}
 		fmt.Printf("// %s  %s:%d-%d\n", disp(mch.FQN, mch.Symbol), mch.File, mch.StartLine, mch.EndLine)
+		if mch.SourceOmitted {
+			fmt.Println("// [source omitted --brief; re-run without --brief for the body]")
+			continue
+		}
 		fmt.Println(mch.Source)
 	}
 	if len(rep.Annotations) > 0 {

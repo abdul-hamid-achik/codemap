@@ -793,7 +793,7 @@ func TestImpactNoTestsEmitsEmptyTestCommands(t *testing.T) {
 // commands as impact/review for the tests it bundles.
 func TestContextEmitsTestCommands(t *testing.T) {
 	svc, proj := reviewRepo(t)
-	rep, err := svc.Context(proj, "Run", 3)
+	rep, err := svc.Context(proj, "Run", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -809,7 +809,7 @@ func TestContextEmitsTestCommands(t *testing.T) {
 // context_batch response carries its own test_commands, not just the aggregate.
 func TestContextBatchEmitsTestCommands(t *testing.T) {
 	svc, proj := reviewRepo(t)
-	rep, err := svc.ContextBatch(proj, []string{"Run"}, nil, 3)
+	rep, err := svc.ContextBatch(proj, []string{"Run"}, nil, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,7 +840,7 @@ func TestReviewImpactTestCommandsParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contextRep, err := svc.Context(proj, "Run", 3)
+	contextRep, err := svc.Context(proj, "Run", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -55,7 +55,10 @@ Every query takes an optional "path" (project dir; defaults to cwd) and returns
 JSON. Results carry each symbol's signature and docstring, so you rarely open
 files; use codemap_source when you need the implementation. codemap_context's
 callers/callees/tests are capped (see *_total); drill with codemap_callers/impact
-for the full lists. When a short name has several definitions, project a result's
+for the full lists. If a hub symbol's context/source response feels heavy, pass
+brief:true (source/context/context_batch) to drop source bodies (signature+doc
+stay) — each dropped definition sets source_omitted:true; re-call codemap_source
+without brief for the one body you actually need. When a short name has several definitions, project a result's
 existing {file,start_line,fqn,kind} fields into the "selector" input accepted by
 source/context/callers/callees/references/impact/risk (and paired selectors for path). This
 keeps every follow-up on one definition without persisting volatile database ids;

@@ -73,7 +73,7 @@ func TestContextBatchUnresolvedUsesNoLanguageServersAndBudgetsSource(t *testing.
 	}
 	svc, proj, syms, marker := unresolvedContextProject(t, contextBatchMax, 4000)
 
-	rep, err := svc.ContextBatchWithContext(context.Background(), proj, syms, nil, 3)
+	rep, err := svc.ContextBatchWithContext(context.Background(), proj, syms, nil, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestContextBatchUnresolvedUsesNoLanguageServersAndBudgetsSource(t *testing.
 
 	// The single-symbol API remains complete; only batch responses apply the
 	// aggregate body budget.
-	single, err := svc.ContextWithContext(context.Background(), proj, syms[len(syms)-1], 3)
+	single, err := svc.ContextWithContext(context.Background(), proj, syms[len(syms)-1], 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestContextWithContextCancelsVecgrepRecall(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := svc.ContextWithContext(ctx, proj, syms[0], 2)
+	_, err := svc.ContextWithContext(ctx, proj, syms[0], 2, false)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("ContextWithContext error = %v, want deadline exceeded", err)
 	}
@@ -151,7 +151,7 @@ func TestContextWithContextCancelsVecgrepRecall(t *testing.T) {
 
 	cancelled, stop := context.WithCancel(context.Background())
 	stop()
-	if _, err := svc.ContextBatchWithContext(cancelled, proj, syms, nil, 2); !errors.Is(err, context.Canceled) {
+	if _, err := svc.ContextBatchWithContext(cancelled, proj, syms, nil, 2, false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ContextBatchWithContext error = %v, want context canceled", err)
 	}
 
@@ -161,7 +161,7 @@ func TestContextWithContextCancelsVecgrepRecall(t *testing.T) {
 	selCancelled, stopSel := context.WithCancel(context.Background())
 	stopSel()
 	sel := SymbolSelector{File: "symbol_00.ts", StartLine: 1, FQN: syms[0]}
-	if _, err := svc.ContextBatchWithContext(selCancelled, proj, nil, []SymbolSelector{sel}, 2); !errors.Is(err, context.Canceled) {
+	if _, err := svc.ContextBatchWithContext(selCancelled, proj, nil, []SymbolSelector{sel}, 2, false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("ContextBatchWithContext (selector) error = %v, want context canceled", err)
 	}
 }
@@ -185,7 +185,7 @@ func TestContextSurfacesVecgrepExecutionAndJSONFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			svc.s.Config.Vecgrep = config.VecgrepConfig{Enabled: true, Bin: bin}
-			rep, err := svc.ContextWithContext(context.Background(), proj, syms[0], 2)
+			rep, err := svc.ContextWithContext(context.Background(), proj, syms[0], 2, false)
 			if err != nil {
 				t.Fatalf("optional memory failure should preserve context: %v", err)
 			}
@@ -201,7 +201,7 @@ func TestContextSurfacesVecgrepExecutionAndJSONFailures(t *testing.T) {
 			if !found {
 				t.Fatalf("%s failure missing from partial_errors: %+v", tc.name, rep.PartialErrors)
 			}
-			batch, err := svc.ContextBatchWithContext(context.Background(), proj, syms, nil, 2)
+			batch, err := svc.ContextBatchWithContext(context.Background(), proj, syms, nil, 2, false)
 			if err != nil {
 				t.Fatalf("batch should preserve partial context: %v", err)
 			}

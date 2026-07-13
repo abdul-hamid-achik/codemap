@@ -197,7 +197,7 @@ func TestAnnotationSurvivesReindex(t *testing.T) {
 	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true}, false); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := svc.Context(proj, "Target", 2)
+	rep, err := svc.Context(proj, "Target", 2, false)
 	if err != nil {
 		t.Fatal(err)
 	}

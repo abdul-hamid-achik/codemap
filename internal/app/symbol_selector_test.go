@@ -134,14 +134,14 @@ func TestSourceSelectorsKeepExactQueriesOnOneDefinition(t *testing.T) {
 			t.Fatalf("exact selector retained name ambiguity: %+v", risk)
 		}
 	}
-	contextRep, err := svc.ContextBySelectorWithContext(context.Background(), proj, selector, 3)
+	contextRep, err := svc.ContextBySelectorWithContext(context.Background(), proj, selector, 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(contextRep.Definitions) != 1 || len(contextRep.Callers) != 1 || len(contextRep.Callees) != 1 || contextRep.Callees[0].Symbol != "leftOnly" {
 		t.Fatalf("exact context = %+v", contextRep)
 	}
-	source, err := svc.SourceBySelector(proj, selector)
+	source, err := svc.SourceBySelector(proj, selector, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestSourceSelectorWithoutFQNUsesDeclarationLine(t *testing.T) {
 	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := svc.SourceBySelector(proj, SymbolSelector{File: "main.go", StartLine: 4, Kind: graph.KindFunction})
+	rep, err := svc.SourceBySelector(proj, SymbolSelector{File: "main.go", StartLine: 4, Kind: graph.KindFunction}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

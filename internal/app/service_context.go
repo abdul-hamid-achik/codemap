@@ -105,8 +105,8 @@ func capSlice[T any](xs []T, n int) []T {
 // without public relation auto-upgrades. depth bounds the blast-radius count
 // (defaults to 3, like Impact). Returns Found=false (not an error) for an
 // unknown symbol.
-func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, error) {
-	return svc.ContextWithContext(context.Background(), cwd, symbol, depth)
+func (svc *Service) Context(cwd, symbol string, depth int, brief bool) (*ContextReport, error) {
+	return svc.ContextWithContext(context.Background(), cwd, symbol, depth, brief)
 }
 
 // ContextWithContext is the cancellable form of Context. Relationship lookups
@@ -114,16 +114,17 @@ func (svc *Service) Context(cwd, symbol string, depth int) (*ContextReport, erro
 // bundle, not an implicit request to spawn language servers. An unresolved LSP-
 // language index therefore stays honestly unresolved and recommends a precise
 // reindex. Callers that explicitly want one-off callHierarchy can still use
-// PreciseCallers/PreciseCallees.
-func (svc *Service) ContextWithContext(ctx context.Context, cwd, symbol string, depth int) (*ContextReport, error) {
-	rep, _, err := svc.contextWithContexts(ctx, ctx, cwd, symbol, depth)
+// PreciseCallers/PreciseCallees. brief drops each definition's Source body (see
+// SourceMatch.SourceOmitted) — everything else in the bundle is unchanged.
+func (svc *Service) ContextWithContext(ctx context.Context, cwd, symbol string, depth int, brief bool) (*ContextReport, error) {
+	rep, _, err := svc.contextWithContexts(ctx, ctx, cwd, symbol, depth, brief)
 	return rep, err
 }
 
 // ContextBySelectorWithContext assembles the same bounded bundle for one exact
 // definition. It is the selector-safe counterpart of ContextWithContext.
-func (svc *Service) ContextBySelectorWithContext(ctx context.Context, cwd string, selector SymbolSelector, depth int) (*ContextReport, error) {
-	rep, _, err := svc.contextForTarget(ctx, ctx, cwd, "", &selector, depth)
+func (svc *Service) ContextBySelectorWithContext(ctx context.Context, cwd string, selector SymbolSelector, depth int, brief bool) (*ContextReport, error) {
+	rep, _, err := svc.contextForTarget(ctx, ctx, cwd, "", &selector, depth, brief)
 	return rep, err
 }
 
@@ -133,11 +134,11 @@ func (svc *Service) ContextBySelectorWithContext(ctx context.Context, cwd string
 // contextWithContexts separates required-work cancellation from the optional
 // memory-recall budget. ContextBatch supplies one shared, bounded memory context
 // across all symbols, preventing N independent 3-second sidecar tails.
-func (svc *Service) contextWithContexts(ctx, memoryCtx context.Context, cwd, symbol string, depth int) (*ContextReport, []SymbolRef, error) {
-	return svc.contextForTarget(ctx, memoryCtx, cwd, symbol, nil, depth)
+func (svc *Service) contextWithContexts(ctx, memoryCtx context.Context, cwd, symbol string, depth int, brief bool) (*ContextReport, []SymbolRef, error) {
+	return svc.contextForTarget(ctx, memoryCtx, cwd, symbol, nil, depth, brief)
 }
 
-func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol string, selector *SymbolSelector, depth int) (*ContextReport, []SymbolRef, error) {
+func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol string, selector *SymbolSelector, depth int, brief bool) (*ContextReport, []SymbolRef, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -159,9 +160,9 @@ func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol
 	var src *SourceReport
 	var err error
 	if selector != nil {
-		src, err = svc.SourceBySelector(cwd, *selector)
+		src, err = svc.SourceBySelector(cwd, *selector, brief)
 	} else {
-		src, err = svc.Source(cwd, symbol)
+		src, err = svc.Source(cwd, symbol, brief)
 	}
 	if err != nil {
 		return nil, nil, err

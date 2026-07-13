@@ -298,14 +298,14 @@ func TestContextCallGraph(t *testing.T) {
 	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
 		t.Fatal(err)
 	}
-	ctx, err := svc.Context(proj, "Run", 3)
+	ctx, err := svc.Context(proj, "Run", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ctx.CallGraph != CallGraphName {
 		t.Errorf("context call_graph = %q, want %q", ctx.CallGraph, CallGraphName)
 	}
-	miss, err := svc.Context(proj, "Ghost", 3)
+	miss, err := svc.Context(proj, "Ghost", 3, false)
 	if err != nil {
 		t.Fatal(err)
 	}
