@@ -8,6 +8,11 @@
     "site:build": "vitepress build docs",
     "site:preview": "vitepress preview docs --host 127.0.0.1"
   },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@vercel/analytics": "^2.0.1"
+  },
   "devDependencies": {
     "vitepress": "1.6.4"
   },

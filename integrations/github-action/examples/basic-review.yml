@@ -42,7 +42,7 @@ jobs:
       # outputs however this repo wants (label the PR here; other repos might
       # post to Slack, block a deploy, etc). See README.md's Outputs table for
       # the full list (risk-level, risk-score, untested-count,
-      # changed-symbols-count, comment-posted, review-json-path).
+      # changed-symbols-count, analysis-complete, comment-posted, review-json-path).
       - name: Label PR by risk level
         if: github.event_name == 'pull_request' && steps.codemap.outputs.risk-level != 'absent'
         env:

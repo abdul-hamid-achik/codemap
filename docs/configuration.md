@@ -1,3 +1,7 @@
+---
+description: Configure codemap paths, indexing, embeddings, semantic backends, MCP profiles, and daemon behavior.
+---
+
 # Configuration
 
 codemap uses XDG-style paths with `CODEMAP_*` environment overrides and an ecosystem
@@ -65,6 +69,10 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_SEMANTIC_FUSION` | `semantic.fusion` (`auto` or `balanced`) |
 | `CODEMAP_MCP_PROFILE` | `mcp.profile` (`agent`, `core`, or `full` — see [MCP tool profiles](/mcp#tool-profiles)) |
 
+Typed environment values are validated when configuration loads. Invalid integers, numbers, or
+booleans stop the command with an error that names the variable; codemap does not silently fall back
+to a lower-precedence value. The rejected value is not echoed in the error message.
+
 ## Command-line flags
 
 Each config knob also has a flag, which wins over the file and env when set:
@@ -89,6 +97,14 @@ codemap daemon start --debounce 800ms --embed-rps 2
 
 ## config.yaml
 
+Config files are decoded strictly. A misspelled or unknown key is an error instead of an ignored
+setting, and filesystem/read/parse errors are surfaced. Missing global and project config files remain
+optional; a path supplied through `--config` or `CODEMAP_CONFIG` must exist and be readable.
+
+Numeric settings must be non-negative, and floating-point settings must also be finite. Zero keeps its
+documented special meaning: no limit/cap for file size, embed text, or rate; no idle shutdown; the
+built-in default for batch, concurrency, debounce, in-flight, cache, and individual fusion weights.
+
 ```yaml
 embedding:
   provider: ollama
@@ -98,7 +114,7 @@ embedding:
   dimensions: 768
   distance: cosine
 index:
-  max_file_bytes: 1048576
+  max_file_bytes: 1048576 # 0 = no size limit
   exclude:                # REPLACES the built-in defaults — set only to override wholesale
     - .git
     - node_modules     # JS/TS deps (any depth)
@@ -111,17 +127,17 @@ index:
     - migrations
     - db/migrations
     - "**/testdata"
-  embed_batch_size: 64    # node texts per embedder request
-  embed_concurrency: 4    # concurrent embedder requests (big win for network providers)
+  embed_batch_size: 64    # node texts per request (0 = default 64)
+  embed_concurrency: 4    # concurrent requests (0 = default 4)
   extract_concurrency: 4 # parallel Go extraction workers (default 4; 1 = sequential)
   embed_max_chars: 0      # cap per-node embed text (0 = no cap); lower = faster, less body recall
 daemon:                   # background indexer (codemap daemon)
-  debounce_ms: 500        # coalesce a burst of edits into one reindex
+  debounce_ms: 500        # coalesce edit bursts (0 = default 500)
   idle_timeout_min: 0     # shut down after N minutes idle (0 = never)
   precise: false          # opt in to exact Go/LSP edges on every watched edit
   embed_rps: 0            # background embed rate to Ollama (0 = unlimited)
-  embed_max_in_flight: 2  # max concurrent embed calls
-  embed_cache_size: 4096  # embedding dedup cache (entries)
+  embed_max_in_flight: 2  # max concurrent embed calls (0 = default 2)
+  embed_cache_size: 4096  # dedup cache entries (0 = default 4096)
 vecgrep:                  # sibling-tool integration (see Ecosystem)
   enabled: true           # allow the one-hop vecgrep search/memory adapter
   bin: ""                 # path to the vecgrep binary (resolved via $PATH if empty)
@@ -216,8 +232,9 @@ Indexing structure (the graph) is fast — the time in a full index is almost en
    - Raise Ollama's own parallelism: `OLLAMA_NUM_PARALLEL=8 ollama serve`, then `--embed-concurrency`
      can overlap requests. A smaller model (e.g. `all-minilm`) embeds several times faster at some
      quality cost.
-   - With a **network** embedder (OpenAI/Cohere/Voyage), per-request latency dominates, so `--embed-batch-size`
-     and `--embed-concurrency` are a large win (codemap batches and parallelizes requests by default).
+   - With a **remote Ollama endpoint** (for example, an authenticated team GPU box), per-request latency
+     can dominate, so `--embed-batch-size` and `--embed-concurrency` matter more. Codemap batches and
+     parallelizes Ollama requests by default; other embedding-provider adapters are not implemented yet.
 
 If the embedder is unreachable mid-index, the **structural index still succeeds** — codemap reports
 `embeddings skipped: …` and you can re-run later to add the vectors.
@@ -264,6 +281,20 @@ Notes, verified against Ollama's docs as of this writing:
 
 ## Embedding profile guard
 
-The embedding provider/model/dimension is stored with the vector collection. If it changes,
+The embedding provider, model, dimensions, and distance metric are stored with the vector collection.
+If any of them changes,
 codemap fails the next index with a clear "reindex" message rather than silently corrupting
 the vector space — run `codemap index --reindex` to rebuild.
+
+## Privacy and network access
+
+The codemap binary sends no product-usage telemetry. Its SQLite graph and local veclite collection
+stay on disk. Language-server traffic stays between codemap and local subprocesses over stdio.
+Embedding requests send symbol source text to `embedding.ollama_url`; that is localhost by default,
+but the text leaves your machine if you explicitly configure a remote endpoint. An explicit vecgrep
+semantic backend follows vecgrep's own configuration and process boundary.
+
+This documentation website is separate from the CLI and uses
+[cookie-free Vercel Web Analytics](https://vercel.com/docs/analytics/privacy-policy). It does not
+change the binary's telemetry behavior. Maintainers must also enable Web Analytics for the Vercel
+project in the Vercel dashboard; installing the client package alone does not activate collection.

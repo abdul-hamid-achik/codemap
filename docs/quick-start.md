@@ -1,3 +1,7 @@
+---
+description: Install codemap, index a repository, and ask your first structural and semantic code questions.
+---
+
 # Quick Start
 
 Three minutes, one repo, real answers. This page is for anyone trying codemap for the
@@ -14,20 +18,22 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 **Optional but recommended:** [Ollama](https://ollama.com) with `ollama pull nomic-embed-text`
 enables semantic search — structure-only indexing works fine without it.
 
-> Indexes **Go**, **TypeScript + JavaScript** (one `typescript-language-server`), **Python**
-> (`pyright-langserver`), and **Vue SFCs** — structure + semantic search always, a precise
-> call graph under `--precise`.
+> **Go** works with the built-in parser. To index **TypeScript, JavaScript, or Vue**,
+> install `typescript-language-server`; **Python** needs `pyright-langserver`. `--precise`
+> resolves calls for Go/TypeScript/JavaScript/Python; Vue currently provides symbols and
+> `defines` edges only. See [Language support](/languages) for install commands and limits.
+> Semantic search is available when embeddings are enabled.
 
 ## 2. Index a project
 
 ```bash
 cd ~/projects/myapp
 codemap init     # register the project
-codemap index    # extract the graph + embed nodes (incremental — safe to rerun)
+codemap index    # extract the graph + attempt embeddings (incremental — safe to rerun)
 ```
 
 Here's that same command run on codemap's own repo, for scale — add `--precise` for
-exact (not just name-matched) call edges, required at all for TypeScript/JavaScript/Python:
+exact Go edges and for any TypeScript/JavaScript/Python call graph:
 
 ```
 Indexed "codemap" (/Users/you/projects/codemap)

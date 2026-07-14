@@ -5,6 +5,7 @@ package main
 import (
 	"testing"
 
+	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/spf13/cobra"
 )
 
@@ -104,5 +105,51 @@ func TestGateExitBypassesJSONFailureEnvelope(t *testing.T) {
 	}
 	if err.Error() != "" {
 		t.Fatalf("gate exit error text = %q, want empty (no envelope, no cobra echo)", err.Error())
+	}
+}
+
+func TestReviewGateFailsClosedOnlyForFinalizedIndexedReports(t *testing.T) {
+	incomplete := &app.ReviewReport{
+		IsRepo: true, Indexed: true, AnalysisComplete: false,
+		Risk: &app.ReviewRisk{Level: "unknown", Factors: []app.RiskFactor{}},
+	}
+	if got := reviewGateResult(incomplete, true, riskLevelOrdinal("high"), false); got != errGate {
+		t.Fatalf("incomplete indexed risk gate = %v, want gate failure", got)
+	}
+	if got := reviewGateResult(incomplete, false, 0, true); got != errGate {
+		t.Fatalf("incomplete indexed untested gate = %v, want gate failure", got)
+	}
+	if got := reviewGateResult(incomplete, false, 0, false); got != nil {
+		t.Fatalf("reporting-only incomplete review = %v, want nil", got)
+	}
+
+	for name, early := range map[string]*app.ReviewReport{
+		"not indexed": {IsRepo: true, Indexed: false, AnalysisComplete: false},
+		"not a repo":  {IsRepo: false, Indexed: false, AnalysisComplete: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := reviewGateResult(early, true, riskLevelOrdinal("low"), true); got != nil {
+				t.Fatalf("early graceful review gate = %v, want nil", got)
+			}
+		})
+	}
+
+	completeUnknown := &app.ReviewReport{
+		IsRepo: true, Indexed: true, AnalysisComplete: true, TotalSymbols: 1,
+		CallGraph: app.CallGraphUnresolved,
+		Risk:      &app.ReviewRisk{Level: "unknown", Factors: []app.RiskFactor{}},
+	}
+	if got := reviewGateResult(completeUnknown, true, riskLevelOrdinal("low"), false); got != nil {
+		t.Fatalf("complete unresolved review risk gate = %v, want nil", got)
+	}
+	if got := reviewGateResult(completeUnknown, false, 0, true); got != errGate {
+		t.Fatalf("complete unresolved review untested gate = %v, want gate failure", got)
+	}
+
+	completeEmpty := &app.ReviewReport{
+		IsRepo: true, Indexed: true, AnalysisComplete: true, TotalSymbols: 0,
+	}
+	if got := reviewGateResult(completeEmpty, false, 0, true); got != nil {
+		t.Fatalf("complete zero-symbol review untested gate = %v, want nil", got)
 	}
 }

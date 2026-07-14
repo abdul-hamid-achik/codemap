@@ -23,6 +23,10 @@
       "signature": "func Run()"
     }
   ],
+  "analysis_complete": false,
+  "total_symbols": 1,
+  "analyzed_symbols": 1,
+  "truncated_symbols": 0,
   "blast_radius": [
     {
       "symbol": "TestRun",
@@ -63,7 +67,7 @@
   },
   "call_graph": "name",
   "risk": {
-    "level": "low",
+    "level": "unknown",
     "score": 0,
     "factors": []
   },

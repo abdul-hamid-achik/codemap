@@ -24,6 +24,10 @@
       "signature": "func Orphan() int"
     }
   ],
+  "analysis_complete": true,
+  "total_symbols": 1,
+  "analyzed_symbols": 1,
+  "truncated_symbols": 0,
   "blast_radius": [],
   "covering_tests": [],
   "untested_symbols": [

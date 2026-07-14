@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,12 @@ func clearEnv(t *testing.T) {
 		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
 		"CODEMAP_EMBEDDING_PROVIDER", "CODEMAP_EMBEDDING_MODEL",
 		"CODEMAP_OLLAMA_URL", "CODEMAP_OLLAMA_API_KEY", "CODEMAP_EMBEDDING_DIMENSIONS", "CODEMAP_EMBEDDING_DISTANCE",
-		"CODEMAP_DAEMON_PRECISE", "CODEMAP_SEMANTIC_BACKEND",
+		"CODEMAP_DAEMON_DEBOUNCE_MS", "CODEMAP_DAEMON_IDLE_TIMEOUT_MIN", "CODEMAP_DAEMON_PRECISE",
+		"CODEMAP_DAEMON_EMBED_RPS", "CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT",
+		"CODEMAP_EXCLUDE_EXTRA", "CODEMAP_EMBED_BATCH_SIZE", "CODEMAP_EMBED_CONCURRENCY",
+		"CODEMAP_EXTRACT_CONCURRENCY", "CODEMAP_EMBED_MAX_CHARS",
+		"CODEMAP_VECGREP_ENABLED", "CODEMAP_VECGREP_BIN",
+		"CODEMAP_SEMANTIC_BACKEND", "CODEMAP_SEMANTIC_FUSION", "CODEMAP_MCP_PROFILE",
 	} {
 		t.Setenv(k, "")
 	}
@@ -296,6 +302,247 @@ func TestLoadEnvOverridesFile(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnknownYAMLFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents string
+		unknown  string
+	}{
+		{name: "top level", contents: "embeddings: {}\n", unknown: "embeddings"},
+		{name: "nested", contents: "embedding:\n  modell: custom\n", unknown: "modell"},
+		{name: "deeply nested", contents: "semantic:\n  fusion_weights:\n    identifier:\n      vectors: 1\n", unknown: "vectors"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("HOME", t.TempDir())
+			t.Chdir(t.TempDir())
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load should reject an unknown YAML field")
+			}
+			var loadErr *LoadError
+			if !errors.As(err, &loadErr) {
+				t.Fatalf("error type = %T, want *LoadError: %v", err, err)
+			}
+			if loadErr.Operation != "parse" || loadErr.Path != path {
+				t.Fatalf("LoadError = %#v, want parse failure for %q", loadErr, path)
+			}
+			if !strings.Contains(err.Error(), tt.unknown) {
+				t.Fatalf("error = %q, want unknown field %q", err, tt.unknown)
+			}
+		})
+	}
+}
+
+func TestLoadAllowsEmptyConfigFile(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Chdir(t.TempDir())
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("# defaults only\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Embedding.Model != "nomic-embed-text" {
+		t.Fatalf("model = %q, want default", cfg.Embedding.Model)
+	}
+}
+
+func TestLoadRejectsMalformedTypedEnvironmentValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment string
+		value       string
+		want        string
+	}{
+		{name: "embedding dimensions", environment: "CODEMAP_EMBEDDING_DIMENSIONS", value: "seven hundred", want: "base-10 integer"},
+		{name: "daemon debounce", environment: "CODEMAP_DAEMON_DEBOUNCE_MS", value: "fast", want: "base-10 integer"},
+		{name: "daemon idle timeout", environment: "CODEMAP_DAEMON_IDLE_TIMEOUT_MIN", value: "later", want: "base-10 integer"},
+		{name: "daemon precise", environment: "CODEMAP_DAEMON_PRECISE", value: "sometimes", want: "boolean"},
+		{name: "daemon embed rate", environment: "CODEMAP_DAEMON_EMBED_RPS", value: "NaN", want: "finite number"},
+		{name: "daemon max in flight", environment: "CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT", value: "many", want: "base-10 integer"},
+		{name: "embed batch size", environment: "CODEMAP_EMBED_BATCH_SIZE", value: "large", want: "base-10 integer"},
+		{name: "embed concurrency", environment: "CODEMAP_EMBED_CONCURRENCY", value: "parallel", want: "base-10 integer"},
+		{name: "extract concurrency", environment: "CODEMAP_EXTRACT_CONCURRENCY", value: "parallel", want: "base-10 integer"},
+		{name: "embed max chars", environment: "CODEMAP_EMBED_MAX_CHARS", value: "all", want: "base-10 integer"},
+		{name: "vecgrep enabled", environment: "CODEMAP_VECGREP_ENABLED", value: "enabled", want: "boolean"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("HOME", t.TempDir())
+			t.Chdir(t.TempDir())
+			t.Setenv(tt.environment, tt.value)
+
+			_, err := Load("")
+			if err == nil {
+				t.Fatalf("Load should reject %s=%q", tt.environment, tt.value)
+			}
+			var loadErr *LoadError
+			if !errors.As(err, &loadErr) {
+				t.Fatalf("error type = %T, want *LoadError: %v", err, err)
+			}
+			if loadErr.Operation != "parse" || loadErr.Environment != tt.environment {
+				t.Fatalf("LoadError = %#v, want parse failure for %s", loadErr, tt.environment)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err, tt.want)
+			}
+			if strings.Contains(err.Error(), tt.value) {
+				t.Fatalf("error must not echo the rejected environment value: %q", err)
+			}
+		})
+	}
+}
+
+func TestLoadPropagatesConfigFilesystemErrors(t *testing.T) {
+	t.Run("explicit path is unreadable as a file", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("HOME", t.TempDir())
+		t.Chdir(t.TempDir())
+		path := t.TempDir()
+
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("Load should return an explicit config read error")
+		}
+		var loadErr *LoadError
+		if !errors.As(err, &loadErr) {
+			t.Fatalf("error type = %T, want *LoadError: %v", err, err)
+		}
+		if loadErr.Operation != "read" || loadErr.Path != path {
+			t.Fatalf("LoadError = %#v, want read failure for %q", loadErr, path)
+		}
+	})
+
+	t.Run("explicit path enotdir is still fatal", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("HOME", t.TempDir())
+		t.Chdir(t.TempDir())
+		parent := t.TempDir()
+		blockingPath := filepath.Join(parent, "not-a-directory")
+		if err := os.WriteFile(blockingPath, []byte("file"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(blockingPath, "config.yaml")
+
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("Load should return ENOTDIR for an explicit config path")
+		}
+		var loadErr *LoadError
+		if !errors.As(err, &loadErr) {
+			t.Fatalf("error type = %T, want *LoadError: %v", err, err)
+		}
+		if loadErr.Operation != "read" || loadErr.Path != path {
+			t.Fatalf("LoadError = %#v, want read failure for %q", loadErr, path)
+		}
+	})
+
+	t.Run("global config stat failure is not treated as missing", func(t *testing.T) {
+		clearEnv(t)
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		configHome := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", configHome)
+		t.Chdir(t.TempDir())
+		configDir := filepath.Join(configHome, "codemap")
+		if err := os.MkdirAll(configDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		configPath := filepath.Join(configDir, "config.yaml")
+		if err := os.Symlink("config.yaml", configPath); err != nil {
+			t.Skipf("cannot create symlink loop: %v", err)
+		}
+
+		_, err := Load("")
+		if err == nil {
+			t.Fatal("Load should propagate a config stat failure")
+		}
+		var loadErr *LoadError
+		if !errors.As(err, &loadErr) {
+			t.Fatalf("error type = %T, want *LoadError: %v", err, err)
+		}
+		if loadErr.Operation != "inspect" {
+			t.Fatalf("LoadError = %#v, want inspect failure", loadErr)
+		}
+	})
+}
+
+func TestLoadValidPrecedence(t *testing.T) {
+	tests := []struct {
+		name             string
+		projectValue     int
+		explicitValue    int
+		environmentValue string
+		want             int
+	}{
+		{name: "global only", want: 100},
+		{name: "project over global", projectValue: 200, want: 200},
+		{name: "explicit over project", projectValue: 200, explicitValue: 300, want: 300},
+		{name: "environment over explicit", projectValue: 200, explicitValue: 300, environmentValue: "400", want: 400},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+			globalDir := ConfigDir()
+			if err := os.MkdirAll(globalDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(globalDir, "config.yaml"), []byte("embedding:\n  dimensions: 100\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			project := t.TempDir()
+			projectContents := "{}\n"
+			if tt.projectValue != 0 {
+				projectContents = fmt.Sprintf("embedding:\n  dimensions: %d\n", tt.projectValue)
+			}
+			if err := os.WriteFile(filepath.Join(project, "codemap.yaml"), []byte(projectContents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(project)
+
+			explicitPath := ""
+			if tt.explicitValue != 0 {
+				explicitPath = filepath.Join(t.TempDir(), "explicit.yaml")
+				contents := fmt.Sprintf("embedding:\n  dimensions: %d\n", tt.explicitValue)
+				if err := os.WriteFile(explicitPath, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.environmentValue != "" {
+				t.Setenv("CODEMAP_EMBEDDING_DIMENSIONS", tt.environmentValue)
+			}
+
+			cfg, err := Load(explicitPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Embedding.Dimensions != tt.want {
+				t.Fatalf("dimensions = %d, want %d", cfg.Embedding.Dimensions, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadProjectFile(t *testing.T) {
 	clearEnv(t)
 	home := t.TempDir()
@@ -345,6 +592,55 @@ func TestFindProjectRootNone(t *testing.T) {
 	_, err := FindProjectRoot(t.TempDir())
 	if !errors.Is(err, ErrNoProject) {
 		t.Errorf("err = %v, want ErrNoProject", err)
+	}
+}
+
+func TestOptionalNestedConfigENOTDIRDoesNotHideDotCodemapMarker(t *testing.T) {
+	clearEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".config"), []byte("regular file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".codemap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := FindProjectRoot(root)
+	if err != nil {
+		t.Fatalf("FindProjectRoot should continue past nested-marker ENOTDIR: %v", err)
+	}
+	if got != root {
+		t.Fatalf("FindProjectRoot = %q, want %q", got, root)
+	}
+
+	t.Chdir(root)
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load should treat optional .config/codemap.yaml ENOTDIR as absent: %v", err)
+	}
+	if cfg.Embedding.Model != "nomic-embed-text" {
+		t.Fatalf("model = %q, want default", cfg.Embedding.Model)
+	}
+}
+
+func TestFindProjectRootPropagatesMarkerIOErrors(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Symlink(".config", filepath.Join(root, ".config")); err != nil {
+		t.Skipf("cannot create symlink loop: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".codemap"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := FindProjectRoot(root)
+	if err == nil {
+		t.Fatal("FindProjectRoot should propagate non-absence marker errors")
+	}
+	if !strings.Contains(err.Error(), "inspect project marker") {
+		t.Fatalf("error = %q, want project marker context", err)
 	}
 }
 
@@ -426,6 +722,121 @@ func TestConfigValidateDistance(t *testing.T) {
 	cfg.Embedding.Distance = "cosine"
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate should accept 'cosine': %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidNumericYAMLValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents string
+		want     string
+		value    string
+	}{
+		{name: "embedding dimensions", contents: "embedding:\n  dimensions: -1\n", want: "embedding.dimensions", value: "-1"},
+		{name: "max file bytes", contents: "index:\n  max_file_bytes: -2\n", want: "index.max_file_bytes", value: "-2"},
+		{name: "embed batch size", contents: "index:\n  embed_batch_size: -3\n", want: "index.embed_batch_size", value: "-3"},
+		{name: "embed concurrency", contents: "index:\n  embed_concurrency: -4\n", want: "index.embed_concurrency", value: "-4"},
+		{name: "extract concurrency", contents: "index:\n  extract_concurrency: -5\n", want: "index.extract_concurrency", value: "-5"},
+		{name: "embed max chars", contents: "index:\n  embed_max_chars: -6\n", want: "index.embed_max_chars", value: "-6"},
+		{name: "daemon debounce", contents: "daemon:\n  debounce_ms: -7\n", want: "daemon.debounce_ms", value: "-7"},
+		{name: "daemon idle timeout", contents: "daemon:\n  idle_timeout_min: -8\n", want: "daemon.idle_timeout_min", value: "-8"},
+		{name: "daemon embed rate negative", contents: "daemon:\n  embed_rps: -0.5\n", want: "daemon.embed_rps", value: "-0.5"},
+		{name: "daemon embed rate non-finite", contents: "daemon:\n  embed_rps: .nan\n", want: "daemon.embed_rps", value: ".nan"},
+		{name: "daemon max in flight", contents: "daemon:\n  embed_max_in_flight: -9\n", want: "daemon.embed_max_in_flight", value: "-9"},
+		{name: "daemon cache size", contents: "daemon:\n  embed_cache_size: -10\n", want: "daemon.embed_cache_size", value: "-10"},
+		{name: "identifier vector weight negative", contents: "semantic:\n  fusion_weights:\n    identifier:\n      vector: -0.1\n", want: "semantic.fusion_weights.identifier.vector", value: "-0.1"},
+		{name: "identifier text weight nan", contents: "semantic:\n  fusion_weights:\n    identifier:\n      text: .nan\n", want: "semantic.fusion_weights.identifier.text", value: ".nan"},
+		{name: "natural language vector weight infinity", contents: "semantic:\n  fusion_weights:\n    natural_language:\n      vector: .inf\n", want: "semantic.fusion_weights.natural_language.vector", value: ".inf"},
+		{name: "natural language text weight negative infinity", contents: "semantic:\n  fusion_weights:\n    natural_language:\n      text: -.inf\n", want: "semantic.fusion_weights.natural_language.text", value: "-.inf"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("HOME", t.TempDir())
+			t.Chdir(t.TempDir())
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load should reject the invalid numeric setting")
+			}
+			message := err.Error()
+			if !strings.Contains(message, tt.want) {
+				t.Fatalf("error = %q, want setting %q", message, tt.want)
+			}
+			if message != strings.ToLower(message) || strings.HasSuffix(message, ".") {
+				t.Fatalf("validation error must be lowercase with no trailing punctuation: %q", message)
+			}
+			if strings.Contains(message, tt.value) {
+				t.Fatalf("validation error must not echo the rejected value: %q", message)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsNegativeNumericEnvironmentValues(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment string
+		want        string
+	}{
+		{name: "embedding dimensions", environment: "CODEMAP_EMBEDDING_DIMENSIONS", want: "embedding.dimensions"},
+		{name: "daemon debounce", environment: "CODEMAP_DAEMON_DEBOUNCE_MS", want: "daemon.debounce_ms"},
+		{name: "daemon idle timeout", environment: "CODEMAP_DAEMON_IDLE_TIMEOUT_MIN", want: "daemon.idle_timeout_min"},
+		{name: "daemon embed rate", environment: "CODEMAP_DAEMON_EMBED_RPS", want: "daemon.embed_rps"},
+		{name: "daemon max in flight", environment: "CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT", want: "daemon.embed_max_in_flight"},
+		{name: "embed batch size", environment: "CODEMAP_EMBED_BATCH_SIZE", want: "index.embed_batch_size"},
+		{name: "embed concurrency", environment: "CODEMAP_EMBED_CONCURRENCY", want: "index.embed_concurrency"},
+		{name: "extract concurrency", environment: "CODEMAP_EXTRACT_CONCURRENCY", want: "index.extract_concurrency"},
+		{name: "embed max chars", environment: "CODEMAP_EMBED_MAX_CHARS", want: "index.embed_max_chars"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("HOME", t.TempDir())
+			t.Chdir(t.TempDir())
+			t.Setenv(tt.environment, "-1")
+
+			_, err := Load("")
+			if err == nil {
+				t.Fatalf("Load should reject negative %s", tt.environment)
+			}
+			message := err.Error()
+			if !strings.Contains(message, tt.want) {
+				t.Fatalf("error = %q, want setting %q", message, tt.want)
+			}
+			if message != strings.ToLower(message) || strings.HasSuffix(message, ".") {
+				t.Fatalf("validation error must be lowercase with no trailing punctuation: %q", message)
+			}
+			if strings.Contains(message, "-1") {
+				t.Fatalf("validation error must not echo the rejected value: %q", message)
+			}
+		})
+	}
+}
+
+func TestConfigValidateAllowsDocumentedZeroValues(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Embedding.Dimensions = 0
+	cfg.Index.MaxFileBytes = 0
+	cfg.Index.EmbedBatchSize = 0
+	cfg.Index.EmbedConcurrency = 0
+	cfg.Index.ExtractConcurrency = 0
+	cfg.Index.EmbedMaxChars = 0
+	cfg.Daemon.DebounceMS = 0
+	cfg.Daemon.IdleTimeoutMin = 0
+	cfg.Daemon.EmbedRPS = 0
+	cfg.Daemon.EmbedMaxInFlight = 0
+	cfg.Daemon.EmbedCacheSize = 0
+	cfg.Semantic.FusionWeights = FusionWeightsConfig{}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate should accept documented zero-value semantics: %v", err)
 	}
 }
 

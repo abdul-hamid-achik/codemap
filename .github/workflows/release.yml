@@ -9,6 +9,8 @@ permissions:
   contents: write # create the GitHub release and upload archives/checksums
 
 env:
+  GO_VERSION: '1.25.12'
+  GORELEASER_VERSION: v2.17.0
   TASK_VERSION: v3.51.1
 
 jobs:
@@ -23,19 +25,28 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Set up Task
         run: go install github.com/go-task/task/v3/cmd/task@${TASK_VERSION}
 
       - name: Run checks
-        run: task check
+        run: task check:verify
+
+      - name: Verify clean worktree
+        run: |
+          status="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$status" ]; then
+            echo "release checks modified the worktree:"
+            printf '%s\n' "$status"
+            exit 1
+          fi
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
-          version: '~> v2'
+          version: ${{ env.GORELEASER_VERSION }}
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

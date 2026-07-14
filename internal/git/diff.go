@@ -3,13 +3,15 @@ package git
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 // LineRange is an inclusive [Start,End] span of 1-based line numbers in the
-// post-image (the new file). A pure deletion contributes no LineRange (there are
-// no new lines), though its file is still reported as changed.
+// post-image (the new file). A pure-deletion hunk contributes no LineRange;
+// ChangedFile.DeletedLines preserves its old-image count so callers do not
+// mistake the missing range for a completely mapped diff.
 type LineRange struct {
 	Start int `json:"start"`
 	End   int `json:"end"`
@@ -23,19 +25,32 @@ func (r LineRange) Overlaps(start, end int) bool {
 
 // ChangedFile is one file in a diff with the changed line ranges in its new image.
 // Status is the single-letter git status: "A" added, "M" modified, "D" deleted,
-// "?" untracked. Hunks is empty for deletes and untracked files (no diffable
-// post-image), but the file is still reported so callers can surface it.
+// "?" untracked. Rename metadata is additive while Status remains "M" for
+// compatibility. DeletedLines counts pure-deletion hunks; RemovedDefinitions
+// records syntactically recognized callable/type declarations removed by mixed
+// or equal-count hunks.
 type ChangedFile struct {
-	Path   string      `json:"path"`
-	Status string      `json:"status"`
-	Hunks  []LineRange `json:"hunks,omitempty"`
+	Path               string      `json:"path"`
+	Status             string      `json:"status"`
+	Hunks              []LineRange `json:"hunks,omitempty"`
+	DeletedLines       int         `json:"deleted_lines,omitempty"`
+	RemovedDefinitions []string    `json:"removed_definitions,omitempty"`
+	Renamed            bool        `json:"renamed,omitempty"`
+	OldPath            string      `json:"old_path,omitempty"`
 }
 
-// hunkHeader matches a unified-diff hunk header, capturing the new-file start line
-// and (optional) line count: `@@ -a,b +c,d @@`. With `git diff -U0` the counts are
-// exact (no surrounding context), so the captured range is precisely the changed
-// lines in the new file.
-var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
+// hunkHeader matches a unified-diff hunk header, capturing both old- and
+// new-image starts/counts: `@@ -a,b +c,d @@`. With `git diff -U0` the counts are
+// exact (no surrounding context), so nonzero new counts become changed ranges
+// and a zero new count is preserved in ChangedFile.DeletedLines.
+var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
+
+var (
+	goMethodDeclaration         = regexp.MustCompile(`^\s*func\s+\(\s*(?:[A-Za-z_]\w*\s+)?\*?([A-Za-z_]\w*)(?:\s*\[[^\]]+\])?\s*\)\s*([A-Za-z_]\w*)\s*\(`)
+	callableDeclaration         = regexp.MustCompile(`^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:func|function|def)\s+([A-Za-z_$][\w$]*)`)
+	variableCallableDeclaration = regexp.MustCompile(`^\s*(?:export\s+)?(?:declare\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?:\??:\s*[^=]+)?=\s*(?:async\s+)?(?:function\b|(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>)`)
+	typeDeclaration             = regexp.MustCompile(`^\s*(?:export\s+(?:default\s+)?)?(?:type|class|interface|enum|struct)\s+([A-Za-z_$][\w$]*)`)
+)
 
 // ChangedFiles returns the files (and changed line ranges) for one of three diff
 // modes, all read-only:
@@ -54,7 +69,7 @@ func ChangedFiles(ctx context.Context, dir, mode, since string) ([]ChangedFile, 
 	var diffArgs []string
 	switch mode {
 	case "staged":
-		diffArgs = []string{"diff", "-U0", "--no-color", "--cached"}
+		diffArgs = []string{"diff", "-U0", "--no-color", "--find-renames=100%", "--cached"}
 	case "since":
 		// `since` is an agent-supplied ref — option-injection guard:
 		// reject empty + leading-dash refs (git parses them as options even past
@@ -65,16 +80,16 @@ func ChangedFiles(ctx context.Context, dir, mode, since string) ([]ChangedFile, 
 		if !ValidRef(since) {
 			return nil, ErrInvalidRef
 		}
-		diffArgs = []string{"diff", "-U0", "--no-color", EndOfOptions, since, "--"}
+		diffArgs = []string{"diff", "-U0", "--no-color", "--find-renames=100%", EndOfOptions, since, "--"}
 	default: // "working"
 		// Diff against HEAD so both staged and unstaged tracked edits show. On an
 		// unborn branch (no HEAD) there's nothing to diff against, so merge the index
 		// diff (staged) with the worktree diff (unstaged) instead.
 		if _, err := HeadSHA(ctx, dir); err == nil {
-			diffArgs = []string{"diff", "-U0", "--no-color", "HEAD"}
+			diffArgs = []string{"diff", "-U0", "--no-color", "--find-renames=100%", "HEAD"}
 		} else {
-			staged, _ := run(ctx, dir, "diff", "-U0", "--no-color", "--cached")
-			unstaged, uerr := run(ctx, dir, "diff", "-U0", "--no-color")
+			staged, _ := run(ctx, dir, "diff", "-U0", "--no-color", "--find-renames=100%", "--cached")
+			unstaged, uerr := run(ctx, dir, "diff", "-U0", "--no-color", "--find-renames=100%")
 			if uerr != nil {
 				return nil, uerr
 			}
@@ -97,8 +112,9 @@ func ChangedFiles(ctx context.Context, dir, mode, since string) ([]ChangedFile, 
 }
 
 // appendUntracked adds untracked files (which git diff never shows) to the set.
-// They carry no hunks (the whole file is new); callers that resolve symbols by line
-// range simply find none, which is correct for a not-yet-indexed file.
+// They carry no hunks because the whole file is new. Review treats the entire
+// file as changed when a fresh index already contains it; an unindexed file still
+// maps to no symbols.
 func appendUntracked(ctx context.Context, dir string, files []ChangedFile) []ChangedFile {
 	untracked, err := run(ctx, dir, "ls-files", "--others", "--exclude-standard")
 	if err != nil {
@@ -128,6 +144,12 @@ func mergeChangedFiles(fs []ChangedFile) []ChangedFile {
 	for _, f := range fs {
 		if i, ok := byPath[f.Path]; ok {
 			out[i].Hunks = append(out[i].Hunks, f.Hunks...)
+			out[i].DeletedLines += f.DeletedLines
+			out[i].RemovedDefinitions = append(out[i].RemovedDefinitions, f.RemovedDefinitions...)
+			if f.Renamed {
+				out[i].Renamed = true
+				out[i].OldPath = f.OldPath
+			}
 			if out[i].Status == "M" && f.Status != "M" {
 				out[i].Status = f.Status
 			}
@@ -150,11 +172,23 @@ func parseUnifiedDiff(out string) []ChangedFile {
 	var files []ChangedFile
 	var cur *ChangedFile
 	inHunks := false
+	oldDeclarations := map[string]bool{}
+	newDeclarations := map[string]bool{}
 	flush := func() {
 		if cur != nil && cur.Path != "" {
+			removed := make([]string, 0, len(oldDeclarations))
+			for declaration := range oldDeclarations {
+				if !newDeclarations[declaration] {
+					removed = append(removed, declaration)
+				}
+			}
+			sort.Strings(removed)
+			cur.RemovedDefinitions = append(cur.RemovedDefinitions, removed...)
 			files = append(files, *cur)
 		}
 		cur = nil
+		oldDeclarations = map[string]bool{}
+		newDeclarations = map[string]bool{}
 	}
 	for _, line := range strings.Split(out, "\n") {
 		switch {
@@ -179,23 +213,66 @@ func parseUnifiedDiff(out string) []ChangedFile {
 			} else if p := stripDiffPath(strings.TrimPrefix(line, "+++ ")); p != "" {
 				cur.Path = p // new-side path is authoritative for adds/modifies
 			}
+		case !inHunks && strings.HasPrefix(line, "rename from "):
+			cur.Renamed = true
+			cur.OldPath = stripRenamePath(strings.TrimPrefix(line, "rename from "))
+		case !inHunks && strings.HasPrefix(line, "rename to "):
+			cur.Renamed = true
+			cur.Path = stripRenamePath(strings.TrimPrefix(line, "rename to "))
 		case strings.HasPrefix(line, "@@"):
 			inHunks = true
 			if m := hunkHeader.FindStringSubmatch(line); m != nil {
-				start, _ := strconv.Atoi(m[1])
-				count := 1
+				oldCount := 1
 				if m[2] != "" {
-					count, _ = strconv.Atoi(m[2])
+					oldCount, _ = strconv.Atoi(m[2])
 				}
-				if count <= 0 || start <= 0 {
-					continue // pure deletion (0 new lines) — file already recorded
+				start, _ := strconv.Atoi(m[3])
+				newCount := 1
+				if m[4] != "" {
+					newCount, _ = strconv.Atoi(m[4])
 				}
-				cur.Hunks = append(cur.Hunks, LineRange{Start: start, End: start + count - 1})
+				if newCount <= 0 {
+					cur.DeletedLines += oldCount
+					continue
+				}
+				if start <= 0 {
+					continue
+				}
+				cur.Hunks = append(cur.Hunks, LineRange{Start: start, End: start + newCount - 1})
+			}
+		case inHunks && strings.HasPrefix(line, "-"):
+			if declaration := declarationKey(strings.TrimPrefix(line, "-")); declaration != "" {
+				oldDeclarations[declaration] = true
+			}
+		case inHunks && strings.HasPrefix(line, "+"):
+			if declaration := declarationKey(strings.TrimPrefix(line, "+")); declaration != "" {
+				newDeclarations[declaration] = true
 			}
 		}
 	}
 	flush()
 	return files
+}
+
+func declarationKey(line string) string {
+	if match := goMethodDeclaration.FindStringSubmatch(line); match != nil {
+		return "method:" + match[1] + "." + match[2]
+	}
+	if match := callableDeclaration.FindStringSubmatch(line); match != nil {
+		return "callable:" + match[1]
+	}
+	// TS/JS language servers expose top-level arrow functions and function
+	// expressions as variable symbols. Diff lines do not carry enough lexical
+	// context to distinguish an indented module/Vue script-setup binding from a
+	// local callback, so prefer the conservative false-positive: an indented
+	// removal is partial until old-image symbol extraction can prove otherwise.
+	if match := variableCallableDeclaration.FindStringSubmatch(line); match != nil {
+		return "callable:" + match[1]
+	}
+	if match := typeDeclaration.FindStringSubmatch(line); match != nil {
+		return "type:" + match[1]
+	}
+	return ""
 }
 
 // diffGitPath extracts the new-side path from a `diff --git a/<x> b/<y>` header,
@@ -231,6 +308,19 @@ func stripDiffPath(s string) string {
 	}
 	if rest, ok := strings.CutPrefix(s, "b/"); ok {
 		return rest
+	}
+	return s
+}
+
+// stripRenamePath cleans `rename from`/`rename to` paths. Unlike ---/+++
+// headers these paths do not carry synthetic a/ or b/ prefixes, so a real
+// source directory named a or b must be preserved.
+func stripRenamePath(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		if unq, err := strconv.Unquote(s); err == nil {
+			return unq
+		}
 	}
 	return s
 }

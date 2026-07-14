@@ -207,8 +207,156 @@ func TestParseUnifiedDiffQuotedDelete(t *testing.T) {
 		"+++ /dev/null\n" +
 		"@@ -1,2 +0,0 @@\n"
 	f := findFile(parseUnifiedDiff(sample), "naïve.txt")
-	if f == nil || f.Status != "D" {
+	if f == nil || f.Status != "D" || f.DeletedLines != 2 {
 		t.Errorf("quoted-path delete should be reported (status D, unquoted path), got %+v", parseUnifiedDiff(sample))
+	}
+}
+
+func TestParseUnifiedDiffPreservesPureDeletionCount(t *testing.T) {
+	sample := "diff --git a/f.go b/f.go\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/f.go\n" +
+		"+++ b/f.go\n" +
+		"@@ -5,3 +4,0 @@ func Removed() {\n" +
+		"-func Removed() {\n" +
+		"-  work()\n" +
+		"-}\n"
+	f := findFile(parseUnifiedDiff(sample), "f.go")
+	if f == nil {
+		t.Fatal("f.go should be reported")
+	}
+	if len(f.Hunks) != 0 || f.DeletedLines != 3 {
+		t.Fatalf("pure-deletion metadata = hunks:%+v deleted_lines:%d, want no post-image hunk and 3 deleted lines", f.Hunks, f.DeletedLines)
+	}
+}
+
+func TestParseUnifiedDiffDetectsDefinitionRemovedByMixedHunk(t *testing.T) {
+	sample := "diff --git a/f.go b/f.go\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/f.go\n" +
+		"+++ b/f.go\n" +
+		"@@ -3,2 +3 @@\n" +
+		"-func Keep() {}\n" +
+		"-func Removed() {}\n" +
+		"+func Keep() { work() }\n"
+	f := findFile(parseUnifiedDiff(sample), "f.go")
+	if f == nil || len(f.Hunks) != 1 || f.DeletedLines != 0 || len(f.RemovedDefinitions) != 1 || f.RemovedDefinitions[0] != "callable:Removed" {
+		t.Fatalf("mixed definition-removal metadata = %+v", f)
+	}
+}
+
+func TestParseUnifiedDiffShrinkingBodyEditIsNotDefinitionLoss(t *testing.T) {
+	sample := "diff --git a/f.go b/f.go\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/f.go\n" +
+		"+++ b/f.go\n" +
+		"@@ -4,3 +4,2 @@ func Keep() {\n" +
+		"-  first()\n" +
+		"-  second()\n" +
+		"-  third()\n" +
+		"+  first(); second()\n" +
+		"+  third()\n"
+	f := findFile(parseUnifiedDiff(sample), "f.go")
+	if f == nil || len(f.Hunks) != 1 || f.DeletedLines != 0 || len(f.RemovedDefinitions) != 0 {
+		t.Fatalf("shrinking body edit metadata = %+v, want one mapped hunk without definition loss", f)
+	}
+}
+
+func TestParseUnifiedDiffDetectsEqualCountDefinitionReplacement(t *testing.T) {
+	sample := "diff --git a/f.go b/f.go\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/f.go\n" +
+		"+++ b/f.go\n" +
+		"@@ -3 +3 @@\n" +
+		"-func Removed() {}\n" +
+		"+func New() {}\n"
+	f := findFile(parseUnifiedDiff(sample), "f.go")
+	if f == nil || f.DeletedLines != 0 || len(f.RemovedDefinitions) != 1 || f.RemovedDefinitions[0] != "callable:Removed" {
+		t.Fatalf("definition replacement metadata = %+v", f)
+	}
+
+	signatureEdit := strings.ReplaceAll(sample, "Removed", "Keep")
+	signatureEdit = strings.ReplaceAll(signatureEdit, "New", "Keep")
+	if edited := findFile(parseUnifiedDiff(signatureEdit), "f.go"); edited == nil || len(edited.RemovedDefinitions) != 0 {
+		t.Fatalf("same-definition edit must not look removed: %+v", edited)
+	}
+
+	typeSample := "diff --git a/f.go b/f.go\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/f.go\n" +
+		"+++ b/f.go\n" +
+		"@@ -3 +3 @@\n" +
+		"-type Old struct{}\n" +
+		"+type New struct{}\n"
+	typeFile := findFile(parseUnifiedDiff(typeSample), "f.go")
+	if typeFile == nil || len(typeFile.RemovedDefinitions) != 1 || typeFile.RemovedDefinitions[0] != "type:Old" {
+		t.Fatalf("type replacement metadata = %+v", typeFile)
+	}
+}
+
+func TestParseUnifiedDiffDetectsTypeScriptArrowReplacement(t *testing.T) {
+	sample := "diff --git a/widget.ts b/widget.ts\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/widget.ts\n" +
+		"+++ b/widget.ts\n" +
+		"@@ -3 +3 @@\n" +
+		"-export const removed = () => 1\n" +
+		"+export const added = () => 2\n"
+	f := findFile(parseUnifiedDiff(sample), "widget.ts")
+	if f == nil || len(f.RemovedDefinitions) != 1 || f.RemovedDefinitions[0] != "callable:removed" {
+		t.Fatalf("TypeScript arrow replacement metadata = %+v", f)
+	}
+
+	// Indented bindings can still be module-level TypeScript or root bindings in
+	// an indented Vue <script setup> block. The diff lacks lexical scope, so the
+	// safe behavior is to keep this removal visible rather than false-pass a gate.
+	indented := strings.ReplaceAll(sample, "export const removed", "  const removed")
+	indented = strings.ReplaceAll(indented, "export const added", "  const added")
+	if edited := findFile(parseUnifiedDiff(indented), "widget.ts"); edited == nil || len(edited.RemovedDefinitions) != 1 || edited.RemovedDefinitions[0] != "callable:removed" {
+		t.Fatalf("indented arrow replacement metadata = %+v", edited)
+	}
+}
+
+func TestDeclarationKeyRecognizesGenericGoReceiver(t *testing.T) {
+	if got := declarationKey("func (r Receiver[T]) Removed() {}"); got != "method:Receiver.Removed" {
+		t.Fatalf("generic receiver declaration key = %q, want method:Receiver.Removed", got)
+	}
+}
+
+func TestParseUnifiedDiffExactRename(t *testing.T) {
+	sample := "diff --git a/old/a.go b/new/a.go\n" +
+		"similarity index 100%\n" +
+		"rename from old/a.go\n" +
+		"rename to new/a.go\n"
+	f := findFile(parseUnifiedDiff(sample), "new/a.go")
+	if f == nil || !f.Renamed || f.OldPath != "old/a.go" || f.Status != "M" || len(f.Hunks) != 0 {
+		t.Fatalf("exact rename metadata = %+v", f)
+	}
+}
+
+func TestChangedFilesExactCrossDirectoryRename(t *testing.T) {
+	dir := initRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, "old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "old/a.go", "package app\n\nfunc Run() {}\n")
+	gitCmd(t, dir, "add", "-A")
+	gitCmd(t, dir, "commit", "-m", "base")
+	gitCmd(t, dir, "config", "diff.renames", "false") // command flag must override user/repo config
+	if err := os.MkdirAll(filepath.Join(dir, "new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "old", "a.go"), filepath.Join(dir, "new", "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, dir, "add", "-A")
+	files, err := ChangedFiles(context.Background(), dir, "working", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := findFile(files, "new/a.go")
+	if f == nil || !f.Renamed || f.OldPath != "old/a.go" {
+		t.Fatalf("cross-directory rename = %+v; files=%+v", f, files)
 	}
 }
 
@@ -273,8 +421,8 @@ index 4444444..0000000
 	if e := findFile(files, "edit.go"); e == nil || e.Status != "M" || !e.Hunks[0].Overlaps(11, 12) {
 		t.Errorf("edit.go = %+v, want status M with a hunk near lines 10-12", e)
 	}
-	if g := findFile(files, "gone.go"); g == nil || g.Status != "D" || len(g.Hunks) != 0 {
-		t.Errorf("gone.go = %+v, want status D, no hunks", g)
+	if g := findFile(files, "gone.go"); g == nil || g.Status != "D" || len(g.Hunks) != 0 || g.DeletedLines != 2 {
+		t.Errorf("gone.go = %+v, want status D, no hunks, 2 deleted lines", g)
 	}
 }
 

@@ -1,14 +1,41 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
+
+// LoadError identifies the configuration source and operation that failed.
+// Environment parse errors intentionally omit the rejected value: config may
+// contain credentials, and startup diagnostics must never echo them.
+type LoadError struct {
+	Operation   string
+	Path        string
+	Environment string
+	Err         error
+}
+
+func (e *LoadError) Error() string {
+	if e.Environment != "" {
+		return fmt.Sprintf("%s config environment variable %s: %v", e.Operation, e.Environment, e.Err)
+	}
+	return fmt.Sprintf("%s config file %s: %v", e.Operation, e.Path, e.Err)
+}
+
+// Unwrap lets callers distinguish filesystem and parsing failures with
+// errors.Is/errors.As without depending on the human-readable message.
+func (e *LoadError) Unwrap() error { return e.Err }
 
 // Config is the resolved codemap configuration.
 type Config struct {
@@ -48,7 +75,8 @@ type FusionWeightsConfig struct {
 	NaturalLanguage FusionWeightPair `yaml:"natural_language"`
 }
 
-// FusionWeightPair is one profile's veclite HybridSearch weights.
+// FusionWeightPair is one profile's veclite HybridSearch weights. Zero uses
+// the hybrid search implementation's default weight for that channel.
 type FusionWeightPair struct {
 	Vector float64 `yaml:"vector"`
 	Text   float64 `yaml:"text"`
@@ -64,12 +92,12 @@ type VecgrepConfig struct {
 
 // DaemonConfig tunes the background daemon (`codemap daemon`).
 type DaemonConfig struct {
-	DebounceMS       int     `yaml:"debounce_ms"`         // watcher debounce (default 500)
+	DebounceMS       int     `yaml:"debounce_ms"`         // watcher debounce (default 500; 0 uses default)
 	IdleTimeoutMin   int     `yaml:"idle_timeout_min"`    // idle-shutdown after N minutes (0 = never)
 	Precise          bool    `yaml:"precise"`             // keep exact call edges current after watched edits
 	EmbedRPS         float64 `yaml:"embed_rps"`           // background embed rate to Ollama (0 = unlimited)
-	EmbedMaxInFlight int     `yaml:"embed_max_in_flight"` // max concurrent embed calls (default 2)
-	EmbedCacheSize   int     `yaml:"embed_cache_size"`    // dedup cache entries (default 4096)
+	EmbedMaxInFlight int     `yaml:"embed_max_in_flight"` // max concurrent embed calls (default 2; 0 uses default)
+	EmbedCacheSize   int     `yaml:"embed_cache_size"`    // dedup cache entries (default 4096; 0 uses default)
 }
 
 // EmbeddingConfig controls how node source text is turned into vectors.
@@ -91,7 +119,7 @@ type EmbeddingConfig struct {
 
 // IndexConfig controls what gets indexed.
 type IndexConfig struct {
-	MaxFileBytes int `yaml:"max_file_bytes"` // skip files larger than this
+	MaxFileBytes int `yaml:"max_file_bytes"` // skip files larger than this (0 = no limit)
 	// Exclude fully REPLACES the built-in default skip list (.git, node_modules,
 	// vendor, …). Set it only to override those defaults wholesale. A pattern
 	// without a slash matches any path segment ("migrations" skips a migrations
@@ -106,9 +134,9 @@ type IndexConfig struct {
 	// restating the defaults. Same glob semantics as Exclude.
 	ExcludeExtra []string `yaml:"exclude_extra"`
 	// EmbedBatchSize is how many node texts are sent to the embedder per request
-	// (default 64). EmbedConcurrency is how many such requests run at once (default
-	// 4). Embedding dominates a reindex; batching + concurrency is the main speedup
-	// (and a large one for network providers — openai/cohere/voyage).
+	// (default 64; 0 uses the default). EmbedConcurrency is how many such requests
+	// run at once (default 4; 0 uses the default). Embedding dominates a reindex;
+	// batching + concurrency is the main speedup for remote endpoints.
 	EmbedBatchSize   int `yaml:"embed_batch_size"`
 	EmbedConcurrency int `yaml:"embed_concurrency"`
 	// ExtractConcurrency is how many Go files are extracted in parallel (default
@@ -211,13 +239,19 @@ func Load(explicitPath string) (*Config, error) {
 	if root, err := FindProjectRoot(""); err == nil {
 		for _, name := range []string{"codemap.yaml", "codemap.yml", filepath.Join(".config", "codemap.yaml")} {
 			path := filepath.Join(root, name)
-			if _, statErr := os.Stat(path); statErr == nil {
+			exists, statErr := configFileExists(path)
+			if statErr != nil {
+				return nil, statErr
+			}
+			if exists {
 				if err := mergeFile(cfg, path); err != nil {
 					return nil, err
 				}
 				break // first match wins
 			}
 		}
+	} else if !errors.Is(err, ErrNoProject) {
+		return nil, err
 	}
 
 	// 3. explicit file (--config flag or CODEMAP_CONFIG)
@@ -231,7 +265,9 @@ func Load(explicitPath string) (*Config, error) {
 	}
 
 	// 4. environment overrides (highest precedence)
-	applyEnv(cfg)
+	if err := applyEnv(cfg); err != nil {
+		return nil, err
+	}
 
 	// P1-12 (B68/O72): validate the resolved config so silent bad
 	// values (unsupported provider, invalid distance, zero dims)
@@ -261,8 +297,40 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("embedding distance %q is not a valid value; use cosine, dot, or euclidean", c.Embedding.Distance)
 	}
-	if c.Embedding.Dimensions < 0 {
-		return fmt.Errorf("embedding dimensions must be >= 0 (0 = auto-detect from the model)")
+	for _, setting := range []struct {
+		name        string
+		value       int
+		zeroMeaning string
+	}{
+		{name: "embedding.dimensions", value: c.Embedding.Dimensions, zeroMeaning: "0 = auto-detect from the model"},
+		{name: "index.max_file_bytes", value: c.Index.MaxFileBytes, zeroMeaning: "0 = no size limit"},
+		{name: "index.embed_batch_size", value: c.Index.EmbedBatchSize, zeroMeaning: "0 = use the default"},
+		{name: "index.embed_concurrency", value: c.Index.EmbedConcurrency, zeroMeaning: "0 = use the default"},
+		{name: "index.extract_concurrency", value: c.Index.ExtractConcurrency, zeroMeaning: "0 = use the default"},
+		{name: "index.embed_max_chars", value: c.Index.EmbedMaxChars, zeroMeaning: "0 = no text cap"},
+		{name: "daemon.debounce_ms", value: c.Daemon.DebounceMS, zeroMeaning: "0 = use the default"},
+		{name: "daemon.idle_timeout_min", value: c.Daemon.IdleTimeoutMin, zeroMeaning: "0 = never shut down for idleness"},
+		{name: "daemon.embed_max_in_flight", value: c.Daemon.EmbedMaxInFlight, zeroMeaning: "0 = use the default"},
+		{name: "daemon.embed_cache_size", value: c.Daemon.EmbedCacheSize, zeroMeaning: "0 = use the default"},
+	} {
+		if err := validateNonNegativeInt(setting.name, setting.value, setting.zeroMeaning); err != nil {
+			return err
+		}
+	}
+	for _, setting := range []struct {
+		name        string
+		value       float64
+		zeroMeaning string
+	}{
+		{name: "daemon.embed_rps", value: c.Daemon.EmbedRPS, zeroMeaning: "0 = unlimited"},
+		{name: "semantic.fusion_weights.identifier.vector", value: c.Semantic.FusionWeights.Identifier.Vector, zeroMeaning: "0 = use the hybrid-search default"},
+		{name: "semantic.fusion_weights.identifier.text", value: c.Semantic.FusionWeights.Identifier.Text, zeroMeaning: "0 = use the hybrid-search default"},
+		{name: "semantic.fusion_weights.natural_language.vector", value: c.Semantic.FusionWeights.NaturalLanguage.Vector, zeroMeaning: "0 = use the hybrid-search default"},
+		{name: "semantic.fusion_weights.natural_language.text", value: c.Semantic.FusionWeights.NaturalLanguage.Text, zeroMeaning: "0 = use the hybrid-search default"},
+	} {
+		if err := validateNonNegativeFinite(setting.name, setting.value, setting.zeroMeaning); err != nil {
+			return err
+		}
 	}
 	switch c.Semantic.Fusion {
 	case "auto", "balanced", "":
@@ -292,27 +360,76 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+func validateNonNegativeInt(name string, value int, zeroMeaning string) error {
+	if value < 0 {
+		return fmt.Errorf("%s must be >= 0 (%s)", name, zeroMeaning)
+	}
+	return nil
+}
+
+func validateNonNegativeFinite(name string, value float64, zeroMeaning string) error {
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("%s must be a finite number >= 0 (%s)", name, zeroMeaning)
+	}
+	return nil
+}
+
 // mergeFile reads a YAML file and overlays its keys onto cfg. Keys absent from
 // the file keep their current (default/lower-precedence) value.
 func mergeFile(cfg *Config, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read config %s: %w", path, err)
+		return &LoadError{Operation: "read", Path: path, Err: err}
 	}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return fmt.Errorf("parse config %s: %w", path, err)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(cfg); errors.Is(err, io.EOF) {
+		return nil // empty/comment-only files preserve lower-precedence values
+	} else if err != nil {
+		return &LoadError{Operation: "parse", Path: path, Err: err}
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple YAML documents are not supported")
+		}
+		return &LoadError{Operation: "parse", Path: path, Err: err}
 	}
 	return nil
 }
 
 func mergeFileIfExists(cfg *Config, path string) error {
-	if _, err := os.Stat(path); err != nil {
-		return nil //nolint:nilerr // missing file is not an error
+	exists, err := configFileExists(path)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
 	}
 	return mergeFile(cfg, path)
 }
 
-func applyEnv(cfg *Config) {
+func configFileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case isOptionalPathAbsent(err):
+		return false, nil
+	default:
+		return false, &LoadError{Operation: "inspect", Path: path, Err: err}
+	}
+}
+
+// isOptionalPathAbsent treats ENOTDIR like ENOENT for optional layered config
+// probes. This matters for the nested .config/codemap.yaml marker: a project is
+// allowed to have a regular file named .config and a later valid .codemap
+// marker. Explicit config paths bypass this helper and still fail on ENOTDIR.
+func isOptionalPathAbsent(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
+}
+
+func applyEnv(cfg *Config) error {
 	if v := os.Getenv("CODEMAP_EMBEDDING_PROVIDER"); v != "" {
 		cfg.Embedding.Provider = v
 	}
@@ -325,38 +442,38 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("CODEMAP_OLLAMA_API_KEY"); v != "" {
 		cfg.Embedding.APIKey = v
 	}
-	if v := os.Getenv("CODEMAP_EMBEDDING_DIMENSIONS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Embedding.Dimensions = n
-		}
+	if n, set, err := envInt("CODEMAP_EMBEDDING_DIMENSIONS"); err != nil {
+		return err
+	} else if set {
+		cfg.Embedding.Dimensions = n
 	}
 	if v := os.Getenv("CODEMAP_EMBEDDING_DISTANCE"); v != "" {
 		cfg.Embedding.Distance = v
 	}
-	if v := os.Getenv("CODEMAP_DAEMON_DEBOUNCE_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Daemon.DebounceMS = n
-		}
+	if n, set, err := envInt("CODEMAP_DAEMON_DEBOUNCE_MS"); err != nil {
+		return err
+	} else if set {
+		cfg.Daemon.DebounceMS = n
 	}
-	if v := os.Getenv("CODEMAP_DAEMON_IDLE_TIMEOUT_MIN"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Daemon.IdleTimeoutMin = n
-		}
+	if n, set, err := envInt("CODEMAP_DAEMON_IDLE_TIMEOUT_MIN"); err != nil {
+		return err
+	} else if set {
+		cfg.Daemon.IdleTimeoutMin = n
 	}
-	if v := os.Getenv("CODEMAP_DAEMON_PRECISE"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Daemon.Precise = b
-		}
+	if b, set, err := envBool("CODEMAP_DAEMON_PRECISE"); err != nil {
+		return err
+	} else if set {
+		cfg.Daemon.Precise = b
 	}
-	if v := os.Getenv("CODEMAP_DAEMON_EMBED_RPS"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Daemon.EmbedRPS = f
-		}
+	if f, set, err := envFloat("CODEMAP_DAEMON_EMBED_RPS"); err != nil {
+		return err
+	} else if set {
+		cfg.Daemon.EmbedRPS = f
 	}
-	if v := os.Getenv("CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Daemon.EmbedMaxInFlight = n
-		}
+	if n, set, err := envInt("CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT"); err != nil {
+		return err
+	} else if set {
+		cfg.Daemon.EmbedMaxInFlight = n
 	}
 	if v := os.Getenv("CODEMAP_EXCLUDE_EXTRA"); v != "" {
 		for _, p := range strings.Split(v, ",") {
@@ -365,30 +482,30 @@ func applyEnv(cfg *Config) {
 			}
 		}
 	}
-	if v := os.Getenv("CODEMAP_EMBED_BATCH_SIZE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Index.EmbedBatchSize = n
-		}
+	if n, set, err := envInt("CODEMAP_EMBED_BATCH_SIZE"); err != nil {
+		return err
+	} else if set {
+		cfg.Index.EmbedBatchSize = n
 	}
-	if v := os.Getenv("CODEMAP_EMBED_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Index.EmbedConcurrency = n
-		}
+	if n, set, err := envInt("CODEMAP_EMBED_CONCURRENCY"); err != nil {
+		return err
+	} else if set {
+		cfg.Index.EmbedConcurrency = n
 	}
-	if v := os.Getenv("CODEMAP_EXTRACT_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Index.ExtractConcurrency = n
-		}
+	if n, set, err := envInt("CODEMAP_EXTRACT_CONCURRENCY"); err != nil {
+		return err
+	} else if set {
+		cfg.Index.ExtractConcurrency = n
 	}
-	if v := os.Getenv("CODEMAP_EMBED_MAX_CHARS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.Index.EmbedMaxChars = n
-		}
+	if n, set, err := envInt("CODEMAP_EMBED_MAX_CHARS"); err != nil {
+		return err
+	} else if set {
+		cfg.Index.EmbedMaxChars = n
 	}
-	if v := os.Getenv("CODEMAP_VECGREP_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.Vecgrep.Enabled = b
-		}
+	if b, set, err := envBool("CODEMAP_VECGREP_ENABLED"); err != nil {
+		return err
+	} else if set {
+		cfg.Vecgrep.Enabled = b
 	}
 	if v := os.Getenv("CODEMAP_VECGREP_BIN"); v != "" {
 		cfg.Vecgrep.Bin = v
@@ -401,6 +518,51 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CODEMAP_MCP_PROFILE"); v != "" {
 		cfg.MCP.Profile = v
+	}
+	return nil
+}
+
+func envInt(name string) (int, bool, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return 0, false, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, true, invalidEnv(name, "must be a base-10 integer")
+	}
+	return n, true, nil
+}
+
+func envBool(name string) (bool, bool, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return false, false, nil
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, true, invalidEnv(name, "must be a boolean (true/false, t/f, or 1/0)")
+	}
+	return b, true, nil
+}
+
+func envFloat(name string) (float64, bool, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return 0, false, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, true, invalidEnv(name, "must be a finite number")
+	}
+	return f, true, nil
+}
+
+func invalidEnv(name, requirement string) error {
+	return &LoadError{
+		Operation:   "parse",
+		Environment: name,
+		Err:         errors.New(requirement),
 	}
 }
 

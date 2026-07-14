@@ -1,9 +1,26 @@
+---
+description: Complete codemap CLI reference for indexing, navigation, impact analysis, search, caching, and automation.
+---
+
 # CLI
 
 The full `codemap` command reference — for people running it by hand and for scripts/CI
 piping `--json`. New here? Start with [Quick Start](/quick-start); wiring an agent instead
 of a terminal? See [codemap for agents](/agents) and the [MCP server](/mcp). Every query
 command below accepts `--json` for machine-readable output.
+
+## Global options
+
+These persistent options can be placed before or after a subcommand:
+
+| Option | Description |
+|---|---|
+| `-C, --path <dir>` | Run against a project directory instead of the current working directory; this is the CLI counterpart of MCP's uniform `path` input. |
+| `-c, --config <file>` | Load a specific config file instead of the normal precedence chain. |
+| `--json` | Emit machine-readable report output and structured failure envelopes where the command has a JSON contract. |
+| `--embed-provider ollama` | Override the embedding provider (currently only Ollama). |
+| `--embed-model <name>` / `--ollama-url <url>` | Override the embedding model or Ollama endpoint. |
+| `--embed-dimensions <n>` / `--embed-distance <cosine\|dot\|euclidean>` | Override the vector profile; changing either on an existing collection requires a reindex. |
 
 ## Project management
 
@@ -13,7 +30,7 @@ anything else.
 | Command | Description |
 |---|---|
 | `codemap init [--local]` | Register the current directory as a project |
-| `codemap index [--reindex] [--no-embed] [--no-lsp] [--precise] [--watch] [--via-vault <project>]` | Index (incremental — re-indexes changed files and prunes deleted ones); `--reindex` rebuilds, `--no-embed` skips embeddings, `--no-lsp` skips the language-server backend (Go is still indexed via `go/parser`; TS/JS/Python/Vue SFC files are skipped — no `typescript-language-server`/`pyright` spawned), `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy; Vue SFCs get symbols + `defines` edges only, no call graph yet), `--watch` hands off to the [background daemon](#background-daemon) after indexing once, `--via-vault` re-execs inside `tvault run` so language servers get private-registry creds (see [secret-impact](#analysis) / [ecosystem](/ecosystem)) |
+| `codemap index [--reindex] [--no-embed] [--no-lsp] [--precise] [--watch] [--via-vault <project>] [--cache=<bool>] [--no-tips]` | Index (incremental — re-indexes changed files and prunes deleted ones); `--reindex` rebuilds, `--no-embed` skips embeddings, `--no-lsp` skips the language-server backend (Go is still indexed via `go/parser`; TS/JS/Python/Vue SFC files are skipped — no `typescript-language-server`/`pyright` spawned), `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy; Vue SFCs get symbols + `defines` edges only, no call graph yet), `--watch` hands off to the [background daemon](#background-daemon) after indexing once, `--via-vault` re-execs inside `tvault run` so language servers get private-registry creds (see [secret-impact](#analysis) / [ecosystem](/ecosystem)), `--cache=false` disables best-effort fcheap restore/save, and `--no-tips` suppresses post-index advice for scripts/CI |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds), plus **index freshness** — warns when files have changed/been added/removed since the last index (a `stale` field in `--json`), so you know to reindex before trusting queries. Also reports a running [background daemon](#background-daemon) (a `daemon` object in `--json`) |
 | `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python, Vue SFC via the same `typescript-language-server`), Ollama embeddings, and the [background daemon](#background-daemon) — with install hints (`--json`) |
 | `codemap projects` | List all registered projects and their index sizes |
@@ -22,6 +39,10 @@ anything else.
 | `codemap export-symbols [--offset N] [--limit N] [--max-content-bytes N] --json` | Export deterministic, paginated structural records under `codemap.structural-export.v1`: a contiguous global ordinal, durable selectors, hashes, signature/doc, and bounded current content. Stale/missing/unsafe content is omitted explicitly. This is the CLI-only boundary consumed by vecgrep `structural_chunks` modes `auto`, `off`, and `required`; it never shares codemap's DB or Go packages. |
 | `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`) |
 | `codemap annotations [<sym> \| <from> <to>]` | List annotations (all/node/path); `--rm <id>` to remove |
+
+Index-specific configuration overrides are also available as flags: `--exclude`,
+`--exclude-extra`, `--max-file-bytes`, `--embed-batch-size`, `--embed-concurrency`, and
+`--embed-max-chars`. See [Configuration](/configuration) for precedence and semantics.
 
 ## Configuration introspection
 
@@ -50,7 +71,7 @@ calls, where it's registered, and how it connects to another symbol.
 | `codemap references <symbol>` | Places a function/method is used as a value rather than called — callbacks, handlers, and registrations. `--at file:line` selects one definition; JSON reports bounded sites plus totals, partial/unavailable coverage, stale state, and confirmed/candidate confidence. The stored edge identifies the enclosing symbol or file, not the exact expression column. |
 | `codemap path <from> <to>` | Shortest call path between two symbols. Unique FQNs such as `app.Controller.Run` and `app.Store.Save` select exact endpoints; human output always reports `call_graph` confidence and any resolution/staleness warning. |
 | `codemap symbols <file>` | Outline a file's symbols with their signatures (a structured alternative to reading it) |
-| `codemap symbol-at <file>:<line>` | Resolve a file:line position to its enclosing symbol (FQN, kind, range, reusable selector). The `indexed` field in `--json` distinguishes an unindexed project (`indexed:false`) from a real miss (`indexed:true`, `resolution:none`). `callers`, `callees`, `source`, `context`, `impact`, and `risk` also accept `--at` to select that exact definition. |
+| `codemap symbol-at <file>:<line> [<file>:<line>...]` | Resolve one or more positions to their enclosing symbols (FQN, kind, range, reusable selector). Multiple positions are batched in one call; at most the first 25 are resolved and an over-limit response includes a note. The `indexed` field in `--json` distinguishes an unindexed project (`indexed:false`) from a real miss (`indexed:true`, `resolution:none`). `callers`, `callees`, `source`, `context`, `impact`, and `risk` also accept `--at` to select one exact definition. |
 | `codemap related-files <file>` | Files related to a file via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence |
 | `codemap source <symbol> [--brief]` | Print source for matching definitions; use `--at <file>:<line>` for exactly one. `--brief` drops each match's body (keeping signature/doc/location) and sets `source_omitted:true` in `--json` — a cheaper first look at a hub definition |
 | `codemap context <symbol> [<symbol>...] [--depth N] [--brief]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, value-reference wiring, covering tests + runnable `test_commands`, blast-radius size, and pinned annotations. Uses the indexed graph only (never launches a language server implicitly); unresolved relationships stay explicit. Replaces separate `source`/`callers`/`callees`/`references`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling) — each result carries its own `test_commands`. Batch source bodies share a 64 KiB budget disclosed by `source_budget`/`source_truncations`; optional component failures appear in `partial_errors` without discarding usable context. `--brief` drops every definition's source body (keeping signature/doc/location, `source_omitted:true`) — the token-diet follow-up for a hub symbol whose context feels heavy; everything else in the bundle is unchanged. |
@@ -58,10 +79,12 @@ calls, where it's registered, and how it connects to another symbol.
 The fast default uses the indexed graph (name-based resolution; same-named methods can over-match,
 e.g. `callers Close` lists callers of every `Close`). **The best fix is to reindex once with
 `codemap index --precise`** — the unified exact-resolution pass (a pure-Go go/types pass for Go,
-`typescript-language-server` callHierarchy for TypeScript). Successful coverage is recorded per file;
+`typescript-language-server` callHierarchy for TypeScript/JavaScript, and pyright callHierarchy for
+Python). Successful coverage is recorded per file;
 a query is `resolved` only when all matched definition files completed the pass, while partial
-failures remain `name`/`unresolved`. (TypeScript has no name-based call edges, so `--precise` is what
-gives covered TS files a call graph.) For a one-off exact answer without
+failures remain `name`/`unresolved`. (TypeScript, JavaScript, and Python have no name-based call
+edges, so `--precise` is what gives covered files a call graph.) Vue SFCs currently provide script-block
+symbols and `defines` edges only; precise indexing does not add Vue call edges yet. For a one-off exact answer without
 reindexing, `callers`/`callees` accept `--precise`; it degrades to the indexed graph with a note
 when the language server isn't available — never a hard error. The old `--lsp` spelling remains a
 hidden compatibility alias, but new scripts and people should use `--precise`.
@@ -171,8 +194,8 @@ One command wires codemap into an AI coding harness — no hand-editing MCP conf
 
 | Command | Description |
 |---|---|
-| `codemap agent list` | List known harnesses (Claude Code, Cursor, Codex, Gemini, Cline/Roo, Zed, VS Code, OpenCode, aider), whether each is detected here, and if codemap is already registered (`--json`) |
-| `codemap agent setup <harness>` | Merge the codemap MCP server into the harness's native config and drop the canonical playbook into its guidance file (`.cursor/rules/*.mdc`, `AGENTS.md`, `GEMINI.md`, …). Never clobbers other servers or your prose. Flags: `--global` (user-level config where the harness has one), `--dry-run` (print planned writes, change nothing), `--no-playbook` (MCP registration only) |
+| `codemap agent list` | List known harnesses (Claude Code, Cursor, Codex, Gemini, Cline/Roo, Zed, VS Code, OpenCode, aider, and the `agents-md` fallback), whether each is detected here, and if codemap is already registered (`--json`) |
+| `codemap agent setup <harness>` | Merge the codemap MCP server into the harness's native config and drop the canonical playbook into its guidance file (`.cursor/rules/*.mdc`, `AGENTS.md`, `GEMINI.md`, …). Never clobbers other servers or your prose. The `agents-md` fallback is deliberately playbook-only: it updates the marked block in `AGENTS.md` for any AGENTS.md-reading harness without registering MCP. Flags: `--global` (user-level config where the harness has one), `--dry-run` (print planned writes, change nothing), `--no-playbook` (MCP registration only) |
 | `codemap agent playbook [--format markdown\|markdown-cli\|claude-skill\|cursor-rule]` | Print the canonical "when to use codemap" playbook, for wiring an unlisted harness by hand |
 
 ## Branches & caching
@@ -299,24 +322,43 @@ agent can execute the selected regressions without deriving runner syntax. The
 `codemap_review` MCP tool returns the same JSON. Every successful review document emits
 `schema_version: 1`; the authoritative Draft 2020-12 contract is
 `schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case:
-`{schema_version, changed_symbols, blast_radius, covering_tests, test_commands,
+`{schema_version, changed_symbols, analysis_complete, total_symbols, analyzed_symbols,
+truncated_symbols, partial_errors, blast_radius, covering_tests, test_commands,
 untested_symbols, hotspots, stale, resolution, call_graph, risk, next}`. Version 1 permits
 additive optional properties but does not rename or repurpose existing fields. The command
 degrades gracefully (a plain changed-file list with a note) when the project isn't indexed or
 isn't a git repo; hard-failure error envelopes are separate from the success schema.
 
+`analysis_complete` is false when the index is stale, a supporting stage fails, an individual
+symbol cannot be analyzed, deleted definitions are unavailable, or the 200-symbol work cap omits part of the
+diff. Fresh indexed untracked source files and exact source-file renames are mapped as whole files
+because they have no post-image hunks; an empty renamed source file remains partial. Documentation,
+assets, and configuration files stay visible in `changed_files` but do not create structural mapping errors. Compare `total_symbols`,
+`analyzed_symbols`, and `truncated_symbols`; bounded
+`partial_errors` entries carry stable `stage`/`code` fields plus an actionable message. An
+incomplete review's aggregate `risk.level` is always `unknown`, even when the successfully
+analyzed subset produced a numeric score. Mapping-stage codes distinguish a failed symbol lookup
+(`symbol_mapping_failed`), a structural-source pure-deletion hunk with no post-image line range
+(`deletion_only_hunk` or `deletion_hunk_unmapped` when the file also has mapped hunks), a recognized
+callable or type declaration line removed from structural source by a mixed/equal-count hunk
+(`removed_definition_unavailable`), and an exact structural-source rename whose new path has no
+indexed symbols (`rename_unmapped`). These signals prevent a
+successfully mapped post-image subset from hiding old definitions that review could not analyze.
+
 **`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`references`/`review`/`context`/
-`hotspots`/`orphans`/`path`
+`hotspots`/`orphans`/`path`/`map`/`traverse`
 tells a consumer how much to trust the call graph without parsing prose: `resolved`
 (every matched definition file has precise coverage), `name` (Go name-based — same-named methods may over-match), `unresolved`
-(TS/JS/Python/Vue without `--precise` — callers/blast/tests are unknown, not absent),
+(TS/JS/Python without successful precise coverage, or Vue whose call graph is not supported yet — callers/blast/tests are unknown, not absent),
 `none` (no matching symbol). The free-form `resolution` sentence stays for humans.
 
 **`risk`** on `review` is one band for the whole diff — `level` (unknown/low/medium/high),
 `score` (0..1), and `factors` (`untested_changes`/`hotspot_fanin`/`cross_package`/
 `ambiguity`/`unresolved`) folded from every changed symbol — so a harness can gate
-verification on one call instead of fanning `risk` out per symbol. Absent when the diff
-maps to no indexed symbols. `unknown` means one or more changed symbols lacks a usable call graph.
+verification on one call instead of fanning `risk` out per symbol. It is absent for a complete
+zero-symbol diff and early no-repository/no-index degradation; a finalized incomplete indexed
+review emits `unknown` even when no symbol could be mapped safely. `unknown` also covers a changed
+symbol whose call graph is unavailable.
 
 ### Gating a commit or script
 
@@ -329,14 +371,25 @@ first-class exit code instead:
 
 - `--fail-on-risk <low|medium|high>` — after printing the normal output
   (unchanged), exit **6** if the risk level's ordinal is at or above the
-  threshold (`low` ≤ `medium` ≤ `high`). `level:"unknown"` **never** trips
-  this, at any threshold — the same honesty rule as everywhere else: an
-  unresolved call graph is not evidence of risk, so a repo indexed without
-  `--precise` can't spuriously fail a gate. Available on both `review`
+  threshold (`low` ≤ `medium` ≤ `high`). On a complete report,
+  `level:"unknown"` does not trip this risk comparison: an unresolved call
+  graph is not evidence of risk, so a repo indexed without `--precise` cannot
+  spuriously fail a risk threshold. Available on both `review`
   (gates the aggregate diff-wide `risk` band) and `risk` (gates one symbol).
 - `--fail-on-untested` — after printing the normal output (unchanged), exit
-  **6** if `untested_symbols` is non-empty. `review` only (there is no
-  untested-*symbols* list on `risk`, which reports one symbol at a time).
+  **6** if `untested_symbols` is non-empty, or if mapped symbols have an
+  `unresolved`/`none` call graph and test coverage therefore cannot be established.
+  An empty list is not proof of coverage when relationships are unknown. `review`
+  only (there is no untested-*symbols* list on `risk`, which reports one symbol at a time).
+
+For `review`, enabling **either** gate also requires a complete analysis. An
+indexed Git repository with `analysis_complete:false` exits **6** before policy
+comparison, even though its aggregate risk is honestly `unknown`; otherwise a
+stale or partially mapped diff could pass because the evidence needed to enforce
+the gate is missing. With both flags disabled, the same incomplete report remains
+reporting-only and exits `0`. Early graceful reports for a non-Git directory or a
+project with no indexed nodes (including `codemap init` without `codemap index`)
+also remain nonblocking and exit `0`.
 
 The gate is **exit-code-only**: under `--json` the body printed is the exact
 same success envelope you'd get without the flag (`ok`/`error`/`code` never
@@ -347,8 +400,8 @@ run the same command it already runs for output and just also check `$?`.
 A ready-made [pre-commit](https://pre-commit.com) hook packages the common
 case — see [`.pre-commit-hooks.yaml`](https://github.com/abdul-hamid-achik/codemap/blob/main/.pre-commit-hooks.yaml)
 and the [pre-commit section of the CI guide](/ci#pre-commit) for the trade-offs
-(name-based resolution for speed; degrades to exit 0 on an unindexed or
-non-git project so a missing index never blocks a commit).
+(name-based resolution for speed; a non-Git or never-indexed project degrades to
+exit `0`, while an existing but stale/partial index fails closed until refreshed).
 
 ### Machine-readable errors + exit codes
 

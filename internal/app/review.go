@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
@@ -15,6 +16,7 @@ import (
 // changed symbol is "load-bearing" enough to flag as a hotspot.
 const (
 	reviewMaxSymbols        = 200 // cap Impact calls on a huge diff (then note the elision)
+	reviewMaxPartialErrors  = 20  // keep degraded reports useful without letting repeated failures dominate the payload
 	reviewHotspotMinCallers = 8   // direct callers at/above which a changed symbol is a hotspot
 	reviewGitTimeout        = 10 * time.Second
 )
@@ -48,6 +50,19 @@ type ReviewDeletionAnalysis struct {
 	Complete bool   `json:"complete"`
 }
 
+// ReviewPartialError is one bounded, non-fatal failure encountered while
+// building a review. Code is the stable machine signal; Message preserves the
+// actionable underlying error for humans. File identifies mapping failures;
+// Symbol identifies per-definition impact failures. Both are absent for
+// project-wide stages such as staleness.
+type ReviewPartialError struct {
+	Stage   string     `json:"stage"` // staleness | mapping | impact
+	Code    string     `json:"code"`  // stable machine-readable failure category
+	Message string     `json:"message"`
+	File    string     `json:"file,omitempty"`
+	Symbol  *SymbolRef `json:"symbol,omitempty"`
+}
+
 // ReviewReport is the diff-scoped intelligence bundle: the symbols a changeset
 // touches, the union of their blast radius, the tests that cover them (regression
 // test selection), the changed symbols that are untested or load-bearing, and the
@@ -55,27 +70,38 @@ type ReviewDeletionAnalysis struct {
 // It is the keystone an agent harness queries after editing — "what did I just
 // affect, and what should I run?" — in one call.
 type ReviewReport struct {
-	SchemaVersion   int              `json:"schema_version"`
-	Project         string           `json:"project"`
-	Mode            string           `json:"mode"`
-	Since           string           `json:"since,omitempty"`
-	Depth           int              `json:"depth"` // effective blast-radius depth (after the <=0 → 3 default)
-	IsRepo          bool             `json:"is_repo"`
-	Indexed         bool             `json:"indexed"`
-	ChangedFiles    []ReviewFile     `json:"changed_files"`
-	ChangedSymbols  []SymbolRef      `json:"changed_symbols"`
-	BlastRadius     []ImpactNode     `json:"blast_radius"`
-	CoveringTests   []ImpactNode     `json:"covering_tests"`
-	UntestedSymbols []SymbolRef      `json:"untested_symbols"`   // changed symbols with no covering test (P1-19: bare "untested" name was the list here vs a bool elsewhere; renamed for consistency)
-	Hotspots        []SymbolRef      `json:"hotspots,omitempty"` // changed symbols with many direct callers
-	Stale           bool             `json:"stale"`
-	Staleness       *index.Staleness `json:"staleness,omitempty"`
-	Resolution      string           `json:"resolution,omitempty"` // human sentence set when some changed symbols' call graph is unresolved (TS/JS/Py without --precise)
-	CallGraph       string           `json:"call_graph,omitempty"` // stable machine enum: resolved|name|unresolved|none — the worst (least-confident) across changed symbols
+	SchemaVersion  int          `json:"schema_version"`
+	Project        string       `json:"project"`
+	Mode           string       `json:"mode"`
+	Since          string       `json:"since,omitempty"`
+	Depth          int          `json:"depth"` // effective blast-radius depth (after the <=0 → 3 default)
+	IsRepo         bool         `json:"is_repo"`
+	Indexed        bool         `json:"indexed"`
+	ChangedFiles   []ReviewFile `json:"changed_files"`
+	ChangedSymbols []SymbolRef  `json:"changed_symbols"`
+	// AnalysisComplete is true only when the index is fresh, every mapped changed
+	// symbol was analyzed, and all supporting stages succeeded. The counts make
+	// an omitted tail or failed symbol visible without changing ChangedSymbols'
+	// historical capped shape.
+	AnalysisComplete       bool                 `json:"analysis_complete"`
+	TotalSymbols           int                  `json:"total_symbols"`
+	AnalyzedSymbols        int                  `json:"analyzed_symbols"`
+	TruncatedSymbols       int                  `json:"truncated_symbols"`
+	PartialErrors          []ReviewPartialError `json:"partial_errors,omitempty"`
+	PartialErrorsTruncated int                  `json:"partial_errors_truncated,omitempty"`
+	BlastRadius            []ImpactNode         `json:"blast_radius"`
+	CoveringTests          []ImpactNode         `json:"covering_tests"`
+	UntestedSymbols        []SymbolRef          `json:"untested_symbols"`   // changed symbols with no covering test (P1-19: bare "untested" name was the list here vs a bool elsewhere; renamed for consistency)
+	Hotspots               []SymbolRef          `json:"hotspots,omitempty"` // changed symbols with many direct callers
+	Stale                  bool                 `json:"stale"`
+	Staleness              *index.Staleness     `json:"staleness,omitempty"`
+	Resolution             string               `json:"resolution,omitempty"` // human sentence set when some changed symbols' call graph is unresolved (TS/JS/Py without --precise)
+	CallGraph              string               `json:"call_graph,omitempty"` // stable machine enum: resolved|name|unresolved|none — the worst (least-confident) across changed symbols
 	// Risk is the aggregate change-risk band for the whole diff, folded from the
 	// per-symbol risk signals over every changed symbol so a harness can gate
-	// verification on ONE band (instead of fanning `risk` out per symbol). Absent
-	// when the diff maps to no indexed symbols.
+	// verification on ONE band (instead of fanning `risk` out per symbol). It is
+	// absent for complete zero-symbol and early graceful reports; finalized
+	// incomplete reports carry level unknown even when no symbol maps safely.
 	Risk *ReviewRisk `json:"risk,omitempty"`
 	// DeletionAnalysis is present only when the diff deletes files. It lets a
 	// harness distinguish a deletion whose prior definitions were analyzed from
@@ -117,7 +143,7 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 		ChangedFiles: []ReviewFile{}, ChangedSymbols: []SymbolRef{},
 		BlastRadius: []ImpactNode{}, CoveringTests: []ImpactNode{}, UntestedSymbols: []SymbolRef{},
 	}
-	_, _, indexed, perr := svc.project(cwd)
+	indexed, _, perr := svc.Indexed(cwd)
 	if perr != nil {
 		return nil, perr
 	}
@@ -158,43 +184,20 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 		return rep, nil
 	}
 
-	if st, serr := svc.Staleness(cwd); serr == nil && st != nil {
+	if st, serr := svc.Staleness(cwd); serr != nil {
+		rep.addPartialError(ReviewPartialError{
+			Stage: "staleness", Code: "staleness_failed",
+			Message: fmt.Sprintf("could not determine index staleness: %v", serr),
+		})
+	} else if st != nil {
 		rep.Staleness = st
 		rep.Stale = st.Any()
 	}
 
 	// 1) Resolve each changed file's hunks to the enclosing indexed symbols.
-	seenSym := map[string]bool{}
-	for _, cf := range changed {
-		rf := ReviewFile{Path: cf.Path, Status: cf.Status}
-		syms := svc.symbolsForChangedFile(cwd, root, cf.Path)
-		if cf.Status == "D" {
-			if rep.DeletionAnalysis == nil {
-				rep.DeletionAnalysis = &ReviewDeletionAnalysis{Source: "last_index"}
-			}
-			rep.DeletionAnalysis.Files++
-			if len(syms) == 0 {
-				rep.DeletionAnalysis.Missing++
-			} else {
-				rep.DeletionAnalysis.Analyzed++
-			}
-		}
-		for _, s := range syms {
-			// A deleted file has no post-image line ranges. Treat every retained
-			// definition as changed; modified/added files still use exact hunks.
-			if cf.Status != "D" && !symbolTouched(s, cf.Hunks) {
-				continue
-			}
-			key := symKey(s.FQN, s.File, s.StartLine)
-			if seenSym[key] {
-				continue
-			}
-			seenSym[key] = true
-			rep.ChangedSymbols = append(rep.ChangedSymbols, s)
-			rf.Symbols++
-		}
-		rep.ChangedFiles = append(rep.ChangedFiles, rf)
-	}
+	mapReviewChangedFiles(rep, changed, func(path string) ([]SymbolRef, error) {
+		return svc.symbolsForChangedFile(cwd, root, path)
+	})
 	if rep.DeletionAnalysis != nil {
 		rep.DeletionAnalysis.Complete = rep.DeletionAnalysis.Missing == 0
 		if rep.DeletionAnalysis.Analyzed > 0 {
@@ -205,59 +208,29 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 		}
 	}
 
-	truncated := 0
+	rep.TotalSymbols = len(rep.ChangedSymbols)
 	if len(rep.ChangedSymbols) > reviewMaxSymbols {
-		truncated = len(rep.ChangedSymbols) - reviewMaxSymbols
+		rep.TruncatedSymbols = len(rep.ChangedSymbols) - reviewMaxSymbols
 		rep.ChangedSymbols = rep.ChangedSymbols[:reviewMaxSymbols]
 	}
 
 	// 2) Union the blast radius + covering tests across changed symbols; flag the
 	//    untested and load-bearing ones.
-	seenBlast, seenTest := map[string]bool{}, map[string]bool{}
-	imps := make([]*ImpactReport, 0, len(rep.ChangedSymbols))
-	for _, s := range rep.ChangedSymbols {
+	imps := analyzeReviewImpacts(rep, rep.ChangedSymbols, func(s SymbolRef) (*ImpactReport, error) {
 		// ChangedSymbols already carry a durable source identity. Keep the
 		// per-symbol review exact instead of sending the FQN through the legacy
 		// name resolver, which canonicalizes to a short name and unions unrelated
 		// same-named definitions even on a precise graph.
-		imp, ierr := svc.ImpactBySelector(cwd, SymbolSelector{
+		return svc.ImpactBySelector(cwd, SymbolSelector{
 			File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
 		}, opts.Depth)
-		if ierr != nil || imp == nil || !imp.Found {
-			continue
-		}
-		imps = append(imps, imp)
-		if imp.Resolution != "" && rep.Resolution == "" {
-			rep.Resolution = imp.Resolution
-		}
-		for _, b := range imp.BlastRadius {
-			if key := symKey(b.FQN, b.File, b.StartLine); !seenBlast[key] {
-				seenBlast[key] = true
-				rep.BlastRadius = append(rep.BlastRadius, b)
-			}
-		}
-		for _, tn := range imp.Tests {
-			if key := symKey(tn.FQN, tn.File, tn.StartLine); !seenTest[key] {
-				seenTest[key] = true
-				rep.CoveringTests = append(rep.CoveringTests, tn)
-			}
-		}
-		if imp.Untested && imp.Resolution == "" {
-			rep.UntestedSymbols = append(rep.UntestedSymbols, s)
-		}
-		if len(imp.DirectCallers) >= reviewHotspotMinCallers {
-			rep.Hotspots = append(rep.Hotspots, s)
-		}
-	}
+	})
 	// Fold the per-symbol resolution + risk signals into one diff-scoped band.
 	// call_graph is the worst (least-confident) across changed symbols — a
 	// review is only as trustworthy as its least-resolved change. Risk reuses
 	// the `risk` command's factor model, aggregated (max severity per factor)
 	// and combined with probabilistic OR.
-	if len(imps) > 0 {
-		rep.CallGraph = worstCallGraph(imps)
-		rep.Risk = aggregateReviewRisk(imps)
-	}
+	finalizeReviewAnalysis(rep, imps)
 
 	// Shallowest-first blast radius (the closest callers matter most), stable by file.
 	sort.SliceStable(rep.BlastRadius, func(i, j int) bool {
@@ -267,11 +240,14 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 		return rep.BlastRadius[i].File < rep.BlastRadius[j].File
 	})
 
-	if truncated > 0 {
-		rep.Note = joinNote(rep.Note, fmt.Sprintf("large changeset — analyzed the first %d changed symbols (%d more elided; use a narrower --since)", reviewMaxSymbols, truncated))
+	if rep.TruncatedSymbols > 0 {
+		rep.Note = joinNote(rep.Note, fmt.Sprintf("large changeset — analyzed the first %d changed symbols (%d more elided; use a narrower --since)", reviewMaxSymbols, rep.TruncatedSymbols))
 	}
 	if len(rep.ChangedSymbols) == 0 && len(changed) > 0 {
 		rep.Note = joinNote(rep.Note, "changed lines don't map to indexed symbols (comments, imports, or unindexed/untracked files) — nothing to analyze")
+	}
+	if partials := len(rep.PartialErrors) + rep.PartialErrorsTruncated; partials > 0 {
+		rep.Note = joinNote(rep.Note, fmt.Sprintf("review analysis is incomplete — %d non-fatal error(s); inspect partial_errors in --json output", partials))
 	}
 	rep.TestCommands = testCommands(rep.CoveringTests)
 	// For deletions, run the selected regressions while the last-index snapshot
@@ -303,21 +279,228 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	return rep, nil
 }
 
+// addPartialError appends a degraded-analysis diagnostic up to the public
+// payload cap, then counts the omitted tail. AnalysisComplete consults both
+// fields, so a capped error list can never make a partial result look complete.
+func (rep *ReviewReport) addPartialError(partial ReviewPartialError) {
+	if len(rep.PartialErrors) < reviewMaxPartialErrors {
+		rep.PartialErrors = append(rep.PartialErrors, partial)
+		return
+	}
+	rep.PartialErrorsTruncated++
+}
+
+// analyzeReviewImpacts applies one impact analyzer to each mapped symbol and
+// unions the successful results into rep. Keeping the callback at this seam
+// makes partial-failure behavior deterministic and directly testable without
+// weakening Service's concrete package boundaries.
+func analyzeReviewImpacts(rep *ReviewReport, symbols []SymbolRef, analyze func(SymbolRef) (*ImpactReport, error)) []*ImpactReport {
+	seenBlast, seenTest := map[string]bool{}, map[string]bool{}
+	imps := make([]*ImpactReport, 0, len(symbols))
+	for _, s := range symbols {
+		imp, err := analyze(s)
+		if err != nil {
+			sym := s
+			rep.addPartialError(ReviewPartialError{
+				Stage: "impact", Code: "impact_failed",
+				Message: fmt.Sprintf("impact analysis failed: %v", err), Symbol: &sym,
+			})
+			continue
+		}
+		if imp == nil {
+			sym := s
+			rep.addPartialError(ReviewPartialError{
+				Stage: "impact", Code: "impact_unavailable",
+				Message: "impact analysis returned no report", Symbol: &sym,
+			})
+			continue
+		}
+		if !imp.Found {
+			sym := s
+			rep.addPartialError(ReviewPartialError{
+				Stage: "impact", Code: "symbol_not_found",
+				Message: "changed symbol was not found during impact analysis", Symbol: &sym,
+			})
+			continue
+		}
+
+		rep.AnalyzedSymbols++
+		imps = append(imps, imp)
+		if imp.Resolution != "" && rep.Resolution == "" {
+			rep.Resolution = imp.Resolution
+		}
+		for _, b := range imp.BlastRadius {
+			if key := symKey(b.FQN, b.File, b.StartLine); !seenBlast[key] {
+				seenBlast[key] = true
+				rep.BlastRadius = append(rep.BlastRadius, b)
+			}
+		}
+		for _, tn := range imp.Tests {
+			if key := symKey(tn.FQN, tn.File, tn.StartLine); !seenTest[key] {
+				seenTest[key] = true
+				rep.CoveringTests = append(rep.CoveringTests, tn)
+			}
+		}
+		if imp.Untested && imp.Resolution == "" {
+			rep.UntestedSymbols = append(rep.UntestedSymbols, s)
+		}
+		if len(imp.DirectCallers) >= reviewHotspotMinCallers {
+			rep.Hotspots = append(rep.Hotspots, s)
+		}
+	}
+	return imps
+}
+
+func finalizeReviewAnalysis(rep *ReviewReport, imps []*ImpactReport) {
+	if len(imps) > 0 {
+		rep.CallGraph = worstCallGraph(imps)
+		rep.Risk = aggregateReviewRisk(imps)
+	}
+	rep.AnalysisComplete = !rep.Stale && rep.TruncatedSymbols == 0 && len(rep.PartialErrors) == 0 && rep.PartialErrorsTruncated == 0
+	if rep.DeletionAnalysis != nil && !rep.DeletionAnalysis.Complete {
+		rep.AnalysisComplete = false
+	}
+	// Risk from a successful subset must never read as authoritative for the
+	// entire diff. Keep any observed score/factors, but make the aggregate band
+	// explicitly unknown. When no symbol can be mapped safely, still emit an
+	// unknown band instead of silently omitting risk as though nothing changed.
+	if !rep.AnalysisComplete {
+		if rep.Risk == nil {
+			rep.Risk = &ReviewRisk{Level: "unknown", Factors: []RiskFactor{}}
+		} else {
+			rep.Risk.Level = "unknown"
+		}
+	}
+}
+
+// mapReviewChangedFiles maps post-image line ranges to indexed symbols and
+// records conservative mapping diagnostics. Old definitions or old-image lines
+// without post-image counterparts cannot be associated safely after a fresh
+// reindex, so deletions inside surviving files are partial rather than an
+// authoritative subset. Whole-file deletes use the retained index separately.
+func mapReviewChangedFiles(rep *ReviewReport, changed []git.ChangedFile, lookup func(string) ([]SymbolRef, error)) {
+	seenSym := map[string]bool{}
+	for _, cf := range changed {
+		rf := ReviewFile{Path: cf.Path, Status: cf.Status}
+		// Documentation, assets, and configuration files are deliberately outside
+		// the structural graph. Do not turn their ordinary edits, deletions, or
+		// renames into false mapping failures (and policy-gate failures). For a
+		// rename, consider both sides so moving source to or from a non-source
+		// extension still receives conservative structural treatment.
+		structural := reviewStructuralPath(cf.Path) || (cf.Renamed && reviewStructuralPath(cf.OldPath))
+		var syms []SymbolRef
+		var err error
+		if structural {
+			syms, err = lookup(cf.Path)
+			if err != nil {
+				rep.addPartialError(ReviewPartialError{
+					Stage: "mapping", Code: "symbol_mapping_failed", File: cf.Path,
+					Message: fmt.Sprintf("could not map changed file to indexed symbols: %v", err),
+				})
+				syms = nil
+			}
+		}
+		if structural && cf.Status != "D" && cf.DeletedLines > 0 {
+			code := "deletion_hunk_unmapped"
+			if len(cf.Hunks) == 0 {
+				code = "deletion_only_hunk"
+			}
+			rep.addPartialError(ReviewPartialError{
+				Stage: "mapping", Code: code, File: cf.Path,
+				Message: fmt.Sprintf("%d deleted line(s) have no post-image range and cannot be mapped to an enclosing symbol", cf.DeletedLines),
+			})
+		}
+		if structural && cf.Status != "D" && cf.DeletedLines == 0 && len(cf.RemovedDefinitions) > 0 {
+			rep.addPartialError(ReviewPartialError{
+				Stage: "mapping", Code: "removed_definition_unavailable", File: cf.Path,
+				Message: fmt.Sprintf("%d old definition(s) are absent from the post-image hunk and cannot be analyzed from the current index", len(cf.RemovedDefinitions)),
+			})
+		}
+		if structural && cf.Renamed && len(syms) == 0 && err == nil {
+			rep.addPartialError(ReviewPartialError{
+				Stage: "mapping", Code: "rename_unmapped", File: cf.Path,
+				Message: fmt.Sprintf("renamed file from %q has no indexed symbols at its new path", cf.OldPath),
+			})
+		}
+		if structural && cf.Status == "D" {
+			if rep.DeletionAnalysis == nil {
+				rep.DeletionAnalysis = &ReviewDeletionAnalysis{Source: "last_index"}
+			}
+			rep.DeletionAnalysis.Files++
+			if len(syms) == 0 {
+				rep.DeletionAnalysis.Missing++
+			} else {
+				rep.DeletionAnalysis.Analyzed++
+			}
+		}
+		for _, s := range syms {
+			// A deleted file has no post-image line ranges. Treat every retained
+			// definition as changed; modified/added files still use exact hunks.
+			wholeFile := cf.Status == "D" || cf.Status == "?" || cf.Renamed
+			if !wholeFile && !symbolTouched(s, cf.Hunks) {
+				continue
+			}
+			key := symKey(s.FQN, s.File, s.StartLine)
+			if seenSym[key] {
+				continue
+			}
+			seenSym[key] = true
+			rep.ChangedSymbols = append(rep.ChangedSymbols, s)
+			rf.Symbols++
+		}
+		rep.ChangedFiles = append(rep.ChangedFiles, rf)
+	}
+}
+
+// reviewStructuralPath reports languages for which this build has a shipped
+// structural backend (always-on Go or the LSP-backed TS/JS/Python/Vue paths).
+// extract.LanguageForPath also recognizes roadmap/config/markup languages, so
+// recognition alone is intentionally not enough here.
+func reviewStructuralPath(path string) bool {
+	switch extract.LanguageForPath(path) {
+	case "go", "typescript", "javascript", "python", "vue":
+		return true
+	default:
+		return false
+	}
+}
+
 // symbolsForChangedFile resolves a diff path (relative to the git root) to its
 // indexed symbols, robust to a symlinked checkout. git's root comes back
 // symlink-resolved (e.g. /private/var/…) while the project may have been indexed
 // via the un-resolved cwd (/var/…), so a path built from the git root won't match
 // the indexed paths. Try the project-relative path first (Symbols joins it to cwd,
 // matching the index's path form), then fall back to the git-root-absolute path
-// (covering a project nested below the repo root). nil when neither resolves.
-func (svc *Service) symbolsForChangedFile(cwd, gitRoot, relPath string) []SymbolRef {
-	if rep, err := svc.Symbols(cwd, relPath); err == nil && rep != nil && len(rep.Symbols) > 0 {
-		return rep.Symbols
+// (covering a project nested below the repo root). An error is returned only
+// when neither lookup provides a trustworthy result.
+func (svc *Service) symbolsForChangedFile(cwd, gitRoot, relPath string) ([]SymbolRef, error) {
+	return lookupChangedFileSymbols(relPath, filepath.Join(gitRoot, relPath), func(file string) (*SymbolsReport, error) {
+		return svc.Symbols(cwd, file)
+	})
+}
+
+func lookupChangedFileSymbols(relPath, absPath string, lookup func(string) (*SymbolsReport, error)) ([]SymbolRef, error) {
+	primary, primaryErr := lookup(relPath)
+	if primaryErr == nil && primary != nil && len(primary.Symbols) > 0 {
+		return primary.Symbols, nil
 	}
-	if rep, err := svc.Symbols(cwd, filepath.Join(gitRoot, relPath)); err == nil && rep != nil {
-		return rep.Symbols
+
+	fallback, fallbackErr := lookup(absPath)
+	if fallbackErr == nil {
+		if fallback == nil {
+			return nil, nil
+		}
+		return fallback.Symbols, nil
 	}
-	return nil
+	// A successful primary lookup is authoritative even when it found no
+	// symbols; the absolute fallback is only needed to recover path-form skew.
+	if primaryErr == nil && primary != nil {
+		return primary.Symbols, nil
+	}
+	if primaryErr != nil {
+		return nil, fmt.Errorf("relative lookup failed: %v; absolute fallback failed: %w", primaryErr, fallbackErr)
+	}
+	return nil, fmt.Errorf("relative lookup returned no report; absolute fallback failed: %w", fallbackErr)
 }
 
 // symbolTouched reports whether any changed hunk overlaps the symbol's line span.

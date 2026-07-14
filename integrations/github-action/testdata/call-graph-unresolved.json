@@ -19,21 +19,15 @@
       "signature": "function renderWidget(props: Props): JSX.Element"
     }
   ],
+  "analysis_complete": true,
+  "total_symbols": 1,
+  "analyzed_symbols": 1,
+  "truncated_symbols": 0,
   "blast_radius": [],
   "covering_tests": [],
-  "untested_symbols": [
-    {
-      "symbol": "renderWidget",
-      "fqn": "widget.renderWidget",
-      "kind": "function",
-      "file": "src/widget.ts",
-      "start_line": 4,
-      "end_line": 9,
-      "signature": "function renderWidget(props: Props): JSX.Element"
-    }
-  ],
+  "untested_symbols": [],
   "stale": false,
-  "resolution": "call graph for TypeScript is name-based; install typescript-language-server and re-run with --precise for exact edges",
+  "resolution": "call graph not available for typescript without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them",
   "call_graph": "unresolved",
   "risk": {
     "level": "unknown",
@@ -41,6 +35,5 @@
     "factors": [
       { "factor": "unresolved", "severity": 0.4, "detail": "call graph could not be resolved for this changed symbol" }
     ]
-  },
-  "test_commands": []
+  }
 }

@@ -2,10 +2,6 @@ version: 2
 
 project_name: codemap
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - id: codemap
     main: ./cmd/codemap
@@ -40,7 +36,7 @@ archives:
     files:
       - README.md
       - LICENSE*
-      - schemas/codemap.review.v1.schema.json
+      - schemas/*.schema.json
 
 checksum:
   name_template: 'checksums.txt'

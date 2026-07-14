@@ -198,10 +198,6 @@ func (svc *Service) project(cwd string) (id int64, name string, found bool, err 
 	return p.ID, name, true, nil
 }
 
-// Indexed reports whether the project for cwd has been indexed (registered in the
-// graph) along with the resolved project name. It's a cheap registration check so
-// query commands can give a clear "run codemap index" message instead of
-// misleading empty results (e.g. "Callers of X: none") on a cold repo.
 // Indexed reports whether the project has indexable content to query — i.e. it's
 // registered AND has at least one node. A registered-but-never-indexed project
 // (init without index) returns false so query commands print "run codemap index"

@@ -10,22 +10,22 @@ inputs:
     description: "codemap release version to install (e.g. 'v0.40.0'); default 'latest' resolves and pins the exact tag at run start (never floats mid-job)"
     default: 'latest'
   precise:
-    description: "run 'codemap index --precise' (needs the go toolchain and/or typescript-language-server / pyright-langserver on PATH for those languages; degrades honestly and says so in the comment when a toolchain is missing)"
+    description: "true|false; run 'codemap index --precise' (needs the go toolchain and/or typescript-language-server / pyright-langserver on PATH for those languages; degrades honestly and says so in the comment when a toolchain is missing)"
     default: 'true'
   depth:
     description: 'blast-radius depth passed to codemap review --depth'
     default: '3'
   install-ts-language-server:
-    description: "npm install -g typescript-language-server typescript before indexing (opt-in; costs ~10-20s)"
+    description: "true|false; npm install -g typescript-language-server typescript before indexing (opt-in; costs ~10-20s)"
     default: 'false'
   install-pyright:
-    description: "npm install -g pyright before indexing (opt-in; costs ~5-10s)"
+    description: "true|false; npm install -g pyright before indexing (opt-in; costs ~5-10s)"
     default: 'false'
   fail-on-untested:
-    description: 'fail the check if any changed symbol has no covering test'
+    description: 'true|false; fail if a changed symbol lacks a covering test or mapped test coverage is unresolved'
     default: 'false'
   fail-on-risk:
-    description: 'fail the check if the aggregate risk.level is at or above this band (low|medium|high); empty disables the risk gate'
+    description: 'fail the check if the aggregate risk.level is at or above this band (low|medium|high); empty disables the risk gate; any other value fails before setup'
     default: ''
   base-sha:
     description: 'commit to diff against; default resolves from the pull_request event (base.sha) or a push event (before)'
@@ -34,7 +34,7 @@ inputs:
     description: 'token used to post/update the sticky PR comment'
     default: ${{ github.token }}
   skip-comment:
-    description: 'compute the review and gate on it, but skip posting a PR comment (useful outside pull_request events)'
+    description: 'true|false; compute the review and gate on it, but skip posting a PR comment (useful outside pull_request events)'
     default: 'false'
 
 outputs:
@@ -42,14 +42,17 @@ outputs:
     description: 'the aggregate risk.level from the review JSON (unknown|low|medium|high), or "absent" when the diff touched no indexed symbols'
     value: ${{ steps.gate.outputs.risk-level }}
   risk-score:
-    description: 'the aggregate risk.score (0..1) from the review JSON, or "0" when risk was not computed (diff touched no indexed symbols, or an unrecognized schema_version)'
+    description: 'the aggregate risk.score (0..1) from the review JSON, or "0" when risk was not computed (diff touched no indexed symbols, or an unrecognized schema_version in an ungated reporting-only run)'
     value: ${{ steps.gate.outputs.risk-score }}
   untested-count:
     description: 'count of untested_symbols in the review JSON'
     value: ${{ steps.gate.outputs.untested-count }}
   changed-symbols-count:
-    description: 'count of changed_symbols in the review JSON'
+    description: 'total mapped changed-symbol count (total_symbols when present; otherwise changed_symbols length for older reports)'
     value: ${{ steps.gate.outputs.changed-symbols-count }}
+  analysis-complete:
+    description: 'whether the complete diff was analyzed (true|false), or unknown for an older/unsupported report shape'
+    value: ${{ steps.gate.outputs.analysis-complete }}
   comment-posted:
     description: '"true" if the sticky PR comment was created or updated this run, "false" if it was skipped (skip-comment: true, a non-pull_request event, or the render/post step failed before posting)'
     value: ${{ steps.post-comment.outputs.comment-posted || 'false' }}
@@ -60,6 +63,17 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Validate action inputs
+      shell: bash
+      env:
+        FAIL_ON_UNTESTED: ${{ inputs.fail-on-untested }}
+        FAIL_ON_RISK: ${{ inputs.fail-on-risk }}
+        CODEMAP_PRECISE: ${{ inputs.precise }}
+        INSTALL_TS_LANGUAGE_SERVER: ${{ inputs.install-ts-language-server }}
+        INSTALL_PYRIGHT: ${{ inputs.install-pyright }}
+        SKIP_COMMENT: ${{ inputs.skip-comment }}
+      run: ${{ github.action_path }}/scripts/gate.sh --validate-inputs
+
     - name: Resolve codemap version + platform
       id: resolve
       shell: bash

@@ -1,3 +1,7 @@
+---
+description: Connect codemap to coding agents and use its MCP tools in a confidence-aware development loop.
+---
+
 # codemap for agents
 
 codemap is built for AI coding agents as much as for people. It precomputes a
@@ -5,11 +9,13 @@ codebase's structure once, then answers narrow questions in **one call** — wit
 provenance and honesty signals attached — instead of making an agent chain dozens of
 `grep`/`read` calls to reconstruct what the graph already knows.
 
-Every CLI command takes `--json`; every capability has a thin **`codemap_<name>` MCP
-tool backed by the same service reports. Point your harness at `codemap serve` (a
-stdio MCP server) or shell the CLI — successful report data is identical, while
-transport-level misses follow each surface's convention (CLI exit codes/error
-envelopes; MCP structured tool results). The built-in guide
+Query and report commands take `--json`, and the core query surface has thin
+**`codemap_<name>` MCP tools backed by the same service reports. Point your harness at
+`codemap serve` (a stdio MCP server) or shell the CLI — shared successful report data is
+identical, while transport-level misses follow each surface's convention (CLI exit
+codes/error envelopes; MCP structured tool results). Administration and export workflows
+such as `structural-manifest`, `export-symbols`, cache export/import, daemon management,
+branch snapshots, agent setup, `serve`, and `studio` remain CLI-only. The built-in guide
 `codemap docs workflow` (and the `codemap_docs` tool) is the in-band version of this
 page.
 
@@ -39,11 +45,14 @@ codemap agent list                # what's detected here, and whether codemap is
 | VS Code Copilot | `.vscode/mcp.json` (**`servers`**, not `mcpServers`) | `.github/copilot-instructions.md` |
 | OpenCode | `opencode.json` (`mcp`, command is an array) | `AGENTS.md` |
 | aider | none (no MCP) — CLI playbook | `CONVENTIONS.md` |
+| Any AGENTS.md-reading harness (`agents-md`) | none (playbook-only) | `AGENTS.md` |
 
 `setup` defaults to **project-scoped** files and never clobbers other servers or your prose (it
 merges JSON and replaces only a marked `<!-- codemap:begin … end -->` block). Global-only configs
 (Codex, Zed, Cline) print the exact snippet unless you pass `--global`; `--dry-run` shows every
-planned write. For any harness not listed, `codemap agent playbook` prints the guidance to paste.
+planned write. For an AGENTS.md-aware harness not otherwise listed, run
+`codemap agent setup agents-md`; for any other harness, `codemap agent playbook` prints the guidance
+to paste.
 
 Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
 [MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
@@ -107,9 +116,17 @@ calibrate its confidence:
   `codemap_review` intentionally uses retained definitions from the last index and emits
   `deletion_analysis`; run its selected tests **before** reindexing prunes that evidence.
   `codemap_status` surfaces freshness too.
+- **`analysis_complete` on `codemap_review`** — staleness, total/analyzed/truncated symbol counts,
+  and bounded structured `partial_errors` distinguish a complete diff analysis from a successful
+  subset. Structural-source mapping errors explicitly cover failed symbol lookup, deletion-only hunks with no
+  post-image line, recognized callable/type declaration lines removed in mixed or equal-count hunks, and an exact
+  source rename with no mapped symbols at its new path. Fresh indexed untracked source files and exact source renames map as
+  whole files; documentation/assets remain ordinary zero-symbol changes. A stale, partial, or capped review always reports aggregate `risk.level:"unknown"`.
 - **`resolution`** — set when a call graph is *unavailable* (TypeScript/JavaScript/
-  Python without `--precise`): callers/blast/tests are **unresolved, not absent**.
-  `codemap_review`/`codemap_risk` will not assert "no tests" in that state;
+  Python without successful precise coverage, or Vue SFCs whose call edges are not yet
+  supported even by precise indexing): callers/blast/tests are **unresolved, not absent**.
+  `codemap_review`/`codemap_risk` will not assert "no tests" in that state, and
+  `--fail-on-untested` fails closed because coverage cannot be established;
   `codemap_file_impact` reports deletion as `unsafe` only from fresh confirmed
   file-scoped evidence and `unknown` otherwise — never "safe" from a candidate or empty result.
 - **`codemap_coverage`** — the per-file map behind every `call_graph` enum: which files have

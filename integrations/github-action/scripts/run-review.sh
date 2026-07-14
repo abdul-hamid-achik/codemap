@@ -26,7 +26,12 @@ command -v codemap >/dev/null 2>&1 || {
   exit 1
 }
 
-if [[ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo true)" == "true" ]]; then
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "::error::GITHUB_WORKSPACE is not a git repository; check out the repository before running codemap review" >&2
+  exit 1
+fi
+
+if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
   echo "::error::this checkout is shallow. 'codemap review --since <base-sha>' needs the merge-base history — add 'fetch-depth: 0' to your actions/checkout step (see this action's README)." >&2
   exit 1
 fi
@@ -46,14 +51,17 @@ fi
 
 echo "codemap-action: codemap index ${index_args[*]}"
 # codemap index degrades honestly per-language (name-based Go without a go
-# toolchain, unresolved call_graph for LSP languages without their server) —
-# a non-zero exit here would only happen on a genuine operational failure
-# (e.g. corrupt DB), and review() below still produces a graceful, honest
-# report even over a partially-indexed project, so this is intentionally not
-# fatal; run-review continues and lets the render step surface any
-# resulting resolution/call_graph caveat instead of hard-failing the job.
-if ! codemap index "${index_args[@]}"; then
-  echo "::warning::codemap index exited non-zero; continuing — codemap review degrades honestly over a partial or unresolved index and will surface that in its output"
+# toolchain, unresolved call_graph for LSP languages without their server)
+# while returning zero. A non-zero exit is therefore an operational failure,
+# not an accuracy caveat: continuing could turn a partial/stale index into a
+# false-green review.
+set +e
+codemap index "${index_args[@]}"
+index_exit=$?
+set -e
+if [[ "$index_exit" -ne 0 ]]; then
+  echo "::error::codemap index failed (exit ${index_exit}); refusing to review a potentially partial or stale index" >&2
+  exit 1
 fi
 
 out="${RUNNER_TEMP}/codemap-review.json"
@@ -76,10 +84,21 @@ if jq -e '.ok == false' "$out" >/dev/null 2>&1; then
   # 2 not_found / 3 index_missing / 4 index_corrupt / 5 not_a_repo. Exit 6 is
   # gate_failed, but cannot occur here because this invocation supplies no
   # native gate flags. This
-  # {"ok":false,...} envelope is the ONE signal this script treats as a real
-  # operational failure — unrelated to the risk/untested gate, which is
-  # applied later from the success JSON (see file header + README).
+  # {"ok":false,...} envelope is an operational failure — unrelated to the
+  # risk/untested gate, which is applied later from the success JSON (see file
+  # header + README). A nonzero index exit is rejected earlier for the same
+  # false-green reason.
   echo "::error::codemap review failed: ${msg} (code=${code})${hint:+ — hint: ${hint}}" >&2
+  exit 1
+fi
+
+# No native gate flags are supplied above, so every nonzero review exit is an
+# operational failure even if stdout happens to contain a valid-looking v1
+# object. Accepting it would let a crashed/aborted analysis masquerade as a
+# successful report.
+if [[ "$review_exit" -ne 0 ]]; then
+  report_note="$(jq -r '.note // empty' "$out" 2>/dev/null || true)"
+  echo "::error::codemap review exited nonzero (${review_exit}); refusing its output as authoritative${report_note:+ — report note: ${report_note}}. Raw stdout remains at ${out}" >&2
   exit 1
 fi
 

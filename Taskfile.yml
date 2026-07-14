@@ -70,16 +70,29 @@ tasks:
     cmds:
       - gofmt -w .
 
-  lint:
-    desc: Lint with golangci-lint v2 to match CI (binary if present, else `go install`); vet+gofmt only when offline
+  verify:source:
+    desc: Verify Go formatting and modules without modifying files
     cmds:
       - |
-        # CI runs golangci-lint v2; mirror it locally so lint-only issues (e.g.
-        # unused funcs, which `go vet` misses) are caught before pushing.
+        unformatted="$(gofmt -l .)"
+        if [ -n "$unformatted" ]; then
+          echo "unformatted Go files:"
+          printf '%s\n' "$unformatted"
+          exit 1
+        fi
+      - go mod tidy -diff
+
+  lint:
+    desc: Lint with golangci-lint v2.12.2; fall back offline
+    cmds:
+      - |
+        # CI runs this exact version; mirror it locally so lint-only issues
+        # (for example unused funcs, which `go vet` misses) are caught early.
         LINT=""
-        if golangci-lint version 2>/dev/null | grep -qE 'version v?2\.'; then
+        LINT_VERSION="2.12.2"
+        if golangci-lint version 2>/dev/null | grep -qE 'version v?2\.12\.2([[:space:]]|$)'; then
           LINT="golangci-lint"
-        elif GOBIN="$PWD/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 2>/dev/null; then
+        elif GOBIN="$PWD/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${LINT_VERSION} 2>/dev/null; then
           LINT="$PWD/bin/golangci-lint"  # cached after first install
         fi
         if [ -n "$LINT" ]; then
@@ -89,6 +102,19 @@ tasks:
           go vet ./...
           test -z "$(gofmt -l .)" || (echo "unformatted files:"; gofmt -l .; exit 1)
         fi
+
+  lint:strict:
+    desc: Run the exact CI linter and fail if it is unavailable
+    cmds:
+      - |
+        LINT_VERSION="2.12.2"
+        if golangci-lint version 2>/dev/null | grep -qE 'version v?2\.12\.2([[:space:]]|$)'; then
+          LINT="golangci-lint"
+        else
+          GOBIN="$PWD/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${LINT_VERSION}
+          LINT="$PWD/bin/golangci-lint"
+        fi
+        "$LINT" run ./...
 
   test:
     desc: Run unit tests
@@ -115,6 +141,13 @@ tasks:
     cmds:
       - task: fmt
       - task: lint
+      - task: test
+
+  check:verify:
+    desc: Run non-mutating source checks, strict lint, and tests
+    cmds:
+      - task: verify:source
+      - task: lint:strict
       - task: test
 
   build:
@@ -190,7 +223,7 @@ tasks:
   site:deps:
     desc: Install docs (VitePress) dependencies with Bun
     cmds:
-      - bun install
+      - bun install --frozen-lockfile
 
   site:dev:
     desc: Run the VitePress docs dev server
@@ -203,9 +236,11 @@ tasks:
       - bun run site:build
 
   ship:
-    desc: Full pre-release gate (check + docs + race + build + e2e)
+    desc: Run the full pre-release gate with non-mutating source checks
     cmds:
-      - task: check
+      - task: check:verify
+      - task: site:deps
+      - task: site:build
       - task: race
       - task: build
       - task: flows

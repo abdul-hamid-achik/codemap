@@ -602,7 +602,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		if more > 0 {
 			fmt.Printf("     … (%d more — use --json)\n", more)
 		}
-	} else if len(rep.ChangedSymbols) > 0 && rep.Resolution == "" {
+	} else if len(rep.ChangedSymbols) > 0 && rep.Resolution == "" && rep.AnalysisComplete {
 		// Only assert "no tests" when the call graph was resolved; otherwise the
 		// absence is unverified (the Resolution line above already explains it).
 		fmt.Println("  ⚠ no tests cover these changes")
@@ -614,16 +614,35 @@ func runReview(cmd *cobra.Command, args []string) error {
 // already-printed ReviewReport. It never changes what was printed — it only
 // turns a tripped threshold into the dedicated gate exit code (errGate; see
 // gate.go). "unknown" risk never trips --fail-on-risk (the honesty rule), and
-// a diff with no changed symbols (rep.Risk == nil) never trips it either —
-// there is nothing to gate on.
+// a complete diff with no changed symbols (rep.Risk == nil) never trips it.
+// An explicitly enabled review gate fails closed on a finalized incomplete
+// indexed report; early non-repo/unindexed degradation remains nonblocking.
+// The untested gate also fails closed when mapped symbols have an unresolved
+// call graph: an empty untested_symbols list then means "unknown", not covered.
 func reviewGateResult(rep *app.ReviewReport, hasFailOnRisk bool, threshold int, failOnUntested bool) error {
+	gateEnabled := hasFailOnRisk || failOnUntested
+	if gateEnabled && rep != nil && rep.IsRepo && rep.Indexed && !rep.AnalysisComplete {
+		return errGate
+	}
 	if hasFailOnRisk && rep.Risk != nil && riskGateTrips(rep.Risk.Level, threshold) {
 		return errGate
 	}
-	if failOnUntested && len(rep.UntestedSymbols) > 0 {
+	if failOnUntested && (len(rep.UntestedSymbols) > 0 || reviewTestCoverageUnresolved(rep)) {
 		return errGate
 	}
 	return nil
+}
+
+func reviewTestCoverageUnresolved(rep *app.ReviewReport) bool {
+	if rep == nil || rep.TotalSymbols == 0 {
+		return false
+	}
+	switch rep.CallGraph {
+	case app.CallGraphResolved, app.CallGraphName:
+		return false
+	default: // unresolved, none, or absent compatibility metadata
+		return true
+	}
 }
 
 func reviewStalenessLine(rep *app.ReviewReport) string {

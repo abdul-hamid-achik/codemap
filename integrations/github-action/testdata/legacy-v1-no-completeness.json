@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "project": "legacy-v1-fixture",
+  "mode": "working",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    { "path": "pkg/legacy.go", "status": "M", "symbols": 1 }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "Legacy",
+      "fqn": "pkg.Legacy",
+      "kind": "function",
+      "file": "pkg/legacy.go",
+      "start_line": 3,
+      "end_line": 5,
+      "signature": "func Legacy()"
+    }
+  ],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [],
+  "stale": false,
+  "call_graph": "unresolved",
+  "risk": {
+    "level": "unknown",
+    "score": 0,
+    "factors": []
+  }
+}

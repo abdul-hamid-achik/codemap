@@ -2,8 +2,8 @@
 
 Local-first code intelligence that gives AI agents and people **structural awareness** of
 codebases — combining a code graph (LSP + parsers) with semantic retrieval
-(local veclite or the sibling vecgrep CLI),
-exposed through a CLI, an MCP server, and an interactive terminal UI.
+(local veclite, with an optional one-hop vecgrep CLI fallback or owner), exposed through a CLI,
+an MCP server, and an interactive terminal UI.
 
 > Working on the code? Read [AGENTS.md](./AGENTS.md) first — it is the source of truth for
 > conventions, architecture, and gotchas.
@@ -34,17 +34,19 @@ instead of dozens of file reads.
 ## Features
 
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
-  (name-based by default, exact via `go/types` with `--precise`) and **defines** edges (file → symbol).
-  Test coverage is derived by walking the call graph to test nodes. Stored in pure-Go SQLite,
-  queryable offline. Indexes **Go** (stdlib `go/parser`, full call graph), **TypeScript + JavaScript**
-  (one `typescript-language-server`, calls resolving *across* the `.ts`↔`.js` boundary), **Python**
-  (`pyright-langserver`), and **Vue SFCs** (`.vue` — `<script>`/`<script setup>` blocks routed to the
-  same `typescript-language-server`, symbol lines mapped back onto the original `.vue` file) — the
-  LSP-backed languages give symbols + structure always, plus a **precise call graph** under
-  `--precise`, so `callers`/`impact`/`hotspots`/`path` work for them too. Semantic search is
-  language-agnostic.
-- **Semantic search** — every node's source is embedded (Ollama `nomic-embed-text`, 768-dim)
-  into [veclite](https://github.com/abdul-hamid-achik/veclite); vector + BM25 hybrid search.
+  (name-based by default for Go, exact via `go/types` with `--precise`) and **defines** edges
+  (file → symbol). Test coverage is derived by walking the call graph to test nodes. The graph is
+  stored in pure-Go SQLite and remains queryable offline. **Go** uses the built-in stdlib parser.
+  With the listed language server installed, **TypeScript + JavaScript** and **Python** provide
+  symbols + structure and a **precise call graph** under `--precise`; one
+  `typescript-language-server` resolves calls across the `.ts`↔`.js` boundary. **Vue SFCs** route
+  `<script>`/`<script setup>` blocks through that TS/JS server and currently provide symbols +
+  `defines` edges only, with source lines mapped back to the original `.vue` file. Semantic search
+  is language-agnostic.
+- **Optional semantic search** — with the local/fallback backend and embeddings enabled, node
+  source is embedded through the configured Ollama-compatible endpoint (`nomic-embed-text`,
+  768-dim by default) into [veclite](https://github.com/abdul-hamid-achik/veclite), then searched
+  with vector + BM25 hybrid retrieval. `--no-embed` keeps codemap's own index structure-only.
 - **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
   transitive blast radius (everything affected by a change), and which tests cover those
   paths (flagging untested code).
@@ -74,14 +76,18 @@ instead of dozens of file reads.
   when the `go` toolchain or module isn't available. For a one-off exact answer without reindexing,
   `callers`/`callees` also take `--precise` (language-server `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
-  provider/model/dimension changes instead of corrupting the vector space.
+  provider, model, dimensions, or distance changes instead of corrupting the vector space.
 - **Three surfaces, one structural store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
   server**, and the **studio** TUI for humans.
 - **Graph analytics** — `map` (subsystems, directed bridges, entrypoints, hubs), `hotspots`
   (hubs), `orphans` (dead-code candidates), `explore` (intent → bounded exact neighborhoods),
   `traverse` (typed, heterogeneous graph walks), and `path` (shortest call path between two symbols).
-- **Local-first & private** — everything runs on your machine; no cloud, no uploads.
-- **Single binary** — pure-Go, `CGO_ENABLED=0`, cross-compiled and shipped via Homebrew.
+- **Local-first by default** — the structural graph, local vectors, and default Ollama endpoint stay
+  on your machine. If you explicitly configure a remote Ollama-compatible endpoint, codemap sends
+  the source text being embedded to that endpoint; see the [configuration guide](docs/configuration.md).
+- **Single core binary** — codemap is pure-Go (`CGO_ENABLED=0`), cross-compiled, and shipped via
+  Homebrew. Optional LSP-backed indexing and embeddings use separately installed language servers
+  or Ollama.
 
 ## studio (TUI)
 
@@ -139,15 +145,17 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for one-off `callers`/`callees --precise` Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-**Indexed languages** — structure works for all of these; semantic retrieval is
-language-agnostic once the project is indexed. A precise call graph
+**Supported language paths** — Go works with the built-in parser. TypeScript, JavaScript, Python,
+and Vue require the language server listed below on `PATH`; without it, codemap recognizes and
+reports those files but skips their structural extraction. Semantic retrieval is language-agnostic
+once symbols are indexed. A precise call graph
 (`callers`/`callees`/`impact`/`hotspots`/`path`) needs `--precise`:
 
 | Language | How | Extensions | Call graph |
 |---|---|---|---|
 | **Go** | stdlib `go/parser` (pure Go, always) · `--precise` adds exact edges via in-process `go/types` | `.go` | name-based by default; exact via `--precise` |
-| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` | `--precise` only |
-| **Python** | `pyright-langserver` | `.py` | `--precise` only |
+| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | `--precise` only |
+| **Python** | `pyright-langserver` | `.py` `.pyw` `.pyi` | `--precise` only |
 | **Vue SFC** | `typescript-language-server` via `vuesrc` — `<script>`/`<script setup>` block content is extracted and routed to the TS/JS delegate; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
 
 > Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is delegated to the same `typescript-language-server` connection that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns the server itself to serve the script blocks.
@@ -181,7 +189,7 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 ```bash
 # 1. Register and index a project
 codemap init                       # registers the current directory
-codemap index                      # extract graph + embed nodes (incremental)
+codemap index                      # extract graph + attempt embeddings (incremental)
 codemap index --no-embed           # structure only (no Ollama needed)
 codemap index --precise            # exact call edges (Go via go/types; TS/JS/Python via callHierarchy)
 codemap index --watch              # index once, then hand off to the background daemon
@@ -367,6 +375,7 @@ use the tools (no hand-editing config files):
 ```bash
 codemap agent setup claude-code   # installs the plugin (MCP server + using-codemap skill)
 codemap agent setup cursor        # or: codex, gemini, vscode, opencode, cline, roo, zed, aider
+codemap agent setup agents-md     # playbook-only fallback for any AGENTS.md-aware harness
 codemap agent list                # what's detected here, and whether codemap is registered
 ```
 
@@ -407,13 +416,16 @@ Tools (42): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_grep`, `codemap_source`,
 `codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,
-`codemap_cache_save`, `codemap_cache_restore`, `codemap_cache_list`, `codemap_cache_drop`. Each takes an
-optional `path` (the project directory) and returns JSON. The two an agent reaches for first:
+`codemap_cache_save`, `codemap_cache_restore`, `codemap_cache_list`, `codemap_cache_drop`.
+Project-scoped tools accept an optional `path` (the project directory) and return JSON;
+`codemap_projects`, `codemap_docs`, and `codemap_doctor` are global/environment tools and take no
+project path. The two an agent reaches for first:
 **`codemap_context <symbol>`** bundles a symbol's definition, callers, callees, value references,
 covering tests and blast radius in **one call**, and **`codemap_status`** reports index *freshness* —
 a `stale` count of files changed/added/removed since indexing, so the agent knows to reindex before
-trusting results. `codemap_callers` / `codemap_callees` accept `precise: true` for exact,
-gopls-resolved results (Go); `codemap_source` returns a symbol's body; `codemap_projects` lists
+trusting results. `codemap_callers` / `codemap_callees` accept `precise: true` for exact on-demand
+language-server results (gopls for Go, `typescript-language-server` for TS/JS, and pyright for
+Python); `codemap_source` returns a symbol's body; `codemap_projects` lists
 what's indexed; **`codemap_docs`** returns an agent guide so a harness can learn the tool;
 **`codemap_annotate` / `codemap_annotations`** pin notes and external data (DB rows, findings) to
 symbols and call paths — a knowledge layer over the graph (see below).
@@ -452,8 +464,10 @@ $XDG_CACHE_HOME/codemap/                  # caches
 
 If `~/.codemap/` already exists it is used (back-compat with vecgrep/noted). `codemap init --local`
 drops a `.codemap` marker so a repo-local `codemap.yaml` is picked up from any subdirectory; the
-index stays central (set `CODEMAP_DATA` to a path inside the repo for a repo-local index). Precedence and all keys are documented in
-[AGENTS.md](./AGENTS.md). Override paths with `CODEMAP_CONFIG` / `CODEMAP_DATA`.
+index stays central (set `CODEMAP_DATA` to a path inside the repo for a repo-local index). Precedence
+and all keys are documented in the public [configuration guide](docs/configuration.md). Override
+paths with `CODEMAP_CONFIG` / `CODEMAP_DATA`; contributors should also read
+[AGENTS.md](./AGENTS.md).
 
 ## How it fits the ecosystem
 
@@ -471,7 +485,10 @@ explicitly instead of being embedded as if it were current.
 
 ## Documentation
 
-Full docs: **[docs/](./docs)** (VitePress). Design rationale: `~/notes/projects/codemap/design-rationale.md` (Obsidian vault).
+Product docs: **[codemap.tools](https://codemap.tools)** · [Quick start](docs/quick-start.md) ·
+[CLI](docs/cli.md) · [Configuration](docs/configuration.md) · [Agent guide](docs/agents.md) ·
+[MCP](docs/mcp.md) · [Languages](docs/languages.md). Contributor rules live in
+[AGENTS.md](./AGENTS.md).
 
 ## License
 

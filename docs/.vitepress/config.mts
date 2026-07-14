@@ -13,21 +13,42 @@ export default defineConfig({
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32.png' }],
     ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' }],
-    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
-    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
-    ['meta', { name: 'description', content: 'A local-first code graph + semantic search your coding agent calls over MCP. One pure-Go binary, fully offline.' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:title', content: 'codemap — your agent greps. codemap knows.' }],
-    ['meta', { property: 'og:description', content: 'Local-first code intelligence for coding agents: who calls this, what breaks, which tests cover it — one call each, over MCP or CLI.' }],
-    ['meta', { property: 'og:url', content: 'https://codemap.tools' }],
+    ['meta', { property: 'og:site_name', content: 'codemap' }],
     ['meta', { property: 'og:image', content: 'https://codemap.tools/og-image.png' }],
     ['meta', { property: 'og:image:width', content: '1200' }],
     ['meta', { property: 'og:image:height', content: '630' }],
+    ['meta', { property: 'og:image:alt', content: 'codemap returning cited structural impact for a code symbol' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:image', content: 'https://codemap.tools/og-image.png' }],
+    ['meta', { name: 'twitter:image:alt', content: 'codemap returning cited structural impact for a code symbol' }],
+    ['meta', { name: 'theme-color', media: '(prefers-color-scheme: light)', content: '#ffffff' }],
+    ['meta', { name: 'theme-color', media: '(prefers-color-scheme: dark)', content: '#1b1b1f' }],
   ],
 
   sitemap: { hostname: 'https://codemap.tools' },
+  transformPageData(pageData) {
+    const relativeUrl = pageData.relativePath
+      .replace(/(^|\/)index\.md$/, '$1')
+      .replace(/\.md$/, '')
+    const canonicalUrl = new URL(relativeUrl, 'https://codemap.tools/').href
+    const isHome = pageData.relativePath === 'index.md'
+    const socialTitle = isHome
+      ? 'codemap — local-first code intelligence for agents'
+      : `${pageData.title} — codemap`
+    const description = pageData.description || 'Local-first code intelligence for agents and people.'
+    const head = pageData.frontmatter.head ?? []
+
+    head.push(
+      ['link', { rel: 'canonical', href: canonicalUrl }],
+      ['meta', { property: 'og:title', content: socialTitle }],
+      ['meta', { property: 'og:description', content: description }],
+      ['meta', { property: 'og:url', content: canonicalUrl }],
+      ['meta', { name: 'twitter:title', content: socialTitle }],
+      ['meta', { name: 'twitter:description', content: description }],
+    )
+    pageData.frontmatter.head = head
+  },
   themeConfig: {
     siteTitle: 'codemap',
     logo: '/mark.svg',
@@ -81,7 +102,7 @@ export default defineConfig({
       text: 'Edit this page',
     },
     footer: {
-      message: 'Local-first code intelligence.',
+      message: 'This docs site uses cookie-free Vercel Web Analytics. codemap sends no usage telemetry.',
       copyright: 'MIT Licensed © Abdul Hamid Achik',
     },
   },

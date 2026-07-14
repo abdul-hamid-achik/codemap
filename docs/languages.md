@@ -1,8 +1,33 @@
-# Language support plan
+---
+description: Current codemap language capabilities, required language servers, and the roadmap for adding new backends.
+---
+
+# Language support
 
 codemap reports language support by **relation domain**, not with one vague
 "supported" badge. Finding a function and proving who calls it are different
 capabilities, and the JSON contracts keep that distinction visible.
+
+## Current release
+
+| Language | Symbols and definitions | Call graph | Requirement / limit |
+|---|---|---|---|
+| **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + a buildable module for the precise pass. One-off `callers --precise` / `callees --precise` uses `gopls`. |
+| **TypeScript + JavaScript** | `documentSymbol` through one shared `typescript-language-server` process, including TSX/JSX and cross-language projects | No name-based edges; `--precise` uses LSP `callHierarchy` | `node` + `typescript-language-server`. |
+| **Python** | `documentSymbol` through `pyright-langserver` | No name-based edges; `--precise` uses LSP `callHierarchy` | `node` + `pyright-langserver`. |
+| **Vue SFC** | `<script>` and `<script setup>` blocks are routed to the TypeScript/JavaScript server; source lines map back to the `.vue` file | Not available yet; Vue currently emits symbols and `defines` edges only | `node` + `typescript-language-server`. Template and style blocks are not indexed. |
+
+Install the optional language servers you need:
+
+```bash
+npm install --global typescript typescript-language-server
+npm install --global pyright
+go install golang.org/x/tools/gopls@latest
+```
+
+Run `codemap doctor` to see which servers are available. Missing LSP-language servers are
+reported with install guidance; `--no-lsp` deliberately skips those backends. Semantic retrieval
+is language-agnostic once source-bearing symbols are indexed, and Ollama remains optional.
 
 ## Support ladder
 
@@ -29,7 +54,7 @@ codemap keeps one normalized graph and admits evidence through three ports:
    advertised capabilities such as `callHierarchy` can supply T3 under
    `--precise`. Missing or failing servers degrade visibly instead of making the
    index fail wholesale.
-3. **SCIP import** — a project-level import of an existing `index.scip`. SCIP is
+3. **Planned SCIP import** — a future project-level import of an existing `index.scip`. SCIP is
    well suited to definitions, references and implementation relationships. It
    must not be relabeled as a call graph unless the producer supplies actual
    call-role evidence; otherwise calls remain `unresolved` and LSP/native
@@ -93,8 +118,8 @@ container-aware extraction or parser structure more than compiler call graphs.
 Ship useful T1/T2 support with honest `unavailable` call coverage rather than
 manufacturing name-based calls.
 
-Optional tree-sitter support remains build-tagged because it requires a
-different release/toolchain story. It is a structure fallback, not a source of
+Tree-sitter is a planned optional structure fallback, not part of current builds. If shipped, it
+will require a separate release/toolchain story and will not be presented as a source of
 compiler-precise relations.
 
 ## Required gates for every language

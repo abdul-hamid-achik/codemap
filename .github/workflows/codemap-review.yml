@@ -53,4 +53,5 @@ jobs:
           echo "risk-score=${{ steps.codemap.outputs.risk-score }}"
           echo "untested-count=${{ steps.codemap.outputs.untested-count }}"
           echo "changed-symbols-count=${{ steps.codemap.outputs.changed-symbols-count }}"
+          echo "analysis-complete=${{ steps.codemap.outputs.analysis-complete }}"
           echo "comment-posted=${{ steps.codemap.outputs.comment-posted }}"

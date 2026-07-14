@@ -71,6 +71,39 @@
         "$ref": "#/$defs/symbol_ref"
       }
     },
+    "analysis_complete": {
+      "type": "boolean",
+      "description": "True only when the index is fresh and every mapped changed symbol and supporting analysis stage succeeded."
+    },
+    "total_symbols": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total unique changed symbols mapped before the 200-symbol analysis cap."
+    },
+    "analyzed_symbols": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 200,
+      "description": "Mapped changed symbols whose impact analysis completed successfully."
+    },
+    "truncated_symbols": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Mapped changed symbols omitted by the 200-symbol analysis cap."
+    },
+    "partial_errors": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/partial_error"
+      }
+    },
+    "partial_errors_truncated": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Additional partial errors omitted after the bounded 20-item list."
+    },
     "blast_radius": {
       "type": "array",
       "items": {
@@ -195,6 +228,32 @@
         "doc": {
           "type": "string",
           "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "partial_error": {
+      "type": "object",
+      "required": ["stage", "code", "message"],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": ["staleness", "mapping", "impact"]
+        },
+        "code": {
+          "type": "string",
+          "enum": ["staleness_failed", "symbol_mapping_failed", "deletion_only_hunk", "deletion_hunk_unmapped", "removed_definition_unavailable", "rename_unmapped", "impact_failed", "impact_unavailable", "symbol_not_found"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "symbol": {
+          "$ref": "#/$defs/symbol_ref"
         }
       },
       "additionalProperties": true

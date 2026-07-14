@@ -19,10 +19,11 @@ const exitGateFailed = 6
 
 // riskLevelOrdinal maps a risk level to its position in the low < medium < high
 // order, for --fail-on-risk threshold comparison. "unknown" (and anything
-// unrecognized) is ordinal 0 and therefore never satisfies any threshold — the
-// honesty rule from internal/app/risk.go: a symbol whose call graph is
-// unavailable must never be treated as "at least as risky as low", or a repo
-// indexed without --precise would spuriously fail every gate.
+// unrecognized) is ordinal 0 and therefore never satisfies a risk threshold —
+// the honesty rule from internal/app/risk.go: a symbol whose call graph is
+// unavailable must never be treated as "at least as risky as low". Review has
+// a separate fail-closed completeness check before this comparison whenever a
+// review gate is enabled (see reviewGateResult in query.go).
 func riskLevelOrdinal(level string) int {
 	switch level {
 	case "low":
@@ -55,8 +56,9 @@ func parseFailOnRiskFlag(cmd *cobra.Command) (threshold int, set bool, err error
 }
 
 // riskGateTrips reports whether a computed risk level meets or exceeds a
-// --fail-on-risk threshold. level "unknown" NEVER trips, regardless of
-// threshold — the same honesty rule riskLevelOrdinal documents.
+// --fail-on-risk threshold. level "unknown" does not trip this risk comparison;
+// reviewGateResult separately rejects incomplete indexed reviews when any
+// review gate is enabled.
 func riskGateTrips(level string, threshold int) bool {
 	if level == "" || level == "unknown" {
 		return false

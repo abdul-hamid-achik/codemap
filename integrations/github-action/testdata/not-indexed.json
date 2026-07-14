@@ -9,6 +9,10 @@
     { "path": "pkg/new.go", "status": "A", "symbols": 0 }
   ],
   "changed_symbols": [],
+  "analysis_complete": false,
+  "total_symbols": 0,
+  "analyzed_symbols": 0,
+  "truncated_symbols": 0,
   "blast_radius": [],
   "covering_tests": [],
   "untested_symbols": [],

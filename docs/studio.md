@@ -1,3 +1,7 @@
+---
+description: Explore code graphs, impact, search, metrics, and paths interactively in the codemap terminal UI.
+---
+
 # studio (TUI)
 
 `codemap studio` opens a full-screen, interactive explorer of your code, built on Charm v2

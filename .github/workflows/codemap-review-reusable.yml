@@ -50,7 +50,7 @@ on:
         type: string
         default: 'false'
       fail-on-untested:
-        description: 'fail the check if any changed symbol has no covering test'
+        description: 'fail if a changed symbol lacks a covering test or mapped test coverage is unresolved'
         type: string
         default: 'false'
       fail-on-risk:
@@ -72,8 +72,11 @@ on:
         description: 'count of untested_symbols'
         value: ${{ jobs.review.outputs.untested-count }}
       changed-symbols-count:
-        description: 'count of changed_symbols'
+        description: 'total mapped changed-symbol count (pre-cap when total_symbols is available)'
         value: ${{ jobs.review.outputs.changed-symbols-count }}
+      analysis-complete:
+        description: 'whether the complete diff was analyzed (true|false|unknown)'
+        value: ${{ jobs.review.outputs.analysis-complete }}
       comment-posted:
         description: '"true" if the sticky PR comment was created/updated this run, "false" otherwise'
         value: ${{ jobs.review.outputs.comment-posted }}
@@ -93,6 +96,7 @@ jobs:
       risk-score: ${{ steps.codemap.outputs.risk-score }}
       untested-count: ${{ steps.codemap.outputs.untested-count }}
       changed-symbols-count: ${{ steps.codemap.outputs.changed-symbols-count }}
+      analysis-complete: ${{ steps.codemap.outputs.analysis-complete }}
       comment-posted: ${{ steps.codemap.outputs.comment-posted }}
       review-json-path: ${{ steps.codemap.outputs.review-json-path }}
     steps:

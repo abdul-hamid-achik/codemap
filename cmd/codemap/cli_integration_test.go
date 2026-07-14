@@ -741,8 +741,9 @@ func runCLI(t *testing.T, bin, dir string, env []string, args ...string) cliResu
 // to pin the I10 gate contract: --fail-on-risk/--fail-on-untested print the
 // normal, unchanged output and only change the process exit code (dedicated
 // exitGateFailed = 6), never synthesizing a {"ok":false,...} failure envelope.
-// It also pins the pre-commit-hook degradation path: an unindexed repo or a
-// non-git directory must exit 0, never block a commit on missing infra.
+// It also pins the completeness split: stale/partial indexed reviews fail
+// closed, while an unindexed repo or a non-git directory exits 0 so missing
+// setup does not block every commit.
 func TestReviewRiskGateExitCode(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -760,19 +761,20 @@ func TestReviewRiskGateExitCode(t *testing.T) {
 	}
 
 	runner := filepath.Join(root, "runner")
-	project := filepath.Join(root, "project") // indexed repo, staged untested+risky change
-	cold := filepath.Join(root, "cold")       // git repo, never indexed
-	nonRepo := filepath.Join(root, "nonrepo") // not a git repository at all
-	for _, dir := range []string{runner, project, cold, nonRepo} {
+	project := filepath.Join(root, "project")    // indexed repo, staged untested+risky change
+	cold := filepath.Join(root, "cold")          // git repo, never indexed
+	initOnly := filepath.Join(root, "init-only") // registered with init, but never indexed
+	nonRepo := filepath.Join(root, "nonrepo")    // not a git repository at all
+	for _, dir := range []string{runner, project, cold, initOnly, nonRepo} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	env := isolatedCLIEnv(root)
 
-	// Hub() has 8 direct callers and NO covering test: changing it trips both
-	// --fail-on-untested (untested_symbols non-empty) and --fail-on-risk high
-	// (untested alone combines to a high score).
+	// Hub() has 8 direct callers and NO covering test: changing it trips
+	// --fail-on-untested. Review risk stays unknown while the index is stale,
+	// even though the successfully analyzed subset carries a high score.
 	var b strings.Builder
 	b.WriteString("package gate\n\nfunc Hub() {}\n")
 	for i := 0; i < 8; i++ {
@@ -786,6 +788,11 @@ func TestReviewRiskGateExitCode(t *testing.T) {
 	gateGit(t, project, "config", "commit.gpgsign", "false")
 	gateGit(t, project, "add", "-A")
 	gateGit(t, project, "commit", "-m", "init")
+	baseOut, err := exec.Command("git", "-C", project, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("resolve fixture base: %v", err)
+	}
+	baseSHA := strings.TrimSpace(string(baseOut))
 
 	res := runCLI(t, bin, runner, env, "index", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
 	if res.exit != 0 {
@@ -828,10 +835,15 @@ func TestReviewRiskGateExitCode(t *testing.T) {
 		}
 	})
 
-	t.Run("fail-on-risk high trips on the same fixture", func(t *testing.T) {
+	t.Run("fail-on-risk fails closed on incomplete stale review", func(t *testing.T) {
 		gated := runCLI(t, bin, runner, env, "review", "-C", project, "--staged", "--json", "--fail-on-risk", "high")
 		if gated.exit != exitGateFailed {
-			t.Fatalf("--fail-on-risk high exit=%d, want %d\nstdout=%s", gated.exit, exitGateFailed, gated.stdout)
+			t.Fatalf("--fail-on-risk high exit=%d, want %d for incomplete analysis\nstdout=%s", gated.exit, exitGateFailed, gated.stdout)
+		}
+		var rep app.ReviewReport
+		mustJSON(t, gated.stdout, &rep)
+		if !rep.Stale || rep.AnalysisComplete || rep.Risk == nil || rep.Risk.Level != "unknown" {
+			t.Fatalf("stale review gate metadata = stale:%v complete:%v risk:%+v", rep.Stale, rep.AnalysisComplete, rep.Risk)
 		}
 	})
 
@@ -860,6 +872,32 @@ func TestReviewRiskGateExitCode(t *testing.T) {
 		}
 	})
 
+	t.Run("action-style fresh since review has normal aggregate risk", func(t *testing.T) {
+		// The Action indexes the PR checkout first, then reviews --since the base
+		// SHA. That report is nonempty but fresh, so completeness must be true and
+		// the high aggregate band remains gateable rather than degrading unknown.
+		indexed := runCLI(t, bin, runner, env, "index", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
+		if indexed.exit != 0 {
+			t.Fatalf("refresh index exit=%d stderr=%s stdout=%s", indexed.exit, indexed.stderr, indexed.stdout)
+		}
+		review := runCLI(t, bin, runner, env, "review", "-C", project, "--since", baseSHA, "--json")
+		if review.exit != 0 || review.stderr != "" {
+			t.Fatalf("fresh --since review exit=%d stderr=%s stdout=%s", review.exit, review.stderr, review.stdout)
+		}
+		var rep app.ReviewReport
+		mustJSON(t, review.stdout, &rep)
+		if rep.Stale || !rep.AnalysisComplete || rep.TotalSymbols == 0 || rep.AnalyzedSymbols != rep.TotalSymbols {
+			t.Fatalf("fresh --since completeness = stale:%v complete:%v total:%d analyzed:%d errors:%+v", rep.Stale, rep.AnalysisComplete, rep.TotalSymbols, rep.AnalyzedSymbols, rep.PartialErrors)
+		}
+		if rep.Risk == nil || rep.Risk.Level != "high" {
+			t.Fatalf("fresh --since aggregate risk = %+v, want high", rep.Risk)
+		}
+		gated := runCLI(t, bin, runner, env, "review", "-C", project, "--since", baseSHA, "--json", "--fail-on-risk", "high")
+		if gated.exit != exitGateFailed {
+			t.Fatalf("fresh high-risk --since gate exit=%d, want %d", gated.exit, exitGateFailed)
+		}
+	})
+
 	t.Run("hook path degrades to exit 0 on an unindexed or non-git repo", func(t *testing.T) {
 		// cold: a real git repo with a staged change, but never indexed.
 		writeTestFile(t, filepath.Join(cold, "a.go"), "package cold\n\nfunc F() {}\n")
@@ -875,6 +913,31 @@ func TestReviewRiskGateExitCode(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "review", "-C", cold, "--staged", "--json", "--fail-on-untested")
 		if res.exit != 0 {
 			t.Fatalf("unindexed repo review --fail-on-untested exit=%d, want 0 (never block a commit on missing infra)\nstderr=%s\nstdout=%s", res.exit, res.stderr, res.stdout)
+		}
+
+		// initOnly: registration without an index must remain the same graceful
+		// missing-infrastructure case, not masquerade as an empty complete index.
+		writeTestFile(t, filepath.Join(initOnly, "a.go"), "package initonly\n\nfunc F() {}\n")
+		gateGit(t, initOnly, "init")
+		gateGit(t, initOnly, "config", "user.email", "t@t")
+		gateGit(t, initOnly, "config", "user.name", "t")
+		gateGit(t, initOnly, "config", "commit.gpgsign", "false")
+		gateGit(t, initOnly, "add", "-A")
+		gateGit(t, initOnly, "commit", "-m", "init")
+		initialized := runCLI(t, bin, runner, env, "init", "-C", initOnly, "--json")
+		if initialized.exit != 0 {
+			t.Fatalf("init-only registration exit=%d stderr=%s stdout=%s", initialized.exit, initialized.stderr, initialized.stdout)
+		}
+		writeTestFile(t, filepath.Join(initOnly, "a.go"), "package initonly\n\nfunc F() { _ = 1 }\n")
+		gateGit(t, initOnly, "add", "-A")
+		res = runCLI(t, bin, runner, env, "review", "-C", initOnly, "--staged", "--json", "--fail-on-untested")
+		if res.exit != 0 {
+			t.Fatalf("init-only review gate exit=%d, want 0\nstderr=%s\nstdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var initOnlyRep app.ReviewReport
+		mustJSON(t, res.stdout, &initOnlyRep)
+		if initOnlyRep.Indexed || initOnlyRep.AnalysisComplete {
+			t.Fatalf("init-only review = indexed:%v complete:%v", initOnlyRep.Indexed, initOnlyRep.AnalysisComplete)
 		}
 
 		// nonRepo: not a git repository at all.

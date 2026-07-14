@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "project": "complete-low-risk-fixture",
+  "mode": "since",
+  "since": "abc123",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    { "path": "pkg/leaf.go", "status": "M", "symbols": 1 }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "Leaf",
+      "fqn": "pkg.Leaf",
+      "kind": "function",
+      "file": "pkg/leaf.go",
+      "start_line": 3,
+      "end_line": 5,
+      "signature": "func Leaf()"
+    }
+  ],
+  "analysis_complete": true,
+  "total_symbols": 1,
+  "analyzed_symbols": 1,
+  "truncated_symbols": 0,
+  "blast_radius": [
+    {
+      "symbol": "TestLeaf",
+      "fqn": "pkg.TestLeaf",
+      "kind": "test",
+      "file": "pkg/leaf_test.go",
+      "start_line": 3,
+      "depth": 1,
+      "signature": "func TestLeaf(t *testing.T)"
+    }
+  ],
+  "covering_tests": [
+    {
+      "symbol": "TestLeaf",
+      "fqn": "pkg.TestLeaf",
+      "kind": "test",
+      "file": "pkg/leaf_test.go",
+      "start_line": 3,
+      "depth": 1,
+      "signature": "func TestLeaf(t *testing.T)"
+    }
+  ],
+  "untested_symbols": [],
+  "stale": false,
+  "call_graph": "resolved",
+  "risk": {
+    "level": "low",
+    "score": 0,
+    "factors": []
+  },
+  "test_commands": ["go test ./pkg -run '^(TestLeaf)$'"]
+}

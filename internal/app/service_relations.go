@@ -231,7 +231,7 @@ func (svc *Service) PreciseCallers(ctx context.Context, cwd, symbol string) (*Re
 	if err != nil {
 		return svc.preciseFallback(cwd, symbol, err, svc.Callers)
 	}
-	// preciseRelations succeeding means gopls resolved the symbol, so it exists.
+	// preciseRelations succeeding means the language server resolved the symbol, so it exists.
 	return &RelationReport{Symbol: symbol, Project: project, Found: true, Results: nonNil(c),
 		CallGraph:   CallGraphResolved, // language-server callHierarchy resolved the edges exactly
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
@@ -260,14 +260,14 @@ func (svc *Service) PreciseCallees(ctx context.Context, cwd, symbol string) (*Re
 	if err != nil {
 		return svc.preciseFallback(cwd, symbol, err, svc.Callees)
 	}
-	// preciseRelations succeeding means gopls resolved the symbol, so it exists.
+	// preciseRelations succeeding means the language server resolved the symbol, so it exists.
 	return &RelationReport{Symbol: symbol, Project: project, Found: true, Results: nonNil(ce),
 		CallGraph:   CallGraphResolved, // language-server callHierarchy resolved the edges exactly
 		Annotations: svc.symbolAnnotationsByName(project, symbol)}, nil
 }
 
 // PreciseRelationsAt returns both exact callers and callees of the symbol whose
-// declaration is at file:line (to disambiguate same-named symbols), in one gopls
+// declaration is at file:line (to disambiguate same-named symbols), in one LSP
 // session. Used by the studio precise toggle.
 func (svc *Service) PreciseRelationsAt(ctx context.Context, cwd, symbol, file string, line int) (callers, callees []SymbolRef, err error) {
 	c, ce, _, err := svc.preciseRelations(ctx, cwd, symbol, file, line)

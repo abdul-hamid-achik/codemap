@@ -1390,6 +1390,10 @@
       "signature": "func Changed119() error"
     }
   ],
+  "analysis_complete": true,
+  "total_symbols": 120,
+  "analyzed_symbols": 120,
+  "truncated_symbols": 0,
   "blast_radius": [
     {
       "symbol": "Caller0",

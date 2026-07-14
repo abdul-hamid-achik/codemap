@@ -14,33 +14,46 @@ comment, writes the job summary, and optionally gates the check on the JSON body
 
 ## What it does, in order
 
-1. **Install** — resolves the `version` input (`latest` pins to an exact tag via the GitHub
+1. **Validate** — checks configuration before downloading or running anything;
+   `fail-on-risk` must be empty, `low`, `medium`, or `high`, and every boolean input
+   (`precise`, language-server installs, `fail-on-untested`, and `skip-comment`) must be
+   exactly `true` or `false`. Omitted booleans receive their documented defaults; explicitly
+   empty booleans are invalid rather than being mistaken for an omission.
+2. **Install** — resolves the `version` input (`latest` pins to an exact tag via the GitHub
    Releases API, once, at job start — it never floats mid-job), downloads the matching GoReleaser
    archive, verifies it against the release's `checksums.txt`, and puts `codemap` on `PATH`.
    Cached by `actions/cache` keyed on `tag-os-arch` so a repeat run on the same commit/runner
    doesn't re-download.
-2. **Index** — `codemap init` then `codemap index --no-embed [--precise]` (`--no-embed`: no
+3. **Index** — `codemap init` then `codemap index --no-embed [--precise]` (`--no-embed`: no
    Ollama in CI; `--precise` needs the go toolchain for Go and/or
    `typescript-language-server`/`pyright-langserver` for TS/JS/Python — opt into installing those
-   with `install-ts-language-server`/`install-pyright`, or let codemap degrade to a name-based
-   call graph and say so in the comment). Want semantic search too? See
+   with `install-ts-language-server`/`install-pyright`; without them, those LSP-backed languages
+   report an unresolved call graph). A nonzero index exit is an operational failure and stops the
+   Action rather than reviewing a potentially partial or stale index. Want semantic search too? See
    [`examples/semantic-index-with-ollama.yml`](examples/semantic-index-with-ollama.yml).
-3. **Review** — `codemap review --since <base-sha> --depth <depth> --json`.
-4. **Render** — a bash+jq script (`scripts/render-comment.sh`) turns the JSON into Markdown,
+4. **Review** — `codemap review --since <base-sha> --depth <depth> --json`. Because no native
+   gate flags are passed here, any nonzero process exit is an operational failure even if stdout
+   happens to resemble a valid report.
+5. **Render** — a bash+jq script (`scripts/render-comment.sh`) turns the JSON into Markdown,
    capped under GitHub's 65 536-character comment limit (default soft budget 60 000; sections are
    dropped to counts-only, in order — blast radius, then changed symbols, then changed files — if
-   needed; the risk band and untested-symbols headline are never truncated).
-5. **Post** — creates or updates **one** sticky comment, keyed by a hidden HTML marker
+   needed; the analysis-completeness warning, risk band, and untested-symbols headline are never
+   truncated). An incomplete report scopes empty test findings to the successfully analyzed subset
+   and never claims that every changed symbol is covered.
+6. **Post** — creates or updates **one** sticky comment, keyed by a hidden HTML marker
    (`<!-- codemap-review-action:marker -->`), via `actions/github-script`.
-6. **Summarize** — appends the *same* rendered Markdown to `$GITHUB_STEP_SUMMARY`
+7. **Summarize** — appends the *same* rendered Markdown to `$GITHUB_STEP_SUMMARY`
    (`scripts/write-summary.sh`), unconditionally (`if: always()`). This is the surface that still
-   works when step 5 doesn't apply: push events (no PR to comment on), forks without PR-write
-   permission, or `skip-comment: true`. It reuses step 4's rendered file rather than re-deriving
+   works when step 6 doesn't apply: push events (no PR to comment on), forks without PR-write
+   permission, or `skip-comment: true`. It reuses step 5's rendered file rather than re-deriving
    Markdown from the JSON, so there is exactly one rendering code path for both surfaces.
-7. **Gate** (optional) — `fail-on-untested`/`fail-on-risk` fail the *Action's final step* by reading
+8. **Gate** (optional) — `fail-on-untested`/`fail-on-risk` fail the *Action's final step* by reading
    the JSON body directly. The Action deliberately invokes `codemap review` without its native
    gate flags, so rendering, the sticky comment, the job summary, and outputs are all produced
-   before the check fails. See [Gate sequencing](#gate-sequencing-vs-codemaps-native-exit-6) below.
+   before the check fails. Action inputs are validated before setup begins. A gate also fails closed
+   when `analysis_complete` is not `true`, since a partial result cannot safely enforce policy.
+   The untested gate also fails when mapped symbols' call graph leaves test coverage unresolved. See
+   [Gate sequencing](#gate-sequencing-vs-codemaps-native-exit-6) below.
 
 ## Adoption: reusable workflow vs. direct action
 
@@ -88,15 +101,15 @@ both paths run identical logic and expose identical outputs.
 | Input | Default | Description |
 |---|---|---|
 | `version` | `latest` | codemap release to install (e.g. `v0.40.0`); `latest` is resolved to one exact tag at job start |
-| `precise` | `true` | run `codemap index --precise` (exact call edges; degrades honestly without the right toolchain/LSP) |
+| `precise` | `true` | `true`/`false`; run `codemap index --precise` (exact call edges; degrades honestly without the right toolchain/LSP) |
 | `depth` | `3` | blast-radius depth passed to `codemap review --depth` |
-| `install-ts-language-server` | `false` | `npm install -g typescript-language-server typescript` before indexing |
-| `install-pyright` | `false` | `npm install -g pyright` before indexing |
-| `fail-on-untested` | `false` | fail the check if any changed symbol has no covering test |
-| `fail-on-risk` | `` (disabled) | fail the check if the aggregate `risk.level` is at or above this band: `low`\|`medium`\|`high` |
+| `install-ts-language-server` | `false` | `true`/`false`; install `typescript-language-server` + TypeScript before indexing |
+| `install-pyright` | `false` | `true`/`false`; install Pyright before indexing |
+| `fail-on-untested` | `false` | `true`/`false`; fail if a changed symbol lacks a covering test or mapped symbols' test coverage is unresolved |
+| `fail-on-risk` | `` (disabled) | fail the check if the aggregate `risk.level` is at or above this band: `low`\|`medium`\|`high`; any other value fails before setup |
 | `base-sha` | `github.event.pull_request.base.sha \|\| github.event.before` | commit to diff against; set explicitly for events other than `pull_request`/`push` |
 | `github-token` | `github.token` | token used to post/update the sticky comment |
-| `skip-comment` | `false` | compute + gate, but don't post a PR comment (useful outside `pull_request` events, e.g. a push-triggered smoke check) |
+| `skip-comment` | `false` | `true`/`false`; compute + gate, but don't post a PR comment (useful outside `pull_request` events) |
 
 ### Outputs
 
@@ -105,13 +118,15 @@ both paths run identical logic and expose identical outputs.
 | `risk-level` | the aggregate `risk.level` (`unknown`\|`low`\|`medium`\|`high`), or `absent` when the diff touched no indexed symbols |
 | `risk-score` | the aggregate `risk.score` (`0`..`1`), or `0` when risk was not computed |
 | `untested-count` | count of `untested_symbols` |
-| `changed-symbols-count` | count of `changed_symbols` |
+| `changed-symbols-count` | total mapped symbol count from `total_symbols`; falls back to `changed_symbols` length for older reports |
+| `analysis-complete` | `true` when the full diff was analyzed, `false` when codemap reports partial analysis, or `unknown` for an older/unsupported report shape |
 | `comment-posted` | `"true"` if the sticky PR comment was created/updated this run, `"false"` if skipped (`skip-comment: true`, a non-`pull_request` event, or the render/post step failed before posting) |
 | `review-json-path` | path to the raw `codemap review --json` output, for downstream steps |
 
-`risk-level`/`risk-score`/`untested-count`/`changed-symbols-count` are set **even when the gate
-step fails** (`>> $GITHUB_OUTPUT` runs before `exit 1` in `gate.sh`), so a downstream step in the
-same job can still read them regardless of `fail-on-untested`/`fail-on-risk`.
+`risk-level`/`risk-score`/`untested-count`/`changed-symbols-count`/`analysis-complete` are set
+**even when the gate step fails** (`>> $GITHUB_OUTPUT` runs before `exit 1` in `gate.sh`), so a
+downstream step in the same job can still read them regardless of
+`fail-on-untested`/`fail-on-risk`.
 
 Downstream-step example — label a PR by risk level instead of (or alongside) failing the check:
 
@@ -142,7 +157,7 @@ reach `http://localhost:11434`.
 ### Gate sequencing vs. codemap's native exit 6
 
 `Review()` (`internal/app/review.go` in the codemap repo) still degrades gracefully and returns a
-normal success report for high-risk, fully-untested, non-indexed, or non-repo diffs. The CLI now
+normal success report for high-risk, fully-untested, or diffs that map to no indexed symbols. The CLI now
 adds native `--fail-on-risk <low|medium|high>` and `--fail-on-untested` gates: after printing that
 same unchanged success report (including under `--json`), it exits **6** when a configured gate
 trips. Exit 6 is deliberately not an `{"ok":false,...}` operational-error envelope.
@@ -150,9 +165,26 @@ trips. Exit 6 is deliberately not an `{"ok":false,...}` operational-error envelo
 This composite Action does not pass those native gate flags to `codemap review`. It needs the
 successful JSON body first so it can render/post the report, write the summary, and expose outputs;
 then its final `gate.sh` step applies the same risk/untested contract and fails the Action. Keeping
-the gate last also means `risk-level`, `risk-score`, and count outputs are available even when the
+the gate last also means risk, count, and analysis-completeness outputs are available even when the
 check fails. `run-review.sh` treats a structured `{"ok":false,...}` envelope as an operational
-failure; with native gates intentionally absent from that invocation, exit 6 is not expected there.
+failure; it also rejects any nonzero `codemap index` or `codemap review` exit rather than accepting
+a partial/stale index or valid-looking stdout from an unsuccessful process. Missing language
+servers remain an accuracy limitation, not an operational failure: codemap
+returns success and reports the affected call graph as unresolved. The Action requires a real,
+non-shallow git checkout and fails before indexing when that precondition is missing. With native
+gates intentionally absent from the review invocation, exit 6 is not expected there.
+
+Gate configuration is validated before version resolution or installation. Invalid
+`fail-on-risk` values do not disable the gate silently; they fail with the accepted values. An
+unknown `schema_version` also fails whenever either gate is enabled, because applying policy to an
+unrecognized payload would be unsafe. A recognized schema-v1 report likewise fails a configured
+gate when `analysis_complete` is `false` or absent (older v1 producers), while preserving all gate
+outputs for downstream diagnosis. `fail-on-untested` also fails closed when mapped symbols have
+`call_graph: unresolved|none`, because an empty list then means coverage is unknown. When both
+gates are disabled, the Action is explicitly a
+reporting-only integration: it renders a prominent incomplete/compatibility notice and remains
+nonblocking so partial analysis or an upgrade mismatch does not take down an observation-only
+workflow.
 
 ### The risk-level ordinal is explicit, not lexical
 
@@ -160,8 +192,12 @@ failure; with native gates intentionally absent from that invocation, exit 6 is 
 table (`low=1, medium=2, high=3, anything else=-1`) rather than comparing strings — so
 `risk.level: "unknown"` can never coincidentally satisfy `fail-on-risk: high` by string comparison
 luck, and a diff with **no** `risk` object at all (nothing indexed was touched) never trips either
-gate. `fail-on-risk` is inclusive of its own threshold: `fail-on-risk: low` fails on `low`,
-`medium`, or `high`.
+content gate. This rule is unchanged: an otherwise complete report with unknown risk passes a risk
+threshold. Separately, `analysis_complete != true` fails any configured policy gate because the
+report is partial, not because unknown risk was treated as high. `fail-on-risk` is inclusive of its
+own threshold: `fail-on-risk: low` fails on `low`, `medium`, or `high`. The untested gate is
+separate: mapped symbols with an unresolved/absent call graph cannot establish test coverage, so
+an empty `untested_symbols` list does not pass `fail-on-untested`.
 
 ## GitLab CI usage
 
@@ -184,6 +220,10 @@ bash+jq instead of `actions/github-script`-flavored JS. Only the comment-posting
 definition and variable list. `install-language-servers.sh` and `write-summary.sh` are GitHub-only
 today — the GitLab template doesn't install language servers or write a job summary (GitLab has no
 `$GITHUB_STEP_SUMMARY` equivalent; a merge-request note is its only report surface).
+It maps `CODEMAP_FAIL_ON_UNTESTED`/`CODEMAP_FAIL_ON_RISK` to the shared gate variables and runs
+`gate.sh --validate-inputs` immediately after downloading the scripts, before resolving or
+installing codemap, indexing, rendering, or posting. GitLab therefore rejects malformed and
+explicitly empty boolean inputs with the same early-failure contract as the GitHub Action.
 
 ## Development
 
@@ -193,12 +233,15 @@ task action:lint  # shellcheck + yamllint, best-effort locally; both run in CI r
 ```
 
 `test/test.sh` is a plain-bash harness (no `bats-core` dependency assumed) that exercises
-`render-comment.sh` and `gate.sh` against every fixture in `testdata/` — including a real
+`render-comment.sh` and `gate.sh` against every fixture in `testdata/`, validates gate inputs,
+and mocks `run-review.sh` to pin index/review process failures and checkout-precondition behavior — including a real
 `codemap review --json` output generated by building codemap from source and running it against
 a scratch git repo (`testdata/real-since-untested-high-risk.json`) and the project's own golden
 contract fixture (`testdata/golden-contract.json`, copied from
 `internal/app/testdata/contracts/codemap.review.v1.json` in the codemap repo) — plus the `gate.sh`
-ordinal table (now including its `risk-score`/`changed-symbols-count` outputs),
+ordinal/completeness behavior (including `risk-score`, total `changed-symbols-count`, and
+`analysis-complete` outputs),
+GitLab's validate-before-work ordering and unset-versus-empty input defaults,
 `write-summary.sh`'s `$GITHUB_STEP_SUMMARY` fallback path (present file, missing file, and unset
 `$GITHUB_STEP_SUMMARY`), `resolve-version.sh`'s archive-name construction for `linux/amd64`,
 `darwin/arm64`, and `windows/amd64` (+ the `windows/arm64` rejection), and

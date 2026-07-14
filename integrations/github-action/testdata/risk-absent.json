@@ -6,22 +6,15 @@
   "is_repo": true,
   "indexed": true,
   "changed_files": [
-    { "path": "pkg/thing.go", "status": "M", "symbols": 1 }
+    { "path": "README.md", "status": "M", "symbols": 0 }
   ],
-  "changed_symbols": [
-    {
-      "symbol": "Thing",
-      "fqn": "pkg.Thing",
-      "kind": "function",
-      "file": "pkg/thing.go",
-      "start_line": 10,
-      "end_line": 12,
-      "signature": "func Thing()"
-    }
-  ],
+  "changed_symbols": [],
+  "analysis_complete": true,
+  "total_symbols": 0,
+  "analyzed_symbols": 0,
+  "truncated_symbols": 0,
   "blast_radius": [],
   "covering_tests": [],
   "untested_symbols": [],
-  "stale": false,
-  "test_commands": []
+  "stale": false
 }

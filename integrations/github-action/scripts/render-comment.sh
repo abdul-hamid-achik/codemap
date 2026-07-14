@@ -77,6 +77,12 @@ resolution="$(j '.resolution // empty')"
 call_graph="$(j '.call_graph // empty')"
 risk_present="$(j 'if has("risk") then "true" else "false" end')"
 deletion_present="$(j 'if has("deletion_analysis") then "true" else "false" end')"
+analysis_complete="$(j 'if .analysis_complete == true then "true" elif .analysis_complete == false then "false" else "unknown" end')"
+total_symbols="$(j '.total_symbols // ((.changed_symbols // []) | length)')"
+analyzed_symbols="$(j '.analyzed_symbols // "unknown"')"
+truncated_symbols="$(j '.truncated_symbols // "unknown"')"
+partial_errors_count="$(j '(.partial_errors // []) | length')"
+partial_errors_truncated="$(j '.partial_errors_truncated // 0')"
 
 changed_files_count="$(j '(.changed_files // []) | length')"
 changed_symbols_count="$(j '(.changed_symbols // []) | length')"
@@ -105,6 +111,25 @@ render_header() {
   echo "### codemap review"
   echo
   echo "Project: \`${project}\` · $(mode_line)"
+  echo
+}
+
+render_analysis_warning() {
+  if [[ "$analysis_complete" == "true" ]]; then
+    return
+  fi
+
+  if [[ "$analysis_complete" == "false" ]]; then
+    printf '> **⚠️ Incomplete analysis.** codemap analyzed `%s` of `%s` mapped symbol(s); `%s` were truncated.\n' \
+      "$analyzed_symbols" "$total_symbols" "$truncated_symbols"
+  else
+    printf '%s\n' '> **⚠️ Analysis completeness unknown.** This schema-v1 report does not declare `analysis_complete` (it may come from an older codemap release).'
+  fi
+  if [[ "$partial_errors_count" -gt 0 || "$partial_errors_truncated" -gt 0 ]]; then
+    printf '> It reports `%s` partial error(s) and `%s` additional omitted error(s); inspect the raw review JSON for details.\n' \
+      "$partial_errors_count" "$partial_errors_truncated"
+  fi
+  echo "> Blast-radius, test-coverage, and risk results below may describe only the successfully analyzed subset."
   echo
 }
 
@@ -198,7 +223,15 @@ render_untested() {
     return
   fi
   if [[ "$untested_count" -eq 0 ]]; then
-    echo "**Untested**: none — every changed symbol has at least one covering test in its blast radius."
+    if [[ "$analysis_complete" == "true" && "$call_graph" == "resolved" ]]; then
+      echo "**Untested**: none — every changed symbol has at least one covering test in its blast radius."
+    elif [[ "$analysis_complete" == "true" && "$call_graph" == "name" ]]; then
+      echo "**Untested**: none reported by the name-based graph — coverage is a medium-confidence candidate and may over- or under-report same-named/dynamic relationships. Run precise indexing to confirm."
+    elif [[ "$analysis_complete" == "true" ]]; then
+      echo "**Untested**: unknown — none reported, but test coverage cannot be established while call graph resolution is \`${call_graph:-unknown}\`."
+    else
+      echo "**Untested**: none reported in the analyzed subset — incomplete analysis cannot establish coverage for every changed symbol."
+    fi
     echo
     return
   fi
@@ -278,9 +311,17 @@ render_test_commands() {
 
 render_caveats() {
   local lines=()
-  if [[ -n "$call_graph" && "$call_graph" != "resolved" ]]; then
-    lines+=("call graph resolution is \`${call_graph}\` (not \`resolved\`) — some edges are name-based or unavailable; treat blast radius/untested findings as a lower bound. Run with \`precise: true\` and the relevant language server installed (\`install-ts-language-server\`/\`install-pyright\`) for exact edges.")
-  fi
+  case "$call_graph" in
+    name)
+      lines+=("call graph resolution is \`name\` (not \`resolved\`) — Go name matching is medium-confidence candidate evidence and may over-match same-named methods or miss dynamic wiring. Run with \`precise: true\` to confirm edges via \`go/types\`.")
+      ;;
+    unresolved)
+      lines+=("call graph resolution is \`unresolved\` — blast radius and test coverage are unknown, not empty. Run with \`precise: true\` and install the relevant language server (\`install-ts-language-server\`/\`install-pyright\`) for exact edges.")
+      ;;
+    none)
+      lines+=("call graph resolution is \`none\` — no usable call relationship evidence was available for the mapped symbols.")
+      ;;
+  esac
   if [[ -n "$resolution" ]]; then
     lines+=("$resolution")
   fi
@@ -323,6 +364,7 @@ build() {
   local drop_blast="${1:-false}" drop_symbols="${2:-false}" drop_files="${3:-false}"
   {
     render_header
+    render_analysis_warning
     if render_not_repo_or_indexed; then
       render_footer
       return
@@ -366,7 +408,7 @@ if [[ "$(printf '%s' "$body" | wc -c | tr -d ' ')" -gt "$MAX_BYTES" ]]; then
 fi
 size="$(printf '%s' "$body" | wc -c | tr -d ' ')"
 if [[ "$size" -gt "$MAX_BYTES" ]]; then
-  echo "::warning::rendered comment is ${size} bytes, still over the ${MAX_BYTES}-byte soft cap even after dropping all list sections (risk/untested headline is never truncated) — GitHub's hard limit is 65536 bytes"
+  echo "::warning::rendered comment is ${size} bytes, still over the ${MAX_BYTES}-byte soft cap even after dropping all list sections (analysis/risk/untested headlines are never truncated) — GitHub's hard limit is 65536 bytes"
 fi
 
 printf '%s\n' "$body" > "$OUT"

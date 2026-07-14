@@ -1,3 +1,7 @@
+---
+description: Keep codemap indexes aligned with Git branches and share or restore content-addressed index snapshots.
+---
+
 # Branches & caching
 
 codemap's index (graph + vectors) is a snapshot of one working tree. Two features
@@ -24,7 +28,7 @@ codemap branch-snapshot                  # stash the current branch's index with
 
 `branch-switch` keys each snapshot on the branch's tip sha, so a restore only lands
 when the snapshot's base is an ancestor of HEAD and its **embedding profile** matches
-(the provider/model/dimension you're using now). Otherwise it falls back to an
+(the provider/model/dimensions/distance metric you're using now). Otherwise it falls back to an
 incremental reindex — never a silent mismatch. A non-git directory or detached HEAD
 is a clean no-op (the single flat index is left as-is).
 
@@ -111,8 +115,8 @@ See [codemap in CI](/ci) for a workflow snippet that caches the tarball between 
   per-repo pointer file. `cache list --rebuild` rebuilds from fcheap if the pointer is
   gone.
 - Both are best-effort and **never fail the index**: a missing `fcheap` binary, an
-  unindexed project, or a non-git dir is a clean no-op. `codemap doctor` reports
-  whether `fcheap` is available.
+  unindexed project, or a non-git dir is a clean no-op. Cache commands return an
+  actionable note when `fcheap` is unavailable.
 
 ## In MCP
 

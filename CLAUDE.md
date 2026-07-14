@@ -6,12 +6,14 @@ and the handful of things that are easy to get wrong.
 ## What codemap is
 
 Local-first code intelligence: a structural code graph (Go via stdlib `go/parser`, plus
-`--precise` go/types; TypeScript **+ JavaScript** via one `typescript-language-server` — calls
-resolving across the `.ts`↔`.js` boundary — **Python** via `pyright-langserver`, and **Vue SFCs**
-(`.vue` → `<script>` blocks routed to the same TS server); tree-sitter still planned) fused with
-semantic retrieval (local veclite or an explicit one-hop vecgrep CLI owner), exposed as a unified
-query layer. Three surfaces over the structural store: CLI
-(`--json` for agents), MCP server (`codemap serve`, 42 tools), and the `studio` TUI.
+`--precise` go/types; TypeScript **+ JavaScript** symbols via one
+`typescript-language-server`, with precise calls resolving across the `.ts`↔`.js` boundary;
+**Python** via `pyright-langserver`; and **Vue SFC** `<script>` blocks routed to the same TS server
+for symbols + `defines` edges only). Tree-sitter remains planned and has no implementation today.
+The graph is fused with semantic retrieval (local veclite plus an optional one-hop vecgrep
+fallback, or vecgrep as the explicit owner) and exposed as a unified query layer. Three surfaces
+share the structural store: CLI (`--json` for agents), MCP server (`codemap serve`: 42 tools in
+`full`, 22 in `agent`/`core`), and the `studio` TUI.
 
 Surfaces / key files:
 - CLI: `cmd/codemap/` — cobra CLI split per-command (main.go plus agent/annotate/branch/cache/
@@ -25,7 +27,7 @@ Surfaces / key files:
 - MCP server (thin, 42 full; agent/core 22): `internal/mcp/server.go`. `agent` is
   pinned exactly to the taught workflow; `core` is the separate compatible lean contract.
 - studio TUI: `internal/tui/` (model.go/view.go/theme.go/run.go + anim.go [harmonica springs]
-  + highlight.go [chroma syntax]; tabs graph/metrics/impact/search)
+  + highlight.go [chroma syntax]; tabs graph/metrics/impact/search/path)
 - Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`
 - Extraction: `internal/extract/` (`gosrc` = go/parser · `typesrc` = go/types [`--precise`] ·
   `lspsrc` = LSP-backed [TS/JS/Python] · `vuesrc` = Vue SFC `.vue` → TS server)
@@ -39,7 +41,8 @@ Surfaces / key files:
 
 ## Two documentation surfaces — do not mix them
 
-- `docs/` → VitePress **product docs**, deployed to **Vercel** (no GitHub Pages).
+- `docs/` → VitePress **product docs**, deployed to **Vercel** (no GitHub Pages). Public
+  configuration belongs in `docs/configuration.md`; agent usage belongs in `docs/agents.md`.
 - `~/notes/projects/codemap/` → Obsidian vault for **working notes / handoffs**, via the
   `obsidian-cli` skill. **Never** write scratch `.md` into the repo. Repo root `.md` is
   limited to: README, AGENTS, CLAUDE — the backlog lives in the vault
@@ -62,9 +65,10 @@ Surfaces / key files:
   ("awaiting upstream merges"); that replace is ignored by our module, so it may not build
   against stock `charm.land/bubbletea/v2`. Mirror the replace or pin bubbletea to what ntcharts
   wants, and `go build ./...` early.
-- **Keep `CGO_ENABLED=0` for releases.** Everything is pure-Go (`modernc.org/sqlite`,
-  veclite, the go-sdk). tree-sitter is the *only* thing that needs CGO — it stays behind the
-  `treesitter` build tag and out of release binaries until 0.2.
+- **Keep `CGO_ENABLED=0` for releases.** The shipped code is pure-Go (`modernc.org/sqlite`,
+  veclite, the go-sdk). No tree-sitter backend or `treesitter` build tag exists today; if that
+  planned CGO-dependent backend is implemented, keep it optional until its release matrix is
+  explicitly supported.
 - **Lazy-open the DB.** Don't open SQLite/veclite at startup (multiple MCP clients spawn
   multiple servers and would fight over the lock). Open on first query.
 - **Detect cycles in graph traversal.** Call graphs have cycles; every BFS/DFS needs a
@@ -72,12 +76,14 @@ Surfaces / key files:
 - **veclite payload vs content**: filterable fields (`path`, `lang`, `kind`, `node_id`) go in
   Payload; the embeddable/searchable source text goes in Content (or a `WithTextIndex`
   field). `HybridSearch` needs a text index enabled.
-- **No tree-sitter exists in the ecosystem** — codemap introduces it. Use the official
-  `github.com/tree-sitter/go-tree-sitter`, not the abandoned `smacker` fork.
+- **Tree-sitter is planned, not present.** Do not describe it as a current backend. If it is
+  introduced, use the official `github.com/tree-sitter/go-tree-sitter`, not the abandoned
+  `smacker` fork, and keep the default release pure-Go.
 
 ## Validate your work
 
-`task check` (fmt + lint + test) before every commit · `task race` for TUI/indexer ·
+`task check` (fmt + lint + test) during development; `task check:verify` is the non-mutating
+CI/release gate · `task race` for TUI/indexer ·
 `task build` · `task flows` (glyphrun) when specs change. Flows are **local-only** (CI skips
 them): `studio.yml` needs `gopls`, `semantic.yml` needs a local Ollama with `nomic-embed-text`,
 `precise.yml` needs the `go` toolchain (it runs `index --precise`); `typescript.yml` +

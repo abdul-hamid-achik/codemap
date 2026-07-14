@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "project": "partial-analysis-fixture",
+  "mode": "since",
+  "since": "abc123",
+  "depth": 3,
+  "is_repo": true,
+  "indexed": true,
+  "changed_files": [
+    { "path": "pkg/work.go", "status": "M", "symbols": 2 }
+  ],
+  "changed_symbols": [
+    {
+      "symbol": "Working",
+      "fqn": "pkg.Working",
+      "kind": "function",
+      "file": "pkg/work.go",
+      "start_line": 3,
+      "end_line": 5,
+      "signature": "func Working()"
+    },
+    {
+      "symbol": "Broken",
+      "fqn": "pkg.Broken",
+      "kind": "function",
+      "file": "pkg/work.go",
+      "start_line": 7,
+      "end_line": 9,
+      "signature": "func Broken()"
+    }
+  ],
+  "analysis_complete": false,
+  "total_symbols": 3,
+  "analyzed_symbols": 1,
+  "truncated_symbols": 1,
+  "partial_errors": [
+    {
+      "stage": "impact",
+      "code": "impact_failed",
+      "message": "graph read failed",
+      "symbol": {
+        "symbol": "Broken",
+        "fqn": "pkg.Broken",
+        "kind": "function",
+        "file": "pkg/work.go",
+        "start_line": 7,
+        "end_line": 9,
+        "signature": "func Broken()"
+      }
+    }
+  ],
+  "blast_radius": [],
+  "covering_tests": [],
+  "untested_symbols": [],
+  "stale": false,
+  "call_graph": "name",
+  "risk": {
+    "level": "unknown",
+    "score": 0,
+    "factors": []
+  }
+}

@@ -9,10 +9,13 @@
     { "path": "README.md", "status": "M", "symbols": 0 }
   ],
   "changed_symbols": [],
+  "analysis_complete": true,
+  "total_symbols": 0,
+  "analyzed_symbols": 0,
+  "truncated_symbols": 0,
   "blast_radius": [],
   "covering_tests": [],
   "untested_symbols": [],
   "stale": false,
-  "note": "changed lines don't map to indexed symbols (comments, imports, or unindexed/untracked files) — nothing to analyze",
-  "test_commands": []
+  "note": "changed lines don't map to indexed symbols (comments, imports, or unindexed/untracked files) — nothing to analyze"
 }

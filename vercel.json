@@ -1,12 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vitepress",
-  "installCommand": "bun install",
+  "installCommand": "bun install --frozen-lockfile",
   "buildCommand": "bun run site:build",
   "outputDirectory": "docs/.vitepress/dist",
   "cleanUrls": true,
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- docs/ package.json bun.lock vercel.json",
-  "rewrites": [
-    { "source": "/(.*)?", "destination": "/$1.html" }
-  ]
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- docs/ package.json bun.lock vercel.json"
 }

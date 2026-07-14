@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -31,8 +32,11 @@ func FindProjectRoot(start string) (string, error) {
 	dir := start
 	for {
 		for _, m := range projectMarkers {
-			if _, err := os.Stat(filepath.Join(dir, m)); err == nil {
+			path := filepath.Join(dir, m)
+			if _, err := os.Stat(path); err == nil {
 				return dir, nil
+			} else if !isOptionalPathAbsent(err) {
+				return "", fmt.Errorf("inspect project marker %s: %w", path, err)
 			}
 		}
 		parent := filepath.Dir(dir)

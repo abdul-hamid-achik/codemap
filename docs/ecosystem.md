@@ -1,3 +1,7 @@
+---
+description: Understand codemap integrations with vecgrep and tinyvault and the one-hop CLI contracts between them.
+---
+
 # Ecosystem
 
 codemap is the *structural-intelligence hub* of a local, XDG-stored toolchain: it feeds the call/test

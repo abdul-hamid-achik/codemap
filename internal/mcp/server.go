@@ -182,10 +182,11 @@ exact-resolution pass: go/types for Go, language-server callHierarchy for the LS
 queried name, pass a source selector to keep the query on one definition. The LSP languages have NO
 name-based call edges, so for a TS/JS/Python
 project precise:true is what gives codemap_callers/impact/hotspots/path a call graph at all. For a
-one-off exact answer on Go without reindexing, pass precise:true to codemap_callers/codemap_callees
-(gopls; Go only — on the LSP languages, reindex with codemap_index precise:true instead). Precise
-resolution degrades to name-based (with a "note" in the result) when the toolchain or module is
-unavailable, so precise:true is never a hard failure. In fallback/local mode codemap_semantic
+one-off exact answer without reindexing, pass precise:true to codemap_callers/codemap_callees. The
+service uses gopls for Go, typescript-language-server for TypeScript/JavaScript, and pyright for
+Python; Vue call hierarchy is not supported yet. When a server or module is unavailable, Go
+degrades to name-based results with a note, while an uncovered LSP language stays unresolved — so
+precise:true is never a hard failure. In fallback/local mode codemap_semantic
 returns a "note" (not an error) when the permitted owner has no embeddings — fall back to
 codemap_find. An explicitly configured vecgrep owner instead surfaces a missing binary, execution
 failure, or invalid response as an error; a valid zero-hit response stays empty.
@@ -305,7 +306,7 @@ type symbolQueryInput struct {
 	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol name to look up; omit when selector is provided"`
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from a result's file/start_line/fqn/kind fields; takes precedence over symbol"`
 	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Precise  bool                `json:"precise,omitempty" jsonschema:"use the language server (gopls) for exact results (Go) — slower, but not inflated by same-named symbols"`
+	Precise  bool                `json:"precise,omitempty" jsonschema:"use callHierarchy for an exact one-off answer (gopls for Go, typescript-language-server for TypeScript/JavaScript, pyright for Python); slower, but not inflated by same-named symbols"`
 }
 
 type referencesInput struct {

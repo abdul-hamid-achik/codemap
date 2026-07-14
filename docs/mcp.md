@@ -1,3 +1,7 @@
+---
+description: Configure the codemap MCP server and explore its agent, core, and full tool profiles.
+---
+
 # MCP server
 
 codemap is a stdio [Model Context Protocol](https://modelcontextprotocol.io) server, so AI
@@ -97,21 +101,22 @@ to `CODEMAP_MCP_PROFILE=core` for exactly this reason; every other harness stays
 
 ## Tools
 
-All tools take an optional `path` (the project directory; defaults to the server's working
-directory) and return JSON.
+Project-scoped tools take an optional `path` (the project directory; defaults to the
+server's working directory) and return JSON. Global helpers such as `codemap_projects`,
+`codemap_docs`, and `codemap_doctor` do not need a project path.
 
 | Tool | Description |
 |---|---|
 | `codemap_init` | Register a project directory |
-| `codemap_index` | Index/reindex a project (`reindex`, `no_embed`, `precise` → exact call edges via go/types for Go) |
+| `codemap_index` | Index/reindex a project (`reindex`, `no_embed`, `precise` → exact call edges via `go/types` for Go and LSP `callHierarchy` for TypeScript/JavaScript/Python; Vue remains symbols-only) |
 | `codemap_status` | Index statistics **plus freshness** — a `stale` count of files changed/added/removed since indexing, so an agent reindexes before trusting results |
 | `codemap_doctor` | Check the environment (go toolchain, gopls, TS/JS + Python language servers, Ollama) with install hints — diagnose why a language isn't indexed or semantic search is off |
 | `codemap_semantic` | Semantic search by meaning (`query`, `top_k`). Adaptively balances the vector/BM25 hybrid-search fusion by query shape — an identifier-looking query leans BM25, a natural-language question leans vector — and reports the chosen profile as `fusion` (`identifier`/`natural_language`/`balanced`). Set `semantic.fusion: balanced` (or `CODEMAP_SEMANTIC_FUSION=balanced`) on the server for exact equal weighting |
 | `codemap_callers` | Functions/methods that call a symbol (`precise: true` → language-server resolution; `selector` → one exact definition). Carries a stable `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) |
 | `codemap_callees` | Functions/methods a symbol calls; accepts the same `precise` and exact `selector` inputs. Same `call_graph` enum |
 | `codemap_references` | Places a function/method is used as a value rather than called (callbacks, handlers, registrations). Accepts an exact `selector`; returns capped source sites with totals plus independent `coverage` and confirmed/candidate confidence. Go coverage is partial and name fan-out remains candidate, so an empty result is not proof of no runtime wiring. |
-| `codemap_impact` | Callers + blast radius + covering tests + `test_commands` (copy/paste-ready runner invocations derived from those tests, same derivation as `codemap_review`) (`depth`). `selector` scopes all traversal to one definition. Carries `call_graph` alongside the human `resolution` note — `unresolved` means the callers/blast/tests are unknown (not absent) on a TS/JS/Python/Vue symbol without `--precise` |
-| `codemap_review` | **Diff-scoped impact + test selection** — maps a working/staged/`since` diff to changed symbols, `blast_radius`, `covering_tests`, `test_commands`, aggregate `risk`, confidence, and bounded `next` actions. Deleted files are analyzed from retained last-index definitions when available; `deletion_analysis` reports completeness and test actions precede reindexing. |
+| `codemap_impact` | Callers + blast radius + covering tests + `test_commands` (copy/paste-ready runner invocations derived from those tests, same derivation as `codemap_review`) (`depth`). `selector` scopes all traversal to one definition. Carries `call_graph` alongside the human `resolution` note — `unresolved` means callers/blast/tests are unknown, not absent (for example, uncovered TS/JS/Python definitions or Vue, whose call graph is not supported yet) |
+| `codemap_review` | **Diff-scoped impact + test selection** — maps a working/staged/`since` diff to changed symbols, `blast_radius`, `covering_tests`, `test_commands`, aggregate `risk`, confidence, and bounded `next` actions. `analysis_complete` plus total/analyzed/truncated counts and bounded `partial_errors` prevent stale, capped, or partially failed analysis from looking authoritative; structural-source mapping errors include failed symbol lookup, deletion-only hunks, recognized callable/type declaration lines removed in mixed or equal-count hunks, and exact source renames with no mapped symbols. Documentation/assets remain visible in `changed_files` without structural mapping failures. Fresh indexed untracked source files and exact source renames map as whole files. Incomplete analysis forces `risk.level:"unknown"`. Deleted source files are analyzed from retained last-index definitions when available; `deletion_analysis` reports completeness and test actions precede reindexing. |
 | `codemap_dependencies` | Direct inbound dependency evidence for a `file`, grouped and capped by dependent file and calls/references/imports. Every sample carries `confidence`/`confidence_reason`; confirmed/candidate totals, file-vs-package scope, truncation, freshness/`call_graph`, and domain coverage stay explicit. |
 | `codemap_file_impact` | **File-level impact** — returns confidence-aware `dependency_evidence`, blast/tests, and a conservative `delete_verdict`. Only fresh confirmed file-scoped evidence proves `unsafe`; name-fanout candidates, stale snapshots, Go package imports, and missing evidence remain `unknown`. Legacy `safe_to_delete` stays false. |
 | `codemap_required_keys` | **Least-privilege key set** — for an `entrypoint`, the candidate secret key NAMES its transitive call tree actually reads. Supply `keys` directly or use `via_vault` plus optional `prefix`; operates on names only, never values. Candidate input is capped at 256 unique names, 256 bytes per name |
@@ -208,7 +213,7 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
   separate `coverage`, `confidence`, and stale signals. These describe stored callback/value wiring;
   `call_graph:"resolved"` never upgrades them, and empty partial/unavailable coverage is not proof of
   no registration.
-- **`risk` on `codemap_review`** — one band for the whole diff (`level` unknown/low/medium/high, `score` 0..1, `factors`), folded from every changed symbol so a harness can gate verification on a single call instead of fanning `codemap_risk` out per symbol. `unknown` means at least one changed symbol lacks a usable call graph; absent when the diff maps to no indexed symbols.
+- **`risk` on `codemap_review`** — one band for the whole diff (`level` unknown/low/medium/high, `score` 0..1, `factors`), folded from every changed symbol so a harness can gate verification on a single call instead of fanning `codemap_risk` out per symbol. `unknown` means at least one changed symbol lacks a usable call graph or `analysis_complete` is false, including mapping failures with zero safely identified symbols. It is absent for a complete zero-symbol diff and early no-repository/no-index degradation.
 - **`stale` / `staleness`** on `codemap_review` (and `codemap_status`) — index drift since the last index. Normally refresh before trusting snapshot-based impact. A deleted file is the intentional exception: when its old nodes remain, `deletion_analysis` identifies `source:"last_index"` and selected tests come before the reindex action that will prune those nodes.
 - **`confidence` on dependency samples** — `confirmed` means fresh precise or exact same-package evidence; `candidate` covers qualified name fan-out, package-scoped imports, and stale snapshots. Additive `confirmed_total`/`candidate_total` fields remain available when samples are capped.
 - **`blast_radius` / `covering_tests` element shape** — both are `ImpactNode` objects (`symbol`, `fqn`, `kind`, `file`, `start_line`, `depth`, …; no `end_line`). `depth` is the blast-radius hop distance. This is the stable element contract.

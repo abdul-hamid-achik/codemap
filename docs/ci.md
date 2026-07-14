@@ -1,3 +1,7 @@
+---
+description: Add codemap impact analysis, risk bands, and test-coverage gates to GitHub or GitLab CI.
+---
+
 # codemap in CI
 
 The same review your agent runs after an edit can gate every pull request:
@@ -11,7 +15,7 @@ jobs:
   review:
     uses: abdul-hamid-achik/codemap/.github/workflows/codemap-review-reusable.yml@main
     with:
-      fail-on-untested: 'true'   # fail when a load-bearing change has no covering tests
+      fail-on-untested: 'true'   # fail when coverage is absent or unresolved
       fail-on-risk: 'high'       # fail at or above this risk level ('' to disable)
 ```
 
@@ -29,15 +33,31 @@ Or use the action directly for more control:
 ```
 
 **Outputs**: `risk-level`, `risk-score`, `untested-count`, `changed-symbols-count`,
-`comment-posted`, `review-json-path` — set even when a gate fails, so downstream
+`analysis-complete`, `comment-posted`, `review-json-path` — set even when a gate fails, so downstream
 steps (labeling, notifications) always have the data. The review also lands in the
 job summary, which works on push events and forked PRs where commenting is blocked.
+`changed-symbols-count` uses the pre-cap `total_symbols` value, while
+`analysis-complete` is `true`, `false`, or `unknown` for an older/unsupported report.
 
 **What it needs**: nothing beyond the automatic `GITHUB_TOKEN`. Indexing runs
 `--precise --no-embed` — the review is purely structural, so CI needs no Ollama
-and no embedding keys. For TypeScript/Python repos, opt into language-server
+and no embedding keys. For TypeScript/JavaScript/Python repos, opt into language-server
 installs via the action's inputs; without them the comment says honestly that the
-call graph is name-based.
+call graph is unresolved. These languages have no name-based call-edge fallback,
+and `fail-on-untested: true` fails closed because their test coverage cannot be established.
+
+The Action fails closed on infrastructure and policy ambiguity: a nonzero index or
+review exit stops the run, and invalid enum/boolean inputs are rejected before setup.
+Omitted booleans receive defaults, but explicitly empty boolean values are rejected.
+If a configured gate receives an unknown review `schema_version`, or a v1 report whose
+`analysis_complete` value is false/absent, the gate fails because it cannot safely
+enforce policy from that payload. `fail-on-untested` also fails when mapped symbols'
+call graph is unresolved: an empty `untested_symbols` list then means unknown, not covered.
+All outputs are still published before that final
+gate failure. With both gates disabled, the run is explicitly reporting-only and may
+remain nonblocking while rendering a prominent schema/incomplete-analysis notice.
+An otherwise complete report with `risk.level:"unknown"` still does not trip a risk
+threshold; incomplete analysis is a separate fail-closed signal.
 
 Full input/output reference: [integrations/github-action](https://github.com/abdul-hamid-achik/codemap/tree/main/integrations/github-action).
 
@@ -50,6 +70,11 @@ A thin mirror reuses the same render/gate scripts and posts via the Notes API
 include:
   - remote: 'https://raw.githubusercontent.com/abdul-hamid-achik/codemap/main/integrations/github-action/gitlab/codemap-review.yml'
 ```
+
+The mirror maps its `CODEMAP_FAIL_ON_*` variables to the shared validator immediately
+after downloading the scripts, before resolving/installing codemap, indexing, or posting.
+Its enum/boolean validation therefore matches the GitHub Action, including rejection of
+explicitly empty booleans.
 
 ## Cache the index between CI runs
 
@@ -98,7 +123,7 @@ repos:
 
 The hook runs `codemap review --staged --json --fail-on-untested` and fails
 the commit (exit code 6 — see [CLI: Gating a commit or script](/cli#gating-a-commit-or-script))
-when a staged change touches an untested symbol.
+when a staged change touches an untested symbol or its test coverage is unresolved.
 
 **Trade-offs, by design:**
 
@@ -107,16 +132,20 @@ when a staged change touches an untested symbol.
   enough for a hook" bar. Name-based resolution is what's already indexed, so
   the hook stays well under 2s on a small diff; the cost is the usual
   same-named-method over-match on cross-package Go calls, and TypeScript/
-  JavaScript/Python get **no** call graph at all without `--precise` (their risk
+  JavaScript/Python get **no** call graph at all without `--precise`. Their risk
   factor becomes `unresolved` → `level:"unknown"`, which `--fail-on-risk` never
-  trips — see the honesty rule in the CLI guide). Run `--precise` in CI (the
+  trips on an otherwise complete report. The default `--fail-on-untested` does fail
+  closed in that state because test coverage is unknown; see the honesty rule in the CLI guide.
+  Run `--precise` in CI (the
   GitHub Action above already does) where the extra seconds don't block a commit.
-- **Degrades to exit 0, never blocks on missing infrastructure.** If the project
-  hasn't been indexed yet (`codemap index`) or the directory isn't a git
+- **Missing setup degrades; incomplete evidence fails closed.** If the project
+  has no indexed nodes yet (`codemap init` alone is not an index) or the directory isn't a git
   repository, `review` already returns a normal (not failed) report with a
   `note` explaining why — no changed symbols, no risk band, no untested list —
-  so the gate has nothing to trip on and exits 0. A missing/stale index is a
-  reason to run `codemap index`, not a reason to block every commit.
+  so the hook exits `0`. Once an index exists, either enabled review gate requires
+  `analysis_complete:true`; stale, capped, or partially mapped analysis exits `6`
+  so missing evidence cannot silently pass policy. Refresh with `codemap index`
+  and retry the commit.
 - `entry` intentionally omits `--depth`/other tuning flags; override `args` in
   your own `.pre-commit-config.yaml` if you want a narrower or wider blast-radius
   bound.

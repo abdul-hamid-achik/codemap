@@ -17,8 +17,8 @@
 #
 # Optional CI/CD variables (mirror the GitHub Action's `inputs:`):
 #   CODEMAP_VERSION            (default: latest)
-#   CODEMAP_PRECISE             (default: "true")
-#   CODEMAP_DEPTH                (default: "3")
+#   CODEMAP_PRECISE            (default: "true")
+#   CODEMAP_DEPTH              (default: "3")
 #   CODEMAP_FAIL_ON_UNTESTED (default: "false")
 #   CODEMAP_FAIL_ON_RISK       (default: "" — disabled)
 #
@@ -46,6 +46,11 @@ codemap_review:
     - curl -sSL --fail -o gate.sh "${SCRIPTS_BASE}/gate.sh"
     - curl -sSL --fail -o post-comment-gitlab.sh "${SCRIPTS_BASE}/post-comment-gitlab.sh"
     - chmod +x ./*.sh
+    # Map GitLab's variable names to the shared gate contract and validate
+    # before version resolution, installation, indexing, or comment posting.
+    - export FAIL_ON_UNTESTED="${CODEMAP_FAIL_ON_UNTESTED}"
+    - export FAIL_ON_RISK="${CODEMAP_FAIL_ON_RISK}"
+    - ./gate.sh --validate-inputs
     # resolve-version.sh / install-codemap.sh were written against GitHub
     # Actions' env conventions (RUNNER_OS/RUNNER_ARCH, $GITHUB_ENV,
     # $GITHUB_PATH). Map GitLab's runner facts onto the same variable names so
@@ -73,6 +78,4 @@ codemap_review:
     - ./render-comment.sh
     - export REVIEW_COMMENT_PATH="${RUNNER_TEMP}/codemap-review-comment.md"
     - ./post-comment-gitlab.sh
-    - export FAIL_ON_UNTESTED="${CODEMAP_FAIL_ON_UNTESTED}"
-    - export FAIL_ON_RISK="${CODEMAP_FAIL_ON_RISK}"
     - ./gate.sh

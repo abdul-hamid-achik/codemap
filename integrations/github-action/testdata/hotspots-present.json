@@ -20,6 +20,10 @@
       "signature": "func CoreDispatch(req Request) Response"
     }
   ],
+  "analysis_complete": true,
+  "total_symbols": 1,
+  "analyzed_symbols": 1,
+  "truncated_symbols": 0,
   "blast_radius": [
     {
       "symbol": "TestCoreDispatch",

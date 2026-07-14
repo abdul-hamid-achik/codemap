@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/google/jsonschema-go/jsonschema"
@@ -104,6 +106,13 @@ func TestReviewWorking(t *testing.T) {
 	if !hasSymbol(rep.ChangedSymbols, "Run") {
 		t.Errorf("Run should be a changed symbol, got %+v", rep.ChangedSymbols)
 	}
+	if rep.AnalysisComplete || rep.TotalSymbols != 1 || rep.AnalyzedSymbols != 1 || rep.TruncatedSymbols != 0 || len(rep.PartialErrors) != 0 {
+		t.Errorf("stale review analysis metadata = complete:%v total:%d analyzed:%d truncated:%d errors:%+v",
+			rep.AnalysisComplete, rep.TotalSymbols, rep.AnalyzedSymbols, rep.TruncatedSymbols, rep.PartialErrors)
+	}
+	if !rep.Stale || rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Errorf("stale review must be incomplete with unknown risk: stale:%v risk:%+v", rep.Stale, rep.Risk)
+	}
 	// Run is covered by TestRun → it must surface as a covering test and Run must
 	// NOT be flagged untested.
 	if len(rep.CoveringTests) == 0 {
@@ -194,6 +203,417 @@ func TestReviewDeletedFileReportsMissingAfterReindex(t *testing.T) {
 	}
 	if !strings.Contains(rep.Note, "prior impact is unavailable") {
 		t.Fatalf("missing deletion evidence must be explicit: %q", rep.Note)
+	}
+	if rep.AnalysisComplete || rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Fatalf("missing deletion evidence must be incomplete with unknown risk: complete:%v risk:%+v", rep.AnalysisComplete, rep.Risk)
+	}
+}
+
+func TestReviewPureDeletionHunkIsIncomplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	baseSource := "package app\n\nfunc Keep() {}\n\nfunc Removed() {}\n"
+	mustWrite(t, proj, "a.go", baseSource)
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Remove one definition from a file that still exists, then refresh the
+	// index. The --since diff is nonempty and fresh, but the +count=0 hunk has
+	// no post-image line that can identify Removed safely.
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Keep() {}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale {
+		t.Fatalf("fixture must be fresh after reindex, got staleness %+v", rep.Staleness)
+	}
+	if rep.AnalysisComplete || rep.TotalSymbols != 0 || rep.AnalyzedSymbols != 0 {
+		t.Fatalf("pure deletion completeness = complete:%v total:%d analyzed:%d", rep.AnalysisComplete, rep.TotalSymbols, rep.AnalyzedSymbols)
+	}
+	if rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Fatalf("pure deletion risk = %+v, want unknown", rep.Risk)
+	}
+	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Stage != "mapping" || rep.PartialErrors[0].Code != "deletion_only_hunk" || rep.PartialErrors[0].File != "a.go" {
+		t.Fatalf("pure deletion partial_errors = %+v", rep.PartialErrors)
+	}
+}
+
+func TestReviewMixedDeletionHunkIsIncomplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Keep() {}\nfunc Removed() {}\n")
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Keep() { _ = 1 }\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale || rep.AnalysisComplete || rep.TotalSymbols != 1 || rep.AnalyzedSymbols != 1 || rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Fatalf("mixed deletion review = stale:%v complete:%v total:%d analyzed:%d risk:%+v", rep.Stale, rep.AnalysisComplete, rep.TotalSymbols, rep.AnalyzedSymbols, rep.Risk)
+	}
+	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Code != "removed_definition_unavailable" {
+		t.Fatalf("mixed deletion partial_errors = %+v", rep.PartialErrors)
+	}
+}
+
+func TestReviewShrinkingBodyEditCanRemainComplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Keep() {\n\tfirst()\n\tsecond()\n\tthird()\n}\n\nfunc first() {}\nfunc second() {}\nfunc third() {}\n")
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Keep() {\n\tfirst(); second()\n\tthird()\n}\n\nfunc first() {}\nfunc second() {}\nfunc third() {}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale || !rep.AnalysisComplete || len(rep.PartialErrors) != 0 || !hasSymbol(rep.ChangedSymbols, "Keep") {
+		t.Fatalf("shrinking body review = stale:%v complete:%v errors:%+v symbols:%+v", rep.Stale, rep.AnalysisComplete, rep.PartialErrors, rep.ChangedSymbols)
+	}
+}
+
+func TestReviewDefinitionReplacementIsIncomplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Removed() {}\n")
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, proj, "a.go", "package app\n\nfunc New() {}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.AnalysisComplete || rep.Risk == nil || rep.Risk.Level != "unknown" || !hasSymbol(rep.ChangedSymbols, "New") {
+		t.Fatalf("definition replacement = complete:%v risk:%+v symbols:%+v", rep.AnalysisComplete, rep.Risk, rep.ChangedSymbols)
+	}
+	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Code != "removed_definition_unavailable" {
+		t.Fatalf("definition replacement partial_errors = %+v", rep.PartialErrors)
+	}
+}
+
+func TestReviewTypeReplacementIsIncomplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "a.go", "package app\n\ntype Old struct{}\n")
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, proj, "a.go", "package app\n\ntype New struct{}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.AnalysisComplete || rep.Risk == nil || rep.Risk.Level != "unknown" || !hasSymbol(rep.ChangedSymbols, "New") {
+		t.Fatalf("type replacement = complete:%v risk:%+v symbols:%+v", rep.AnalysisComplete, rep.Risk, rep.ChangedSymbols)
+	}
+	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Code != "removed_definition_unavailable" {
+		t.Fatalf("type replacement partial_errors = %+v", rep.PartialErrors)
+	}
+}
+
+func TestReviewExactRenameAnalyzesNewPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "old/a.go", "package app\n\nfunc Run() {}\n")
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(proj, "new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(proj, "old", "a.go"), filepath.Join(proj, "new", "a.go")); err != nil {
+		t.Fatal(err)
+	}
+	reviewGit(t, proj, "add", "-A")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale || !rep.AnalysisComplete || len(rep.PartialErrors) != 0 || !hasSymbol(rep.ChangedSymbols, "Run") {
+		t.Fatalf("exact rename review = stale:%v complete:%v symbols:%+v errors:%+v", rep.Stale, rep.AnalysisComplete, rep.ChangedSymbols, rep.PartialErrors)
+	}
+	if rep.ChangedSymbols[0].File != "new/a.go" {
+		t.Fatalf("renamed symbol file = %q, want new/a.go", rep.ChangedSymbols[0].File)
+	}
+}
+
+func TestReviewFreshIndexedUntrackedSourceMapsWholeFile(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	mustWrite(t, proj, "new.go", "package app\n\nfunc NewFn() {}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale || !rep.AnalysisComplete || !hasSymbol(rep.ChangedSymbols, "NewFn") {
+		t.Fatalf("fresh indexed untracked source = stale:%v complete:%v symbols:%+v errors:%+v", rep.Stale, rep.AnalysisComplete, rep.ChangedSymbols, rep.PartialErrors)
+	}
+	if rep.TotalSymbols != 1 || rep.AnalyzedSymbols != 1 || rep.Risk == nil || rep.Risk.Level == "unknown" {
+		t.Fatalf("untracked source counts/risk = total:%d analyzed:%d risk:%+v", rep.TotalSymbols, rep.AnalyzedSymbols, rep.Risk)
+	}
+}
+
+func TestReviewInitOnlyProjectIsNotIndexed(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Run() {}\n")
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Init(proj, false); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Run() { _ = 1 }\n")
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.IsRepo || rep.Indexed || rep.AnalysisComplete || rep.Risk != nil {
+		t.Fatalf("init-only review = repo:%v indexed:%v complete:%v risk:%+v", rep.IsRepo, rep.Indexed, rep.AnalysisComplete, rep.Risk)
+	}
+	if len(rep.ChangedFiles) != 1 || !strings.Contains(rep.Note, "project not indexed") {
+		t.Fatalf("init-only changed files/note = files:%+v note:%q", rep.ChangedFiles, rep.Note)
+	}
+}
+
+func TestReviewSinceFreshIndexIsComplete(t *testing.T) {
+	svc, proj := reviewRepo(t)
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := "package app\n\nfunc Helper() {}\n\nfunc Run() {\n\tHelper() // touched\n}\n"
+	mustWrite(t, proj, "a.go", edited)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale || !rep.AnalysisComplete {
+		t.Fatalf("fresh nonempty --since review = stale:%v complete:%v errors:%+v", rep.Stale, rep.AnalysisComplete, rep.PartialErrors)
+	}
+	if rep.TotalSymbols != 1 || rep.AnalyzedSymbols != 1 || rep.TruncatedSymbols != 0 {
+		t.Fatalf("fresh --since counts = total:%d analyzed:%d truncated:%d", rep.TotalSymbols, rep.AnalyzedSymbols, rep.TruncatedSymbols)
+	}
+	if rep.Risk == nil || rep.Risk.Level == "unknown" {
+		t.Fatalf("fresh --since risk = %+v, want a normal aggregate band", rep.Risk)
+	}
+}
+
+func TestChangedFileSymbolLookupFallbackAndFailure(t *testing.T) {
+	want := []SymbolRef{{Symbol: "Run", FQN: "app.Run", Kind: "function", File: "a.go", StartLine: 3, EndLine: 3}}
+	primaryErr := errors.New("relative lookup failed")
+	got, err := lookupChangedFileSymbols("a.go", "/repo/a.go", func(file string) (*SymbolsReport, error) {
+		if file == "a.go" {
+			return nil, primaryErr
+		}
+		return &SymbolsReport{Symbols: want}, nil
+	})
+	if err != nil || len(got) != 1 || got[0].FQN != want[0].FQN {
+		t.Fatalf("absolute fallback = symbols:%+v err:%v", got, err)
+	}
+
+	_, err = lookupChangedFileSymbols("a.go", "/repo/a.go", func(file string) (*SymbolsReport, error) {
+		return nil, fmt.Errorf("lookup %s failed", file)
+	})
+	if err == nil || !strings.Contains(err.Error(), "relative lookup failed") || !strings.Contains(err.Error(), "absolute fallback failed") {
+		t.Fatalf("dual mapping failure = %v", err)
+	}
+
+	rep := &ReviewReport{ChangedFiles: []ReviewFile{}, ChangedSymbols: []SymbolRef{}}
+	mapReviewChangedFiles(rep, []git.ChangedFile{{Path: "a.go", Status: "M"}}, func(string) ([]SymbolRef, error) {
+		return nil, errors.New("database unavailable")
+	})
+	rep.TotalSymbols = len(rep.ChangedSymbols)
+	finalizeReviewAnalysis(rep, nil)
+	if rep.AnalysisComplete || rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Fatalf("mapping failure completeness/risk = complete:%v risk:%+v", rep.AnalysisComplete, rep.Risk)
+	}
+	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Stage != "mapping" || rep.PartialErrors[0].Code != "symbol_mapping_failed" || rep.PartialErrors[0].File != "a.go" {
+		t.Fatalf("mapping failure partial_errors = %+v", rep.PartialErrors)
+	}
+}
+
+func TestReviewMappingIgnoresNonStructuralFileDiagnostics(t *testing.T) {
+	rep := &ReviewReport{ChangedFiles: []ReviewFile{}, ChangedSymbols: []SymbolRef{}}
+	changed := []git.ChangedFile{
+		{Path: "README.md", Status: "M", DeletedLines: 3, RemovedDefinitions: []string{"callable:Old"}},
+		{Path: "GUIDE.txt", OldPath: "README.txt", Status: "M", Renamed: true},
+		{Path: "docs/obsolete.md", Status: "D", DeletedLines: 20},
+	}
+	lookups := 0
+	mapReviewChangedFiles(rep, changed, func(string) ([]SymbolRef, error) {
+		lookups++
+		return nil, errors.New("non-source files must not touch the structural store")
+	})
+	finalizeReviewAnalysis(rep, nil)
+	if lookups != 0 || !rep.AnalysisComplete || len(rep.PartialErrors) != 0 || rep.DeletionAnalysis != nil {
+		t.Fatalf("non-structural mapping = lookups:%d complete:%v errors:%+v deletion:%+v", lookups, rep.AnalysisComplete, rep.PartialErrors, rep.DeletionAnalysis)
+	}
+	if len(rep.ChangedFiles) != len(changed) {
+		t.Fatalf("non-structural changed files = %+v, want all %d reported", rep.ChangedFiles, len(changed))
 	}
 }
 
@@ -411,6 +831,9 @@ func TestReviewRepoButUnindexed(t *testing.T) {
 	if len(rep.ChangedFiles) == 0 || rep.Note == "" {
 		t.Errorf("unindexed repo review should still list changed files + a note, got %+v", rep)
 	}
+	if rep.AnalysisComplete || rep.TotalSymbols != 0 || rep.AnalyzedSymbols != 0 || rep.TruncatedSymbols != 0 {
+		t.Errorf("unindexed review completeness metadata = %+v", rep)
+	}
 }
 
 func TestReviewNotARepo(t *testing.T) {
@@ -427,6 +850,9 @@ func TestReviewNotARepo(t *testing.T) {
 	assertReviewSchemaVersion(t, rep)
 	if rep.IsRepo {
 		t.Errorf("a non-git dir should report IsRepo=false, got %+v", rep)
+	}
+	if rep.AnalysisComplete || rep.TotalSymbols != 0 || rep.AnalyzedSymbols != 0 || rep.TruncatedSymbols != 0 {
+		t.Errorf("non-repo review completeness metadata = %+v", rep)
 	}
 }
 
@@ -500,11 +926,9 @@ func TestReviewRejectsUnsupportedModeAndMissingSince(t *testing.T) {
 	}
 }
 
-// TestReviewRiskBand pins feature 1: the aggregate risk band folded into
-// ReviewReport from the per-symbol signals over every changed symbol. An
-// untested hub (8 callers, no test) must produce a high band with the
-// untested_changes + hotspot_fanin factors; a covered leaf must be low with
-// no factors. Absent when the diff maps to no indexed symbols.
+// TestReviewRiskBand pins the aggregate risk folded from per-symbol signals.
+// A stale working-tree review must be unknown rather than falsely high, while
+// preserving the successful subset's score and factors for diagnosis.
 func TestReviewRiskBand(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
@@ -548,14 +972,128 @@ func TestReviewRiskBand(t *testing.T) {
 	if rep.Risk == nil {
 		t.Fatal("expected a risk band for a diff with changed symbols, got nil")
 	}
-	if rep.Risk.Level != "high" {
-		t.Errorf("untested 8-caller hub → high risk, got %s (%.3f)", rep.Risk.Level, rep.Risk.Score)
+	if rep.Risk.Level != "unknown" || !rep.Stale || rep.AnalysisComplete {
+		t.Errorf("stale untested hub → incomplete/unknown risk, got stale:%v complete:%v %s (%.3f)", rep.Stale, rep.AnalysisComplete, rep.Risk.Level, rep.Risk.Score)
+	}
+	if rep.Risk.Score < 0.9 {
+		t.Errorf("stale review should preserve successful subset score, got %.3f", rep.Risk.Score)
 	}
 	if !hasReviewRiskFactor(rep.Risk.Factors, "untested_changes") {
 		t.Errorf("expected untested_changes factor, got %+v", rep.Risk.Factors)
 	}
 	if !hasReviewRiskFactor(rep.Risk.Factors, "hotspot_fanin") {
 		t.Errorf("expected hotspot_fanin factor, got %+v", rep.Risk.Factors)
+	}
+}
+
+func TestAnalyzeReviewImpactsReportsPartialErrorsAndUnknownRisk(t *testing.T) {
+	symbols := []SymbolRef{
+		{Symbol: "Good", FQN: "app.Good", Kind: "function", File: "good.go", StartLine: 1, EndLine: 1},
+		{Symbol: "Broken", FQN: "app.Broken", Kind: "function", File: "broken.go", StartLine: 2, EndLine: 2},
+		{Symbol: "Unavailable", FQN: "app.Unavailable", Kind: "function", File: "unavailable.go", StartLine: 3, EndLine: 3},
+		{Symbol: "Gone", FQN: "app.Gone", Kind: "function", File: "gone.go", StartLine: 4, EndLine: 4},
+	}
+	rep := &ReviewReport{
+		TotalSymbols: len(symbols), ChangedSymbols: symbols,
+		BlastRadius: []ImpactNode{}, CoveringTests: []ImpactNode{}, UntestedSymbols: []SymbolRef{},
+	}
+	sentinel := errors.New("graph read failed")
+	imps := analyzeReviewImpacts(rep, symbols, func(s SymbolRef) (*ImpactReport, error) {
+		switch s.Symbol {
+		case "Good":
+			return &ImpactReport{Found: true, CallGraph: CallGraphName, Untested: true}, nil
+		case "Broken":
+			return nil, sentinel
+		case "Unavailable":
+			return nil, nil
+		default:
+			return &ImpactReport{Found: false, CallGraph: CallGraphNone}, nil
+		}
+	})
+	finalizeReviewAnalysis(rep, imps)
+
+	if rep.AnalysisComplete {
+		t.Fatal("partial impact failures must make analysis_complete false")
+	}
+	if rep.AnalyzedSymbols != 1 || len(imps) != 1 {
+		t.Fatalf("analyzed symbols = %d reports = %d, want 1", rep.AnalyzedSymbols, len(imps))
+	}
+	wantCodes := []string{"impact_failed", "impact_unavailable", "symbol_not_found"}
+	if len(rep.PartialErrors) != len(wantCodes) {
+		t.Fatalf("partial errors = %+v, want codes %v", rep.PartialErrors, wantCodes)
+	}
+	for i, want := range wantCodes {
+		if got := rep.PartialErrors[i]; got.Stage != "impact" || got.Code != want || got.Symbol == nil {
+			t.Errorf("partial_errors[%d] = %+v, want impact/%s with symbol", i, got, want)
+		}
+	}
+	if !strings.Contains(rep.PartialErrors[0].Message, sentinel.Error()) {
+		t.Errorf("impact failure should preserve actionable error: %+v", rep.PartialErrors[0])
+	}
+	if rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Fatalf("partial analysis risk = %+v, want level unknown", rep.Risk)
+	}
+}
+
+func TestReviewPartialErrorsAreBounded(t *testing.T) {
+	rep := &ReviewReport{}
+	for i := 0; i < reviewMaxPartialErrors+5; i++ {
+		rep.addPartialError(ReviewPartialError{
+			Stage: "staleness", Code: "staleness_failed", Message: fmt.Sprintf("failure %d", i),
+		})
+	}
+	if len(rep.PartialErrors) != reviewMaxPartialErrors || rep.PartialErrorsTruncated != 5 {
+		t.Fatalf("bounded errors = %d + %d omitted, want %d + 5", len(rep.PartialErrors), rep.PartialErrorsTruncated, reviewMaxPartialErrors)
+	}
+}
+
+func TestReviewReportsSymbolCapAsIncomplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	var original, edited strings.Builder
+	original.WriteString("package app\n\n")
+	edited.WriteString("package app\n\n")
+	for i := 0; i < reviewMaxSymbols+1; i++ {
+		fmt.Fprintf(&original, "func F%03d() {}\n", i)
+		fmt.Fprintf(&edited, "func F%03d() { _ = %d }\n", i, i)
+	}
+	mustWrite(t, proj, "many.go", original.String())
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "init")
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, proj, "many.go", edited.String())
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "working"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.TotalSymbols != reviewMaxSymbols+1 || len(rep.ChangedSymbols) != reviewMaxSymbols {
+		t.Fatalf("symbol counts = total:%d returned:%d, want %d/%d", rep.TotalSymbols, len(rep.ChangedSymbols), reviewMaxSymbols+1, reviewMaxSymbols)
+	}
+	if rep.AnalyzedSymbols != reviewMaxSymbols || rep.TruncatedSymbols != 1 || rep.AnalysisComplete {
+		t.Fatalf("analysis metadata = analyzed:%d truncated:%d complete:%v", rep.AnalyzedSymbols, rep.TruncatedSymbols, rep.AnalysisComplete)
+	}
+	if rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Fatalf("truncated analysis risk = %+v, want level unknown", rep.Risk)
+	}
+	if !strings.Contains(rep.Note, "1 more elided") {
+		t.Fatalf("truncation note = %q", rep.Note)
 	}
 }
 
@@ -683,6 +1221,14 @@ func TestReviewContractV1(t *testing.T) {
 		{name: "invalid impact depth", mutate: func(root map[string]any) {
 			root["blast_radius"].([]any)[0].(map[string]any)["depth"] = float64(-1)
 		}},
+		{name: "negative total symbols", mutate: func(root map[string]any) {
+			root["total_symbols"] = float64(-1)
+		}},
+		{name: "invalid partial error code", mutate: func(root map[string]any) {
+			root["partial_errors"] = []any{map[string]any{
+				"stage": "impact", "code": "other", "message": "invalid",
+			}}
+		}},
 		{name: "null risk", mutate: func(root map[string]any) { root["risk"] = nil }},
 		{name: "invalid risk level", mutate: func(root map[string]any) {
 			root["risk"].(map[string]any)["level"] = "critical"
@@ -731,6 +1277,21 @@ func TestReviewContractV1(t *testing.T) {
 	root["risk"].(map[string]any)["future_risk_field"] = 1
 	if err := resolved.Validate(root); err != nil {
 		t.Fatalf("v1 schema rejected additive optional fields: %v", err)
+	}
+
+	partial := cloneDocument()
+	partial["analysis_complete"] = false
+	partial["total_symbols"] = float64(2)
+	partial["analyzed_symbols"] = float64(1)
+	partial["truncated_symbols"] = float64(1)
+	partial["partial_errors"] = []any{map[string]any{
+		"stage": "mapping", "code": "symbol_mapping_failed", "message": "graph read failed",
+		"file": "a.go",
+	}}
+	partial["partial_errors_truncated"] = float64(1)
+	partial["risk"].(map[string]any)["level"] = "unknown"
+	if err := resolved.Validate(partial); err != nil {
+		t.Fatalf("v1 schema rejected additive partial-analysis fields: %v", err)
 	}
 }
 
@@ -854,6 +1415,51 @@ func TestReviewImpactTestCommandsParity(t *testing.T) {
 	if !equalStringSlices(reviewRep.TestCommands, contextRep.TestCommands) {
 		t.Errorf("review.test_commands = %+v, context.test_commands = %+v, want identical for the same symbol",
 			reviewRep.TestCommands, contextRep.TestCommands)
+	}
+}
+
+func TestReviewActionV1FixturesValidate(t *testing.T) {
+	schemaPath := filepath.Join("..", "..", "schemas", "codemap.review.v1.schema.json")
+	schemaJSON, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
+		t.Fatalf("parse %s: %v", schemaPath, err)
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", schemaPath, err)
+	}
+
+	fixtures, err := filepath.Glob(filepath.Join("..", "..", "integrations", "github-action", "testdata", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("no GitHub Action review fixtures found")
+	}
+	for _, fixture := range fixtures {
+		t.Run(filepath.Base(fixture), func(t *testing.T) {
+			body, err := os.ReadFile(fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]any
+			if err := json.Unmarshal(body, &document); err != nil {
+				t.Fatalf("parse fixture: %v", err)
+			}
+			// Consumers keep an explicit unsupported-version fixture to test
+			// fail-closed behavior. Only documents declaring v1 belong to the v1
+			// schema contract validated here.
+			if document["schema_version"] != float64(1) {
+				return
+			}
+			if err := resolved.Validate(document); err != nil {
+				t.Fatalf("fixture does not validate against %s: %v", schemaPath, err)
+			}
+		})
 	}
 }
 
