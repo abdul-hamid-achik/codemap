@@ -16,7 +16,7 @@ type FileDependencyNode struct {
 
 // FileDependencyEdge is one distinct inbound structural relationship from a
 // node in another file to a node in the target file. EdgeType is currently one
-// of calls, references, or imports. Duplicate edge rows are collapsed by
+// of calls, references, imports, or styles. Duplicate edge rows are collapsed by
 // logical source→target relationship, preferring precise provenance.
 type FileDependencyEdge struct {
 	EdgeType   string
@@ -40,9 +40,9 @@ func (s *Store) InboundFileDependencies(projectID int64, targetFile string) ([]F
 		JOIN nodes tgt ON tgt.id = e.target_id
 		WHERE src.project_id = ? AND tgt.project_id = ?
 		  AND tgt.file_path = ? AND src.file_path != tgt.file_path
-		  AND e.edge_type IN (?, ?, ?)
+		  AND e.edge_type IN (?, ?, ?, ?)
 		ORDER BY src.file_path, e.edge_type, src.start_line, tgt.start_line`,
-		projectID, projectID, targetFile, EdgeCalls, EdgeReferences, EdgeImports)
+		projectID, projectID, targetFile, EdgeCalls, EdgeReferences, EdgeImports, EdgeStyles)
 	if err != nil {
 		return nil, err
 	}

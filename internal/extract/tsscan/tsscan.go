@@ -51,6 +51,7 @@ func Enrich(res *extract.FileResult, relPath string, src []byte) {
 	res.Imports = append(res.Imports, Imports(src)...)
 	if isJSXPath(relPath) {
 		res.References = append(res.References, JSXRefs(relPath, src, res.Symbols)...)
+		res.References = append(res.References, ClassNameRefs(relPath, src, res.Symbols)...)
 	}
 	res.References = append(res.References, FrameworkRefs(relPath, src)...)
 }
@@ -191,6 +192,168 @@ func refTarget(name string) string {
 		return name[:i]
 	}
 	return name
+}
+
+// classNameRe anchors a className attribute (`className=`) or object property
+// (`className:` — props objects, cva/clsx maps) whose value follows.
+var classNameRe = regexp.MustCompile(`\bclassName\s*[=:]\s*`)
+
+// classNameTokenExcluded rejects tokens that cannot be plain class names:
+// Tailwind variants/arbitrary values (`hover:underline`, `w-[10px]`) and
+// interpolation remnants. Plain utilities (`flex`, `mt-4`) pass — they simply
+// resolve to no selector node and produce no edge, like external imports.
+func classNameTokenExcluded(tok string) bool {
+	return tok == "" || strings.ContainsAny(tok, ":[]()/${}")
+}
+
+// ClassNameRefs scans a .tsx/.jsx file for className values and returns one
+// RefStyles reference per (enclosing symbol, class token) pair, targeting the
+// selector name `.token` — the namespace the CSS backends define nodes under.
+// The scan runs on the comments-blanked view (string contents kept: class
+// names live in strings). Values are read three ways:
+//
+//   - className="btn active"    — the literal's tokens;
+//   - className={…}             — every string literal and template-literal
+//     static segment inside the balanced-brace span, covering cn()/clsx(),
+//     ternaries, and `${}` templates without modeling the call graph;
+//   - className: "btn"          — same, for props objects.
+//
+// Dynamic segments contribute nothing; tokens that cannot be class names
+// (Tailwind variants/arbitrary values) are filtered. Like all name-based
+// extraction the edges carry candidate weight.
+func ClassNameRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Reference {
+	_, code := sanitize(src)
+	text := string(code)
+	lineOf := lineOffsets(text)
+	enclose := newEncloser(symbols)
+
+	seen := map[string]bool{}
+	var refs []extract.Reference
+	for _, m := range classNameRe.FindAllStringIndex(text, -1) {
+		start := m[1]
+		if start >= len(code) {
+			continue
+		}
+		var tokens []string
+		switch code[start] {
+		case '"', '\'':
+			if end := closingQuote(code, start); end > start {
+				tokens = strings.Fields(text[start+1 : end])
+			}
+		case '{', '`':
+			tokens = stringTokensInSpan(code, src, start)
+		default:
+			continue // an identifier or expression with no literal head
+		}
+		line := lineOf(m[0])
+		from := enclose(line)
+		if from == "" {
+			from = relPath
+		}
+		for _, tok := range tokens {
+			if classNameTokenExcluded(tok) {
+				continue
+			}
+			key := from + "\x00" + tok
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			refs = append(refs, extract.Reference{
+				From: from,
+				To:   "." + tok,
+				Kind: extract.RefStyles,
+				Line: line,
+				// Qualified: the defining stylesheet is another file; name
+				// matching may over-match → candidate weight.
+				Qualified: true,
+			})
+		}
+	}
+	return refs
+}
+
+// stringTokensInSpan collects the whitespace-split tokens of every string
+// literal and template-literal static segment inside the balanced expression
+// starting at code[start] (`{` — a JSX expression container — or a bare
+// template literal). A tiny mode machine, not a JS parser: quotes and
+// backticks toggle collection; `${…}` interpolation bodies are code again
+// (nested string literals inside them still collect — `${cond ? "on" : "off"}`
+// names real classes); everything else only balances braces. Structure is
+// read from the sanitized code view (comments blanked — a quote inside a
+// comment never opens collection) while token TEXT is read from raw at the
+// same offsets, because the code view blanks template-literal contents.
+func stringTokensInSpan(code, raw []byte, start int) []string {
+	var tokens []string
+	collect := func(from, to int) {
+		if from < to && to <= len(raw) {
+			tokens = append(tokens, strings.Fields(string(raw[from:to]))...)
+		}
+	}
+
+	outerDepth := 0     // {…} nesting of the JSX expression container
+	var tmplBrace []int // ${…} brace depth per open template; top = innermost
+	inTemplate := false
+	segStart := -1
+
+	i := start
+	if code[i] == '{' {
+		outerDepth = 1
+		i++
+	}
+	for ; i < len(code); i++ {
+		c := code[i]
+		if inTemplate {
+			switch {
+			case c == '\\' && i+1 < len(code):
+				i++
+			case c == '`': // closes the innermost template
+				collect(segStart, i)
+				tmplBrace = tmplBrace[:len(tmplBrace)-1]
+				inTemplate = false
+				if outerDepth == 0 && len(tmplBrace) == 0 {
+					return tokens // bare template value ended
+				}
+			case c == '$' && i+1 < len(code) && code[i+1] == '{':
+				collect(segStart, i)
+				inTemplate = false // interpolation body is code again
+				i++
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			if end := closingQuote(code, i); end > i {
+				collect(i+1, end)
+				i = end
+			}
+		case '`':
+			tmplBrace = append(tmplBrace, 0)
+			inTemplate = true
+			segStart = i + 1
+		case '{':
+			if len(tmplBrace) > 0 {
+				tmplBrace[len(tmplBrace)-1]++
+			} else {
+				outerDepth++
+			}
+		case '}':
+			if len(tmplBrace) > 0 {
+				if tmplBrace[len(tmplBrace)-1] == 0 {
+					inTemplate = true // interpolation closed → template text resumes
+					segStart = i + 1
+				} else {
+					tmplBrace[len(tmplBrace)-1]--
+				}
+			} else if outerDepth > 0 {
+				outerDepth--
+				if outerDepth == 0 {
+					return tokens
+				}
+			}
+		}
+	}
+	return tokens
 }
 
 // sanitize produces two same-length views of src (byte offsets and line

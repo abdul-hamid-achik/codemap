@@ -17,12 +17,18 @@ const (
 	KindModule   = "module"   // namespace/module (TS) or package
 	KindVariable = "variable" // top-level var/const that isn't callable
 	KindTest     = "test"
+	KindSelector = "selector" // CSS class/id selector (.btn, #hero)
 )
 
 // Reference kinds (string values shared with internal/graph edge types).
 const (
 	RefCalls      = "calls"
 	RefReferences = "references"
+	// RefStyles links a styled thing (a JSX className, an HTML class attribute)
+	// to the CSS selector node that defines the styling. Kept distinct from
+	// RefReferences so call-graph consumers (impact, orphans, callers) stay
+	// unpolluted by styling relationships.
+	RefStyles = "styles"
 )
 
 // Symbol is a code entity discovered in a file.

@@ -30,7 +30,9 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/csssrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/gosrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/htmlsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/luasrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/rubysrc"
@@ -336,7 +338,8 @@ func (ix *Indexer) Close() error {
 }
 
 // New returns an indexer with the default pure-Go backends registered:
-// go/parser for Go, and the line-scanner backends for Ruby and Lua. LSP-backed
+// go/parser for Go, and the line-scanner backends for Ruby, Lua,
+// CSS/SCSS/Sass/Less selectors, and HTML class references. LSP-backed
 // languages (TypeScript/JavaScript/Python, plus Vue delegation) are registered
 // per project by registerLSP when their files are present.
 func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.IndexConfig) *Indexer {
@@ -351,6 +354,10 @@ func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.Index
 	ix.Register(gosrc.New())
 	ix.Register(rubysrc.New())
 	ix.Register(luasrc.New())
+	for _, lang := range []string{"css", "scss", "sass", "less"} {
+		ix.Register(csssrc.New(lang))
+	}
+	ix.Register(htmlsrc.New())
 	return ix
 }
 

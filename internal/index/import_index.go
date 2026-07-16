@@ -193,8 +193,64 @@ func resolveImportFile(language, fromRel, spec string, idx *importIndex) string 
 		return resolveRubyImport(fromRel, spec, idx)
 	case "lua":
 		return resolveLuaImport(spec, idx)
+	case "css", "scss", "sass", "less":
+		return resolveCSSImport(fromRel, spec, idx)
 	}
 	return ""
+}
+
+// resolveCSSImport maps a stylesheet @import/@use/@forward spec to a project
+// file. Sass resolves bare specs relative to the importing file first, so
+// relative and bare specs share one candidate walk: the spec as written, the
+// spec with each stylesheet extension, the Sass partial (_name.scss/_name.sass,
+// also for extension-bearing specs), and directory index files. Anything else
+// (node_modules packages, `~` webpack specs, absolute paths) is external.
+func resolveCSSImport(fromRel, spec string, idx *importIndex) string {
+	if strings.HasPrefix(spec, "/") || strings.HasPrefix(spec, "~") {
+		return ""
+	}
+	fromDir := parentDir(filepath.ToSlash(fromRel))
+	base := normalizeSlashPath(joinSlash(fromDir, filepath.ToSlash(spec)))
+	if base == "" {
+		return ""
+	}
+	dir := parentDir(base)
+	name := base
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		name = base[i+1:]
+	}
+	candidates := []string{
+		base,
+		base + ".css", base + ".scss", base + ".sass", base + ".less",
+		joinSlash(dir, "_"+name), // partial with an extension already in the spec
+		joinSlash(dir, "_"+name+".scss"), joinSlash(dir, "_"+name+".sass"),
+		base + "/index.scss", base + "/_index.scss",
+	}
+	for _, cand := range candidates {
+		if idx.relFiles[cand] {
+			return cand
+		}
+	}
+	return ""
+}
+
+// normalizeSlashPath collapses "."/".." segments of a root-relative slash
+// path; "" when the path escapes the project root.
+func normalizeSlashPath(p string) string {
+	var segs []string
+	for _, seg := range strings.Split(p, "/") {
+		switch seg {
+		case "", ".":
+		case "..":
+			if len(segs) == 0 {
+				return ""
+			}
+			segs = segs[:len(segs)-1]
+		default:
+			segs = append(segs, seg)
+		}
+	}
+	return strings.Join(segs, "/")
 }
 
 // resolveRubyImport maps a require/require_relative spec to a project file.

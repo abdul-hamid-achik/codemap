@@ -32,6 +32,9 @@ var languageByExtension = map[string]string{
 	".html": "html",
 	".htm":  "html",
 	".css":  "css",
+	".scss": "scss",
+	".sass": "sass",
+	".less": "less",
 
 	// Wave 1: compiler/LSP/SCIP candidates. Recognition remains T0 only.
 	".rs":    "rust",

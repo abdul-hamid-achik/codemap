@@ -384,3 +384,102 @@ import Live from './live';
 		t.Errorf("imports = %v, want [./live]", imports)
 	}
 }
+
+// TestClassNameRefsLiteral: className="btn active" inside a component
+// attributes one styles ref per class token to the enclosing symbol.
+func TestClassNameRefsLiteral(t *testing.T) {
+	src := []byte("function Page() {\n  return <div className=\"btn active\">x</div>;\n}\n")
+	syms := []extract.Symbol{{Name: "Page", FQN: "Page", Kind: extract.KindFunction, StartLine: 1, EndLine: 3}}
+	refs := ClassNameRefs("app/page.tsx", src, syms)
+	for _, want := range []string{".btn", ".active"} {
+		r := refTo(refs, want)
+		if r == nil {
+			t.Errorf("missing styles ref Page → %s: %v", want, refs)
+			continue
+		}
+		if r.From != "Page" || r.Kind != extract.RefStyles || !r.Qualified {
+			t.Errorf("%s ref = %+v, want From=Page Kind=styles Qualified", want, r)
+		}
+	}
+	if len(refs) != 2 {
+		t.Errorf("refs = %v, want exactly 2", refs)
+	}
+}
+
+// TestClassNameRefsExpression: cn()/clsx() calls and conditionals inside a
+// braced className contribute every string literal.
+func TestClassNameRefsExpression(t *testing.T) {
+	src := []byte("function Page() {\n  return <div className={cn(\"btn\", cond && \"btn-lg\")}>x</div>;\n}\n")
+	syms := []extract.Symbol{{Name: "Page", FQN: "Page", Kind: extract.KindFunction, StartLine: 1, EndLine: 3}}
+	refs := ClassNameRefs("x.tsx", src, syms)
+	for _, want := range []string{".btn", ".btn-lg"} {
+		if refTo(refs, want) == nil {
+			t.Errorf("missing styles ref → %s: %v", want, refs)
+		}
+	}
+	if len(refs) != 2 {
+		t.Errorf("refs = %v, want exactly 2", refs)
+	}
+}
+
+// TestClassNameRefsTemplate: template-literal static segments count; the
+// interpolated segment does not.
+func TestClassNameRefsTemplate(t *testing.T) {
+	src := []byte("function Page() {\n  return <div className={`btn ${x}`}>x</div>;\n}\n")
+	syms := []extract.Symbol{{Name: "Page", FQN: "Page", Kind: extract.KindFunction, StartLine: 1, EndLine: 3}}
+	refs := ClassNameRefs("x.tsx", src, syms)
+	if refTo(refs, ".btn") == nil {
+		t.Errorf("missing styles ref → .btn: %v", refs)
+	}
+	if len(refs) != 1 {
+		t.Errorf("refs = %v, want only .btn", refs)
+	}
+}
+
+// TestClassNameRefsFiltersNonSelectors: Tailwind variants and arbitrary
+// values cannot be selector names; commented-out className produces nothing.
+func TestClassNameRefsFiltersNonSelectors(t *testing.T) {
+	src := []byte("function Page() {\n" +
+		"  // className=\"ghost\"\n" +
+		"  return <div className=\"flex hover:underline w-[10px] btn\">x</div>;\n" +
+		"}\n")
+	syms := []extract.Symbol{{Name: "Page", FQN: "Page", Kind: extract.KindFunction, StartLine: 1, EndLine: 4}}
+	refs := ClassNameRefs("x.tsx", src, syms)
+	for _, dead := range []string{".ghost", ".hover:underline", ".w-[10px]"} {
+		if refTo(refs, dead) != nil {
+			t.Errorf("filtered token produced a ref: %s in %v", dead, refs)
+		}
+	}
+	// Plain Tailwind utilities pass the filter (they resolve to nothing later).
+	for _, live := range []string{".flex", ".btn"} {
+		if refTo(refs, live) == nil {
+			t.Errorf("missing styles ref → %s: %v", live, refs)
+		}
+	}
+}
+
+// TestClassNamePropsObjectAndTopLevel: the `className:` props-object form
+// matches; usage outside any symbol attributes to the file path.
+func TestClassNamePropsObjectAndTopLevel(t *testing.T) {
+	src := []byte("const props = { className: \"card\" };\n")
+	refs := ClassNameRefs("x.tsx", src, nil)
+	r := refTo(refs, ".card")
+	if r == nil {
+		t.Fatalf("missing styles ref → .card: %v", refs)
+	}
+	if r.From != "x.tsx" {
+		t.Errorf("From = %q, want file path", r.From)
+	}
+}
+
+// TestClassNameRefsPlainTSNotScanned: Enrich only runs the className scan on
+// JSX-capable paths, mirroring the JSX component scan's gate.
+func TestClassNameRefsPlainTSNotScanned(t *testing.T) {
+	res := &extract.FileResult{Path: "x.ts", Language: "typescript"}
+	Enrich(res, "x.ts", []byte("const c = { className: \"btn\" };\n"))
+	for _, r := range res.References {
+		if r.Kind == extract.RefStyles {
+			t.Errorf("plain .ts produced a styles ref: %+v", r)
+		}
+	}
+}
