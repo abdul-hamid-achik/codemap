@@ -30,7 +30,7 @@ anything else.
 | Command | Description |
 |---|---|
 | `codemap init [--local]` | Register the current directory as a project |
-| `codemap index [--reindex] [--no-embed] [--no-lsp] [--precise] [--watch] [--via-vault <project>] [--cache=<bool>] [--no-tips]` | Index (incremental — re-indexes changed files and prunes deleted ones); `--reindex` rebuilds, `--no-embed` skips embeddings, `--no-lsp` skips the language-server backend (Go is still indexed via `go/parser`; TS/JS/Python/Vue SFC files are skipped — no `typescript-language-server`/`pyright` spawned), `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy; Vue SFCs get symbols + `defines` edges only, no call graph yet), `--watch` hands off to the [background daemon](#background-daemon) after indexing once, `--via-vault` re-execs inside `tvault run` so language servers get private-registry creds (see [secret-impact](#analysis) / [ecosystem](/ecosystem)), `--cache=false` disables best-effort fcheap restore/save, and `--no-tips` suppresses post-index advice for scripts/CI |
+| `codemap index [--reindex] [--no-embed] [--no-lsp] [--precise] [--watch] [--via-vault <project>] [--cache=<bool>] [--no-tips]` | Index (incremental — re-indexes changed files and prunes deleted ones); `--reindex` rebuilds, `--no-embed` skips embeddings, `--no-lsp` skips the language-server backend (Go is still indexed via `go/parser`; TS/JS/Python/Vue SFC files are skipped — no `typescript-language-server`/`pyright` spawned), `--precise` resolves call edges exactly (Go via go/types, TypeScript/JavaScript/Python via callHierarchy; Vue SFCs get symbols + `defines` + import edges only, no call graph yet), `--watch` hands off to the [background daemon](#background-daemon) after indexing once, `--via-vault` re-execs inside `tvault run` so language servers get private-registry creds (see [secret-impact](#analysis) / [ecosystem](/ecosystem)), `--cache=false` disables best-effort fcheap restore/save, and `--no-tips` suppresses post-index advice for scripts/CI |
 | `codemap status` | Show index statistics (nodes, edges, languages, kinds), plus **index freshness** — warns when files have changed/been added/removed since the last index (a `stale` field in `--json`), so you know to reindex before trusting queries. Also reports a running [background daemon](#background-daemon) (a `daemon` object in `--json`) |
 | `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python, Vue SFC via the same `typescript-language-server`), Ollama embeddings, and the [background daemon](#background-daemon) — with install hints (`--json`) |
 | `codemap projects` | List all registered projects and their index sizes |
@@ -82,9 +82,11 @@ e.g. `callers Close` lists callers of every `Close`). **The best fix is to reind
 `typescript-language-server` callHierarchy for TypeScript/JavaScript, and pyright callHierarchy for
 Python). Successful coverage is recorded per file;
 a query is `resolved` only when all matched definition files completed the pass, while partial
-failures remain `name`/`unresolved`. (TypeScript, JavaScript, and Python have no name-based call
-edges, so `--precise` is what gives covered files a call graph.) Vue SFCs currently provide script-block
-symbols and `defines` edges only; precise indexing does not add Vue call edges yet. For a one-off exact answer without
+failures remain `name`/`unresolved`. (TypeScript and JavaScript get name-based candidate edges for
+JSX component usage, imports, and Next.js framework wiring; plain function calls there — and all
+Python calls — have no name-based edges, so `--precise` is what gives covered files a complete
+call graph, superseding the candidates per file.) Vue SFCs currently provide script-block
+symbols, `defines`, and import edges only; precise indexing does not add Vue call edges yet. For a one-off exact answer without
 reindexing, `callers`/`callees` accept `--precise`; it degrades to the indexed graph with a note
 when the language server isn't available — never a hard error. The old `--lsp` spelling remains a
 hidden compatibility alias, but new scripts and people should use `--precise`.
@@ -98,8 +100,11 @@ file+FQN+kind, so ordinary line shifts survive reindex; moves/renames return a m
 
 On a name-based index the analysis commands flag their limits honestly: `callers`/`impact` note when
 a name resolves to multiple definitions, `hotspots` marks name-collision inflation, and `orphans`
-follows functions wired by value (handlers like cobra `RunE` / `mux.HandleFunc`) but can't see
-callers reached via interface dispatch or reflection — treat its output as dead-code *candidates*.
+follows functions wired by value (handlers like cobra `RunE` / `mux.HandleFunc`; JSX-rendered
+components and Next.js framework-invoked exports in TS/JS) but can't see
+callers reached via interface dispatch or reflection, components passed only as props
+(`Link={AuthLink}`), or wrapped default exports (`export default memo(Page)`) — treat its output
+as dead-code *candidates*.
 `index --precise` removes the call-edge inflation outright. See
 [Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-vs-precise).
 
@@ -348,8 +353,8 @@ successfully mapped post-image subset from hiding old definitions that review co
 **`call_graph`** (stable machine enum) on `impact`/`callers`/`callees`/`references`/`review`/`context`/
 `hotspots`/`orphans`/`path`/`map`/`traverse`
 tells a consumer how much to trust the call graph without parsing prose: `resolved`
-(every matched definition file has precise coverage), `name` (Go name-based — same-named methods may over-match), `unresolved`
-(TS/JS/Python without successful precise coverage, or Vue whose call graph is not supported yet — callers/blast/tests are unknown, not absent),
+(every matched definition file has precise coverage), `name` (Go/Ruby/Lua name-based — same-named symbols may over-match), `unresolved`
+(TS/JS/Python without successful precise coverage, or Vue whose call graph is not supported yet — callers/blast/tests are incomplete, not absent; TS/JS may still return name-based JSX candidates),
 `none` (no matching symbol). The free-form `resolution` sentence stays for humans.
 
 **`risk`** on `review` is one band for the whole diff — `level` (unknown/low/medium/high),

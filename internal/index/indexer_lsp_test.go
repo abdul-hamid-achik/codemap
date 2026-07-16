@@ -152,6 +152,94 @@ func TestIndexTSXCallEdges(t *testing.T) {
 	}
 }
 
+// TestIndexJSXNameBasedEdges proves React composition is visible WITHOUT
+// --precise: JSX component usage (<Button/>) becomes a name-based call edge,
+// Next.js convention files get framework-wiring references (so orphans stops
+// flagging pages), and .jsx files index at all. Server-gated (documentSymbol
+// still comes from typescript-language-server), but no callHierarchy runs.
+func TestIndexJSXNameBasedEdges(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "components/button.tsx", "export function Button(props: { label: string }) {\n  return <button>{props.label}</button>;\n}\n")
+	writeFile(t, dir, "app/page.tsx", "import { Button } from \"../components/button\";\nexport default function HomePage() {\n  return <main><Button label=\"hi\" /></main>;\n}\n")
+	writeFile(t, dir, "components/legacy.jsx", "export function Legacy() {\n  return <Button label=\"old\" />;\n}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("jsx-name", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := ix.IndexProject(ctx, pid, "jsx-name", dir, Options{}) // NOT precise
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Languages["javascript"] == 0 {
+		t.Errorf(".jsx file not indexed: languages = %v", res.Languages)
+	}
+
+	// Name-based JSX call edges: HomePage (.tsx) and Legacy (.jsx) → Button.
+	callers, err := g.Callers(pid, "Button")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, c := range callers {
+		got[c.Symbol] = true
+	}
+	if !got["HomePage"] || !got["Legacy"] {
+		t.Errorf("callers of Button = %v, want HomePage (.tsx) and Legacy (.jsx)", got)
+	}
+	// Intrinsic elements never create edges.
+	if c, _ := g.Callers(pid, "button"); len(c) != 0 {
+		t.Errorf("<button> intrinsic must not have callers: %+v", c)
+	}
+	if c, _ := g.Callers(pid, "main"); len(c) != 0 {
+		t.Errorf("<main> intrinsic must not have callers: %+v", c)
+	}
+
+	// Framework wiring: app/page.tsx's default export is referenced by its
+	// file node, so orphan detection keeps it.
+	orphans, err := g.Orphans(pid, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range orphans {
+		if n.Symbol == "HomePage" {
+			t.Errorf("HomePage (Next.js page default export) flagged as orphan")
+		}
+		if n.Symbol == "Button" {
+			t.Errorf("Button (JSX-used component) flagged as orphan")
+		}
+	}
+
+	// Relative import persisted as a file→file imports edge.
+	edges, err := g.ProjectEdges(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := g.ProjectNodes(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileID := map[string]int64{}
+	for _, n := range nodes {
+		if n.Kind == graph.KindFile {
+			fileID[n.FilePath] = n.ID
+		}
+	}
+	var importFound bool
+	for _, e := range edges {
+		if e.EdgeType == graph.EdgeImports &&
+			e.SourceID == fileID["app/page.tsx"] && e.TargetID == fileID["components/button.tsx"] {
+			importFound = true
+		}
+	}
+	if !importFound {
+		t.Errorf("missing imports edge app/page.tsx → components/button.tsx")
+	}
+}
+
 // TestIndexJavaScriptMixed proves one typescript-language-server serves BOTH
 // TypeScript and JavaScript: a mixed project indexes .js and .ts together, and
 // --precise resolves call edges across the language boundary (a .ts function

@@ -25,10 +25,13 @@ Three surfaces over one structural store (semantic retrieval may be delegated to
 
 Key features:
 - **Structural graph** — nodes (files, functions, types, methods, tests) + `calls`/`defines` edges
-  in pure-Go SQLite (Go call edges are name-based by default, exact via `go/types` with `--precise`;
-  TypeScript/JavaScript/Python call edges come only from `--precise` via `callHierarchy`;
-  Vue SFC script blocks currently produce symbols + `defines` edges but no call graph;
-  Go callback/handler uses are persisted as `references`; imports are package-scoped evidence;
+  in pure-Go SQLite (Go, Ruby, and Lua call edges are name-based by default, Go exact via `go/types`
+  with `--precise`; base TS/JS gets name-based JSX component-usage call edges, import edges, and
+  Next.js framework-wiring references via `tsscan`, while plain TS/JS/Python function-call edges
+  come only from `--precise` via `callHierarchy`;
+  Vue SFC script blocks currently produce symbols + `defines` + import edges but no call graph;
+  Go callback/handler uses and TS/JS framework wiring are persisted as `references`; Go imports are
+  package-scoped evidence, TS/JS/Vue/Ruby/Lua imports resolve file→file;
   `implements`/`overrides` remain reserved for planned backends).
 - **Local semantic search** — under the `local`/`fallback` backend with embeddings enabled,
   node source text is embedded through the configured Ollama-compatible endpoint
@@ -103,6 +106,9 @@ codemap/
 │   │   ├── gosrc/            #   stdlib go/parser backend (pure Go, default for Go)
 │   │   ├── typesrc/          #   in-process go/types pass (Go --precise; exact call edges)
 │   │   ├── lspsrc/           #   LSP-backed extractor (documentSymbol → symbols; callHierarchy)
+│   │   ├── tsscan/           #   name-based TS/JS enrichment (imports, JSX usage, Next.js wiring)
+│   │   ├── rubysrc/          #   pure-Go Ruby line scanner (symbols, name-based calls, requires)
+│   │   ├── luasrc/           #   pure-Go Lua line scanner (symbols, name-based calls, requires)
 │   │   └── vuesrc/           #   Vue SFC (.vue) → routes <script> blocks to the TS server
 │   ├── lsp/                  # headless LSP client (no deps; Content-Length JSON-RPC)
 │   │   ├── jsonrpc.go        #   framed conn: read loop, Call/Notify, 30s default timeout
@@ -220,17 +226,30 @@ task install         # go install ./cmd/codemap
 
 ## Architecture Notes
 
-### Extraction (Go + TypeScript + JavaScript + Python + Vue SFC)
-- **`gosrc` (`go/parser`) is always registered** (Go: full call graph; `--precise` adds exact edges
-  via `go/types`). **`lspsrc` (the LSP backend) is now wired in**: `IndexProject` runs a present-aware
+### Extraction (Go + TypeScript + JavaScript + Python + Ruby + Lua + Vue SFC)
+- **`gosrc` (`go/parser`), `rubysrc`, and `luasrc` are always registered** (Go: full call graph,
+  `--precise` adds exact edges via `go/types`; Ruby and Lua are pure-Go line scanners producing
+  symbols, name-based call references, and `require` imports — heredoc/`=begin`/string-safe for
+  Ruby, long-string/comment-safe for Lua; no precise pass for either yet).
+  **`lspsrc` (the LSP backend) is now wired in**: `IndexProject` runs a present-aware
   `registerLSP` that, for each `lspsrc.DefaultServers` spec, spawns its server **once** if any of the
   server's languages are present and the binary is on PATH, then registers an extractor per present
   language sharing that one connection (via `Extractor.Bind`) — so **one `typescript-language-server`
   serves both TypeScript and JavaScript** (`.ts/.tsx/.mts/.cts` + `.js/.jsx/.mjs/.cjs`), each
   routed with its own LSP `languageId`. Calls resolve **across** the `.ts`↔`.js` boundary.
   **Python** uses `pyright-langserver` (its own spec/process). With the server available, normal
-  indexing writes symbols + `defines` edges; `--precise` additionally resolves call edges via
-  `callHierarchy` in `Indexer.resolveLSPCallEdges`. `appendSymbols` drops
+  indexing writes symbols + `defines` edges — and for TS/JS, `lspsrc.ExtractFile` calls
+  `tsscan.Enrich`, adding name-based import specifiers, JSX component-usage call references
+  (`.tsx`/`.jsx` only; member expressions resolve to the root binding, lowercase intrinsics never
+  match, comments/strings are sanitized), and Next.js framework-wiring references (App Router
+  special files, `route.ts` HTTP verbs, middleware, Pages Router) so React components and
+  framework entrypoints stop reading as orphans. These edges carry candidate weight (0.7);
+  `--precise` additionally resolves exact call edges via
+  `callHierarchy` in `Indexer.resolveLSPCallEdges` and supersedes the candidates per file
+  (an EMPTY on-demand precise answer never erases non-empty name-based candidates —
+  see `autoUpgradeRelation`). The import resolver understands `@/`/`~/` aliases and
+  monorepo workspace packages via `package.json` names (`exports`/`module`/`main`), resolved
+  deterministically on duplicate names. `appendSymbols` drops
   Variable symbols nested inside a callable (pyright reports params/locals as variables). A Go-only repo
   never spawns a server; `defer ix.Close()` reaps any that were.
 - **Vue SFC (`.vue`)** is indexed by `internal/extract/vuesrc`: a `.vue` file's
@@ -329,18 +348,23 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`
   marks inflation; `orphans` follows functions wired by value — handlers like cobra `RunE` /
-  `mux.HandleFunc(s.h)`, via `references` edges that never enter the call graph — but stays
-  interface/reflection-blind, so its results are *candidates*). **The graph-wide
+  `mux.HandleFunc(s.h)`, and in TS/JS the tsscan JSX/framework-wiring references — via
+  `references` edges that never enter the call graph — but stays
+  interface/reflection-blind and cannot see components passed only as props
+  (`Link={AuthLink}`) or wrapped default exports (`export default memo(Page)`), so its results
+  are *candidates*). **The graph-wide
   fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) is the unified
   exact-resolution pass. For Go it runs an in-process pure-Go `go/types` pass (`internal/extract/typesrc`);
   for the LSP languages (TypeScript, JavaScript, Python) it drives the language server's `callHierarchy`
   (`Indexer.resolveLSPCallEdges`). It resolves each call to the one it invokes, writes precise call
   edges via `edges.provenance`, and records successful coverage per file. Query confidence is classified
   from the matching definition files: all covered → `resolved`; uncovered TS/JS/Python/Vue wins →
-  `unresolved`; otherwise Go/parser → `name`. One precise edge never upgrades an unrelated file, and
-  changed files lose coverage until their precise pass succeeds again. The LSP languages have **no**
-  name-based call edges, so `--precise` is
-  what gives them a call graph at all (for Go it *replaces* the name-based edges; name-based stays the Go
+  `unresolved`; otherwise parser-backed (Go/Ruby/Lua) → `name`. One precise edge never upgrades an unrelated file, and
+  changed files lose coverage until their precise pass succeeds again. TS/JS get name-based
+  candidate edges for JSX component usage, imports, and Next.js framework wiring; plain TS/JS
+  function calls and all Python calls have **no** name-based edges, so `--precise` is
+  what gives those languages a complete call graph (for Go it *replaces* the name-based edges;
+  name-based stays the Go/Ruby/Lua
   default). The Go pass degrades
   per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable.
   `callers`/`callees --precise` (`precise:true` in MCP) remains the per-query language-server path for a one-off without

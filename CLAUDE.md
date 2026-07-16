@@ -7,9 +7,12 @@ and the handful of things that are easy to get wrong.
 
 Local-first code intelligence: a structural code graph (Go via stdlib `go/parser`, plus
 `--precise` go/types; TypeScript **+ JavaScript** symbols via one
-`typescript-language-server`, with precise calls resolving across the `.ts`↔`.js` boundary;
-**Python** via `pyright-langserver`; and **Vue SFC** `<script>` blocks routed to the same TS server
-for symbols + `defines` edges only). Tree-sitter remains planned and has no implementation today.
+`typescript-language-server` — enriched by `tsscan` with name-based import, JSX component-usage,
+and Next.js framework-wiring edges — with precise calls resolving across the `.ts`↔`.js` boundary;
+**Python** via `pyright-langserver`; **Ruby** and **Lua** via built-in pure-Go line scanners
+(symbols + name-based calls + `require` imports, no server); and **Vue SFC** `<script>` blocks
+routed to the same TS server
+for symbols + `defines` + import edges only). Tree-sitter remains planned and has no implementation today.
 The graph is fused with semantic retrieval (local veclite plus an optional one-hop vecgrep
 fallback, or vecgrep as the explicit owner) and exposed as a unified query layer. Three surfaces
 share the structural store: CLI (`--json` for agents), MCP server (`codemap serve`: 42 tools in
@@ -30,7 +33,8 @@ Surfaces / key files:
   + highlight.go [chroma syntax]; tabs graph/metrics/impact/search/path)
 - Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`
 - Extraction: `internal/extract/` (`gosrc` = go/parser · `typesrc` = go/types [`--precise`] ·
-  `lspsrc` = LSP-backed [TS/JS/Python] · `vuesrc` = Vue SFC `.vue` → TS server)
+  `lspsrc` = LSP-backed [TS/JS/Python] · `tsscan` = name-based TS/JS imports/JSX/Next.js wiring ·
+  `rubysrc`/`luasrc` = pure-Go Ruby/Lua scanners · `vuesrc` = Vue SFC `.vue` → TS server)
 - LSP client: `internal/lsp/`  ·  indexer: `internal/index/`  ·  embeddings: `internal/embed/`
 - Branch/cache/daemon: `internal/branchstate` · `internal/cachestate` · `internal/snapshot`
   (fcheap) · `internal/daemon` (watcher) · `internal/git` (branch/ref/diff for review + branch-switch)

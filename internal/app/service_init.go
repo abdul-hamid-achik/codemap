@@ -249,7 +249,7 @@ func indexAdvisory(res *index.Result) string {
 	}
 	if len(planned) > 0 {
 		msgs = append(msgs, "skipped "+summarizeUnsupported(planned)+
-			" — recognized at T0 only (structural backend planned, not shipped); codemap currently indexes Go, TypeScript, JavaScript, Python, and Vue script blocks")
+			" — recognized at T0 only (structural backend planned, not shipped); codemap currently indexes Go, TypeScript, JavaScript, Python, Ruby, Lua, and Vue script blocks")
 	}
 	return strings.Join(msgs, "; ")
 }

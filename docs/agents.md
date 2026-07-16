@@ -122,9 +122,10 @@ calibrate its confidence:
   post-image line, recognized callable/type declaration lines removed in mixed or equal-count hunks, and an exact
   source rename with no mapped symbols at its new path. Fresh indexed untracked source files and exact source renames map as
   whole files; documentation/assets remain ordinary zero-symbol changes. A stale, partial, or capped review always reports aggregate `risk.level:"unknown"`.
-- **`resolution`** — set when a call graph is *unavailable* (TypeScript/JavaScript/
-  Python without successful precise coverage, or Vue SFCs whose call edges are not yet
-  supported even by precise indexing): callers/blast/tests are **unresolved, not absent**.
+- **`resolution`** — set when a call graph is *unavailable* (plain TypeScript/JavaScript/
+  Python calls without successful precise coverage, or Vue SFCs whose call edges are not yet
+  supported even by precise indexing): callers/blast/tests are **unresolved, not absent**
+  (TS/JS may still return name-based JSX component-usage candidates).
   `codemap_review`/`codemap_risk` will not assert "no tests" in that state, and
   `--fail-on-untested` fails closed because coverage cannot be established;
   `codemap_file_impact` reports deletion as `unsafe` only from fresh confirmed
@@ -139,9 +140,11 @@ calibrate its confidence:
   grouped by dependent file/kind with totals and bounded source→target samples. Every
   sample is `confirmed` or `candidate` with a reason; additive confirmed/candidate totals
   survive list caps. Go imports are package-scoped candidates, not proof that the
-  representative file is required.
-- **`references.coverage` / `references.confidence`** — Go callback/handler patterns are
-  indexed, but general type/value use and runtime wiring are not. Empty partial coverage is
+  representative file is required; TS/JS/Vue/Ruby/Lua import edges prove use, not that the
+  file is required, so the references/imports domains report `partial` where persisted.
+- **`references.coverage` / `references.confidence`** — Go callback/handler patterns, TS/JS
+  JSX component usage, and Next.js framework wiring are
+  indexed, but general type/value use and other runtime wiring are not. Empty partial coverage is
   never presented as proof that no registration exists; name fan-out and stale snapshots remain
   candidates.
 - **`note` / `shared_name`** — the name resolves to several definitions, so a count
@@ -162,10 +165,13 @@ calibrate its confidence:
 
 ## Precision when you need it
 
-The Go graph starts name-based from `go/parser`. For TypeScript/JavaScript/Python — and for
+The Go, Ruby, and Lua graphs start name-based from built-in pure-Go backends; base TS/JS carries
+name-based JSX component-usage, import, and Next.js framework-wiring edges. For plain
+TypeScript/JavaScript/Python calls — and for
 exact Go method resolution — run `codemap index --precise` (go/types + language-server
 `callHierarchy`). Precise coverage is tracked per file: a query is `resolved` only when every
-matched definition file completed the pass; partial failures remain `name`/`unresolved`. For a one-off exact Go
+matched definition file completed the pass; partial failures remain `name`/`unresolved`, and
+per-file precise coverage supersedes the name-based candidates. For a one-off exact Go
 answer without reindexing, pass `precise: true` to `codemap_callers`/`codemap_callees`.
 
 ## Exact source selectors

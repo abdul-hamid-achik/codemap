@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/tsscan"
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
 )
 
@@ -173,6 +174,14 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 	lines := strings.Split(string(src), "\n")
 	for _, s := range syms {
 		appendSymbols(res, lines, e.lang, "", false, relPath, s)
+	}
+	// documentSymbol yields definitions only — no imports and no references at
+	// all, which left TS/JS with a disconnected base graph (every React
+	// component an orphan). Enrich adds the cheap name-based layer: import
+	// specifiers (persisted as file→file imports edges by the indexer), JSX
+	// component-usage call references, and Next.js framework-wiring references.
+	if e.lang == "typescript" || e.lang == "javascript" {
+		tsscan.Enrich(res, relPath, src)
 	}
 	return res, nil
 }

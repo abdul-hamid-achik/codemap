@@ -115,6 +115,16 @@ func (svc *Service) autoUpgradeRelation(base *RelationReport, cwd, symbol string
 	if wantCallers {
 		results = callers
 	}
+	// The graph may already hold name-based candidate results (JSX component
+	// usage from tsscan). A genuinely-resolved-but-EMPTY on-demand answer must
+	// not erase that evidence: the server's callHierarchy cannot see JSX
+	// composition in every project shape (a .jsx file without a ts/jsconfig,
+	// unresolved path aliases), and "zero callers, resolved" would be
+	// confidently wrong where the honest answer is "candidates, unresolved".
+	// Non-empty precise results still supersede the candidates entirely.
+	if len(results) == 0 && len(base.Results) > 0 {
+		return base
+	}
 	base.Results = nonNil(results)
 	base.Found = true
 	base.Resolution = ""               // resolved on demand; the "run --precise" note no longer applies

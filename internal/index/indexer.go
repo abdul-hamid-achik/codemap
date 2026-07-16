@@ -32,6 +32,8 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/gosrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/luasrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/rubysrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/typesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/vuesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
@@ -333,8 +335,10 @@ func (ix *Indexer) Close() error {
 	return firstErr
 }
 
-// New returns an indexer with the default backends registered (currently the
-// pure-Go go/parser Go backend).
+// New returns an indexer with the default pure-Go backends registered:
+// go/parser for Go, and the line-scanner backends for Ruby and Lua. LSP-backed
+// languages (TypeScript/JavaScript/Python, plus Vue delegation) are registered
+// per project by registerLSP when their files are present.
 func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.IndexConfig) *Indexer {
 	ix := &Indexer{
 		graph:      g,
@@ -345,6 +349,8 @@ func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.Index
 		extractors: map[string]extract.Extractor{},
 	}
 	ix.Register(gosrc.New())
+	ix.Register(rubysrc.New())
+	ix.Register(luasrc.New())
 	return ix
 }
 

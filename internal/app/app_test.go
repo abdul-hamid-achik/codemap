@@ -2631,3 +2631,55 @@ func TestFindSymbolsMatchedIn(t *testing.T) {
 		t.Errorf("docstring-only match ValidateInput missing from hits: %+v", rep.Hits)
 	}
 }
+
+// TestCallersKeepsNameCandidatesWhenOnDemandFindsZero pins the interaction of
+// the tsscan name-based JSX call edges with autoUpgradeRelation: when the
+// on-demand callHierarchy genuinely resolves but reports ZERO callers (in a
+// bare .jsx project without a ts/jsconfig the server cannot see cross-file JSX
+// composition), the graph's name-based candidate edges must survive — not be
+// overwritten by a confidently-wrong empty "resolved on demand" answer.
+func TestCallersKeepsNameCandidatesWhenOnDemandFindsZero(t *testing.T) {
+	if _, err := exec.LookPath("typescript-language-server"); err != nil {
+		t.Skip("typescript-language-server not installed")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "widget.jsx"),
+		[]byte("export function Widget({ label }) {\n  return <button>{label}</button>;\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "app.jsx"),
+		[]byte("import { Widget } from './widget';\n\nexport function App() {\n  return <div><Widget label=\"hi\" /></div>;\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Callers(proj, "Widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasApp bool
+	for _, r := range rep.Results {
+		if r.Symbol == "App" {
+			hasApp = true
+		}
+	}
+	if !hasApp {
+		t.Fatalf("callers of Widget = %+v, want the name-based candidate App to survive the on-demand upgrade", rep.Results)
+	}
+	if rep.CallGraph == CallGraphResolved && len(rep.Results) == 0 {
+		t.Error("an empty on-demand answer must not claim a resolved call graph over existing candidates")
+	}
+}

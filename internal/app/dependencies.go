@@ -400,21 +400,40 @@ func dependencyTargetScope(edge graph.FileDependencyEdge) string {
 	return DependencyTargetFile
 }
 
+// referencePersistingLanguages are the languages whose extractors persist
+// name-based reference AND import edges (gosrc value refs + Go imports;
+// tsscan JSX/framework refs + TS/JS/Vue import specifiers; rubysrc/luasrc
+// call refs + require imports). Python's LSP backend still extracts symbols
+// only, so a Python-only file keeps the unavailable status.
+var referencePersistingLanguages = map[string]bool{
+	"go": true, "typescript": true, "javascript": true, "vue": true,
+	"ruby": true, "lua": true,
+}
+
+func anyLanguage(present map[string]bool, supported map[string]bool) bool {
+	for lang := range present {
+		if supported[lang] {
+			return true
+		}
+	}
+	return false
+}
+
 func dependencyCoverage(callGraph string, nodes []graph.Node) FileDependencyCoverage {
 	languages := map[string]bool{}
 	for _, node := range nodes {
 		languages[node.Language] = true
 	}
 	domains := []DependencyDomainCoverage{callDependencyCoverage(callGraph)}
-	if languages["go"] {
+	if anyLanguage(languages, referencePersistingLanguages) {
 		domains = append(domains,
 			DependencyDomainCoverage{
 				Domain: "references", Status: DependencyCoveragePartial, Scope: "indexed_project",
-				Note: "Go function/method values used as callbacks or fields are indexed; general type/value uses and LSP-language references are not",
+				Note: "Go function/method values used as callbacks or fields, JSX component usage, and framework-wiring references are indexed; general type/value uses are not",
 			},
 			DependencyDomainCoverage{
 				Domain: "imports", Status: DependencyCoveragePartial, Scope: "indexed_project",
-				Note: "in-module Go package imports are indexed to one representative file; they prove package use, not that the representative file is required",
+				Note: "in-project Go package imports (one representative file per package) and TS/JS/Ruby/Lua relative imports are indexed; they prove use, not that the file is required",
 			},
 		)
 	} else {

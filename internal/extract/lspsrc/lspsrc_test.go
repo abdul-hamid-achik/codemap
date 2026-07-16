@@ -388,6 +388,51 @@ func TestLSPLanguageID(t *testing.T) {
 	}
 }
 
+// TestExtractFileEnrichesTSX pins the name-based enrichment layer: a .tsx
+// extraction must carry import specifiers, JSX component-usage call
+// references attributed to the enclosing component, and framework-wiring
+// references for Next.js convention files — with no language server beyond
+// documentSymbol involved.
+func TestExtractFileEnrichesTSX(t *testing.T) {
+	src := "import Hero from './hero';\n" +
+		"export default function Page() {\n" +
+		"  return <main><Hero title=\"x\" /></main>;\n" +
+		"}\n"
+	stub := &stubLanguageClient{documentSymbols: true, syms: []lsp.DocumentSymbol{{
+		Name: "Page", Kind: lsp.SymbolFunction,
+		Range: lsp.Range{Start: lsp.Position{Line: 1}, End: lsp.Position{Line: 3}},
+	}}}
+	e := &Extractor{ctx: context.Background(), lang: "typescript", langID: "typescript", root: "/proj", client: stub}
+	res, err := e.ExtractFile("app/page.tsx", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Imports) != 1 || res.Imports[0] != "./hero" {
+		t.Errorf("imports = %v, want [./hero]", res.Imports)
+	}
+	var jsx, wired, intrinsic bool
+	for _, r := range res.References {
+		if r.From == "Page" && r.To == "Hero" && r.Kind == extract.RefCalls {
+			jsx = true
+		}
+		if r.From == "app/page.tsx" && r.To == "Page" && r.Kind == extract.RefReferences {
+			wired = true
+		}
+		if r.To == "main" {
+			intrinsic = true
+		}
+	}
+	if !jsx {
+		t.Errorf("missing JSX call reference Page → Hero: %v", res.References)
+	}
+	if !wired {
+		t.Errorf("missing framework wiring reference file → Page: %v", res.References)
+	}
+	if intrinsic {
+		t.Errorf("intrinsic <main> must not produce a reference: %v", res.References)
+	}
+}
+
 func TestCallEdgesTypeScript(t *testing.T) {
 	if _, err := exec.LookPath("typescript-language-server"); err != nil {
 		t.Skip("typescript-language-server not on PATH")

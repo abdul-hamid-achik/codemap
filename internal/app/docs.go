@@ -17,10 +17,12 @@ calls instead of many file reads — for both people (CLI + the studio TUI) and
 agents (a stdio MCP server).
 
 Indexes Go (stdlib go/parser, full call graph), TypeScript + JavaScript (one
-typescript-language-server, across the .ts<->.js boundary), and Python (pyright-
-langserver) when the servers are installed: symbols + structure always, plus a
-precise call graph under 'index --precise' so callers/impact/hotspots/path work
-for them. Other languages are recognized and reported as skipped (more in
+typescript-language-server, across the .ts<->.js boundary; plus built-in
+name-based JSX component-usage, import, and Next.js framework-wiring edges),
+Python (pyright-langserver), Ruby and Lua (built-in pure-Go backends, no server
+needed), and Vue script blocks: symbols + structure always, plus a precise call
+graph under 'index --precise' so callers/impact/hotspots/path work for the LSP
+languages. Other languages are recognized and reported as skipped (more in
 progress); --no-lsp disables the LSP backend. Semantic search is language-agnostic.
 
 Data lives under XDG paths (or ~/.codemap): the graph DB, optional local veclite
@@ -169,11 +171,13 @@ precise:true (MCP) — the unified exact-resolution pass. For Go it's a pure-Go 
 pass; for the LSP languages (TypeScript, JavaScript, Python) it drives the language
 server's callHierarchy. Successful precise coverage is recorded per file; a query is
 "resolved" only when every matched definition file completed the pass. Partial failures
-remain honestly "name" or "unresolved" rather than upgrading the whole project. (The LSP
-languages have NO name-based call edges, so --precise is what gives
-TS/JS/Python a call graph at all — so without it, impact/callers/callees on a TS/JS/Python symbol
-return a "resolution" note saying the call graph is unavailable, NOT a confidently-empty result or
-untested:true; the callers/tests are unresolved, not absent.) Every impact/callers/callees/review/
+remain honestly "name" or "unresolved" rather than upgrading the whole project. (TS/JS have
+name-based candidate edges for JSX component usage, imports, and framework wiring at the
+base level — but plain function calls still come only from --precise, so impact/callers/callees
+on a non-JSX TS/JS/Python symbol return a "resolution" note saying the call graph is
+unavailable, NOT a confidently-empty result or untested:true; the callers/tests are
+unresolved, not absent. Ruby and Lua carry name-based call edges from their built-in
+backends and classify as "name".) Every impact/callers/callees/review/
 context/hotspots/orphans/path report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
 so a consumer can switch on confidence (resolved→high, name→medium, unresolved/none→low) instead of
 parsing the free-form resolution sentence. The Go pass

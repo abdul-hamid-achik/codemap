@@ -77,7 +77,7 @@ onBeforeUnmount(() => {
           <ul class="cm-home-facts" aria-label="codemap product facts">
             <li>Pure-Go binary</li>
             <li>Stored-graph queries work offline</li>
-            <li>5 indexed languages</li>
+            <li>7 indexed languages</li>
             <li>42 MCP tools in full</li>
           </ul>
         </div>

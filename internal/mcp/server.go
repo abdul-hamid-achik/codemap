@@ -179,9 +179,11 @@ named Foo — codemap_callers/codemap_impact note when a name is ambiguous and c
 the inflation. The graph-wide fix is to re-run codemap_index with precise:true — the unified
 exact-resolution pass: go/types for Go, language-server callHierarchy for the LSP languages
 (TypeScript, JavaScript, Python). It makes graph EDGES exact; when multiple definitions share the
-queried name, pass a source selector to keep the query on one definition. The LSP languages have NO
-name-based call edges, so for a TS/JS/Python
-project precise:true is what gives codemap_callers/impact/hotspots/path a call graph at all. For a
+queried name, pass a source selector to keep the query on one definition. TS/JS get name-based
+edges for JSX component usage (React composition), imports, and Next.js framework wiring; Ruby and
+Lua have full name-based call extraction. Plain TS/JS/Python function calls still have NO
+name-based call edges, so precise:true remains what gives
+those languages a complete codemap_callers/impact/hotspots/path call graph. For a
 one-off exact answer without reindexing, pass precise:true to codemap_callers/codemap_callees. The
 service uses gopls for Go, typescript-language-server for TypeScript/JavaScript, and pyright for
 Python; Vue call hierarchy is not supported yet. When a server or module is unavailable, Go

@@ -18,11 +18,13 @@ go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 **Optional but recommended:** [Ollama](https://ollama.com) with `ollama pull nomic-embed-text`
 enables semantic search — structure-only indexing works fine without it.
 
-> **Go** works with the built-in parser. To index **TypeScript, JavaScript, or Vue**,
-> install `typescript-language-server`; **Python** needs `pyright-langserver`. `--precise`
-> resolves calls for Go/TypeScript/JavaScript/Python; Vue currently provides symbols and
-> `defines` edges only. See [Language support](/languages) for install commands and limits.
-> Semantic search is available when embeddings are enabled.
+> **Go, Ruby, and Lua** work with built-in pure-Go backends. To index **TypeScript,
+> JavaScript, or Vue**, install `typescript-language-server` (TS/JS then get name-based
+> import, JSX component-usage, and Next.js framework-wiring edges out of the box);
+> **Python** needs `pyright-langserver`. `--precise`
+> resolves plain calls exactly for Go/TypeScript/JavaScript/Python; Vue currently provides
+> symbols, `defines`, and import edges only. See [Language support](/languages) for install
+> commands and limits. Semantic search is available when embeddings are enabled.
 
 ## 2. Index a project
 

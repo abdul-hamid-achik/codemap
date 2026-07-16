@@ -36,10 +36,16 @@ instead of dozens of file reads.
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
   (name-based by default for Go, exact via `go/types` with `--precise`) and **defines** edges
   (file → symbol). Test coverage is derived by walking the call graph to test nodes. The graph is
-  stored in pure-Go SQLite and remains queryable offline. **Go** uses the built-in stdlib parser.
+  stored in pure-Go SQLite and remains queryable offline. **Go**, **Ruby**, and **Lua** use
+  built-in pure-Go backends (symbols + name-based calls/imports, no server needed).
   With the listed language server installed, **TypeScript + JavaScript** and **Python** provide
   symbols + structure and a **precise call graph** under `--precise`; one
-  `typescript-language-server` resolves calls across the `.ts`↔`.js` boundary. **Vue SFCs** route
+  `typescript-language-server` resolves calls across the `.ts`↔`.js` boundary. Base (non-precise)
+  TS/JS indexing additionally extracts name-based **import edges**, **JSX component-usage edges**
+  (`<Foo/>` in `.tsx`/`.jsx` — rendering *is* invocation for a function component, so React
+  codebases no longer read as disconnected), and **Next.js framework-wiring references** (App
+  Router special files, `route.ts` HTTP verbs, middleware, Pages Router), so framework-invoked
+  symbols stop appearing as orphans. **Vue SFCs** route
   `<script>`/`<script setup>` blocks through that TS/JS server and currently provide symbols +
   `defines` edges only, with source lines mapped back to the original `.vue` file. Semantic search
   is language-agnostic.
@@ -145,24 +151,26 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for one-off `callers`/`callees --precise` Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-**Supported language paths** — Go works with the built-in parser. TypeScript, JavaScript, Python,
-and Vue require the language server listed below on `PATH`; without it, codemap recognizes and
-reports those files but skips their structural extraction. Semantic retrieval is language-agnostic
-once symbols are indexed. A precise call graph
+**Supported language paths** — Go, Ruby, and Lua work with built-in pure-Go backends. TypeScript,
+JavaScript, Python, and Vue require the language server listed below on `PATH`; without it, codemap
+recognizes and reports those files but skips their structural extraction. Semantic retrieval is
+language-agnostic once symbols are indexed. A precise call graph
 (`callers`/`callees`/`impact`/`hotspots`/`path`) needs `--precise`:
 
 | Language | How | Extensions | Call graph |
 |---|---|---|---|
 | **Go** | stdlib `go/parser` (pure Go, always) · `--precise` adds exact edges via in-process `go/types` | `.go` | name-based by default; exact via `--precise` |
-| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | `--precise` only |
+| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) + a name-based scan for imports, JSX component usage, and Next.js framework wiring | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | name-based JSX/import/framework edges by default; plain function calls via `--precise` only |
 | **Python** | `pyright-langserver` | `.py` `.pyw` `.pyi` | `--precise` only |
+| **Ruby** | built-in pure-Go scanner (modules/classes/defs incl. `def self.x`, endless defs, `private def`; heredoc-, `=begin`-, and string-safe) | `.rb` | name-based (calls + `require`/`require_relative` imports) |
+| **Lua** | built-in pure-Go scanner (`function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe) | `.lua` | name-based (calls + `require` imports) |
 | **Vue SFC** | `typescript-language-server` via `vuesrc` — `<script>`/`<script setup>` block content is extracted and routed to the TS/JS delegate; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
 
 > Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is delegated to the same `typescript-language-server` connection that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns the server itself to serve the script blocks.
 
 The language servers auto-enable when installed — run [`codemap doctor`](docs/cli.md) to see which are
 detected, or `--no-lsp` to skip. The next waves are tracked honestly at **T0 recognized**:
-Rust; Java/Kotlin/Scala; C/C++/CUDA; C#/VB; Ruby; PHP; Dart; Swift; Lua; Elixir;
+Rust; Java/Kotlin/Scala; C/C++/CUDA; C#/VB; PHP; Dart; Swift; Elixir;
 Svelte/Astro/Razor; shell; HCL/Terraform; SQL; YAML; HTML/CSS. T0 means the file is detected
 and reported with a planned/missing backend, but produces no graph nodes yet. Public support
 advances per relation domain (symbols, references/imports, resolved calls) only after its
@@ -336,10 +344,18 @@ and turns `hotspots` from name-collision noise into genuine hubs. Requirements a
 - Interface dispatch is statically undecidable, so a precise edge points at the interface method, not
   the concrete implementors.
 
-**For TypeScript, `--precise` is the *only* source of call edges.** The name-based pass extracts TS
-structure (classes, methods, functions) but not calls, so a plain `index` gives TS no call graph;
-`index --precise` drives `typescript-language-server` `callHierarchy`; files it resolves gain exact
-edges, while any uncovered definition remains explicitly `unresolved`. The same
+**For TypeScript/JavaScript, plain function calls still come only from `--precise`.** Base indexing
+now extracts real name-based edges for TS/JS: import edges (`import`/`export … from`/`require`/
+dynamic `import()`, comment-safe, with `@/` and `~/` alias and workspace-package resolution), JSX
+component-usage call edges in `.tsx`/`.jsx` (`<Foo/>` — rendering is invocation; member expressions
+like `<Foo.Bar/>` and `<motion.div/>` resolve to the root binding; lowercase intrinsics like
+`<div>` never create edges; generics/comparisons are excluded, and commented-out or string-literal
+JSX creates nothing), and Next.js framework-wiring references. Like all name-based extraction these
+are *candidate* edges (same over-match contract as Go selector calls) — but a React codebase no
+longer reads as disconnected. Ordinary function calls (`foo()`) still have no name-based TS/JS
+edges: `index --precise` drives `typescript-language-server` `callHierarchy`; files it resolves gain
+exact edges that supersede the candidates per file, while any uncovered definition remains
+explicitly `unresolved`. The same
 `callers`/`callees`/`impact`/`hotspots`/`path` queries then use that indexed coverage with no flag of their own.
 Needs `typescript-language-server` on `PATH`.
 
@@ -363,8 +379,14 @@ prunes that historical evidence.
 `orphans` finds call-graph dead ends. It follows functions wired by *value* — handlers in a
 table like cobra's `RunE: runInit`, callbacks passed to a registrar — and excludes methods that
 implement well-known stdlib interfaces (`error`, `fmt.Stringer`, `Unwrap`, the JSON/text
-marshalers), so those aren't flagged as dead (Go). It still can't see callers reached via
-*custom* interface dispatch or reflection, so treat its output as *candidates*, not proof.
+marshalers), so those aren't flagged as dead (Go). In TS/JS, JSX component usage and Next.js
+framework wiring (App Router special files like `page.tsx`/`layout.tsx`, `route.ts` HTTP-verb
+handlers, `middleware`, Pages Router modules) keep rendered components and framework-invoked
+exports off the dead-code list. It still can't see callers reached via
+*custom* interface dispatch or reflection, a component passed only as a *prop*
+(`<Nav Link={AuthLink}/>` — never JSX-rendered by name), or a wrapped default export
+(`export default memo(Page)` — the identifier the framework invokes isn't resolvable by name),
+so treat its output as *candidates*, not proof.
 
 ## Use it from an agent (MCP)
 

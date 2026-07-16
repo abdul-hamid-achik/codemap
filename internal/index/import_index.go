@@ -3,9 +3,11 @@ package index
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
@@ -41,6 +43,15 @@ type importIndex struct {
 	// for fast relative-specifier resolution. The TS/JS backends
 	// emit "./foo" / "../bar/baz" — we normalize and look it up.
 	relFiles map[string]bool
+
+	// jsPackages maps a workspace package.json "name" (e.g.
+	// "@cartographer/domain") to its root-relative directory, and
+	// jsPkgEntry maps that same name to its resolved entry file —
+	// so a monorepo's bare cross-package imports become file→file
+	// edges (the apps↔packages bridges in codemap_map) instead of
+	// being dropped as external.
+	jsPackages map[string]string
+	jsPkgEntry map[string]string
 }
 
 func newImportIndex(root string, files []fileTask) *importIndex {
@@ -49,11 +60,20 @@ func newImportIndex(root string, files []fileTask) *importIndex {
 		goModulePath: goModulePath(root),
 		goFiles:      map[string]string{},
 		relFiles:     map[string]bool{},
+		jsPackages:   map[string]string{},
+		jsPkgEntry:   map[string]string{},
 	}
+	jsDirs := map[string]bool{}
 	for _, ft := range files {
 		rel := filepath.ToSlash(ft.rel)
 		idx.relFiles[rel] = true
 		if ft.lang != "go" {
+			for dir := filepath.ToSlash(filepath.Dir(rel)); ; dir = parentDir(dir) {
+				jsDirs[dir] = true
+				if dir == "" {
+					break
+				}
+			}
 			continue
 		}
 		// A Go file at "a/b.go" declares package "b" — the
@@ -78,7 +98,47 @@ func newImportIndex(root string, files []fileTask) *importIndex {
 			idx.goFiles[dir] = rel
 		}
 	}
+	// Discover workspace packages: any ancestor directory of an indexed
+	// non-Go source file that carries a package.json with a "name". Bounded
+	// by the number of distinct source directories (node_modules is excluded
+	// by the walk), so this is a handful of stats per index run. Iterate in
+	// sorted order: map order is randomized, and when two directories declare
+	// the same package name the winner must be deterministic across reindexes
+	// (lexical, parents before children — not whichever the runtime yields first).
+	sortedDirs := make([]string, 0, len(jsDirs))
+	for dir := range jsDirs {
+		sortedDirs = append(sortedDirs, dir)
+	}
+	sort.Strings(sortedDirs)
+	for _, dir := range sortedDirs {
+		name := jsPackageName(root, dir)
+		if name == "" {
+			continue
+		}
+		if _, dup := idx.jsPackages[name]; dup {
+			continue // same name declared twice — keep the first, don't flip-flop
+		}
+		idx.jsPackages[name] = dir
+	}
+	for name, dir := range idx.jsPackages {
+		if entry := jsPackageEntry(root, dir, idx); entry != "" {
+			idx.jsPkgEntry[name] = entry
+		}
+	}
 	return idx
+}
+
+// parentDir returns the slash-form parent of a root-relative directory, with
+// "" for the project root ("." and "" both terminate).
+func parentDir(dir string) string {
+	if dir == "" || dir == "." {
+		return ""
+	}
+	p := filepath.ToSlash(filepath.Dir(dir))
+	if p == "." {
+		return ""
+	}
+	return p
 }
 
 // goModulePath returns the project's go.mod module path, or "" when
@@ -129,6 +189,50 @@ func resolveImportFile(language, fromRel, spec string, idx *importIndex) string 
 		return resolveGoImport(spec, idx)
 	case "typescript", "javascript", "vue":
 		return resolveJSImport(fromRel, spec, idx)
+	case "ruby":
+		return resolveRubyImport(fromRel, spec, idx)
+	case "lua":
+		return resolveLuaImport(spec, idx)
+	}
+	return ""
+}
+
+// resolveRubyImport maps a require/require_relative spec to a project file.
+// rubysrc prefixes require_relative specs with "./" so they resolve against
+// the requiring file; plain require load-path specs are tried against the
+// project root and the conventional lib/ root.
+func resolveRubyImport(fromRel, spec string, idx *importIndex) string {
+	try := func(base string) string {
+		base = strings.TrimSuffix(base, ".rb")
+		if idx.relFiles[base+".rb"] {
+			return base + ".rb"
+		}
+		return ""
+	}
+	if strings.HasPrefix(spec, "./") || strings.HasPrefix(spec, "../") {
+		fromDir := filepath.ToSlash(filepath.Dir(fromRel))
+		base := filepath.ToSlash(filepath.Clean(filepath.Join(fromDir, spec)))
+		return try(strings.TrimPrefix(base, "./"))
+	}
+	if fp := try(spec); fp != "" {
+		return fp
+	}
+	return try("lib/" + spec)
+}
+
+// resolveLuaImport maps a require("a.b.c") module spec to a project file,
+// trying the standard package.path shapes: a/b/c.lua, a/b/c/init.lua, and the
+// conventional lua/ and src/ roots (Neovim plugins and busted projects).
+func resolveLuaImport(spec string, idx *importIndex) string {
+	rel := strings.ReplaceAll(spec, ".", "/")
+	for _, cand := range []string{
+		rel + ".lua", rel + "/init.lua",
+		"lua/" + rel + ".lua", "lua/" + rel + "/init.lua",
+		"src/" + rel + ".lua", "src/" + rel + "/init.lua",
+	} {
+		if idx.relFiles[cand] {
+			return cand
+		}
 	}
 	return ""
 }
@@ -168,15 +272,46 @@ func resolveGoImport(spec string, idx *importIndex) string {
 	return ""
 }
 
-// resolveJSImport maps a TS/JS/Vue relative specifier ("./foo",
-// "../bar/baz", or a package-rooted "/abs") to a project file. Bare
-// specifiers ("foo", "@scope/pkg") are package imports, not project
-// files, and resolve to "".
+// resolveJSImport maps a TS/JS/Vue specifier to a project file:
+//   - relative ("./foo", "../bar/baz") and package-rooted ("/abs") paths;
+//   - "@/rest" and "~/rest" source aliases (the near-universal tsconfig
+//     `paths` convention mapping to an app's src/ or root), resolved by
+//     walking the importing file's ancestor directories;
+//   - bare workspace-package specifiers ("@scope/pkg", "@scope/pkg/sub")
+//     resolved through the project's own package.json names.
+//
+// Anything else (an npm dependency) is external and resolves to "".
 func resolveJSImport(fromRel, spec string, idx *importIndex) string {
-	if !strings.HasPrefix(spec, "./") && !strings.HasPrefix(spec, "../") && !strings.HasPrefix(spec, "/") {
-		return ""
-	}
 	fromDir := filepath.ToSlash(filepath.Dir(fromRel))
+
+	// tsconfig-style source alias: "@/lib/x" or "~/lib/x". The alias target
+	// is almost always the importing app's src/ (or package root); walking
+	// ancestors deepest-first finds the nearest match in a monorepo where
+	// several apps each define their own "@/*".
+	if rest, ok := strings.CutPrefix(spec, "@/"); ok || strings.HasPrefix(spec, "~/") {
+		if !ok {
+			rest = strings.TrimPrefix(spec, "~/")
+		}
+		if rest == "" {
+			return ""
+		}
+		for dir := fromDir; ; dir = parentDir(dir) {
+			if fp := lookupJSFile(idx, joinSlash(dir, "src", rest)); fp != "" {
+				return fp
+			}
+			if fp := lookupJSFile(idx, joinSlash(dir, rest)); fp != "" {
+				return fp
+			}
+			if dir == "" {
+				return ""
+			}
+		}
+	}
+
+	if !strings.HasPrefix(spec, "./") && !strings.HasPrefix(spec, "../") && !strings.HasPrefix(spec, "/") {
+		return resolveJSWorkspaceImport(spec, idx)
+	}
+
 	var base string
 	if strings.HasPrefix(spec, "/") {
 		base = strings.TrimPrefix(spec, "/")
@@ -188,14 +323,53 @@ func resolveJSImport(fromRel, spec string, idx *importIndex) string {
 	if base == "" {
 		return ""
 	}
+	return lookupJSFile(idx, base)
+}
+
+// resolveJSWorkspaceImport maps a bare specifier to a workspace package's
+// entry (or subpath) file when the project itself declares that package.
+// External npm dependencies resolve to "".
+func resolveJSWorkspaceImport(spec string, idx *importIndex) string {
+	best := ""
+	for name := range idx.jsPackages {
+		if (spec == name || strings.HasPrefix(spec, name+"/")) && len(name) > len(best) {
+			best = name
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	if spec == best {
+		return idx.jsPkgEntry[best]
+	}
+	dir := idx.jsPackages[best]
+	sub := strings.TrimPrefix(spec[len(best):], "/")
+	if fp := lookupJSFile(idx, joinSlash(dir, sub)); fp != "" {
+		return fp
+	}
+	// Packages routinely export "pkg/sub" from src/sub via the exports map.
+	return lookupJSFile(idx, joinSlash(dir, "src", sub))
+}
+
+// lookupJSFile resolves an extensionless-or-not root-relative base path to an
+// indexed project file: exact (a specifier may include its extension), the
+// extension-swapped form ("a.js" emitted for a source "a.ts"), then a
+// directory's index file.
+func lookupJSFile(idx *importIndex, base string) string {
+	if base == "" {
+		return ""
+	}
 	// A specifier MAY include a file extension ("./a.ts" is valid
 	// TS) — keep the spec-as-file attempt first.
+	if idx.relFiles[base] {
+		return base
+	}
 	for _, ext := range []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue"} {
 		if idx.relFiles[base+ext] {
 			return base + ext
 		}
 	}
-	// Then the extension-stripped form ("./a" → "a.ts").
+	// Then the extension-stripped form ("./a" → "a.ts", "./a.js" → "a.ts").
 	stripped := base
 	for _, ext := range []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue"} {
 		if strings.HasSuffix(stripped, ext) {
@@ -213,6 +387,106 @@ func resolveJSImport(fromRel, spec string, idx *importIndex) string {
 		idxPath := filepath.ToSlash(filepath.Join(stripped, "index"+ext))
 		if idx.relFiles[idxPath] {
 			return idxPath
+		}
+	}
+	return ""
+}
+
+// joinSlash joins root-relative slash path segments, skipping empties.
+func joinSlash(parts ...string) string {
+	keep := parts[:0]
+	for _, p := range parts {
+		if p != "" && p != "." {
+			keep = append(keep, p)
+		}
+	}
+	return strings.Join(keep, "/")
+}
+
+// jsPackageManifest is the subset of package.json the import resolver reads.
+type jsPackageManifest struct {
+	Name    string `json:"name"`
+	Main    string `json:"main"`
+	Module  string `json:"module"`
+	Exports any    `json:"exports"`
+}
+
+// readJSPackageManifest parses <root>/<dir>/package.json, or nil when absent
+// or malformed (never fatal — a broken manifest just means no bare-specifier
+// resolution for that directory).
+func readJSPackageManifest(root, dir string) *jsPackageManifest {
+	p := filepath.Join(root, filepath.FromSlash(dir), "package.json")
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) > 1<<20 {
+		return nil
+	}
+	var m jsPackageManifest
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	return &m
+}
+
+// jsPackageName returns the package.json "name" declared in dir, or "".
+func jsPackageName(root, dir string) string {
+	if m := readJSPackageManifest(root, dir); m != nil {
+		return m.Name
+	}
+	return ""
+}
+
+// jsPackageEntry resolves a workspace package's entry file: the manifest's
+// exports["."]/module/main when it names a project file, else the
+// conventional index / src/index fallbacks.
+func jsPackageEntry(root, dir string, idx *importIndex) string {
+	m := readJSPackageManifest(root, dir)
+	if m == nil {
+		return ""
+	}
+	var candidates []string
+	if e := exportsDotTarget(m.Exports); e != "" {
+		candidates = append(candidates, e)
+	}
+	if m.Module != "" {
+		candidates = append(candidates, m.Module)
+	}
+	if m.Main != "" {
+		candidates = append(candidates, m.Main)
+	}
+	for _, c := range candidates {
+		c = strings.TrimPrefix(filepath.ToSlash(filepath.Clean(c)), "./")
+		if fp := lookupJSFile(idx, joinSlash(dir, c)); fp != "" {
+			return fp
+		}
+	}
+	if fp := lookupJSFile(idx, joinSlash(dir, "index")); fp != "" {
+		return fp
+	}
+	return lookupJSFile(idx, joinSlash(dir, "src", "index"))
+}
+
+// exportsDotTarget digs the "." entry out of a package.json "exports" value:
+// a bare string, a {".": "./x"} map, or a conditions object ({".": {"import":
+// "./x", "default": "./y"}}). Anything unrecognized yields "".
+func exportsDotTarget(exports any) string {
+	switch e := exports.(type) {
+	case string:
+		return e
+	case map[string]any:
+		v, ok := e["."]
+		if !ok {
+			// The exports map may itself be a conditions object.
+			v = e
+		}
+		switch t := v.(type) {
+		case string:
+			return t
+		case map[string]any:
+			for _, cond := range []string{"import", "require", "default", "types"} {
+				if s, ok := t[cond].(string); ok {
+					return s
+				}
+			}
 		}
 	}
 	return ""
