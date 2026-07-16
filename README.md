@@ -192,6 +192,12 @@ task build        # → ./bin/codemap   (or: go build ./cmd/codemap)
 go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 ```
 
+### Changelog
+
+Release notes are generated per tag by GoReleaser (`.github/workflows/release.yml`) — see the
+[GitHub releases page](https://github.com/abdul-hamid-achik/codemap/releases) for what changed
+in each version.
+
 ## Quick start
 
 ```bash
@@ -382,10 +388,11 @@ implement well-known stdlib interfaces (`error`, `fmt.Stringer`, `Unwrap`, the J
 marshalers), so those aren't flagged as dead (Go). In TS/JS, JSX component usage and Next.js
 framework wiring (App Router special files like `page.tsx`/`layout.tsx`, `route.ts` HTTP-verb
 handlers, `middleware`, Pages Router modules) keep rendered components and framework-invoked
-exports off the dead-code list. It still can't see callers reached via
-*custom* interface dispatch or reflection, a component passed only as a *prop*
-(`<Nav Link={AuthLink}/>` — never JSX-rendered by name), or a wrapped default export
-(`export default memo(Page)` — the identifier the framework invokes isn't resolvable by name),
+exports off the dead-code list — including wrapped default exports (`export default memo(Page)`,
+`forwardRef(...)`, or a chain of both), whose innermost identifier is resolved as the wired
+component. It still can't see callers reached via
+*custom* interface dispatch or reflection, or a component passed only as a *prop*
+(`<Nav Link={AuthLink}/>` — never JSX-rendered by name),
 so treat its output as *candidates*, not proof.
 
 ## Use it from an agent (MCP)

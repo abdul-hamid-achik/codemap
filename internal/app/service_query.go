@@ -289,7 +289,7 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 	callables := callableNodes(projectNodes)
 	rep.CallGraph = svc.callGraphStatus(g, pid, callables)
 	if lang, unavailable := svc.callGraphUnavailable(g, pid, callables); unavailable {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — hotspot rankings are incomplete; run 'codemap index --precise'", lang)
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — hotspot rankings are incomplete; run 'codemap index --precise'", lang) + svc.coverageHint(g, pid)
 		rep.Note = "hotspot ranking is unreliable while some callable files are unresolved"
 	}
 	hs, err := g.Hotspots(pid, limit)
@@ -339,7 +339,7 @@ func (svc *Service) Orphans(cwd string, limit int) (*OrphansReport, error) {
 		callables := callableNodes(projectNodes)
 		rep.CallGraph = svc.callGraphStatus(g, pid, callables)
 		if lang, unavailable := svc.callGraphUnavailable(g, pid, callables); unavailable {
-			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — orphan candidates are incomplete", lang)
+			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — orphan candidates are incomplete", lang) + svc.coverageHint(g, pid)
 			rep.Note = "orphan list is unreliable — run 'codemap index --precise' to resolve the call graph, then re-check"
 		}
 	}
@@ -457,6 +457,7 @@ func (svc *Service) finishPathReport(g *graph.Store, pid int64, rep *PathReport,
 		} else {
 			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — whether this path exists is unresolved", lang)
 		}
+		rep.Resolution += svc.coverageHint(g, pid)
 	}
 	// Surface notes pinned to this from→to path (annotate <from> <to>), so a path
 	// annotation shows up where it's relevant — not only in `annotations`.

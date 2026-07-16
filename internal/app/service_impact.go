@@ -209,7 +209,7 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 	// don't claim "untested" (that fired for a function with 106 real tests).
 	if lang, yes := svc.callGraphUnavailable(g, p.ID, locs); yes {
 		rep.Untested = false
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang)
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang) + svc.coverageHint(g, p.ID)
 	}
 	// Same derivation codemap_review applies to covering_tests, so impact — the
 	// more common pre-edit path — is just as runnable as the post-edit review.

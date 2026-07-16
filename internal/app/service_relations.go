@@ -199,7 +199,7 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	// Empty results for a no-name-based-call language on a non-precise index mean
 	// "unresolved", not "no callers" — flag it instead of a confident empty.
 	if lang, yes := svc.callGraphUnavailable(g, p.ID, defs); yes {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang)
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang) + svc.coverageHint(g, p.ID)
 	}
 	rep.Annotations = symbolAnnotations(g, p.ID, symbol)
 	return rep, nil

@@ -387,7 +387,12 @@ var (
 )
 
 var (
-	defaultExportFuncRe  = regexp.MustCompile(`\bexport\s+default\s+(?:async\s+)?(?:function|class)\s+([A-Za-z_$][\w$]*)`)
+	defaultExportFuncRe = regexp.MustCompile(`\bexport\s+default\s+(?:async\s+)?(?:function|class)\s+([A-Za-z_$][\w$]*)`)
+	// Wrapped default exports: `export default memo(Page)`, forwardRef(Input),
+	// memo(forwardRef(Page)) — the `(?:ident\s*\(\s*)+` group skips one or more
+	// wrapper calls and captures the innermost call's first identifier argument
+	// (the component the framework ultimately invokes).
+	defaultExportCallRe  = regexp.MustCompile(`\bexport\s+default\s+(?:[A-Za-z_$][\w$]*\s*\(\s*)+([A-Za-z_$][\w$]*)`)
 	defaultExportIdentRe = regexp.MustCompile(`(?m)\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*;?\s*$`)
 	defaultExportAsRe    = regexp.MustCompile(`\bexport\s*\{[^}]*?\b([A-Za-z_$][\w$]*)\s+as\s+default\b`)
 	exportedDeclRe       = regexp.MustCompile(`(?m)\bexport\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)`)
@@ -464,7 +469,11 @@ func frameworkWiredNames(relPath string, src []byte) []string {
 // defaultExportName resolves the identifier a module's default export names,
 // or "" for an anonymous or absent default export.
 func defaultExportName(src []byte) string {
-	for _, re := range []*regexp.Regexp{defaultExportFuncRe, defaultExportIdentRe, defaultExportAsRe} {
+	// Order matters: the func/class form first (so `export default function Page`
+	// never reads as a call), then the wrapped-call form BEFORE the bare-ident
+	// form — identRe's end-of-line anchor can't match `memo(Page)`, but keep the
+	// ordering defensive rather than load-bearing.
+	for _, re := range []*regexp.Regexp{defaultExportFuncRe, defaultExportCallRe, defaultExportIdentRe, defaultExportAsRe} {
 		if m := re.FindSubmatch(src); m != nil {
 			name := string(m[1])
 			switch name { // keywords the ident form could catch (`export default async ...`)

@@ -92,6 +92,9 @@ func startDaemonForeground(cmd *cobra.Command, root string) error {
 	}
 	fmt.Printf("\ncodemap daemon started (pid %d), watching %s\n  socket: %s\n  stop with: codemap daemon stop  (or Ctrl-C)\n",
 		os.Getpid(), root, config.DaemonSocketPath())
+	if w := d.Info().Warning; w != "" {
+		fmt.Printf("  warning: %s\n", w)
+	}
 
 	// Clean shutdown on Ctrl-C / SIGTERM.
 	sig := make(chan os.Signal, 1)

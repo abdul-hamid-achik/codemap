@@ -230,6 +230,32 @@ func TestFrameworkRefsDefaultExportIdentifier(t *testing.T) {
 	}
 }
 
+// TestFrameworkRefsWrappedDefaultExport pins the wrapped default-export forms
+// (`export default memo(Page)`, forwardRef, and a wrapper chain): the innermost
+// identifier is the component the framework actually invokes, so it must be
+// wired exactly like a bare `export default Page` — otherwise every memo'd
+// App Router page shows up as an orphan.
+func TestFrameworkRefsWrappedDefaultExport(t *testing.T) {
+	cases := []struct {
+		src  string
+		want string
+	}{
+		{"function Page() { return null; }\nexport default memo(Page)\n", "Page"},
+		{"function Input() { return null; }\nexport default forwardRef(Input);\n", "Input"},
+		{"function Page() { return null; }\nexport default memo(forwardRef(Page))\n", "Page"},
+	}
+	for _, c := range cases {
+		refs := FrameworkRefs("src/app/page.tsx", []byte(c.src))
+		if r := refTo(refs, c.want); r == nil {
+			t.Errorf("wrapped default export %q not wired to %s: %v", c.src, c.want, refs)
+		}
+		// The wrapper itself is never a framework-wired name.
+		if r := refTo(refs, "memo"); r != nil {
+			t.Errorf("wrapper identifier wired as a component: %+v", r)
+		}
+	}
+}
+
 func TestFrameworkRefsScopedToRouterTrees(t *testing.T) {
 	src := []byte("export default function Error() { return null; }\n")
 	if refs := FrameworkRefs("packages/ui/src/error.tsx", src); len(refs) != 0 {

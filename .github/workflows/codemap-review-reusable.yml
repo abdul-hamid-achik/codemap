@@ -3,10 +3,13 @@
 #
 #   jobs:
 #     review:
-#       uses: abdul-hamid-achik/codemap/.github/workflows/codemap-review-reusable.yml@main
+#       uses: abdul-hamid-achik/codemap/.github/workflows/codemap-review-reusable.yml@v0.47.0
 #       with:
 #         fail-on-untested: 'true'
 #         fail-on-risk: 'high'
+#
+# Pin a release tag (as above) rather than @main so the workflow you reviewed
+# is the workflow that runs; the wrapped action ref below is pinned the same way.
 #
 # This wraps the checkout (with the mandatory fetch-depth: 0 — see
 # integrations/github-action/README.md) and the action call so a consumer
@@ -100,11 +103,11 @@ jobs:
       comment-posted: ${{ steps.codemap.outputs.comment-posted }}
       review-json-path: ${{ steps.codemap.outputs.review-json-path }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0  # required — codemap review --since needs merge-base history
 
-      - uses: abdul-hamid-achik/codemap/integrations/github-action@main
+      - uses: abdul-hamid-achik/codemap/integrations/github-action@v0.47.0
         id: codemap
         with:
           version: ${{ inputs.version }}

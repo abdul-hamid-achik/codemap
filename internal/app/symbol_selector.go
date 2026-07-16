@@ -227,7 +227,7 @@ func (svc *Service) relationBySelector(cwd string, selector SymbolSelector, quer
 	}
 	rep.CallGraph = svc.callGraphStatus(res.graph, res.project.ID, []graph.Node{n})
 	if lang, unavailable := svc.callGraphUnavailable(res.graph, res.project.ID, []graph.Node{n}); unavailable {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang)
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang) + svc.coverageHint(res.graph, res.project.ID)
 	}
 	rep.Annotations = nodeAnnotationsFor(res.graph, res.project.ID, n.FQN, n.Symbol)
 	return rep, nil
@@ -379,6 +379,7 @@ func (svc *Service) PathBySelectors(cwd string, from, to SymbolSelector) (*PathR
 		} else {
 			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — whether this path exists is unresolved", lang)
 		}
+		rep.Resolution += svc.coverageHint(fromRes.graph, fromRes.project.ID)
 	}
 	if anns, annErr := fromRes.graph.AnnotationsByTarget(fromRes.project.ID, graph.AnnotationPath, pathTarget(rep.From, rep.To)); annErr == nil {
 		rep.Annotations = anns

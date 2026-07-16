@@ -15,6 +15,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
+	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
 // boolPtr is a test helper so ReindexOpts{Embed: boolPtr(false)} reads cleanly.
@@ -155,6 +156,64 @@ func TestDaemonPreciseMaintainsCoverageAfterChange(t *testing.T) {
 		t.Fatal(err)
 	} else if n < 2 {
 		t.Fatalf("precise daemon edges = %d, want Alpha→Beta and Added→Beta", n)
+	}
+}
+
+// TestDaemonWarnsWhenNonPreciseWatchDecaysCoverage pins the startup warning:
+// a daemon started WITHOUT --precise over a project that already holds
+// precise call-graph coverage must say so in its status (every watched
+// re-extraction clears the touched file's coverage row and nothing restores
+// it, so the coverage silently decays). A project with no coverage rows gets
+// no warning — the daemon isn't decaying anything.
+func TestDaemonWarnsWhenNonPreciseWatchDecaysCoverage(t *testing.T) {
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	root := t.TempDir()
+	mustWrite(t, root, "go.mod", "module example.com/m\n\ngo 1.25\n")
+	mustWrite(t, root, "a.go", "package m\n\nfunc Alpha() {}\n")
+
+	// Seed precise coverage without requiring a precise toolchain: index once
+	// through a plain session, then mark the file's coverage row directly.
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := app.NewService(sess)
+	rep, err := svc.Index(context.Background(), root, index.Options{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := g.GetProjectByName(rep.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(p.ID, "a.go", "go/types"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Close(); err != nil { // release the write handle before the daemon claims it
+		t.Fatal(err)
+	}
+
+	d, err := Start(context.Background(), root, Config{NoEmbed: true, Debounce: 80 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	if w := d.Info().Warning; !strings.Contains(w, "--precise") {
+		t.Errorf("daemon Info().Warning = %q, want a decay warning naming --precise", w)
+	}
+	// The warning reaches both surfaces of daemon status: the control socket
+	// response and the persisted state file behind QueryStatus.
+	if resp := sendControl(t, "daemon.status"); !strings.Contains(resp, `"warning"`) {
+		t.Errorf("daemon.status response should carry the warning, got %s", resp)
+	}
+	if info := QueryStatus(); info == nil || !strings.Contains(info.Warning, "--precise") {
+		t.Errorf("QueryStatus should carry the decay warning, got %+v", info)
 	}
 }
 

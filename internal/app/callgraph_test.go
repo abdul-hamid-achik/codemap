@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
@@ -311,5 +312,75 @@ func TestContextCallGraph(t *testing.T) {
 	}
 	if miss.CallGraph != CallGraphNone {
 		t.Errorf("unknown context call_graph = %q, want %q", miss.CallGraph, CallGraphNone)
+	}
+}
+
+// TestPreciseCoverageHint pins the coverage-aware qualifier appended to
+// "run 'codemap index --precise'" Resolution sentences: silent when the
+// project never had precise coverage (the bare advice is the whole story),
+// an N/M decay warning when coverage is partial (the daemon-watching-
+// without---precise footgun), and silent again on full coverage (where
+// callGraphUnavailable can't fire anyway).
+func TestPreciseCoverageHint(t *testing.T) {
+	callables := []graph.Node{
+		{FilePath: "a.ts"}, {FilePath: "a.ts"}, // same file twice — counted once
+		{FilePath: "b.ts"},
+	}
+	if got := preciseCoverageHint(map[string]bool{}, callables); got != "" {
+		t.Errorf("no coverage should yield no hint, got %q", got)
+	}
+	got := preciseCoverageHint(map[string]bool{"a.ts": true}, callables)
+	if !strings.Contains(got, "1/2 callable files") || !strings.Contains(got, "--precise") {
+		t.Errorf("partial coverage hint = %q, want a 1/2 decay warning naming --precise", got)
+	}
+	if got := preciseCoverageHint(map[string]bool{"a.ts": true, "b.ts": true}, callables); got != "" {
+		t.Errorf("full coverage should yield no hint, got %q", got)
+	}
+}
+
+// TestImpactResolutionCarriesCoverageHint pins the end-to-end wiring: a TS
+// project whose coverage is partial (one callable file covered, one not) gets
+// the N/M decay suffix appended to impact's unresolved Resolution sentence.
+func TestImpactResolutionCarriesCoverageHint(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := g.UpsertProject(filepath.Base(proj), proj, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "a.ts", Symbol: "alpha", FQN: "alpha",
+		Kind: graph.KindFunction, Language: "typescript", SourceHash: "a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "b.ts", Symbol: "beta", FQN: "beta",
+		Kind: graph.KindFunction, Language: "typescript", SourceHash: "b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.MarkCallGraphResolved(pid, "a.ts", "lsp"); err != nil {
+		t.Fatal(err)
+	}
+	imp, err := svc.Impact(proj, "beta", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if imp.CallGraph != CallGraphUnresolved {
+		t.Fatalf("impact call_graph = %q, want unresolved", imp.CallGraph)
+	}
+	if !strings.Contains(imp.Resolution, "1/2 callable files") {
+		t.Errorf("Resolution = %q, want the 1/2 partial-coverage decay hint appended", imp.Resolution)
 	}
 }

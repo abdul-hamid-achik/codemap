@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -58,6 +59,46 @@ func (svc *Service) callGraphUnavailable(g *graph.Store, pid int64, nodes []grap
 		}
 	}
 	return "", false
+}
+
+// preciseCoverageHint qualifies a "run 'codemap index --precise'" Resolution
+// sentence with the project's current partial coverage, so an agent can tell
+// "never precisely indexed" apart from "was precise, but coverage has been
+// decaying under a daemon watching without --precise". It returns "" when no
+// callable file is covered (the bare advice is already the whole story) or
+// when every callable file is covered (callGraphUnavailable can't fire then);
+// a partial count returns an appendable " — N/M callable files …" suffix.
+func preciseCoverageHint(resolved map[string]bool, callables []graph.Node) string {
+	files := map[string]bool{}
+	covered := 0
+	for _, n := range callables {
+		if n.FilePath == "" || files[n.FilePath] {
+			continue
+		}
+		files[n.FilePath] = true
+		if resolved[n.FilePath] {
+			covered++
+		}
+	}
+	if covered == 0 || covered == len(files) {
+		return ""
+	}
+	return fmt.Sprintf(" — %d/%d callable files currently have precise coverage; coverage decays when a daemon watches without --precise (see 'codemap coverage', restart with 'codemap index --precise --watch')", covered, len(files))
+}
+
+// coverageHint loads project-wide coverage and callable definitions and
+// delegates to preciseCoverageHint. Read failures degrade to no hint — the
+// Resolution sentence it decorates must never be lost to a decoration error.
+func (svc *Service) coverageHint(g *graph.Store, pid int64) string {
+	resolved, err := g.CallGraphResolvedFiles(pid)
+	if err != nil || len(resolved) == 0 {
+		return ""
+	}
+	nodes, err := g.ProjectNodes(pid)
+	if err != nil {
+		return ""
+	}
+	return preciseCoverageHint(resolved, callableNodes(nodes))
 }
 
 // CallGraphStatus is the stable, machine-readable enum a consumer reads to

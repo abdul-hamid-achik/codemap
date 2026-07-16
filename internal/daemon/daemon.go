@@ -60,6 +60,12 @@ type Info struct {
 	// to spawn, so the daemon watches Go only. Empty when every present
 	// language-server language is wired (P0-11).
 	MissingServers map[string]string `json:"missing_servers,omitempty"`
+	// Warning flags a standing hazard of this daemon's configuration —
+	// currently: watching without --precise while the project holds precise
+	// call-graph coverage, which every watched edit silently decays
+	// (ClearCallGraphResolvedTx fires on re-extraction). Surfaced via
+	// daemon.status and the startup banner so the decay isn't invisible.
+	Warning string `json:"warning,omitempty"`
 }
 
 // Daemon is a running background indexer for one project.
@@ -213,10 +219,20 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	if st, gerr := git.Inspect(ctx, d.root); gerr == nil {
 		branch = st.Branch
 	}
+	// A non-precise daemon over a project that HAS precise coverage silently
+	// decays it: every watched re-extraction clears the touched file's
+	// coverage row and nothing restores it. Warn rather than auto-upgrade —
+	// precise mode is an explicit, more expensive contract the user opts into.
+	warning := ""
+	if !cfg.Precise {
+		if resolved, rerr := g.CallGraphResolvedFiles(p.ID); rerr == nil && len(resolved) > 0 {
+			warning = "watching without --precise: existing precise call-graph coverage will decay as files change; restart with 'codemap index --precise --watch' to keep it current"
+		}
+	}
 	d.info = Info{
 		PID: os.Getpid(), Socket: sockPath, ProjectRoot: d.root, ProjectName: d.name,
 		Branch: branch, StartedAt: nowRFC3339(), Watching: true, Precise: cfg.Precise,
-		MissingServers: missingServers,
+		MissingServers: missingServers, Warning: warning,
 	}
 	if err := d.writeState(); err != nil {
 		_ = ln.Close()
@@ -428,6 +444,11 @@ func (d *Daemon) snapshot() Info {
 	defer d.mu.Unlock()
 	return d.info
 }
+
+// Info returns a snapshot of the daemon's current status, so a foreground
+// starter (startDaemonForeground) can echo startup warnings without a
+// round-trip through its own control socket.
+func (d *Daemon) Info() Info { return d.snapshot() }
 
 func (d *Daemon) writeState() error {
 	b, err := json.MarshalIndent(d.snapshot(), "", "  ")
