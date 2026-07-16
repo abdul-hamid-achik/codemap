@@ -36,7 +36,7 @@ instead of dozens of file reads.
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
   (name-based by default for Go, exact via `go/types` with `--precise`) and **defines** edges
   (file → symbol). Test coverage is derived by walking the call graph to test nodes. The graph is
-  stored in pure-Go SQLite and remains queryable offline. **Go**, **Ruby**, and **Lua** use
+  stored in pure-Go SQLite and remains queryable offline. **Go**, **Ruby**, **Lua**, and **CSS/HTML** use
   built-in pure-Go backends (symbols + name-based calls/imports, no server needed).
   With the listed language server installed, **TypeScript + JavaScript** and **Python** provide
   symbols + structure and a **precise call graph** under `--precise`; one
@@ -151,7 +151,7 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for one-off `callers`/`callees --precise` Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-**Supported language paths** — Go, Ruby, and Lua work with built-in pure-Go backends. TypeScript,
+**Supported language paths** — Go, Ruby, Lua, and CSS/SCSS/Sass/Less/HTML work with built-in pure-Go backends. TypeScript,
 JavaScript, Python, and Vue require the language server listed below on `PATH`; without it, codemap
 recognizes and reports those files but skips their structural extraction. Semantic retrieval is
 language-agnostic once symbols are indexed. A precise call graph
@@ -165,6 +165,8 @@ language-agnostic once symbols are indexed. A precise call graph
 | **Ruby** | built-in pure-Go scanner (modules/classes/defs incl. `def self.x`, endless defs, `private def`; heredoc-, `=begin`-, and string-safe) | `.rb` | name-based (calls + `require`/`require_relative` imports) |
 | **Lua** | built-in pure-Go scanner (`function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe) | `.lua` | name-based (calls + `require` imports) |
 | **Vue SFC** | `typescript-language-server` via `vuesrc` — `<script>`/`<script setup>` block content is extracted and routed to the TS/JS delegate; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
+| **CSS / SCSS / Sass / Less** | built-in pure-Go scanner — selector nodes per class/id token, SCSS/Less nesting flattened, at-rule- and interpolation-safe; `className`/`class=` references from TSX/JSX and HTML resolve to selectors as `styles` edges | `.css` `.scss` `.sass` `.less` | `styles` + import edges (no call graph — not applicable) |
+| **HTML** | built-in pure-Go scanner — `class=`/`id=` references into CSS selector nodes (template placeholders skipped) | `.html` | `styles` reference edges |
 
 > Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is delegated to the same `typescript-language-server` connection that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns the server itself to serve the script blocks.
 

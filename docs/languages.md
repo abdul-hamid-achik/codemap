@@ -18,6 +18,8 @@ capabilities, and the JSON contracts keep that distinction visible.
 | **Ruby** | Built in with a pure-Go scanner: modules, classes, `def` (incl. `def self.x`, endless defs, `private def`); heredoc-, `=begin`-, and string-safe | Name-based calls plus `require`/`require_relative` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **Lua** | Built in with a pure-Go scanner: `function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe | Name-based calls plus `require` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **Vue SFC** | `<script>` and `<script setup>` blocks are routed to the TypeScript/JavaScript server; source lines map back to the `.vue` file | Not available yet for calls; Vue emits symbols, `defines` edges, and import edges | `node` + `typescript-language-server`. Template and style blocks are not indexed. |
+| **CSS / SCSS / Sass / Less** | Built in with a pure-Go scanner: one selector node per distinct class/id token per file, SCSS/Less nesting flattened via `&`-substitution, transparent at-rule frames (`@media`/`@supports`/`@layer`), interpolation-safe | `styles` edges from `class=`/`id=` in HTML and `className` in TSX/JSX (string literals, `cn()`/`clsx()` expressions, template statics) resolve to selector nodes; `@import`/`@use`/`@forward` become import edges (Sass partials and index files resolved) | None — pure Go, works offline. CSS-in-JS, CSS Modules member access, cascade/specificity, and `<style>` blocks are out of scope for v1. |
+| **HTML** | Built in with a pure-Go scanner: `class=`/`id=` attribute references (template placeholders skipped); no symbols are emitted | `styles` reference edges into CSS selector nodes | None — pure Go, works offline. |
 
 Install the optional language servers you need:
 
@@ -144,7 +146,8 @@ for T3. Do not maintain language-specific forks of the graph/query layer.
 
 ### Wave 4 — containers and long tail
 
-Svelte, Astro, Razor, shell, Terraform/HCL, SQL, YAML and HTML/CSS usually need
+HTML/CSS/Sass shipped in v0.49.0 as pure-Go backends (selector nodes + `styles`
+edges from markup and `className`). Svelte, Astro, Razor, shell, Terraform/HCL, SQL and YAML usually need
 container-aware extraction or parser structure more than compiler call graphs.
 Ship useful T1/T2 support with honest `unavailable` call coverage rather than
 manufacturing name-based calls.
