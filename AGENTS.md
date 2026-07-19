@@ -121,9 +121,9 @@ codemap/
 │   │   ├── indexer.go        #   main pipeline; resolveLSPCallEdges / resolveGoCallEdges
 │   │   ├── staleness.go      #   hash-based drift detection (status/agent trust)
 │   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
-│   │   └── import_index.go   #   fcheap cache restore (skip extract+embed)
+│   │   └── import_index.go   #   resolve import specifiers to file→file import edges
 │   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app
-│   │                        #   (42 full; 25 agent/core — CODEMAP_MCP_PROFILE)
+│   │                        #   (43 full; 25 agent/core — CODEMAP_MCP_PROFILE)
 │   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
 │   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search/Path)
 │   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
