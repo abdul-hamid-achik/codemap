@@ -80,9 +80,9 @@ directional and machine-dependent; counts and payload sizes are deterministic fo
 
 | MCP profile | tools | schema chars | estimated tokens | `tools/list` |
 |---|---:|---:|---:|---:|
-| `agent` | 25 | 29,958 | 7,490 | 0.92 ms |
-| `core` | 25 | 29,958 | 7,490 | 0.99 ms |
-| `full` | 42 | 41,709 | 10,428 | 1.37 ms |
+| `agent` | 26 | 30,834 | 7,709 | 0.96 ms |
+| `core` | 26 | 30,834 | 7,709 | 0.98 ms |
+| `full` | 43 | 42,585 | 10,647 | 1.38 ms |
 
 `agent` is a separate contract derived exactly from the taught workflow; `core`
 preserves the shipped lean inventory. They intentionally match today. Both remove about

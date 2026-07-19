@@ -25,9 +25,9 @@ import (
 )
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
-// (the default, back-compat) registers every tool (42). ProfileCore preserves
-// the shipped lean 25-tool contract. ProfileAgent is a separately pinned
-// 25-tool contract containing exactly the tools named by the canonical
+// (the default, back-compat) registers every tool (43). ProfileCore preserves
+// the shipped lean 26-tool contract. ProfileAgent is a separately pinned
+// 26-tool contract containing exactly the tools named by the canonical
 // playbook plus codemap_docs for self-discovery. Core and agent intentionally
 // start with the same inventory: keeping separate sets lets the taught agent
 // workflow evolve without silently changing the backwards-compatible core
@@ -60,6 +60,7 @@ var coreTools = map[string]bool{
 	"codemap_docs":          true,
 	"codemap_explore":       true,
 	"codemap_file_impact":   true,
+	"codemap_file_context":  true,
 	"codemap_find":          true,
 	"codemap_grep":          true,
 	"codemap_hotspots":      true,
@@ -94,6 +95,7 @@ var agentTools = map[string]bool{
 	"codemap_docs":          true,
 	"codemap_explore":       true,
 	"codemap_file_impact":   true,
+	"codemap_file_context":  true,
 	"codemap_find":          true,
 	"codemap_grep":          true,
 	"codemap_hotspots":      true,
@@ -213,7 +215,7 @@ func instructionsFor(profile string) string {
 	case ProfileCore:
 		return instructions + "\n\nprofile: core — admin and extended tools (init, doctor, projects, symbols, map, traverse, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
 	case ProfileAgent:
-		return instructions + "\n\nprofile: agent — this session exposes exactly 24 taught workflow tools plus codemap_docs for self-discovery (25 total); use CODEMAP_MCP_PROFILE=full for admin and extended tools."
+		return instructions + "\n\nprofile: agent — this session exposes exactly 25 taught workflow tools plus codemap_docs for self-discovery (26 total); use CODEMAP_MCP_PROFILE=full for admin and extended tools."
 	default:
 		return instructions
 	}

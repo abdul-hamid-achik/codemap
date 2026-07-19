@@ -30,6 +30,7 @@ var wantCLIForm = map[string]string{
 	"codemap_dependencies":  "dependencies",
 	"codemap_explore":       "explore",
 	"codemap_file_impact":   "file-impact",
+	"codemap_file_context":  "file-context",
 	"codemap_find":          "find",
 	"codemap_grep":          "grep",
 	"codemap_hotspots":      "hotspots",

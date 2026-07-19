@@ -59,7 +59,7 @@ Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=cor
 *all* servers combined; every other harness above stays on the full 43-tool default.
 For a manually configured harness, choose `CODEMAP_MCP_PROFILE=agent` to bind its
 surface exactly to this page's taught loop. `agent` and the backwards-compatible
-`core` profile both contain 25 tools today; `full` is the explicit expert/admin
+`core` profile both contain 26 tools today; `full` is the explicit expert/admin
 surface and remains the default for compatibility.
 
 ### Claude Code plugin
@@ -105,7 +105,7 @@ after every change — those two bookend the loop.
 `full` profile additionally exposes two bounded orientation tools outside the lean taught loop:
 `codemap_map` surveys subsystems and `codemap_traverse` walks selected relation types from a
 required durable selector (`direction`/`edge_types`/`depth`/`limit`). Those two are intentionally
-not registered in the current 25-tool `agent` or `core` profiles.
+not registered in the current 26-tool `agent` or `core` profiles.
 
 ## Honesty signals — why an agent can trust the answers
 

@@ -60,10 +60,10 @@ in every session's context — and some clients (Cursor) cap total MCP tools at 
 other server.
 
 Set `CODEMAP_MCP_PROFILE=agent` (env), `mcp.profile: agent` (`codemap.yaml`), or pass
-`--profile agent` to `codemap serve` for the exact **25-tool** surface derived from
-the canonical taught workflow: the 24 tools it names plus `codemap_docs` for
+`--profile agent` to `codemap serve` for the exact **26-tool** surface derived from
+the canonical taught workflow: the 25 tools it names plus `codemap_docs` for
 self-discovery. The shipped `core` profile remains compatible and currently has
-the same 25-tool inventory; its contract stays stable while `agent` is pinned to
+the same 26-tool inventory; its contract stays stable while `agent` is pinned to
 what the playbook actually teaches. `full` remains the default for backwards
 compatibility and is the explicit expert/admin surface.
 
@@ -77,9 +77,9 @@ compatibility and is the explicit expert/admin surface.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
-server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **29,958
-schema characters (≈7,490 tokens using the declared chars/4 planning estimate)**;
-`full` serializes **41,709 characters (≈10,428 estimated tokens)**. That is about
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **30,834
+schema characters (≈7,709 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **42,585 characters (≈10,647 estimated tokens)**. That is about
 28% less schema context for the taught surface. Reproduce it with:
 
 ```bash

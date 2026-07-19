@@ -14,6 +14,7 @@ Map the loop to the tools:
   - orient on a repo    -> codemap_read_order (entrypoints + hubs, ranked)
   - locate              -> codemap_semantic (by meaning) · codemap_find (by name) · codemap_grep (exact text: a literal, error string, route, env var) · codemap_explore (fuzzy intent → oriented structure)
   - resolve a file:line -> codemap_symbol_at (a stack trace / diff hunk / grep hit → a selector; batch positions:[…] for a whole trace)
+  - orient on a file    -> codemap_file_context (symbol outline + file impact + related files in one call)
   - understand          -> codemap_context, codemap_impact, codemap_source
   - before a risky edit -> codemap_risk, codemap_file_impact, codemap_dependencies, codemap_related_files
   - after every edit    -> codemap_review (it names the tests to run and folds one risk band)
@@ -42,6 +43,7 @@ Index once, then query. The typical agent loop for understanding or fixing code:
                                # codemap_callers / codemap_callees (add precise:true on Go)
                                # codemap_references (callback/RunE/registration value wiring; not callers)
   6. before a risky change     # codemap_risk <sym>  (how careful?)
+                               # codemap_file_context <file>  (ONE call: symbol outline + file impact + related files)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
                                # codemap_related_files <file>  (the other files structurally tied to this one)
   7. trace flow                # codemap_path <from> <to>  (shortest call chain)

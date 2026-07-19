@@ -2,9 +2,9 @@ version: 1
 name: mcp_profile
 intent: |
     `CODEMAP_MCP_PROFILE=agent|core|full` gates which MCP tools `codemap serve`
-    registers: `agent` is exactly the 24 tools named by the canonical taught
-    workflow plus codemap_docs (25); `core` preserves its compatible 25-tool
-    inventory; `full` is the back-compat superset (42).
+    registers: `agent` is exactly the 25 tools named by the canonical taught
+    workflow plus codemap_docs (26); `core` preserves its compatible 26-tool
+    inventory; `full` is the back-compat superset (43).
     This drives three real MCP handshakes over stdio — one per profile — and
     counts tools/list, confirming agent/core are strictly smaller than full,
     all counts are exact, admin tools (codemap_annotate) are agent/core-excluded
@@ -36,10 +36,10 @@ outcomes:
         screen:
             contains: "agent serve exit: 0"
     - id: agent_count_exact
-      description: profile=agent registers exactly the 25 taught/discovery tools
+      description: profile=agent registers exactly the 26 taught/discovery tools
       verify:
         screen:
-            contains: "AGENT_COUNT: 25"
+            contains: "AGENT_COUNT: 26"
     - id: agent_instructions_note
       description: the server instructions identify the exact taught agent profile
       verify:
@@ -66,20 +66,20 @@ outcomes:
         screen:
             contains: "core serve exit: 0"
     - id: core_count_exact
-      description: profile=core registers exactly 25 tools
+      description: profile=core registers exactly 26 tools
       verify:
         screen:
-            contains: "CORE_COUNT: 25"
+            contains: "CORE_COUNT: 26"
     - id: full_serve_clean_exit
       description: serve under profile=full completes the handshake and exits 0
       verify:
         screen:
             contains: "full serve exit: 0"
     - id: full_count_exact
-      description: profile=full registers exactly 42 tools
+      description: profile=full registers exactly 43 tools
       verify:
         screen:
-            contains: "FULL_COUNT: 42"
+            contains: "FULL_COUNT: 43"
     - id: core_instructions_note
       description: the server instructions mention the trimmed profile under core
       verify:
@@ -130,4 +130,4 @@ outcomes:
       verify:
         screen:
             contains: "BAD_PROFILE_NO_TRAILING_PERIOD"
-contractHash: sha256:a09d8314b5f72cd935afdbd1fac7d5046c280262c0adb78cea8d652b4d0e1c65
+contractHash: sha256:e58c0c21c3a1b351036fff9b2452aef72d0160e138677b37da8be5801147ab2f

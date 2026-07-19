@@ -43,6 +43,7 @@ authority in codemap and delegates retrieval through a versioned one-hop CLI.`},
                                # codemap_callers / codemap_callees (add precise:true on Go)
                                # codemap_references (callback/RunE/registration value wiring; not callers)
   6. before a risky change     # codemap_risk <sym>  (how careful?)
+                               # codemap_file_context <file>  (ONE call: symbol outline + file impact + related files)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
                                # codemap_related_files <file>  (the other files structurally tied to this one)
   7. trace flow                # codemap_path <from> <to>  (shortest call chain)

@@ -1490,7 +1490,7 @@ func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
 }
 
 // TestMCPToolsByProfile pins the exact registered-tool set for all profiles:
-// ProfileFull remains all 43 tools, ProfileCore remains its shipped 25-tool
+// ProfileFull remains all 43 tools, ProfileCore remains its shipped 26-tool
 // inventory, and ProfileAgent is the separately versioned taught workflow.
 func TestMCPToolsByProfile(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
@@ -1575,8 +1575,8 @@ func TestCoreProfileCoversTaughtTools(t *testing.T) {
 // and include no untaught admin or expert surface.
 func TestAgentProfileExactlyMatchesTaughtWorkflow(t *testing.T) {
 	taught := taughtToolSet(t)
-	if len(taught) != 25 {
-		t.Fatalf("taught workflow tool count = %d, want 25; review the agent profile and its schema benchmark", len(taught))
+	if len(taught) != 26 {
+		t.Fatalf("taught workflow tool count = %d, want 26; review the agent profile and its schema benchmark", len(taught))
 	}
 	got := map[string]bool{}
 	for name := range agentTools {

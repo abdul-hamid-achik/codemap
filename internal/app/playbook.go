@@ -32,6 +32,7 @@ Map the loop to the tools:
   - orient on a repo    -> codemap_read_order (entrypoints + hubs, ranked)
   - locate              -> codemap_semantic (by meaning) · codemap_find (by name) · codemap_grep (exact text: a literal, error string, route, env var) · codemap_explore (fuzzy intent → oriented structure)
   - resolve a file:line -> codemap_symbol_at (a stack trace / diff hunk / grep hit → a selector; batch positions:[…] for a whole trace)
+  - orient on a file    -> codemap_file_context (symbol outline + file impact + related files in one call)
   - understand          -> codemap_context, codemap_impact, codemap_source
   - before a risky edit -> codemap_risk, codemap_file_impact, codemap_dependencies, codemap_related_files
   - after every edit    -> codemap_review (it names the tests to run and folds one risk band)

@@ -434,8 +434,8 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-`CODEMAP_MCP_PROFILE=agent` selects exactly the 25-tool surface derived from the taught agent
-workflow (24 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
+`CODEMAP_MCP_PROFILE=agent` selects exactly the 26-tool surface derived from the taught agent
+workflow (25 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
 today; the default `full` profile remains the explicit 43-tool expert/admin surface. See
 [MCP tool profiles](docs/mcp.md#tool-profiles) for the measured schema cost and precedence rules.
 
