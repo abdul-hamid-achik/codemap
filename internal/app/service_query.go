@@ -282,11 +282,10 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 		return rep, nil
 	}
 	g, _ := svc.s.Graph()
-	projectNodes, err := g.ProjectNodes(pid)
+	callables, err := g.CallableFileLangs(pid)
 	if err != nil {
 		return nil, err
 	}
-	callables := callableNodes(projectNodes)
 	resolvedFiles, _ := g.CallGraphResolvedFiles(pid)
 	rep.CallGraph = callGraphEnum(resolvedFiles, callables)
 	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, callables); unavailable {
@@ -336,8 +335,7 @@ func (svc *Service) Orphans(cwd string, limit int) (*OrphansReport, error) {
 	// has no call graph (TS/JS/Python without --precise).
 	g, _ := svc.s.Graph()
 	if g != nil {
-		projectNodes, _ := g.ProjectNodes(pid)
-		callables := callableNodes(projectNodes)
+		callables, _ := g.CallableFileLangs(pid)
 		resolvedFiles, _ := g.CallGraphResolvedFiles(pid)
 		rep.CallGraph = callGraphEnum(resolvedFiles, callables)
 		if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, callables); unavailable {

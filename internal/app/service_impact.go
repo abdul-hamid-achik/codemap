@@ -307,6 +307,16 @@ func (svc *Service) RelatedFiles(cwd, file string) (*RelatedFilesReport, error) 
 			best[key] = RelatedFile{RelativePath: path, Reason: reason, Confidence: conf}
 		}
 	}
+	// Collect the file's symbols once so the heuristic test scan reads each test
+	// file a single time and matches all of them, instead of re-reading every
+	// test file per symbol (P3/P11).
+	symbols := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Symbol != "" {
+			symbols = append(symbols, n.Symbol)
+		}
+	}
+	heuristic := heuristicTestCoverageBatch(g, p.ID, p.Path, symbols)
 	for _, n := range nodes {
 		if n.Symbol == "" { // the file node itself
 			continue
@@ -325,7 +335,7 @@ func (svc *Service) RelatedFiles(cwd, file string) (*RelatedFilesReport, error) 
 		for _, c := range callees {
 			add(c.FilePath, "callee", 0.7)
 		}
-		for _, t := range heuristicTestCoverage(g, p.ID, p.Path, n.Symbol) {
+		for _, t := range heuristic[n.Symbol] {
 			add(t.File, "test", 1.0)
 		}
 	}
@@ -413,6 +423,64 @@ func heuristicTestCoverage(g *graph.Store, projectID int64, root, symbol string)
 		})
 		if len(out) >= 50 {
 			break // bound output; the point is "is it tested", not an exhaustive list
+		}
+	}
+	return out
+}
+
+// heuristicTestCoverageBatch is the multi-symbol sibling of
+// heuristicTestCoverage: it reads each indexed test file ONCE and matches every
+// symbol against it, returning per-symbol covering-test nodes. Reading the test
+// files is the expensive part, so batching collapses the O(symbols × test-files)
+// disk reads a per-symbol loop would do into O(test-files) — the related-files
+// path's worst case (P3/P11). Each symbol's result is bounded at 50 like the
+// single-symbol version.
+func heuristicTestCoverageBatch(g *graph.Store, projectID int64, root string, symbols []string) map[string][]ImpactNode {
+	type matcher struct {
+		sym string
+		re  *regexp.Regexp
+	}
+	var matchers []matcher
+	for _, sym := range symbols {
+		name := sym
+		if i := strings.LastIndex(name, "."); i >= 0 {
+			name = name[i+1:] // bare name; a method is referenced as obj.method, not Type.method
+		}
+		if name == "" {
+			continue
+		}
+		re, err := regexp.Compile(`\b` + regexp.QuoteMeta(name) + `\b`)
+		if err != nil {
+			continue
+		}
+		matchers = append(matchers, matcher{sym: sym, re: re})
+	}
+	if len(matchers) == 0 {
+		return nil
+	}
+	files, err := g.IndexedFiles(projectID)
+	if err != nil {
+		return nil
+	}
+	out := map[string][]ImpactNode{}
+	for _, rel := range files {
+		if !isTestFilePath(rel) {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		for _, m := range matchers {
+			if len(out[m.sym]) >= 50 {
+				continue // bound per symbol; the point is "is it tested", not an exhaustive list
+			}
+			if m.re.Match(content) {
+				out[m.sym] = append(out[m.sym], ImpactNode{
+					Symbol: filepath.Base(rel), FQN: rel, Kind: graph.KindTest,
+					File: rel, StartLine: 1, Heuristic: true,
+				})
+			}
 		}
 	}
 	return out

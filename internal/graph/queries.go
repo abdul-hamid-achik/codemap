@@ -573,8 +573,12 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	// Hydrate each hub's node columns in the same aggregate query (the GROUP BY
+	// key e.target_id == n.id functionally determines them). The previous shape
+	// ran one GetNode per hub — an N+1 that read-order amplified by requesting up
+	// to 100k hubs (P2).
 	rows, err := s.db.Query(`
-		SELECT e.target_id, COUNT(*) AS indeg
+		SELECT `+nodeColsAs("n")+`, COUNT(*) AS indeg
 		FROM edges e JOIN nodes n ON e.target_id = n.id
 		WHERE n.project_id = ? AND n.kind != ? AND e.edge_type = ?
 		GROUP BY e.target_id
@@ -584,33 +588,43 @@ func (s *Store) Hotspots(projectID int64, limit int) ([]Hotspot, error) {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	type row struct {
-		id    int64
-		indeg int
-	}
-	var raw []row
+	var out []Hotspot
 	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.id, &r.indeg); err != nil {
+		var n Node
+		var indeg int
+		if err := rows.Scan(&n.ID, &n.ProjectID, &n.FilePath, &n.Symbol, &n.FQN, &n.Kind, &n.Language,
+			&n.StartLine, &n.EndLine, &n.Signature, &n.Docstring, &n.SourceHash, &n.VecID,
+			&n.CreatedAt, &n.UpdatedAt, &indeg); err != nil {
 			return nil, err
 		}
-		raw = append(raw, r)
+		out = append(out, Hotspot{Node: n, InDegree: indeg})
 	}
-	if err := rows.Err(); err != nil {
+	return out, rows.Err()
+}
+
+// CallableFileLangs returns the distinct (file_path, language) pairs of a
+// project's callable nodes (functions/methods/tests) as minimal Nodes carrying
+// only those two fields. It is the cheap input for project-wide call_graph
+// confidence classification (callGraphEnum reads only FilePath+Language), so
+// hotspots/orphans classify without loading every full node (P10).
+func (s *Store) CallableFileLangs(projectID int64) ([]Node, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT file_path, language FROM nodes
+		 WHERE project_id = ? AND kind IN (?, ?, ?)`,
+		projectID, KindFunction, KindMethod, KindTest)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]Hotspot, 0, len(raw))
-	for _, r := range raw {
-		n, err := s.GetNode(r.id)
-		if errors.Is(err, ErrNotFound) {
-			continue
-		}
-		if err != nil {
+	defer func() { _ = rows.Close() }()
+	var out []Node
+	for rows.Next() {
+		var n Node
+		if err := rows.Scan(&n.FilePath, &n.Language); err != nil {
 			return nil, err
 		}
-		out = append(out, Hotspot{Node: *n, InDegree: r.indeg})
+		out = append(out, n)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // SymbolMatch pairs a SearchSymbols hit with which field satisfied the
