@@ -17,10 +17,6 @@ func (s *Store) startNodeIDs(projectID int64, symbol string) ([]int64, error) {
 	return s.scanIDs("SELECT id FROM nodes WHERE project_id=? AND symbol=?", projectID, symbol)
 }
 
-func (s *Store) callerIDs(targetID int64) ([]int64, error) {
-	return s.scanIDs("SELECT source_id FROM edges WHERE target_id=? AND edge_type=?", targetID, EdgeCalls)
-}
-
 func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -36,6 +32,90 @@ func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// inChunkSize keeps batched IN(…) lists well under SQLite's host-parameter
+// limit (default 999), matching DeleteCallEdgesBySource.
+const inChunkSize = 500
+
+// callerIDsBatch returns the distinct source ids that call ANY of the target
+// nodes via `calls` edges, in chunked IN(…) queries. It replaces the per-node
+// callerIDs round-trip that made the blast-radius BFS an N+1 (one query per
+// reached node). Distinct is applied within each chunk and deduped across
+// chunks, so a caller hitting targets in several chunks is returned once.
+func (s *Store) callerIDsBatch(targets []int64) ([]int64, error) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	seen := make(map[int64]bool, len(targets))
+	var out []int64
+	for start := 0; start < len(targets); start += inChunkSize {
+		end := start + inChunkSize
+		if end > len(targets) {
+			end = len(targets)
+		}
+		batch := targets[start:end]
+		ph := make([]string, len(batch))
+		args := make([]any, 0, len(batch)+1)
+		for i, id := range batch {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		args = append(args, EdgeCalls)
+		rows, err := s.db.Query(
+			"SELECT DISTINCT source_id FROM edges WHERE target_id IN ("+strings.Join(ph, ",")+") AND edge_type=?",
+			args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// nodesByIDs fetches nodes by id in chunked IN(…) queries — one round-trip per
+// 500 ids instead of one GetNode per id. Missing ids are simply absent from the
+// result (callers that relied on GetNode's ErrNotFound skip treat absence the
+// same way).
+func (s *Store) nodesByIDs(ids []int64) ([]Node, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var out []Node
+	for start := 0; start < len(ids); start += inChunkSize {
+		end := start + inChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		ph := make([]string, len(batch))
+		args := make([]any, 0, len(batch))
+		for i, id := range batch {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		nodes, err := s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE id IN ("+strings.Join(ph, ",")+")", args...)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, nodes...)
+	}
+	return out, nil
 }
 
 // Annotation is user-attached knowledge (a note or external data) pinned to a
@@ -174,50 +254,54 @@ func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth i
 			return nil, err
 		}
 	}
+	// Level-by-level BFS over incoming call edges. The whole frontier at each
+	// depth is expanded in ONE batched query (callerIDsBatch) instead of one
+	// callerIDs round-trip per reached node — the previous shape made blast
+	// radius (and codemap_review, which unions it per changed symbol) a per-node
+	// N+1. First reach is the minimum depth (BFS processes levels in order), so a
+	// visited set keyed by id is enough for cycle-safety and min-depth.
 	visited := make(map[int64]int, len(starts)) // node id -> min depth
-	type item struct {
-		id    int64
-		depth int
-	}
-	queue := make([]item, 0, len(starts))
+	frontier := make([]int64, 0, len(starts))
 	for _, id := range starts {
-		visited[id] = 0
-		queue = append(queue, item{id: id, depth: 0})
-	}
-
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		if cur.depth >= maxDepth {
+		if _, seen := visited[id]; seen {
 			continue
 		}
-		callers, err := s.callerIDs(cur.id)
+		visited[id] = 0
+		frontier = append(frontier, id)
+	}
+	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
+		callers, err := s.callerIDsBatch(frontier)
 		if err != nil {
 			return nil, err
 		}
+		nd := depth + 1
+		next := make([]int64, 0, len(callers))
 		for _, c := range callers {
-			nd := cur.depth + 1
-			if prev, seen := visited[c]; seen && prev <= nd {
+			if _, seen := visited[c]; seen {
 				continue
 			}
 			visited[c] = nd
-			queue = append(queue, item{id: c, depth: nd})
+			next = append(next, c)
 		}
+		frontier = next
 	}
 
-	out := make([]NodeDepth, 0, len(visited))
+	// Batch-fetch every reached node (except the depth-0 starts) in chunked
+	// IN(…) queries instead of one GetNode per result node.
+	ids := make([]int64, 0, len(visited))
 	for id, d := range visited {
 		if d == 0 {
 			continue // skip the query symbol's own node(s)
 		}
-		n, err := s.GetNode(id)
-		if errors.Is(err, ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, NodeDepth{Node: *n, Depth: d})
+		ids = append(ids, id)
+	}
+	nodes, err := s.nodesByIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]NodeDepth, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, NodeDepth{Node: n, Depth: visited[n.ID]})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Depth != out[j].Depth {
@@ -299,6 +383,54 @@ func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {
 	return s.scanIDs("SELECT target_id FROM edges WHERE source_id=? AND edge_type=?", sourceID, EdgeCalls)
 }
 
+// calleeIDsBatch returns the distinct target ids called by ANY of the source
+// nodes via `calls` edges, in chunked IN(…) queries — the forward-edge twin of
+// callerIDsBatch, replacing the per-node calleeIDs round-trip in CalleeClosure.
+func (s *Store) calleeIDsBatch(sources []int64) ([]int64, error) {
+	if len(sources) == 0 {
+		return nil, nil
+	}
+	seen := make(map[int64]bool, len(sources))
+	var out []int64
+	for start := 0; start < len(sources); start += inChunkSize {
+		end := start + inChunkSize
+		if end > len(sources) {
+			end = len(sources)
+		}
+		batch := sources[start:end]
+		ph := make([]string, len(batch))
+		args := make([]any, 0, len(batch)+1)
+		for i, id := range batch {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		args = append(args, EdgeCalls)
+		rows, err := s.db.Query(
+			"SELECT DISTINCT target_id FROM edges WHERE source_id IN ("+strings.Join(ph, ",")+") AND edge_type=?",
+			args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // CalleeClosure returns the set of node ids reachable from symbol's definition
 // node(s) by following call edges FORWARD up to maxDepth hops (the start nodes are
 // included). Cycle-safe. Answers "what does this entrypoint's call tree touch" —
@@ -318,33 +450,29 @@ func (s *Store) CalleeClosure(projectID int64, symbol string, maxDepth int) (map
 		return nil, err
 	}
 	reached := make(map[int64]bool, len(starts))
-	type item struct {
-		id    int64
-		depth int
-	}
-	var queue []item
+	frontier := make([]int64, 0, len(starts))
 	for _, id := range starts {
 		if !reached[id] {
 			reached[id] = true
-			queue = append(queue, item{id, 0})
+			frontier = append(frontier, id)
 		}
 	}
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		if cur.depth >= maxDepth {
-			continue
-		}
-		callees, err := s.calleeIDs(cur.id)
+	// Level-by-level BFS over outgoing call edges, batching each level's whole
+	// frontier in one calleeIDsBatch query instead of one calleeIDs round-trip
+	// per node (the previous per-node N+1 behind secret_impact/risk).
+	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
+		callees, err := s.calleeIDsBatch(frontier)
 		if err != nil {
 			return nil, err
 		}
+		var next []int64
 		for _, c := range callees {
 			if !reached[c] {
 				reached[c] = true
-				queue = append(queue, item{c, cur.depth + 1})
+				next = append(next, c)
 			}
 		}
+		frontier = next
 	}
 	return reached, nil
 }

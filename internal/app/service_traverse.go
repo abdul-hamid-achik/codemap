@@ -145,9 +145,10 @@ func (svc *Service) TraverseBySelector(cwd string, selector SymbolSelector, opts
 	sort.Slice(rep.Domains, func(i, j int) bool { return rep.Domains[i].EdgeType < rep.Domains[j].EdgeType })
 
 	if containsString(opts.EdgeTypes, graph.EdgeCalls) {
-		rep.CallGraph = svc.callGraphStatus(resolved.graph, resolved.project.ID, []graph.Node{resolved.node})
-		if lang, unavailable := svc.callGraphUnavailable(resolved.graph, resolved.project.ID, []graph.Node{resolved.node}); unavailable {
-			rep.Resolution = fmt.Sprintf("call relations are unresolved for %s without precise indexing; non-call domains remain independently available", lang) + svc.coverageHint(resolved.graph, resolved.project.ID)
+		resolvedFiles, _ := resolved.graph.CallGraphResolvedFiles(resolved.project.ID)
+		rep.CallGraph = callGraphEnum(resolvedFiles, []graph.Node{resolved.node})
+		if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, []graph.Node{resolved.node}); unavailable {
+			rep.Resolution = fmt.Sprintf("call relations are unresolved for %s without precise indexing; non-call domains remain independently available", lang) + svc.coverageHintResolved(resolved.graph, resolved.project.ID, resolvedFiles)
 		}
 	}
 	return rep, nil

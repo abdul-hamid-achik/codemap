@@ -53,6 +53,15 @@ func (svc *Service) callGraphUnavailable(g *graph.Store, pid int64, nodes []grap
 	if err != nil {
 		resolved = nil // conservative on legacy/corrupt coverage state
 	}
+	return callGraphUnavailableResolved(resolved, nodes)
+}
+
+// callGraphUnavailableResolved is the pure core of callGraphUnavailable: it
+// classifies against an already-loaded resolved-files map, so a query that also
+// needs the call_graph enum (callGraphEnum) and the coverage hint can load
+// call_graph_coverage ONCE and reuse it across all three instead of each
+// re-scanning the table — the per-query 3× coverage scan this removes.
+func callGraphUnavailableResolved(resolved map[string]bool, nodes []graph.Node) (string, bool) {
 	for _, n := range nodes {
 		if !resolved[n.FilePath] && noNameBasedCallLang(n.Language) {
 			return n.Language, true
@@ -86,12 +95,14 @@ func preciseCoverageHint(resolved map[string]bool, callables []graph.Node) strin
 	return fmt.Sprintf(" — %d/%d callable files currently have precise coverage; coverage decays when a daemon watches without --precise (see 'codemap coverage', restart with 'codemap index --precise --watch')", covered, len(files))
 }
 
-// coverageHint loads project-wide coverage and callable definitions and
-// delegates to preciseCoverageHint. Read failures degrade to no hint — the
-// Resolution sentence it decorates must never be lost to a decoration error.
-func (svc *Service) coverageHint(g *graph.Store, pid int64) string {
-	resolved, err := g.CallGraphResolvedFiles(pid)
-	if err != nil || len(resolved) == 0 {
+// coverageHintResolved computes the partial-coverage hint against an
+// already-loaded resolved-files map (loading only the callable node set), so a
+// query shares its single call_graph_coverage scan across the call_graph enum,
+// the unavailability check, and this hint. Read failures degrade to no hint —
+// the Resolution sentence it decorates must never be lost to a decoration
+// error. See callGraphUnavailableResolved.
+func (svc *Service) coverageHintResolved(g *graph.Store, pid int64, resolved map[string]bool) string {
+	if len(resolved) == 0 {
 		return ""
 	}
 	nodes, err := g.ProjectNodes(pid)

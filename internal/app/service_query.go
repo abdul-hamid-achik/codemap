@@ -287,9 +287,10 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 		return nil, err
 	}
 	callables := callableNodes(projectNodes)
-	rep.CallGraph = svc.callGraphStatus(g, pid, callables)
-	if lang, unavailable := svc.callGraphUnavailable(g, pid, callables); unavailable {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — hotspot rankings are incomplete; run 'codemap index --precise'", lang) + svc.coverageHint(g, pid)
+	resolvedFiles, _ := g.CallGraphResolvedFiles(pid)
+	rep.CallGraph = callGraphEnum(resolvedFiles, callables)
+	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, callables); unavailable {
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — hotspot rankings are incomplete; run 'codemap index --precise'", lang) + svc.coverageHintResolved(g, pid, resolvedFiles)
 		rep.Note = "hotspot ranking is unreliable while some callable files are unresolved"
 	}
 	hs, err := g.Hotspots(pid, limit)
@@ -337,9 +338,10 @@ func (svc *Service) Orphans(cwd string, limit int) (*OrphansReport, error) {
 	if g != nil {
 		projectNodes, _ := g.ProjectNodes(pid)
 		callables := callableNodes(projectNodes)
-		rep.CallGraph = svc.callGraphStatus(g, pid, callables)
-		if lang, unavailable := svc.callGraphUnavailable(g, pid, callables); unavailable {
-			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — orphan candidates are incomplete", lang) + svc.coverageHint(g, pid)
+		resolvedFiles, _ := g.CallGraphResolvedFiles(pid)
+		rep.CallGraph = callGraphEnum(resolvedFiles, callables)
+		if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, callables); unavailable {
+			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — orphan candidates are incomplete", lang) + svc.coverageHintResolved(g, pid, resolvedFiles)
 			rep.Note = "orphan list is unreliable — run 'codemap index --precise' to resolve the call graph, then re-check"
 		}
 	}
@@ -450,14 +452,15 @@ func (svc *Service) finishPathReport(g *graph.Store, pid int64, rep *PathReport,
 		}
 		confidenceNodes = callableNodes(projectNodes)
 	}
-	rep.CallGraph = svc.callGraphStatus(g, pid, confidenceNodes)
-	if lang, unavailable := svc.callGraphUnavailable(g, pid, confidenceNodes); unavailable {
+	resolvedFiles, _ := g.CallGraphResolvedFiles(pid)
+	rep.CallGraph = callGraphEnum(resolvedFiles, confidenceNodes)
+	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, confidenceNodes); unavailable {
 		if rep.Found {
 			rep.Resolution = fmt.Sprintf("a path was found, but the %s call graph is not available without precise indexing — path completeness is unresolved", lang)
 		} else {
 			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — whether this path exists is unresolved", lang)
 		}
-		rep.Resolution += svc.coverageHint(g, pid)
+		rep.Resolution += svc.coverageHintResolved(g, pid, resolvedFiles)
 	}
 	// Surface notes pinned to this from→to path (annotate <from> <to>), so a path
 	// annotation shows up where it's relevant — not only in `annotations`.

@@ -225,9 +225,10 @@ func (svc *Service) relationBySelector(cwd string, selector SymbolSelector, quer
 	for _, result := range nodes {
 		rep.Results = append(rep.Results, nodeToRef(result))
 	}
-	rep.CallGraph = svc.callGraphStatus(res.graph, res.project.ID, []graph.Node{n})
-	if lang, unavailable := svc.callGraphUnavailable(res.graph, res.project.ID, []graph.Node{n}); unavailable {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang) + svc.coverageHint(res.graph, res.project.ID)
+	resolvedFiles, _ := res.graph.CallGraphResolvedFiles(res.project.ID)
+	rep.CallGraph = callGraphEnum(resolvedFiles, []graph.Node{n})
+	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, []graph.Node{n}); unavailable {
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang) + svc.coverageHintResolved(res.graph, res.project.ID, resolvedFiles)
 	}
 	rep.Annotations = nodeAnnotationsFor(res.graph, res.project.ID, n.FQN, n.Symbol)
 	return rep, nil
@@ -372,14 +373,15 @@ func (svc *Service) PathBySelectors(cwd string, from, to SymbolSelector) (*PathR
 		}
 		confidenceNodes = callableNodes(projectNodes)
 	}
-	rep.CallGraph = svc.callGraphStatus(fromRes.graph, fromRes.project.ID, confidenceNodes)
-	if lang, unavailable := svc.callGraphUnavailable(fromRes.graph, fromRes.project.ID, confidenceNodes); unavailable {
+	resolvedFiles, _ := fromRes.graph.CallGraphResolvedFiles(fromRes.project.ID)
+	rep.CallGraph = callGraphEnum(resolvedFiles, confidenceNodes)
+	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, confidenceNodes); unavailable {
 		if rep.Found {
 			rep.Resolution = fmt.Sprintf("a path was found, but the %s call graph is not available without precise indexing — path completeness is unresolved", lang)
 		} else {
 			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — whether this path exists is unresolved", lang)
 		}
-		rep.Resolution += svc.coverageHint(fromRes.graph, fromRes.project.ID)
+		rep.Resolution += svc.coverageHintResolved(fromRes.graph, fromRes.project.ID, resolvedFiles)
 	}
 	if anns, annErr := fromRes.graph.AnnotationsByTarget(fromRes.project.ID, graph.AnnotationPath, pathTarget(rep.From, rep.To)); annErr == nil {
 		rep.Annotations = anns

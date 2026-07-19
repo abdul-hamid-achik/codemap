@@ -132,8 +132,11 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 	}
 	// call_graph: the stable machine enum a consumer switches on (vs the
 	// human Resolution sentence). precise → resolved; a no-name-based-call
-	// language on a name-based index → unresolved; else name-based.
-	rep.CallGraph = svc.callGraphStatus(g, p.ID, locs)
+	// language on a name-based index → unresolved; else name-based. Load the
+	// resolved-files map ONCE here and reuse it for the unavailability check +
+	// coverage hint below (P8: one call_graph_coverage scan per query, not three).
+	resolved, _ := g.CallGraphResolvedFiles(p.ID)
+	rep.CallGraph = callGraphEnum(resolved, locs)
 	if len(locs) > 1 {
 		// Lookup is by name, so the callers/blast-radius/tests below are the union
 		// across every definition with this name. Say so — a "71 callers" number is
@@ -207,9 +210,9 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 	// If the symbol's language has no name-based call graph and the index isn't
 	// precise, the empty callers/blast/tests are UNRESOLVED, not absent — say so and
 	// don't claim "untested" (that fired for a function with 106 real tests).
-	if lang, yes := svc.callGraphUnavailable(g, p.ID, locs); yes {
+	if lang, yes := callGraphUnavailableResolved(resolved, locs); yes {
 		rep.Untested = false
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang) + svc.coverageHint(g, p.ID)
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang) + svc.coverageHintResolved(g, p.ID, resolved)
 	}
 	// Same derivation codemap_review applies to covering_tests, so impact — the
 	// more common pre-edit path — is just as runnable as the post-edit review.

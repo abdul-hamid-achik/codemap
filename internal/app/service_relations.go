@@ -186,8 +186,11 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	defs, derr := g.FindNodesBySymbol(p.ID, symbol)
 	rep.Found = len(rep.Results) > 0 || (derr == nil && len(defs) > 0)
 	// call_graph: the stable enum. defs (the matching definitions) classify
-	// resolution; empty defs on an unknown symbol stays "none".
-	rep.CallGraph = svc.callGraphStatus(g, p.ID, defs)
+	// resolution; empty defs on an unknown symbol stays "none". Load the
+	// resolved-files map once and reuse it for the unavailability check + hint
+	// below (P8: one call_graph_coverage scan per query, not three).
+	resolved, _ := g.CallGraphResolvedFiles(p.ID)
+	rep.CallGraph = callGraphEnum(resolved, defs)
 	if derr == nil && len(defs) > 1 {
 		rep.Candidates = candidatesFromNodes(defs)
 		if rep.CallGraph == CallGraphResolved {
@@ -198,8 +201,8 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	}
 	// Empty results for a no-name-based-call language on a non-precise index mean
 	// "unresolved", not "no callers" — flag it instead of a confident empty.
-	if lang, yes := svc.callGraphUnavailable(g, p.ID, defs); yes {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang) + svc.coverageHint(g, p.ID)
+	if lang, yes := callGraphUnavailableResolved(resolved, defs); yes {
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang) + svc.coverageHintResolved(g, p.ID, resolved)
 	}
 	rep.Annotations = symbolAnnotations(g, p.ID, symbol)
 	return rep, nil

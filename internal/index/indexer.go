@@ -732,7 +732,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 
 	// Pass 2: resolve references into edges against the project-wide symbol map.
-	if _, err := ix.resolveEdgesWith(projectID, pending, ni); err != nil {
+	if _, err := ix.resolveEdgesWith(ctx, projectID, pending, ni); err != nil {
 		return res, err
 	}
 
@@ -933,7 +933,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	if err != nil {
 		return res, err
 	}
-	if _, err := ix.resolveEdgesWith(projectID, pending, ni); err != nil {
+	if _, err := ix.resolveEdgesWith(ctx, projectID, pending, ni); err != nil {
 		return res, err
 	}
 	if opts.Precise && preciseRelevant {
@@ -1382,10 +1382,20 @@ func (ix *Indexer) buildNodeIndex(projectID int64) (*nodeIndex, error) {
 // resolveEdges links references (from changed files) to target nodes by name,
 // resolveEdgesWith is the shared resolver that takes a pre-built nodeIndex,
 // avoiding a redundant ProjectNodes call when the caller already built one.
-func (ix *Indexer) resolveEdgesWith(projectID int64, refs []extract.Reference, ni *nodeIndex) (int, error) {
+func (ix *Indexer) resolveEdgesWith(ctx context.Context, projectID int64, refs []extract.Reference, ni *nodeIndex) (int, error) {
 	if len(refs) == 0 {
 		return 0, nil
 	}
+	// Batch every resolved reference into ONE transaction instead of one
+	// autocommit INSERT per edge. Every other write path in the indexer is
+	// tx-batched (amortizing SQLite's fsync to ~1 per pass); this pass was the
+	// lone exception, paying a separate implicit transaction per edge — tens of
+	// thousands of them on a large repo (P6).
+	tx, err := ix.graph.BeginTx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }() // safe: Commit renders this a no-op
 
 	count := 0
 	for _, ref := range refs {
@@ -1411,11 +1421,14 @@ func (ix *Indexer) resolveEdgesWith(projectID int64, refs []extract.Reference, n
 			if to == from {
 				continue
 			}
-			if _, err := ix.graph.AddEdge(from, to, ref.Kind, weight); err != nil {
+			if _, err := graph.AddEdgeProvTx(tx, from, to, ref.Kind, weight, graph.ProvName); err != nil {
 				return count, err
 			}
 			count++
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return count, err
 	}
 	return count, nil
 }
