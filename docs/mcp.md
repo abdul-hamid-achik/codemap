@@ -52,7 +52,7 @@ index → understand → read workflow on its own.
 
 ## Tool profiles
 
-By default `codemap serve` registers all 42 tools. That's a real cost: a
+By default `codemap serve` registers all 43 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
 measured **+95% input tokens** on the codemap arm, driven by 39 tool schemas riding
 in every session's context — and some clients (Cursor) cap total MCP tools at ~40
@@ -60,10 +60,10 @@ in every session's context — and some clients (Cursor) cap total MCP tools at 
 other server.
 
 Set `CODEMAP_MCP_PROFILE=agent` (env), `mcp.profile: agent` (`codemap.yaml`), or pass
-`--profile agent` to `codemap serve` for the exact **22-tool** surface derived from
-the canonical taught workflow: the 21 tools it names plus `codemap_docs` for
+`--profile agent` to `codemap serve` for the exact **25-tool** surface derived from
+the canonical taught workflow: the 24 tools it names plus `codemap_docs` for
 self-discovery. The shipped `core` profile remains compatible and currently has
-the same 22-tool inventory; its contract stays stable while `agent` is pinned to
+the same 25-tool inventory; its contract stays stable while `agent` is pinned to
 what the playbook actually teaches. `full` remains the default for backwards
 compatibility and is the explicit expert/admin surface.
 
@@ -72,14 +72,15 @@ compatibility and is the explicit expert/admin surface.
 `codemap_context_batch`, `codemap_impact`, `codemap_source`, `codemap_callers`,
 `codemap_callees`, `codemap_references`, `codemap_risk`, `codemap_dependencies`,
 `codemap_file_impact`, `codemap_review`, `codemap_path`, `codemap_hotspots`,
-`codemap_orphans`, `codemap_coverage`.
+`codemap_orphans`, `codemap_coverage`, `codemap_explore`, `codemap_symbol_at`,
+`codemap_related_files`.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
-server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **26,116
-schema characters (≈6,529 tokens using the declared chars/4 planning estimate)**;
-`full` serializes **40,855 characters (≈10,214 estimated tokens)**. That is about
-36% less schema context for the taught surface. Reproduce it with:
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **29,958
+schema characters (≈7,490 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **41,709 characters (≈10,428 estimated tokens)**. That is about
+28% less schema context for the taught surface. Reproduce it with:
 
 ```bash
 go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime=100x -benchmem

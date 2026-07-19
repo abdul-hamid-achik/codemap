@@ -67,6 +67,12 @@ no dynamic or otherwise-unindexed wiring.`,
 		Args:  cobra.ExactArgs(1),
 		RunE:  runFileImpact,
 	}
+	fileContextCmd = &cobra.Command{
+		Use:   "file-context <file>",
+		Short: "Orient on a file in one call: its symbols, file-level impact (dependents/blast/tests/delete verdict), and related files",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runFileContext,
+	}
 	riskCmd = &cobra.Command{
 		Use:   "risk [<symbol>]",
 		Short: "Change-risk score: untested + fan-in + cross-package spread + ambiguity, combined into one number",
@@ -897,6 +903,69 @@ func runFileImpact(cmd *cobra.Command, args []string) error {
 	}
 	if len(rep.UntestedSymbols) > 0 {
 		fmt.Printf("  ⚠ externally-called but untested: %s\n", joinRefNames(rep.UntestedSymbols, 8))
+	}
+	return nil
+}
+
+// runFileContext renders the one-call file orientation bundle: the file's symbol
+// outline, its file-level impact, and the files structurally tied to it.
+func runFileContext(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sess.Close() }()
+	cwd := targetDir(cmd)
+	depth, _ := cmd.Flags().GetInt("depth")
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	rep, err := svc.FileContext(cwd, args[0], depth)
+	if err != nil {
+		return err
+	}
+	if !rep.Found {
+		return notFoundError(
+			fmt.Sprintf("no indexed symbols in file %q", rep.File),
+			"check the path relative to the project root")
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	fmt.Printf("File context: %s (%s)\n", rep.File, rep.Project)
+	if len(rep.Symbols) > 0 {
+		fmt.Printf("  symbols defined:  %d (%s)\n", len(rep.Symbols), joinRefNames(rep.Symbols, 8))
+	} else {
+		fmt.Printf("  symbols defined:  0\n")
+	}
+	if imp := rep.Impact; imp != nil {
+		fmt.Printf("  dependent files:  %d\n", len(imp.DependentFiles))
+		fmt.Printf("  blast radius:     %d (depth ≤ %d)\n", imp.BlastRadius, imp.Depth)
+		fmt.Printf("  covering tests:   %d\n", len(imp.CoveringTests))
+		switch imp.DeleteVerdict {
+		case app.DeleteVerdictUnsafe:
+			fmt.Println("  ⚠ delete verdict: unsafe — confirmed indexed dependency evidence proves external dependencies")
+		default:
+			fmt.Println("  ? delete verdict: unknown — dependency evidence is not complete enough to prove safety")
+		}
+		if imp.BreakingChange {
+			fmt.Println("  ⚠ breaking change: externally-called symbols here are untested")
+		}
+	}
+	if len(rep.RelatedFiles) > 0 {
+		paths := make([]string, 0, len(rep.RelatedFiles))
+		for _, r := range rep.RelatedFiles {
+			paths = append(paths, r.RelativePath)
+		}
+		related, more := capList(paths, 8)
+		fmt.Printf("  related files:    %d\n", len(rep.RelatedFiles))
+		for _, r := range related {
+			fmt.Printf("     %s\n", r)
+		}
+		if more > 0 {
+			fmt.Printf("     … (%d more — use --json)\n", more)
+		}
 	}
 	return nil
 }

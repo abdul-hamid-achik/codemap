@@ -28,6 +28,7 @@ var wantCLIForm = map[string]string{
 	"codemap_context_batch": "context",
 	"codemap_coverage":      "coverage",
 	"codemap_dependencies":  "dependencies",
+	"codemap_explore":       "explore",
 	"codemap_file_impact":   "file-impact",
 	"codemap_find":          "find",
 	"codemap_grep":          "grep",
@@ -38,11 +39,13 @@ var wantCLIForm = map[string]string{
 	"codemap_path":          "path",
 	"codemap_read_order":    "read-order",
 	"codemap_references":    "references",
+	"codemap_related_files": "related-files",
 	"codemap_review":        "review",
 	"codemap_risk":          "risk",
 	"codemap_semantic":      "semantic",
 	"codemap_source":        "source",
 	"codemap_status":        "status",
+	"codemap_symbol_at":     "symbol-at",
 }
 
 var codemapTokenRe = regexp.MustCompile(`codemap_[a-z_]*`)

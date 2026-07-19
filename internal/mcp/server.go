@@ -26,8 +26,8 @@ import (
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
 // (the default, back-compat) registers every tool (42). ProfileCore preserves
-// the shipped lean 22-tool contract. ProfileAgent is a separately pinned
-// 22-tool contract containing exactly the tools named by the canonical
+// the shipped lean 25-tool contract. ProfileAgent is a separately pinned
+// 25-tool contract containing exactly the tools named by the canonical
 // playbook plus codemap_docs for self-discovery. Core and agent intentionally
 // start with the same inventory: keeping separate sets lets the taught agent
 // workflow evolve without silently changing the backwards-compatible core
@@ -46,11 +46,10 @@ const (
 // because honesty requires it even though it isn't explicitly taught:
 // codemap_docs (so a core-profile agent can still self-discover the full
 // guide) and codemap_status (index staleness — already taught, kept for
-// clarity). Everything else (init, doctor, projects, symbols, symbol_at,
-// related_files, secret_impact, required_keys, annotate/annotations/
-// unannotate, branch_status/branch_switch, cache_save/restore/list/drop, map,
-// explore, and traverse) is admin/ecosystem/extended surface, available only
-// under ProfileFull.
+// clarity). Everything else (init, doctor, projects, symbols, secret_impact,
+// required_keys, annotate/annotations/unannotate, branch_status/branch_switch,
+// cache_save/restore/list/drop, map, and traverse) is admin/ecosystem/extended
+// surface, available only under ProfileFull.
 var coreTools = map[string]bool{
 	"codemap_callees":       true,
 	"codemap_callers":       true,
@@ -59,6 +58,7 @@ var coreTools = map[string]bool{
 	"codemap_coverage":      true,
 	"codemap_dependencies":  true,
 	"codemap_docs":          true,
+	"codemap_explore":       true,
 	"codemap_file_impact":   true,
 	"codemap_find":          true,
 	"codemap_grep":          true,
@@ -69,11 +69,13 @@ var coreTools = map[string]bool{
 	"codemap_path":          true,
 	"codemap_read_order":    true,
 	"codemap_references":    true,
+	"codemap_related_files": true,
 	"codemap_review":        true,
 	"codemap_risk":          true,
 	"codemap_semantic":      true,
 	"codemap_source":        true,
 	"codemap_status":        true,
+	"codemap_symbol_at":     true,
 }
 
 // agentTools is the ProfileAgent tool set. Unlike coreTools, its invariant is
@@ -90,6 +92,7 @@ var agentTools = map[string]bool{
 	"codemap_coverage":      true,
 	"codemap_dependencies":  true,
 	"codemap_docs":          true,
+	"codemap_explore":       true,
 	"codemap_file_impact":   true,
 	"codemap_find":          true,
 	"codemap_grep":          true,
@@ -100,11 +103,13 @@ var agentTools = map[string]bool{
 	"codemap_path":          true,
 	"codemap_read_order":    true,
 	"codemap_references":    true,
+	"codemap_related_files": true,
 	"codemap_review":        true,
 	"codemap_risk":          true,
 	"codemap_semantic":      true,
 	"codemap_source":        true,
 	"codemap_status":        true,
+	"codemap_symbol_at":     true,
 }
 
 // resolveProfile normalizes cfg.MCP.Profile the same way config.Validate
@@ -206,9 +211,9 @@ local toolchain) — useful when wiring codemap into a harness.`
 func instructionsFor(profile string) string {
 	switch profile {
 	case ProfileCore:
-		return instructions + "\n\nprofile: core — admin and extended tools (init, doctor, projects, symbols, symbol_at, map, explore, traverse, related_files, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
+		return instructions + "\n\nprofile: core — admin and extended tools (init, doctor, projects, symbols, map, traverse, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
 	case ProfileAgent:
-		return instructions + "\n\nprofile: agent — this session exposes exactly 21 taught workflow tools plus codemap_docs for self-discovery (22 total); use CODEMAP_MCP_PROFILE=full for admin and extended tools."
+		return instructions + "\n\nprofile: agent — this session exposes exactly 24 taught workflow tools plus codemap_docs for self-discovery (25 total); use CODEMAP_MCP_PROFILE=full for admin and extended tools."
 	default:
 		return instructions
 	}
@@ -292,10 +297,12 @@ type pathInput struct {
 }
 
 type indexInput struct {
-	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Reindex bool   `json:"reindex,omitempty" jsonschema:"wipe and rebuild the whole index"`
-	NoEmbed bool   `json:"no_embed,omitempty" jsonschema:"skip semantic embeddings (structure only)"`
-	Precise bool   `json:"precise,omitempty" jsonschema:"resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via language-server callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph"`
+	Path         string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Reindex      bool     `json:"reindex,omitempty" jsonschema:"wipe and rebuild the whole index"`
+	NoEmbed      bool     `json:"no_embed,omitempty" jsonschema:"skip semantic embeddings (structure only)"`
+	Precise      bool     `json:"precise,omitempty" jsonschema:"resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via language-server callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph"`
+	NoLSP        bool     `json:"no_lsp,omitempty" jsonschema:"skip language-server extraction (index only the built-in Go/Ruby/Lua/CSS/HTML backends)"`
+	ExcludeExtra []string `json:"exclude_extra,omitempty" jsonschema:"extra path globs to skip, appended to the configured excludes (bare name = any depth, slash = root-anchored, **/ = any depth)"`
 }
 
 type semanticInput struct {
@@ -309,6 +316,7 @@ type symbolQueryInput struct {
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from a result's file/start_line/fqn/kind fields; takes precedence over symbol"`
 	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Precise  bool                `json:"precise,omitempty" jsonschema:"use callHierarchy for an exact one-off answer (gopls for Go, typescript-language-server for TypeScript/JavaScript, pyright for Python); slower, but not inflated by same-named symbols"`
+	Top      int                 `json:"top,omitempty" jsonschema:"cap the number of returned relations (default uncapped); when trimmed, total/truncated are set — narrow with a selector to see the rest"`
 }
 
 type referencesInput struct {
@@ -376,6 +384,12 @@ type fileImpactInput struct {
 	File  string `json:"file" jsonschema:"project-relative file path to analyze"`
 	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Depth int    `json:"depth,omitempty" jsonschema:"max hops for the file's blast radius (default 3)"`
+}
+
+type fileContextInput struct {
+	File  string `json:"file" jsonschema:"project-relative file path to orient on"`
+	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth int    `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
 }
 
 type riskInput struct {
@@ -632,6 +646,12 @@ func (s *Server) register() {
 			Description: "File-level impact — 'what happens if I change or DELETE this file?' Returns dependency_evidence grouped by dependent file and edge kind (calls/references/imports), bounded source→target samples with totals/truncation, per-domain coverage, blast radius, tests, and a conservative delete_verdict. File-scoped calls/references prove unsafe; Go imports are package-scoped hints and remain unknown for the exact file. Missing evidence never proves safety while type/value uses, runtime wiring, and external consumers are incomplete; legacy safe_to_delete remains false.",
 		}, s.handleFileImpact)
 	}
+	if s.include("codemap_file_context") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_file_context",
+			Description: "Orient on a file in ONE call — the file-level peer of codemap_context. Bundles the file's symbol outline (what it defines), its codemap_file_impact (dependents, blast radius, covering tests, delete_verdict, breaking_change, dependency_evidence), and its codemap_related_files (co-change candidates). Use it when landing on an unfamiliar file or before a move/delete/split instead of chaining codemap_symbols + codemap_file_impact + codemap_related_files. Available in the full MCP profile.",
+		}, s.handleFileContext)
+	}
 	if s.include("codemap_risk") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_risk",
@@ -806,7 +826,7 @@ func (s *Server) handleIndex(ctx context.Context, req *sdkmcp.CallToolRequest, i
 	// wrong tree.
 	if info := daemon.QueryStatus(); info != nil {
 		if ok, reason := daemon.DelegationAllowed(root, info); ok {
-			dopts := daemon.ReindexOpts{Reindex: in.Reindex, Precise: in.Precise, NoLSP: false}
+			dopts := daemon.ReindexOpts{Reindex: in.Reindex, Precise: in.Precise, NoLSP: in.NoLSP, ExcludeExtra: in.ExcludeExtra}
 			embed := !in.NoEmbed
 			dopts.Embed = &embed
 			rep, err := daemon.Reindex(dopts)
@@ -825,7 +845,7 @@ func (s *Server) handleIndex(ctx context.Context, req *sdkmcp.CallToolRequest, i
 	// supplied a progress token. The index.Options.OnFile/OnEmbed hooks
 	// are throttled (every ~50ms or every 64 files / 64 embeds) so a
 	// multi-minute reindex doesn't look hung or trip client timeouts.
-	opts := index.Options{Reindex: in.Reindex, Precise: in.Precise}
+	opts := index.Options{Reindex: in.Reindex, Precise: in.Precise, NoLSP: in.NoLSP, ExcludeExtra: in.ExcludeExtra}
 	if token := req.Params.GetProgressToken(); token != nil && req.Session != nil {
 		notifier := &mcpProgress{ctx: ctx, session: req.Session, token: token}
 		opts.OnFile = notifier.onFile
@@ -977,46 +997,46 @@ func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	if in.Selector != nil && in.Precise {
-		rep, err := s.svc.PreciseCallersBySelector(ctx, cwdOf(in.Path), *in.Selector)
-		return result(rep, err)
+	var (
+		rep *app.RelationReport
+		err error
+	)
+	switch {
+	case in.Selector != nil && in.Precise:
+		rep, err = s.svc.PreciseCallersBySelector(ctx, cwdOf(in.Path), *in.Selector)
+	case in.Selector != nil:
+		rep, err = s.svc.CallersBySelector(cwdOf(in.Path), *in.Selector)
+	case in.Symbol == "":
+		return invalidInputResult("callers needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
+	case in.Precise:
+		rep, err = s.svc.PreciseCallers(ctx, cwdOf(in.Path), in.Symbol)
+	default:
+		rep, err = s.svc.Callers(cwdOf(in.Path), in.Symbol)
 	}
-	if in.Selector != nil {
-		rep, err := s.svc.CallersBySelector(cwdOf(in.Path), *in.Selector)
-		return result(rep, err)
-	}
-	if in.Symbol == "" {
-		return result(nil, fmt.Errorf("callers needs symbol or selector"))
-	}
-	if in.Precise {
-		rep, err := s.svc.PreciseCallers(ctx, cwdOf(in.Path), in.Symbol)
-		return result(rep, err)
-	}
-	rep, err := s.svc.Callers(cwdOf(in.Path), in.Symbol)
-	return result(rep, err)
+	return result(capRelation(rep, in.Top), err)
 }
 
 func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, in symbolQueryInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	if in.Selector != nil && in.Precise {
-		rep, err := s.svc.PreciseCalleesBySelector(ctx, cwdOf(in.Path), *in.Selector)
-		return result(rep, err)
+	var (
+		rep *app.RelationReport
+		err error
+	)
+	switch {
+	case in.Selector != nil && in.Precise:
+		rep, err = s.svc.PreciseCalleesBySelector(ctx, cwdOf(in.Path), *in.Selector)
+	case in.Selector != nil:
+		rep, err = s.svc.CalleesBySelector(cwdOf(in.Path), *in.Selector)
+	case in.Symbol == "":
+		return invalidInputResult("callees needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
+	case in.Precise:
+		rep, err = s.svc.PreciseCallees(ctx, cwdOf(in.Path), in.Symbol)
+	default:
+		rep, err = s.svc.Callees(cwdOf(in.Path), in.Symbol)
 	}
-	if in.Selector != nil {
-		rep, err := s.svc.CalleesBySelector(cwdOf(in.Path), *in.Selector)
-		return result(rep, err)
-	}
-	if in.Symbol == "" {
-		return result(nil, fmt.Errorf("callees needs symbol or selector"))
-	}
-	if in.Precise {
-		rep, err := s.svc.PreciseCallees(ctx, cwdOf(in.Path), in.Symbol)
-		return result(rep, err)
-	}
-	rep, err := s.svc.Callees(cwdOf(in.Path), in.Symbol)
-	return result(rep, err)
+	return result(capRelation(rep, in.Top), err)
 }
 
 func (s *Server) handleReferences(_ context.Context, _ *sdkmcp.CallToolRequest, in referencesInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1028,7 +1048,7 @@ func (s *Server) handleReferences(_ context.Context, _ *sdkmcp.CallToolRequest, 
 		return result(rep, err)
 	}
 	if in.Symbol == "" {
-		return result(nil, fmt.Errorf("references needs symbol or selector"))
+		return invalidInputResult("references needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.References(cwdOf(in.Path), in.Symbol)
 	return result(rep, err)
@@ -1043,7 +1063,7 @@ func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in i
 		return result(rep, err)
 	}
 	if in.Symbol == "" {
-		return result(nil, fmt.Errorf("impact needs symbol or selector"))
+		return invalidInputResult("impact needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
@@ -1084,7 +1104,7 @@ func (s *Server) handleExplore(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return r, v, nil
 	}
 	if strings.TrimSpace(in.Query) == "" {
-		return result(nil, fmt.Errorf("explore needs a query"))
+		return invalidInputResult("explore needs a query", "pass query: a natural-language intent, e.g. \"where is auth validated\""), nil, nil
 	}
 	rep, err := s.svc.Explore(ctx, cwdOf(in.Path), in.Query, app.ExploreOptions{
 		Seeds: in.Seeds, Edges: in.Edges, Depth: in.Depth,
@@ -1123,6 +1143,17 @@ func (s *Server) handleFileImpact(_ context.Context, _ *sdkmcp.CallToolRequest, 
 	return result(rep, err)
 }
 
+func (s *Server) handleFileContext(_ context.Context, _ *sdkmcp.CallToolRequest, in fileContextInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	if in.File == "" {
+		return invalidInputResult("file_context needs a file", "pass file: a project-relative path"), nil, nil
+	}
+	rep, err := s.svc.FileContext(cwdOf(in.Path), in.File, in.Depth)
+	return result(rep, err)
+}
+
 func (s *Server) handleRisk(_ context.Context, _ *sdkmcp.CallToolRequest, in riskInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
@@ -1132,7 +1163,7 @@ func (s *Server) handleRisk(_ context.Context, _ *sdkmcp.CallToolRequest, in ris
 		return result(rep, err)
 	}
 	if in.Symbol == "" {
-		return result(nil, fmt.Errorf("risk needs symbol or selector"))
+		return invalidInputResult("risk needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.Risk(cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
@@ -1188,13 +1219,13 @@ func (s *Server) handlePath(_ context.Context, _ *sdkmcp.CallToolRequest, in pat
 	}
 	if in.FromSelector != nil || in.ToSelector != nil {
 		if in.FromSelector == nil || in.ToSelector == nil {
-			return result(nil, fmt.Errorf("path needs both from_selector and to_selector"))
+			return invalidInputResult("path needs both from_selector and to_selector", "pass both selectors, or both from and to symbols"), nil, nil
 		}
 		rep, err := s.svc.PathBySelectors(cwdOf(in.Path), *in.FromSelector, *in.ToSelector)
 		return result(rep, err)
 	}
 	if in.From == "" || in.To == "" {
-		return result(nil, fmt.Errorf("path needs from and to symbols or two selectors"))
+		return invalidInputResult("path needs from and to symbols or two selectors", "pass from and to symbols, or from_selector and to_selector"), nil, nil
 	}
 	rep, err := s.svc.Path(cwdOf(in.Path), in.From, in.To)
 	return result(rep, err)
@@ -1233,7 +1264,7 @@ func (s *Server) handleSource(_ context.Context, _ *sdkmcp.CallToolRequest, in s
 		return result(rep, err)
 	}
 	if in.Symbol == "" {
-		return result(nil, fmt.Errorf("source needs symbol or selector"))
+		return invalidInputResult("source needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.Source(cwdOf(in.Path), in.Symbol, in.Brief)
 	return result(rep, err)
@@ -1248,7 +1279,7 @@ func (s *Server) handleContext(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return result(rep, err)
 	}
 	if in.Symbol == "" {
-		return result(nil, fmt.Errorf("context needs symbol or selector"))
+		return invalidInputResult("context needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.ContextWithContext(ctx, cwdOf(in.Path), in.Symbol, in.Depth, in.Brief)
 	return result(rep, err)
@@ -1423,4 +1454,42 @@ func codedErrResult(err error) *sdkmcp.CallToolResult {
 		IsError: true,
 		Meta:    sdkmcp.Meta{"error": json.RawMessage(errData)},
 	}
+}
+
+// invalidInputResult renders a malformed-call error with a stable
+// "invalid_input" code plus an actionable hint in Meta["error"], so an agent
+// can switch on the failure and self-correct (e.g. supply a selector) instead
+// of seeing a bare "operational" error indistinguishable from an internal
+// fault. Used at the argument-validation sites that previously returned an
+// untyped fmt.Errorf.
+func invalidInputResult(msg, hint string) *sdkmcp.CallToolResult {
+	text := "Error: " + msg
+	if hint != "" {
+		text += " (hint: " + hint + ")"
+	}
+	errData, _ := json.Marshal(mcpError{Code: "invalid_input", Message: msg, Hint: hint})
+	return &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}},
+		IsError: true,
+		Meta:    sdkmcp.Meta{"error": json.RawMessage(errData)},
+	}
+}
+
+// capRelation bounds a callers/callees result set for the MCP surface so an
+// ambiguous name (which unions every same-named definition's relations) or a
+// high-fan-in hub cannot blow up an agent's context window. top<=0 leaves the
+// report untouched (back-compatible uncapped behavior). When top is set, total
+// always reports the pre-cap count and truncated marks an actual trim — the
+// same contract as grep/find — so the agent knows to narrow with a selector
+// rather than silently reading a partial list.
+func capRelation(rep *app.RelationReport, top int) *app.RelationReport {
+	if rep == nil || top <= 0 {
+		return rep
+	}
+	rep.Total = len(rep.Results)
+	if len(rep.Results) > top {
+		rep.Results = rep.Results[:top]
+		rep.Truncated = true
+	}
+	return rep
 }

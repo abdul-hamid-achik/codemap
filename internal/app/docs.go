@@ -35,6 +35,8 @@ authority in codemap and delegates retrieval through a versioned one-hop CLI.`},
   2. where to start            # codemap_read_order  (entrypoints + hubs ranked — orient on a new repo)
   3. find the entry point      # codemap_semantic "<intent>" OR codemap_find <name>
                                # OR codemap_grep "<exact text>" (string literal, error message, route, env-var)
+                               # codemap_explore "<intent>" (fuzzy goal → bounded context neighborhoods, source-light)
+                               # got a file:line? codemap_symbol_at <file>:<line> (batch positions:[…] resolves a whole trace)
   4. orient on a symbol        # codemap_context <sym>  (def + callers + callees + tests + test_commands, ONE call)
                                # codemap_context_batch <s1> <s2> …  (several symbols at once + shared callers)
   5. go deeper                 # codemap_impact (blast radius + runnable test_commands) · codemap_source (full body)
@@ -42,6 +44,7 @@ authority in codemap and delegates retrieval through a versioned one-hop CLI.`},
                                # codemap_references (callback/RunE/registration value wiring; not callers)
   6. before a risky change     # codemap_risk <sym>  (how careful?)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
+                               # codemap_related_files <file>  (the other files structurally tied to this one)
   7. trace flow                # codemap_path <from> <to>  (shortest call chain)
   8. AFTER you edit            # codemap_review  (your diff → changed symbols, blast radius, the TESTS TO RUN)
   9. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
@@ -84,6 +87,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      (codemap_explore is available in the full MCP profile)
   dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage
   file-impact <file>                 file impact: confidence-aware evidence + coverage + conservative delete verdict
+  file-context <file>                one-call file orientation: symbols + file-impact + related files
   risk <sym> [--at file:line]        change-risk: unknown when graph coverage is missing; otherwise low/medium/high
   context <sym> [<sym>...] [--at|--brief]  one-call bundle; pass several symbols for a batch + shared callers;
                                      --brief drops source bodies (signature+doc stay, source_omitted:true)
@@ -116,7 +120,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
-callers, callees, references, impact, file_impact, dependencies, review, secret_impact,
+callers, callees, references, impact, file_impact, file_context, dependencies, review, secret_impact,
 required_keys, risk, hotspots, orphans, coverage, read_order, map, explore, traverse, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,

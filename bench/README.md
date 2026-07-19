@@ -80,13 +80,13 @@ directional and machine-dependent; counts and payload sizes are deterministic fo
 
 | MCP profile | tools | schema chars | estimated tokens | `tools/list` |
 |---|---:|---:|---:|---:|
-| `agent` | 22 | 26,116 | 6,529 | 0.82 ms |
-| `core` | 22 | 26,116 | 6,529 | 0.82 ms |
-| `full` | 42 | 40,855 | 10,214 | 1.32 ms |
+| `agent` | 25 | 29,958 | 7,490 | 0.92 ms |
+| `core` | 25 | 29,958 | 7,490 | 0.99 ms |
+| `full` | 42 | 41,709 | 10,428 | 1.37 ms |
 
 `agent` is a separate contract derived exactly from the taught workflow; `core`
 preserves the shipped lean inventory. They intentionally match today. Both remove about
-36% of the current full-profile schema characters.
+28% of the current full-profile schema characters.
 
 | bounded report | compact JSON | service + JSON |
 |---|---:|---:|

@@ -15,8 +15,8 @@ routed to the same TS server
 for symbols + `defines` + import edges only). Tree-sitter remains planned and has no implementation today.
 The graph is fused with semantic retrieval (local veclite plus an optional one-hop vecgrep
 fallback, or vecgrep as the explicit owner) and exposed as a unified query layer. Three surfaces
-share the structural store: CLI (`--json` for agents), MCP server (`codemap serve`: 42 tools in
-`full`, 22 in `agent`/`core`), and the `studio` TUI.
+share the structural store: CLI (`--json` for agents), MCP server (`codemap serve`: 43 tools in
+`full`, 25 in `agent`/`core`), and the `studio` TUI.
 
 Surfaces / key files:
 - CLI: `cmd/codemap/` — cobra CLI split per-command (main.go plus agent/annotate/branch/cache/

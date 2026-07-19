@@ -54,6 +54,12 @@ type Options struct {
 	// NoLSP disables auto-registration of language-server-backed extractors
 	// (TypeScript, …). Indexing then covers only the built-in Go backend.
 	NoLSP bool
+	// ExcludeExtra appends per-call skip globs to the configured excludes
+	// (cfg.Exclude + cfg.ExcludeExtra) for this run only — e.g. extra paths an
+	// MCP codemap_index caller wants skipped without editing the config file.
+	// Same glob semantics as config (bare = any depth, slash = root-anchored,
+	// **/ = any depth).
+	ExcludeExtra []string
 	// OnFile, if non-nil, is called once per scanned file just before it is
 	// indexed: done is the 1-based position, total is the number of scanned files
 	// (== Result.FilesScanned), rel is the project-relative path. Used only by the
@@ -484,6 +490,13 @@ const (
 func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectName, root string, opts Options) (*Result, error) {
 	res := &Result{}
 	defer func() { _ = ix.Close() }() // shut down any language servers spawned below
+
+	// Per-call exclude_extra (e.g. from codemap_index over MCP) appends to the
+	// configured excludes for this run only. The indexer is built fresh per
+	// Index call, so this never leaks into a later run.
+	if len(opts.ExcludeExtra) > 0 {
+		ix.exclude = append(ix.exclude, opts.ExcludeExtra...)
+	}
 
 	// A structure-only run is an explicit project-wide semantic mode change, not
 	// merely "do not update changed vectors". Clear the full project scope before

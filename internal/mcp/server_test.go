@@ -614,6 +614,155 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 	}
 }
 
+// TestMCPHandlerWiring positively exercises the tool handlers that the
+// not-indexed table test above only checks for the {"indexed":false}
+// short-circuit. Each entry drives a real CallTool against an indexed Go
+// fixture and asserts the handler maps its input struct onto the service
+// layer cleanly — exactly the class of bug a mis-tagged JSON field, a
+// dropped "path", or a nil-deref in a handler would cause (the service
+// layer beneath is already unit-tested; the MCP wiring is what this sweeps).
+// Tools that need an external binary or a git repo (review, branch_status/
+// branch_switch, cache_save/restore/list/drop) are covered by their own
+// gated tests and deliberately excluded so this sweep stays hermetic — it
+// must pass in a minimal CI image with no gopls/tsserver/fcheap/git.
+func TestMCPHandlerWiring(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// A tiny call graph Util -> Run -> Helper so callees/path/hotspots have
+	// real edges to return (line 3 of main.go is the Run declaration, for
+	// codemap_symbol_at).
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "util.go"),
+		[]byte("package app\n\nfunc Util() { Run() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := app.Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if _, err := app.NewService(sess).Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(sess)
+	clientT, serverT := sdkmcp.NewInMemoryTransports()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.serve(ctx, serverT) }()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+		want string // optional substring proving real data flowed ("" = just assert a clean, non-empty result)
+	}{
+		{"codemap_init", map[string]any{"path": proj}, ""},
+		{"codemap_callees", map[string]any{"path": proj, "symbol": "Run"}, "Helper"},
+		{"codemap_impact", map[string]any{"path": proj, "symbol": "Run"}, ""},
+		{"codemap_risk", map[string]any{"path": proj, "symbol": "Run"}, ""},
+		{"codemap_file_impact", map[string]any{"path": proj, "file": "main.go"}, ""},
+		{"codemap_file_context", map[string]any{"path": proj, "file": "main.go"}, "impact"},
+		{"codemap_coverage", map[string]any{"path": proj}, ""},
+		{"codemap_path", map[string]any{"path": proj, "from": "Util", "to": "Helper"}, "Helper"},
+		{"codemap_symbols", map[string]any{"path": proj, "file": "main.go"}, "Run"},
+		{"codemap_symbol_at", map[string]any{"path": proj, "file": "main.go", "line": 3}, "Run"},
+		{"codemap_related_files", map[string]any{"path": proj, "file": "main.go"}, ""},
+		{"codemap_context_batch", map[string]any{"path": proj, "symbols": []string{"Run", "Helper"}}, ""},
+		{"codemap_read_order", map[string]any{"path": proj}, ""},
+		{"codemap_orphans", map[string]any{"path": proj}, ""},
+		{"codemap_hotspots", map[string]any{"path": proj}, ""},
+		{"codemap_projects", map[string]any{}, ""},
+		{"codemap_docs", map[string]any{}, "codemap"},
+		{"codemap_required_keys", map[string]any{"path": proj, "entrypoint": "Run", "keys": []string{"TEST_KEY"}}, ""},
+		{"codemap_secret_impact", map[string]any{"path": proj, "keys": []string{"TEST_KEY"}}, ""},
+	} {
+		res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.args})
+		if err != nil {
+			t.Fatalf("%s: transport error: %v", tc.tool, err)
+		}
+		if res.IsError {
+			t.Errorf("%s: handler returned an error result: %s", tc.tool, textOf(res))
+			continue
+		}
+		txt := textOf(res)
+		if txt == "" {
+			t.Errorf("%s: empty response body", tc.tool)
+			continue
+		}
+		if tc.want != "" && !strings.Contains(txt, tc.want) {
+			t.Errorf("%s: response missing %q (handler wired to the wrong data?): %s", tc.tool, tc.want, txt)
+		}
+	}
+}
+
+// TestCapRelationBoundsMCPResults pins the D1 contract: callers/callees accept
+// a top cap so an ambiguous name or a high-fan-in hub cannot blow up an agent's
+// context, and the trim is disclosed via total/truncated (the grep/find
+// contract) rather than silently returning a partial list.
+func TestCapRelationBoundsMCPResults(t *testing.T) {
+	rep := func() *app.RelationReport {
+		return &app.RelationReport{Results: []app.SymbolRef{{Symbol: "a"}, {Symbol: "b"}, {Symbol: "c"}}}
+	}
+	// top<=0 leaves the report untouched (back-compatible uncapped behavior).
+	if got := capRelation(rep(), 0); got.Total != 0 || got.Truncated || len(got.Results) != 3 {
+		t.Fatalf("capRelation(rep, 0) should be a no-op, got total=%d truncated=%v n=%d", got.Total, got.Truncated, len(got.Results))
+	}
+	// top trims and discloses the real pre-cap count.
+	capped := capRelation(rep(), 2)
+	if capped.Total != 3 || !capped.Truncated || len(capped.Results) != 2 {
+		t.Fatalf("capRelation(rep, 2) = total=%d truncated=%v n=%d, want total=3 truncated=true n=2", capped.Total, capped.Truncated, len(capped.Results))
+	}
+	// top >= len reports the count without marking a trim.
+	full := capRelation(&app.RelationReport{Results: []app.SymbolRef{{Symbol: "a"}}}, 5)
+	if full.Total != 1 || full.Truncated || len(full.Results) != 1 {
+		t.Fatalf("capRelation under cap = total=%d truncated=%v n=%d, want total=1 truncated=false n=1", full.Total, full.Truncated, len(full.Results))
+	}
+	if capRelation(nil, 5) != nil {
+		t.Fatal("capRelation(nil) should be nil")
+	}
+}
+
+// TestInvalidInputResultCarriesCode pins the D7 contract: a malformed call
+// surfaces a stable "invalid_input" code plus an actionable hint in
+// Meta["error"], so an agent can switch on the failure instead of seeing a
+// bare "operational" error indistinguishable from an internal fault.
+func TestInvalidInputResultCarriesCode(t *testing.T) {
+	res := invalidInputResult("callers needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}")
+	if !res.IsError {
+		t.Fatal("invalidInputResult must set IsError")
+	}
+	if txt := textOf(res); !strings.Contains(txt, "callers needs symbol or selector") || !strings.Contains(txt, "hint:") {
+		t.Fatalf("visible error should carry the message + hint, got %q", txt)
+	}
+	raw, ok := res.Meta["error"].(json.RawMessage)
+	if !ok {
+		t.Fatalf("Meta[error] = %T, want json.RawMessage", res.Meta["error"])
+	}
+	var envelope mcpError
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Code != "invalid_input" || envelope.Hint == "" {
+		t.Fatalf("structured error = %+v, want code invalid_input with a hint", envelope)
+	}
+}
+
 // TestHandleGrepThreadsRequestContext pins the fix for handleGrep discarding
 // its request context.Context and calling the non-cancellable Service.Grep
 // wrapper (context.Background() under the hood), so an MCP client
@@ -1298,13 +1447,13 @@ func listToolNames(t *testing.T, srv *Server) map[string]bool {
 }
 
 // fullToolNames is the exhaustive, hand-maintained list of every tool
-// codemap ships under ProfileFull (42; AGENTS.md's "Current set (42)" line
+// codemap ships under ProfileFull (43; AGENTS.md's "Current set (43)" line
 // must be updated alongside this list if it ever changes).
 var fullToolNames = []string{
 	"codemap_init", "codemap_index", "codemap_status", "codemap_semantic",
 	"codemap_callers", "codemap_callees", "codemap_references", "codemap_impact",
 	"codemap_review", "codemap_read_order", "codemap_map", "codemap_explore", "codemap_traverse", "codemap_related_files", "codemap_dependencies",
-	"codemap_file_impact", "codemap_risk", "codemap_symbol_at", "codemap_secret_impact",
+	"codemap_file_impact", "codemap_file_context", "codemap_risk", "codemap_symbol_at", "codemap_secret_impact",
 	"codemap_required_keys", "codemap_hotspots", "codemap_orphans", "codemap_coverage",
 	"codemap_path", "codemap_symbols", "codemap_find", "codemap_grep", "codemap_source",
 	"codemap_context", "codemap_context_batch", "codemap_projects", "codemap_docs",
@@ -1341,7 +1490,7 @@ func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
 }
 
 // TestMCPToolsByProfile pins the exact registered-tool set for all profiles:
-// ProfileFull remains all 42 tools, ProfileCore remains its shipped 22-tool
+// ProfileFull remains all 43 tools, ProfileCore remains its shipped 25-tool
 // inventory, and ProfileAgent is the separately versioned taught workflow.
 func TestMCPToolsByProfile(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
@@ -1426,8 +1575,8 @@ func TestCoreProfileCoversTaughtTools(t *testing.T) {
 // and include no untaught admin or expert surface.
 func TestAgentProfileExactlyMatchesTaughtWorkflow(t *testing.T) {
 	taught := taughtToolSet(t)
-	if len(taught) != 22 {
-		t.Fatalf("taught workflow tool count = %d, want 22; review the agent profile and its schema benchmark", len(taught))
+	if len(taught) != 25 {
+		t.Fatalf("taught workflow tool count = %d, want 25; review the agent profile and its schema benchmark", len(taught))
 	}
 	got := map[string]bool{}
 	for name := range agentTools {
@@ -1439,7 +1588,7 @@ func TestAgentProfileExactlyMatchesTaughtWorkflow(t *testing.T) {
 	}
 	assertExactToolSet(t, got, want)
 
-	for _, excluded := range []string{"codemap_init", "codemap_annotate", "codemap_map", "codemap_explore", "codemap_traverse"} {
+	for _, excluded := range []string{"codemap_init", "codemap_annotate", "codemap_map", "codemap_traverse"} {
 		if agentTools[excluded] {
 			t.Errorf("agent profile unexpectedly includes untaught tool %s", excluded)
 		}

@@ -40,6 +40,8 @@ type RelationReport struct {
 	Project     string               `json:"project"`
 	Found       bool                 `json:"found"` // whether the symbol exists in the index — distinguishes a typo from a real symbol with no callers/callees (both yield empty Results)
 	Results     []SymbolRef          `json:"results"`
+	Total       int                  `json:"total,omitempty"`       // result count before any top cap; set alongside Truncated so a consumer knows the list was bounded
+	Truncated   bool                 `json:"truncated,omitempty"`   // true when a top cap trimmed Results; narrow with a selector to see the rest
 	Note        string               `json:"note,omitempty"`        // set when precise resolution fell back to name-based
 	Candidates  []AmbiguityCandidate `json:"candidates,omitempty"`  // the merged definition set behind Note; re-query with candidates[i].selector
 	Resolution  string               `json:"resolution,omitempty"`  // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — results are unavailable, not absent

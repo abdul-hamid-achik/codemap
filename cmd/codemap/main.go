@@ -183,6 +183,7 @@ func init() {
 	reviewCmd.Flags().Bool("fail-on-untested", false, "after printing the normal report, exit 6 if any changed symbol has no covering test")
 	readOrderCmd.Flags().Int("top", 20, "maximum entries to rank")
 	fileImpactCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
+	fileContextCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
 	riskCmd.Flags().Int("depth", 3, "max hops for the fan-in/blast analysis")
 	riskCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
 	riskCmd.Flags().String("fail-on-risk", "", "after printing the normal report, exit 6 if the risk level is at or above this threshold (low|medium|high); 'unknown' never trips it")
@@ -225,7 +226,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd, serveCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured

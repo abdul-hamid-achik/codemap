@@ -2,13 +2,14 @@ version: 1
 name: mcp_profile
 intent: |
     `CODEMAP_MCP_PROFILE=agent|core|full` gates which MCP tools `codemap serve`
-    registers: `agent` is exactly the 21 tools named by the canonical taught
-    workflow plus codemap_docs (22); `core` preserves its compatible 22-tool
+    registers: `agent` is exactly the 24 tools named by the canonical taught
+    workflow plus codemap_docs (25); `core` preserves its compatible 25-tool
     inventory; `full` is the back-compat superset (42).
     This drives three real MCP handshakes over stdio — one per profile — and
     counts tools/list, confirming agent/core are strictly smaller than full,
-    all counts are exact, admin tools (codemap_annotate) and the extended
-    codemap_explore/codemap_traverse surfaces are agent/core-excluded but full-included,
+    all counts are exact, admin tools (codemap_annotate) are agent/core-excluded
+    but full-included, codemap_explore is now taught (agent/core-included) while
+    codemap_traverse stays full-only,
     the server instructions identify each trimmed profile, and an
     invalid CODEMAP_MCP_PROFILE value fails cleanly (nonzero exit, lowercase
     error) before the stdio loop ever starts.
@@ -16,7 +17,7 @@ target:
     cmd:
         - "/bin/sh"
         - "-lc"
-        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/h\"; mkdir -p \"$HOME\"; CM=\"$ROOT/bin/codemap\"; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"flow\",\"version\":\"0\"}}}' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' > \"$TMP/reqs\"; export CODEMAP_DATA=\"$TMP/d_agent\"; export CODEMAP_MCP_PROFILE=agent; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/agent_out\" 2>/dev/null; echo \"agent serve exit: $?\"; AGENT_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/agent_out\" | sort -u | wc -l | tr -d ' '); echo \"AGENT_COUNT: $AGENT_COUNT\"; grep -q 'profile: agent' \"$TMP/agent_out\" && echo AGENT_INSTRUCTIONS_OK; grep -q '\"name\":\"codemap_docs\"' \"$TMP/agent_out\" && echo AGENT_HAS_DOCS; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/agent_out\" || echo AGENT_EXCLUDES_ADMIN; if ! grep -q '\"name\":\"codemap_explore\"' \"$TMP/agent_out\" && ! grep -q '\"name\":\"codemap_traverse\"' \"$TMP/agent_out\"; then echo AGENT_EXCLUDES_EXPLORE_TRAVERSE; fi; export CODEMAP_DATA=\"$TMP/d_core\"; export CODEMAP_MCP_PROFILE=core; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/core_out\" 2>/dev/null; echo \"core serve exit: $?\"; CORE_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/core_out\" | sort -u | wc -l | tr -d ' '); echo \"CORE_COUNT: $CORE_COUNT\"; grep -q 'profile: core' \"$TMP/core_out\" && echo CORE_INSTRUCTIONS_OK; grep -q '\"name\":\"codemap_docs\"' \"$TMP/core_out\" && echo CORE_HAS_DOCS; grep -q '\"name\":\"codemap_status\"' \"$TMP/core_out\" && echo CORE_HAS_STATUS; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/core_out\" || echo CORE_EXCLUDES_ADMIN; if ! grep -q '\"name\":\"codemap_explore\"' \"$TMP/core_out\" && ! grep -q '\"name\":\"codemap_traverse\"' \"$TMP/core_out\"; then echo CORE_EXCLUDES_EXPLORE_TRAVERSE; fi; export CODEMAP_DATA=\"$TMP/d_full\"; export CODEMAP_MCP_PROFILE=full; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/full_out\" 2>/dev/null; echo \"full serve exit: $?\"; FULL_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/full_out\" | sort -u | wc -l | tr -d ' '); echo \"FULL_COUNT: $FULL_COUNT\"; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/full_out\" && echo FULL_HAS_ADMIN; if grep -q '\"name\":\"codemap_explore\"' \"$TMP/full_out\" && grep -q '\"name\":\"codemap_traverse\"' \"$TMP/full_out\"; then echo FULL_HAS_EXPLORE_TRAVERSE; fi; export CODEMAP_DATA=\"$TMP/d_bad\"; export CODEMAP_MCP_PROFILE=bogus; \"$CM\" serve < /dev/null > \"$TMP/bad_out\" 2>\"$TMP/bad_err\"; echo \"bad profile exit: $?\"; grep -q 'Error: mcp profile' \"$TMP/bad_err\" && echo BAD_PROFILE_ERROR_OK; grep -q 'full\\.$' \"$TMP/bad_err\" && echo BAD_PROFILE_TRAILING_PERIOD || echo BAD_PROFILE_NO_TRAILING_PERIOD; exit 0"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/h\"; mkdir -p \"$HOME\"; CM=\"$ROOT/bin/codemap\"; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"flow\",\"version\":\"0\"}}}' '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}' > \"$TMP/reqs\"; export CODEMAP_DATA=\"$TMP/d_agent\"; export CODEMAP_MCP_PROFILE=agent; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/agent_out\" 2>/dev/null; echo \"agent serve exit: $?\"; AGENT_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/agent_out\" | sort -u | wc -l | tr -d ' '); echo \"AGENT_COUNT: $AGENT_COUNT\"; grep -q 'profile: agent' \"$TMP/agent_out\" && echo AGENT_INSTRUCTIONS_OK; grep -q '\"name\":\"codemap_docs\"' \"$TMP/agent_out\" && echo AGENT_HAS_DOCS; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/agent_out\" || echo AGENT_EXCLUDES_ADMIN; if grep -q '\"name\":\"codemap_explore\"' \"$TMP/agent_out\" && ! grep -q '\"name\":\"codemap_traverse\"' \"$TMP/agent_out\"; then echo AGENT_HAS_EXPLORE_NOT_TRAVERSE; fi; export CODEMAP_DATA=\"$TMP/d_core\"; export CODEMAP_MCP_PROFILE=core; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/core_out\" 2>/dev/null; echo \"core serve exit: $?\"; CORE_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/core_out\" | sort -u | wc -l | tr -d ' '); echo \"CORE_COUNT: $CORE_COUNT\"; grep -q 'profile: core' \"$TMP/core_out\" && echo CORE_INSTRUCTIONS_OK; grep -q '\"name\":\"codemap_docs\"' \"$TMP/core_out\" && echo CORE_HAS_DOCS; grep -q '\"name\":\"codemap_status\"' \"$TMP/core_out\" && echo CORE_HAS_STATUS; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/core_out\" || echo CORE_EXCLUDES_ADMIN; if grep -q '\"name\":\"codemap_explore\"' \"$TMP/core_out\" && ! grep -q '\"name\":\"codemap_traverse\"' \"$TMP/core_out\"; then echo CORE_HAS_EXPLORE_NOT_TRAVERSE; fi; export CODEMAP_DATA=\"$TMP/d_full\"; export CODEMAP_MCP_PROFILE=full; (cat \"$TMP/reqs\"; sleep 2) | \"$CM\" serve > \"$TMP/full_out\" 2>/dev/null; echo \"full serve exit: $?\"; FULL_COUNT=$(grep -o '\"name\":\"codemap_[a-z_]*\"' \"$TMP/full_out\" | sort -u | wc -l | tr -d ' '); echo \"FULL_COUNT: $FULL_COUNT\"; grep -q '\"name\":\"codemap_annotate\"' \"$TMP/full_out\" && echo FULL_HAS_ADMIN; if grep -q '\"name\":\"codemap_explore\"' \"$TMP/full_out\" && grep -q '\"name\":\"codemap_traverse\"' \"$TMP/full_out\"; then echo FULL_HAS_EXPLORE_TRAVERSE; fi; export CODEMAP_DATA=\"$TMP/d_bad\"; export CODEMAP_MCP_PROFILE=bogus; \"$CM\" serve < /dev/null > \"$TMP/bad_out\" 2>\"$TMP/bad_err\"; echo \"bad profile exit: $?\"; grep -q 'Error: mcp profile' \"$TMP/bad_err\" && echo BAD_PROFILE_ERROR_OK; grep -q 'full\\.$' \"$TMP/bad_err\" && echo BAD_PROFILE_TRAILING_PERIOD || echo BAD_PROFILE_NO_TRAILING_PERIOD; exit 0"
     cwd: "."
 terminal:
     cols: 100
@@ -35,10 +36,10 @@ outcomes:
         screen:
             contains: "agent serve exit: 0"
     - id: agent_count_exact
-      description: profile=agent registers exactly the 22 taught/discovery tools
+      description: profile=agent registers exactly the 25 taught/discovery tools
       verify:
         screen:
-            contains: "AGENT_COUNT: 22"
+            contains: "AGENT_COUNT: 25"
     - id: agent_instructions_note
       description: the server instructions identify the exact taught agent profile
       verify:
@@ -54,21 +55,21 @@ outcomes:
       verify:
         screen:
             contains: "AGENT_EXCLUDES_ADMIN"
-    - id: agent_excludes_extended_orientation
-      description: agent does not register untaught codemap_explore or codemap_traverse
+    - id: agent_includes_explore_not_traverse
+      description: agent registers the now-taught codemap_explore but not full-only codemap_traverse
       verify:
         screen:
-            contains: "AGENT_EXCLUDES_EXPLORE_TRAVERSE"
+            contains: "AGENT_HAS_EXPLORE_NOT_TRAVERSE"
     - id: core_serve_clean_exit
       description: serve under profile=core completes the handshake and exits 0
       verify:
         screen:
             contains: "core serve exit: 0"
     - id: core_count_exact
-      description: profile=core registers exactly 22 tools
+      description: profile=core registers exactly 25 tools
       verify:
         screen:
-            contains: "CORE_COUNT: 22"
+            contains: "CORE_COUNT: 25"
     - id: full_serve_clean_exit
       description: serve under profile=full completes the handshake and exits 0
       verify:
@@ -104,11 +105,11 @@ outcomes:
       verify:
         screen:
             contains: "FULL_HAS_ADMIN"
-    - id: core_excludes_extended_orientation
-      description: core does not register full-only codemap_explore or codemap_traverse
+    - id: core_includes_explore_not_traverse
+      description: core registers the now-taught codemap_explore but not full-only codemap_traverse
       verify:
         screen:
-            contains: "CORE_EXCLUDES_EXPLORE_TRAVERSE"
+            contains: "CORE_HAS_EXPLORE_NOT_TRAVERSE"
     - id: full_includes_extended_orientation
       description: full registers codemap_explore and codemap_traverse
       verify:
@@ -129,4 +130,4 @@ outcomes:
       verify:
         screen:
             contains: "BAD_PROFILE_NO_TRAILING_PERIOD"
-contractHash: sha256:31c24d2de52d23b07f1364462b1d80963e2961b09325d1dbc89136e5efdda90f
+contractHash: sha256:a09d8314b5f72cd935afdbd1fac7d5046c280262c0adb78cea8d652b4d0e1c65

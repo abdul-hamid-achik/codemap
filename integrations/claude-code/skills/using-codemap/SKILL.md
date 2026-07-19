@@ -12,9 +12,10 @@ semantic search, exposed as codemap_context, codemap_impact and friends over MCP
 
 Map the loop to the tools:
   - orient on a repo    -> codemap_read_order (entrypoints + hubs, ranked)
-  - locate              -> codemap_semantic (by meaning) · codemap_find (by name) · codemap_grep (exact text: a literal, error string, route, env var)
+  - locate              -> codemap_semantic (by meaning) · codemap_find (by name) · codemap_grep (exact text: a literal, error string, route, env var) · codemap_explore (fuzzy intent → oriented structure)
+  - resolve a file:line -> codemap_symbol_at (a stack trace / diff hunk / grep hit → a selector; batch positions:[…] for a whole trace)
   - understand          -> codemap_context, codemap_impact, codemap_source
-  - before a risky edit -> codemap_risk, codemap_file_impact, codemap_dependencies
+  - before a risky edit -> codemap_risk, codemap_file_impact, codemap_dependencies, codemap_related_files
   - after every edit    -> codemap_review (it names the tests to run and folds one risk band)
   - calibrate trust     -> codemap_coverage (per-file precise call-graph coverage)
 
@@ -33,6 +34,8 @@ Index once, then query. The typical agent loop for understanding or fixing code:
   2. where to start            # codemap_read_order  (entrypoints + hubs ranked — orient on a new repo)
   3. find the entry point      # codemap_semantic "<intent>" OR codemap_find <name>
                                # OR codemap_grep "<exact text>" (string literal, error message, route, env-var)
+                               # codemap_explore "<intent>" (fuzzy goal → bounded context neighborhoods, source-light)
+                               # got a file:line? codemap_symbol_at <file>:<line> (batch positions:[…] resolves a whole trace)
   4. orient on a symbol        # codemap_context <sym>  (def + callers + callees + tests + test_commands, ONE call)
                                # codemap_context_batch <s1> <s2> …  (several symbols at once + shared callers)
   5. go deeper                 # codemap_impact (blast radius + runnable test_commands) · codemap_source (full body)
@@ -40,6 +43,7 @@ Index once, then query. The typical agent loop for understanding or fixing code:
                                # codemap_references (callback/RunE/registration value wiring; not callers)
   6. before a risky change     # codemap_risk <sym>  (how careful?)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
+                               # codemap_related_files <file>  (the other files structurally tied to this one)
   7. trace flow                # codemap_path <from> <to>  (shortest call chain)
   8. AFTER you edit            # codemap_review  (your diff → changed symbols, blast radius, the TESTS TO RUN)
   9. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)

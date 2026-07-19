@@ -390,10 +390,11 @@ func (d *Daemon) handleConn(conn net.Conn) {
 			// and encode the response OUTSIDE the lock so a slow socket doesn't
 			// stall the next reindex.
 			var r struct {
-				Reindex bool  `json:"reindex"`
-				Precise bool  `json:"precise"`
-				NoLSP   bool  `json:"no_lsp"`
-				Embed   *bool `json:"embed"`
+				Reindex      bool     `json:"reindex"`
+				Precise      bool     `json:"precise"`
+				NoLSP        bool     `json:"no_lsp"`
+				ExcludeExtra []string `json:"exclude_extra"`
+				Embed        *bool    `json:"embed"`
 			}
 			_ = json.Unmarshal(sc.Bytes(), &r)
 			embed := !d.cfg.NoEmbed
@@ -412,7 +413,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 				// it merely because the request omitted --precise; stop/restart the
 				// daemon with precise=false to opt out of that persistent mode.
 				precise := d.cfg.Precise || r.Precise
-				rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: precise, NoLSP: r.NoLSP}, embed)
+				rep, ierr := d.svc.Index(d.ctx, d.root, index.Options{Reindex: r.Reindex, Precise: precise, NoLSP: r.NoLSP, ExcludeExtra: r.ExcludeExtra}, embed)
 				if ierr != nil {
 					return reindexResult{err: ierr}
 				}

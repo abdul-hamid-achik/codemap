@@ -152,7 +152,7 @@ semantic:
       vector: 1.5
       text: 0.5
 mcp:
-  profile: full            # full (default, 42) | agent (21 taught + docs = 22) | core (compatible 22)
+  profile: full            # full (default, 42) | agent (24 taught + docs = 25) | core (compatible 25)
 ```
 
 ### Semantic owner

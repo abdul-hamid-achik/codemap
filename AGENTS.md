@@ -123,7 +123,7 @@ codemap/
 │   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
 │   │   └── import_index.go   #   fcheap cache restore (skip extract+embed)
 │   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app
-│   │                        #   (42 full; 22 agent/core — CODEMAP_MCP_PROFILE)
+│   │                        #   (42 full; 25 agent/core — CODEMAP_MCP_PROFILE)
 │   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
 │   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search/Path)
 │   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
@@ -317,16 +317,16 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (42, full profile; agent/core = 22): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `coverage`, `read_order`, `map`, `explore`, `traverse`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `grep`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Project-scoped tools generally take an optional `path` (project dir, defaults to cwd) and return JSON; `projects`, `docs`, and `doctor` take no project path. Callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `map` returns bounded source-path subsystems, directed cross-subsystem bridges, entrypoints, and hubs; `explore` turns an intent query into bounded semantic/name seeds plus exact context neighborhoods; `traverse` walks selected relationship domains from a required durable selector with per-edge confidence; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path; `coverage` returns per-file precise call-graph coverage rolled up by language/directory — the project-wide, per-file signal behind the per-query `call_graph` enum. `codemap_map`, `codemap_explore`, and `codemap_traverse` are registered only in the `full` MCP profile.
+- Tool names are `codemap_`-prefixed. Current set (43, full profile; agent/core = 25): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `file_context`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `coverage`, `read_order`, `map`, `explore`, `traverse`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `grep`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Project-scoped tools generally take an optional `path` (project dir, defaults to cwd) and return JSON; `projects`, `docs`, and `doctor` take no project path. Callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `map` returns bounded source-path subsystems, directed cross-subsystem bridges, entrypoints, and hubs; `explore` turns an intent query into bounded semantic/name seeds plus exact context neighborhoods; `traverse` walks selected relationship domains from a required durable selector with per-edge confidence; `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path; `coverage` returns per-file precise call-graph coverage rolled up by language/directory — the project-wide, per-file signal behind the per-query `call_graph` enum. `codemap_map` and `codemap_traverse` are registered only in the `full` MCP profile.
 - **Tool profiles**: `CODEMAP_MCP_PROFILE=agent|core|full` (env) / `mcp.profile` (config file) /
   `--profile` on `codemap serve` (flag) gates the registered set at the go-sdk `mcp.AddTool` call
   site (`Server.include`, `internal/mcp/server.go`) — registration-time only, zero behavior change
-  for any tool that IS registered. Default `full` is the back-compatible 42-tool expert surface.
-  `agent` is exactly the 21 tools named by `RenderPlaybook`/the workflow topic plus `codemap_docs`;
+  for any tool that IS registered. Default `full` is the back-compatible 43-tool expert surface.
+  `agent` is exactly the 24 tools named by `RenderPlaybook`/the workflow topic plus `codemap_docs`;
   `TestAgentProfileExactlyMatchesTaughtWorkflow` pins both inclusion and exclusion. `core` preserves
-  its shipped 22-tool inventory and currently matches `agent`, but is a separate compatibility
-  contract. The hermetic `BenchmarkProfileSchemaTax` measures 26,116 schema characters (≈6,529
-  chars/4 planning tokens) for agent/core versus 40,855 (≈10,214) for full on the current 42-tool
+  its shipped 25-tool inventory and currently matches `agent`, but is a separate compatibility
+  contract. The hermetic `BenchmarkProfileSchemaTax` measures 29,958 schema characters (≈7,490
+  schema-approx-tokens) for agent/core versus 41,709 (≈10,428) for full on the current 43-tool
   build. Lean profiles also help harnesses with a hard tool-count ceiling (Cursor caps
   ~40 across ALL MCP servers — `codemap agent setup cursor` defaults its generated entry to
   `core` for exactly this reason; every other harness stays `full`).
