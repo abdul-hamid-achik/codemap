@@ -608,14 +608,17 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// for edge resolution and the nodes to embed (embedded together in Pass 4, not
 	// per-file, so the slow Ollama calls batch and run concurrently).
 	//
-	// Go files (gosrc, pure go/parser — stateless and thread-safe) are extracted
-	// concurrently with a bounded worker pool. Graph writes serialize naturally
-	// on the single-connection pool (SetMaxOpenConns(1)), so the parallelism
-	// overlaps CPU-bound parsing with I/O-bound graph writes — a 3–5x speedup on
-	// Go-heavy repos. LSP-backed files (TypeScript, Python) stay sequential: the
-	// language-server connection is stateful and the parseWait retry loop paces
-	// codemap to the server's parse rate, so parallelism there needs careful
-	// benchmarking (planned for a later iteration).
+	// Go files (gosrc, pure go/parser — stateless and thread-safe) and LSP-backed
+	// files (TypeScript, JavaScript, Python, Vue) are both extracted concurrently
+	// with a bounded worker pool. Graph writes serialize naturally on the
+	// single-connection pool (SetMaxOpenConns(1)), so the parallelism overlaps the
+	// slow per-file work (go/parser; the LSP DidOpen+documentSymbol round trips)
+	// with I/O-bound graph writes. The language-server connection is safe for
+	// concurrent requests — each JSON-RPC call has a unique id, writes serialize
+	// on the conn mutex, and the read loop routes responses by id — and the
+	// Extractor holds no shared mutable state, so a bounded worker pool is safe;
+	// the server's parseWait retry already paces codemap to the parse rate under
+	// load (P4).
 	var pending []extract.Reference
 	var embedAcc []embedItem
 	var mu sync.Mutex   // guards res, embedAcc, pending across parallel Go workers
@@ -644,24 +647,57 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 
 	extractStart = time.Now()
 
-	// LSP files: sequential (stateful server connection).
-	for _, ft := range lspFiles {
-		if err := ctx.Err(); err != nil {
+	// LSP files: bounded concurrency (P4). Same pattern as the Go pass — a
+	// per-worker local Result merged under mu — overlapping the slow
+	// DidOpen+documentSymbol round trips while graph writes serialize on the
+	// single DB connection.
+	lspConcurrency := ix.cfg.ExtractConcurrency
+	if lspConcurrency < 1 {
+		lspConcurrency = 4
+	}
+	if lspConcurrency > len(lspFiles) {
+		lspConcurrency = len(lspFiles)
+	}
+	if lspConcurrency > 0 {
+		leg, lgctx := errgroup.WithContext(ctx)
+		leg.SetLimit(lspConcurrency)
+		for _, ft := range lspFiles {
+			ft := ft // capture
+			leg.Go(func() error {
+				if lgctx.Err() != nil {
+					return lgctx.Err()
+				}
+				if opts.OnFile != nil {
+					opts.OnFile(int(atomic.AddInt64(&fileDone, 1)), total, ft.rel)
+				}
+				localRes := &Result{}
+				changed, refs, toEmbed, err := ix.indexFile(lgctx, projectID, projectName, ft, opts, localRes)
+				mu.Lock()
+				res.FilesIndexed += localRes.FilesIndexed
+				res.FilesSkipped += localRes.FilesSkipped
+				res.FilesUnchanged += localRes.FilesUnchanged
+				res.Oversized = append(res.Oversized, localRes.Oversized...)
+				res.Generated = append(res.Generated, localRes.Generated...)
+				if len(localRes.Errors) > 0 {
+					res.Errors = append(res.Errors, localRes.Errors...)
+				}
+				if err != nil {
+					res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
+					// P2-07 (O108): unchanged LSP files are up-to-date too.
+					res.FilesUnchanged++
+					mu.Unlock()
+					return nil // don't fail the group — record and continue
+				}
+				if changed {
+					pending = append(pending, refs...)
+					embedAcc = append(embedAcc, toEmbed...)
+				}
+				mu.Unlock()
+				return nil
+			})
+		}
+		if err := leg.Wait(); err != nil {
 			return res, err
-		}
-		if opts.OnFile != nil {
-			opts.OnFile(int(atomic.AddInt64(&fileDone, 1)), total, ft.rel)
-		}
-		changed, refs, toEmbed, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
-		if err != nil {
-			res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
-			// P2-07 (O108): unchanged LSP files are up-to-date too.
-			res.FilesUnchanged++
-			continue
-		}
-		if changed {
-			pending = append(pending, refs...)
-			embedAcc = append(embedAcc, toEmbed...)
 		}
 	}
 
@@ -1656,9 +1692,44 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 	})
 
 	type preciseEdgeIDs struct{ from, to int64 }
+
+	// Phase 1 (P5): gather callHierarchy edges for every file concurrently — the
+	// slow LSP round trips — without touching the DB. posTo is read-only here and
+	// the position join stays sequential in phase 2, so only the CallEdges fan-out
+	// is parallel. The documents were opened during extraction and stay open, so
+	// callHierarchy can run before the transactional supersede below.
+	type fileCallEdges struct {
+		edges []extract.CallEdge
+		err   error
+	}
+	gathered := make([]fileCallEdges, len(files))
+	lspConcurrency := ix.cfg.ExtractConcurrency
+	if lspConcurrency < 1 {
+		lspConcurrency = 4
+	}
+	if lspConcurrency > len(files) {
+		lspConcurrency = len(files)
+	}
+	if lspConcurrency > 0 {
+		eg, gctx := errgroup.WithContext(ctx)
+		eg.SetLimit(lspConcurrency)
+		for i, current := range files {
+			i, current := i, current
+			eg.Go(func() error {
+				edges, cErr := resolvers[current.lang].CallEdges(gctx, current.file)
+				gathered[i] = fileCallEdges{edges: edges, err: cErr}
+				return nil
+			})
+		}
+		_ = eg.Wait()
+	}
+
+	// Phase 2: apply each file's gathered edges to the single transaction
+	// sequentially — supersede prior coverage + exact calls, join positions, write
+	// the new exact edges, and re-mark coverage — preserving the per-language
+	// atomicity and coverage-downgrade logic exactly.
 	upgraded, skipped, failedFiles := 0, 0, 0
-	for _, current := range files {
-		cr := resolvers[current.lang]
+	for i, current := range files {
 		file := current.file
 		// Supersede prior coverage for this file, then re-mark it only after
 		// every indexed callable and every internal position join succeeds. An
@@ -1675,12 +1746,13 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 			res.PreciseNote = "LSP precise supersede failed: " + clearErr.Error()
 			return clearErr
 		}
-		edges, cErr := cr.CallEdges(ctx, file)
-		if cErr != nil {
-			appendPreciseFileError(res, file, fmt.Errorf("LSP call hierarchy: %w", cErr))
+		fe := gathered[i]
+		if fe.err != nil {
+			appendPreciseFileError(res, file, fmt.Errorf("LSP call hierarchy: %w", fe.err))
 			failedFiles++
 			continue
 		}
+		edges := fe.edges
 		pending := make([]preciseEdgeIDs, 0, len(edges))
 		joinFailures := 0
 		joinSamples := make([]string, 0, 3)
