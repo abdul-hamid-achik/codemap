@@ -38,6 +38,7 @@ node_modules/
 .idea/
 .vscode/
 .claude/
+.qwen/
 
 # Env / secrets — never commit
 .env
