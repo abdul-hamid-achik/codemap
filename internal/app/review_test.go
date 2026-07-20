@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,11 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 	"github.com/google/jsonschema-go/jsonschema"
 )
+
+// updateReviewContract regenerates the review v1 golden contract fixture. Run
+// with `go test ./internal/app -run TestReviewContractV1 -update-review-contract`
+// after an intentional, backwards-compatible change to the review report shape.
+var updateReviewContract = flag.Bool("update-review-contract", false, "regenerate testdata/contracts/codemap.review.v1.json")
 
 // reviewGit runs a git command in dir, failing the test on error.
 func reviewGit(t *testing.T, dir string, args ...string) {
@@ -1166,6 +1172,13 @@ func TestReviewContractV1(t *testing.T) {
 	}
 	got = append(got, '\n')
 	goldenPath := filepath.Join("testdata", "contracts", "codemap.review.v1.json")
+	if *updateReviewContract {
+		if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("regenerated %s", goldenPath)
+		return
+	}
 	want, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatal(err)

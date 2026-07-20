@@ -170,6 +170,43 @@
       "items": {
         "$ref": "#/$defs/next_action"
       }
+    },
+    "gate": {
+      "type": "object",
+      "description": "Computed CI-gate signal so a harness reproduces the CLI --fail-on-risk/--fail-on-untested exit-6 logic from the report alone.",
+      "required": ["risk_level", "analysis_complete", "would_fail_on"],
+      "properties": {
+        "risk_level": {
+          "type": "string"
+        },
+        "analysis_complete": {
+          "type": "boolean"
+        },
+        "would_fail_on": {
+          "type": "object",
+          "required": ["incomplete_analysis", "untested", "risk_at_or_above"],
+          "properties": {
+            "incomplete_analysis": {
+              "type": "boolean"
+            },
+            "untested": {
+              "type": "boolean"
+            },
+            "risk_at_or_above": {
+              "type": "object",
+              "required": ["low", "medium", "high"],
+              "properties": {
+                "low": {"type": "boolean"},
+                "medium": {"type": "boolean"},
+                "high": {"type": "boolean"}
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true,

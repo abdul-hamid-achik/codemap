@@ -110,6 +110,9 @@ type ReviewReport struct {
 	Note             string                  `json:"note,omitempty"`
 	TestCommands     []string                `json:"test_commands,omitempty"`
 	Next             []NextAction            `json:"next,omitempty"`
+	// Gate is the computed CI-gate signal so a harness reproduces the CLI
+	// --fail-on-risk/--fail-on-untested exit-6 logic from the report alone (D9).
+	Gate *ReviewGate `json:"gate,omitempty"`
 }
 
 // Review computes diff-scoped impact + test selection for the working tree. It
@@ -117,7 +120,15 @@ type ReviewReport struct {
 // hunk→symbol resolution, and Impact for each changed symbol's blast radius and
 // covering tests. Never errors on a non-repo or unindexed project — it degrades to
 // a plain changed-file list with a Note so an agent always gets an actionable answer.
-func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
+func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error) {
+	// Attach the computed CI-gate signal on every return path so MCP/CLI
+	// consumers can reproduce the --fail-on-risk/--fail-on-untested logic from
+	// the report alone (D9).
+	defer func() {
+		if rep != nil {
+			rep.Gate = rep.ComputeGate()
+		}
+	}()
 	if opts.Depth <= 0 {
 		opts.Depth = 3
 	}
@@ -138,7 +149,7 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (*ReviewReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep := &ReviewReport{
+	rep = &ReviewReport{
 		SchemaVersion: 1, Project: name, Mode: mode, Since: opts.Since, Depth: opts.Depth,
 		ChangedFiles: []ReviewFile{}, ChangedSymbols: []SymbolRef{},
 		BlastRadius: []ImpactNode{}, CoveringTests: []ImpactNode{}, UntestedSymbols: []SymbolRef{},

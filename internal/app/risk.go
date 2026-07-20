@@ -34,6 +34,9 @@ type RiskReport struct {
 	Note       string               `json:"note,omitempty"`
 	Candidates []AmbiguityCandidate `json:"candidates,omitempty"` // the merged definition set behind Note; re-query with candidates[i].selector
 	Next       []NextAction         `json:"next,omitempty"`
+	// Gate is the computed --fail-on-risk signal so a harness reproduces the CLI
+	// gate logic from the report alone (D9).
+	Gate *RiskGate `json:"gate,omitempty"`
 }
 
 // Risk computes a change-risk score for a symbol from its impact analysis. Reuses
@@ -56,8 +59,10 @@ func (svc *Service) RiskBySelector(cwd string, selector SymbolSelector, depth in
 	return riskFromImpact(cwd, imp.Symbol, depth, imp), nil
 }
 
-func riskFromImpact(cwd, symbol string, depth int, imp *ImpactReport) *RiskReport {
-	rep := &RiskReport{Symbol: imp.Symbol, Selector: imp.Selector, Project: imp.Project, Found: imp.Found, Factors: []RiskFactor{}}
+func riskFromImpact(cwd, symbol string, depth int, imp *ImpactReport) (rep *RiskReport) {
+	rep = &RiskReport{Symbol: imp.Symbol, Selector: imp.Selector, Project: imp.Project, Found: imp.Found, Factors: []RiskFactor{}}
+	// Attach the computed --fail-on-risk gate signal on every return path (D9).
+	defer func() { rep.Gate = rep.ComputeGate() }()
 	if !imp.Found {
 		return rep
 	}

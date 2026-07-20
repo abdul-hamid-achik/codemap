@@ -89,5 +89,18 @@
       },
       "why": "run the selected regression tests that cover this changeset"
     }
-  ]
+  ],
+  "gate": {
+    "risk_level": "unknown",
+    "analysis_complete": false,
+    "would_fail_on": {
+      "incomplete_analysis": true,
+      "untested": false,
+      "risk_at_or_above": {
+        "low": false,
+        "medium": false,
+        "high": false
+      }
+    }
+  }
 }
