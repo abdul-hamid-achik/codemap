@@ -1015,13 +1015,25 @@ func (s *Store) pathFromNodes(projectID int64, starts, targets []int64, maxDepth
 	if len(starts) == 0 || len(targets) == 0 {
 		return nil, nil
 	}
-	for _, id := range append(append([]int64(nil), starts...), targets...) {
-		n, err := s.GetNode(id)
-		if errors.Is(err, ErrNotFound) || (err == nil && n.ProjectID != projectID) {
+	// Validate every start/target id exists and belongs to this project in one
+	// batched fetch instead of one GetNode per id.
+	want := make(map[int64]bool, len(starts)+len(targets))
+	check := append(append([]int64(nil), starts...), targets...)
+	for _, id := range check {
+		want[id] = true
+	}
+	endpoints, err := s.nodesByIDs(check)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]Node, len(endpoints))
+	for _, n := range endpoints {
+		byID[n.ID] = n
+	}
+	for id := range want {
+		n, ok := byID[id]
+		if !ok || n.ProjectID != projectID {
 			return nil, nil
-		}
-		if err != nil {
-			return nil, err
 		}
 	}
 	targetSet := make(map[int64]bool, len(targets))
@@ -1072,13 +1084,23 @@ func (s *Store) reconstructPath(end int64, parent map[int64]int64) ([]Node, erro
 	for i, j := 0, len(ids)-1; i < j; i, j = i+1, j-1 {
 		ids[i], ids[j] = ids[j], ids[i]
 	}
+	// Batch-fetch all path nodes in chunked IN(…) queries instead of one GetNode
+	// per node, then reassemble in path order (nodesByIDs returns storage order).
+	nodes, err := s.nodesByIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]Node, len(nodes))
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
 	out := make([]Node, 0, len(ids))
 	for _, id := range ids {
-		n, err := s.GetNode(id)
-		if err != nil {
-			return nil, err
+		n, ok := byID[id]
+		if !ok {
+			return nil, ErrNotFound
 		}
-		out = append(out, *n)
+		out = append(out, n)
 	}
 	return out, nil
 }
