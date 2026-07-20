@@ -232,8 +232,8 @@ func symbolOrAtArgs(cmd *cobra.Command, args []string) error {
 }
 
 func contextOrAtArgs(cmd *cobra.Command, args []string) error {
-	at, _ := cmd.Flags().GetString("at")
-	if at != "" {
+	ats, _ := cmd.Flags().GetStringArray("at")
+	if len(ats) > 0 {
 		if len(args) > 0 {
 			return fmt.Errorf("--at and positional symbol arguments are mutually exclusive")
 		}
@@ -430,6 +430,32 @@ func selectorFromAtFlag(svc *app.Service, cwd string, cmd *cobra.Command) (*app.
 		return nil, notFoundError("no symbol found at "+at, "check the file path and line number")
 	}
 	return rep.Selector, nil
+}
+
+// selectorsFromAtFlags resolves every --at <file>:<line> on the context command
+// (a repeatable flag) to exact source selectors, so several definitions can be
+// batched in one call (D11). An empty list means no --at was given.
+func selectorsFromAtFlags(svc *app.Service, cwd string, cmd *cobra.Command) ([]app.SymbolSelector, error) {
+	ats, _ := cmd.Flags().GetStringArray("at")
+	if len(ats) == 0 {
+		return nil, nil
+	}
+	selectors := make([]app.SymbolSelector, 0, len(ats))
+	for _, at := range ats {
+		file, line, err := parseFileLine(at)
+		if err != nil {
+			return nil, err
+		}
+		rep, err := svc.SymbolAt(cwd, file, line)
+		if err != nil {
+			return nil, err
+		}
+		if rep.Resolution == "none" || rep.Selector == nil {
+			return nil, notFoundError("no symbol found at "+at, "check the file path and line number")
+		}
+		selectors = append(selectors, *rep.Selector)
+	}
+	return selectors, nil
 }
 
 func relationPreciseRequested(cmd *cobra.Command) bool {

@@ -366,28 +366,36 @@ func TestPathReportAnsweredDistinguishesMissingEndpoints(t *testing.T) {
 }
 
 func TestAtSelectorRejectsPositionalSymbols(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		args func(*cobra.Command, []string) error
-	}{
-		{name: "single symbol commands", args: symbolOrAtArgs},
-		{name: "context", args: contextOrAtArgs},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd := &cobra.Command{Use: "query"}
-			cmd.Flags().String("at", "", "")
-			if err := cmd.Flags().Set("at", "main.go:4"); err != nil {
-				t.Fatal(err)
-			}
-			if err := tc.args(cmd, nil); err != nil {
-				t.Fatalf("--at without a positional symbol should be valid: %v", err)
-			}
-			err := tc.args(cmd, []string{"Helper"})
-			if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-				t.Fatalf("--at plus positional symbol error = %v, want mutual-exclusion guidance", err)
-			}
-		})
-	}
+	t.Run("single symbol commands", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "query"}
+		cmd.Flags().String("at", "", "")
+		if err := cmd.Flags().Set("at", "main.go:4"); err != nil {
+			t.Fatal(err)
+		}
+		if err := symbolOrAtArgs(cmd, nil); err != nil {
+			t.Fatalf("--at without a positional symbol should be valid: %v", err)
+		}
+		err := symbolOrAtArgs(cmd, []string{"Helper"})
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("--at plus positional symbol error = %v, want mutual-exclusion guidance", err)
+		}
+	})
+	// context's --at is a repeatable StringArray (D11: several --at batch exact
+	// definitions), so its validator reads the array form.
+	t.Run("context", func(t *testing.T) {
+		cmd := &cobra.Command{Use: "query"}
+		cmd.Flags().StringArray("at", nil, "")
+		if err := cmd.Flags().Set("at", "main.go:4"); err != nil {
+			t.Fatal(err)
+		}
+		if err := contextOrAtArgs(cmd, nil); err != nil {
+			t.Fatalf("--at without a positional symbol should be valid: %v", err)
+		}
+		err := contextOrAtArgs(cmd, []string{"Helper"})
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("--at plus positional symbol error = %v, want mutual-exclusion guidance", err)
+		}
+	})
 }
 
 func TestReviewDeletionGuidanceRunsTestsBeforeReindex(t *testing.T) {

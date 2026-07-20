@@ -195,7 +195,7 @@ func init() {
 	requiredKeysCmd.Flags().String("via-vault", "", "use all of `tvault -p <project> list` as the candidate keys (value-free)")
 	requiredKeysCmd.Flags().String("prefix", "", "with --via-vault, restrict candidates to this prefix")
 	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
-	contextCmd.Flags().String("at", "", "select one definition by source position instead of merging a name: <file>:<line>")
+	contextCmd.Flags().StringArray("at", nil, "select definition(s) by source position (repeatable): <file>:<line> — pass several to batch exact definitions")
 	contextCmd.Flags().Bool("brief", false, "drop each definition's source body, keeping signature/doc/location (source_omitted:true) — cheaper first look at a hub symbol; follow up with 'codemap source' for the body you actually need")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")

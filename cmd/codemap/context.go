@@ -35,22 +35,23 @@ func runContext(cmd *cobra.Command, args []string) error {
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	selector, err := selectorFromAtFlag(svc, cwd, cmd)
+	selectors, err := selectorsFromAtFlags(svc, cwd, cmd)
 	if err != nil {
 		return err
 	}
-	if selector == nil && len(args) == 0 {
+	if len(selectors) == 0 && len(args) == 0 {
 		return fmt.Errorf("context needs at least one <symbol> or --at <file>:<line>")
 	}
-	if selector != nil && len(args) > 1 {
-		return fmt.Errorf("context --at selects one definition and cannot be combined with a symbol batch")
-	}
-	if len(args) > 1 {
-		return runContextBatch(cmd, svc, cwd, args, depth, brief)
+	// contextOrAtArgs (the cobra Args validator) already rejected a mix of --at
+	// and positional symbols, so here it's either symbols or --at selectors.
+	// Batch when there are several inputs (multiple symbols, or multiple --at
+	// selectors) — one call covers them all plus their shared callers (D11).
+	if len(args) > 1 || len(selectors) > 1 {
+		return runContextBatch(cmd, svc, cwd, args, selectors, depth, brief)
 	}
 	var rep *app.ContextReport
-	if selector != nil {
-		rep, err = svc.ContextBySelectorWithContext(cmd.Context(), cwd, *selector, depth, brief)
+	if len(selectors) == 1 {
+		rep, err = svc.ContextBySelectorWithContext(cmd.Context(), cwd, selectors[0], depth, brief)
 	} else {
 		rep, err = svc.ContextWithContext(cmd.Context(), cwd, args[0], depth, brief)
 	}
@@ -58,7 +59,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !rep.Found {
-		if selector != nil {
+		if len(selectors) == 1 {
 			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
 		}
 		return notFoundError(
@@ -141,8 +142,8 @@ func runContext(cmd *cobra.Command, args []string) error {
 
 // runContextBatch renders the one-call bundle for several symbols plus the callers
 // they share (likely shared entrypoints / coupling). --json carries the full batch.
-func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, depth int, brief bool) error {
-	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, nil, depth, brief)
+func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, selectors []app.SymbolSelector, depth int, brief bool) error {
+	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, selectors, depth, brief)
 	if err != nil {
 		return err
 	}
