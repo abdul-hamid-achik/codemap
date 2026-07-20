@@ -417,6 +417,10 @@ func (d *Daemon) handleConn(conn net.Conn) {
 				if ierr != nil {
 					return reindexResult{err: ierr}
 				}
+				// A full reindex (a separate Indexer) rewrote the DB; drop the
+				// incremental node-index cache so the next watcher sync rebuilds
+				// it fresh instead of serving stale nodes (P7).
+				d.ix.InvalidateNodeIndex()
 				d.mu.Lock()
 				d.info.LastReindexAt = nowRFC3339()
 				d.mu.Unlock()

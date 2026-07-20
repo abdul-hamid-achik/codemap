@@ -144,6 +144,12 @@ type Indexer struct {
 	exclude    []string // effective skip globs: cfg.Exclude + cfg.ExcludeExtra
 	extractors map[string]extract.Extractor
 	closers    []io.Closer // stateful extractors (e.g. spawned language servers) to shut down
+	// cachedNI is the incrementally-maintained node index reused across a
+	// long-lived Indexer's IndexFiles calls (the daemon's), avoiding a full
+	// ProjectNodes reload on every watcher event (P7). Nil until first built;
+	// InvalidateNodeIndex drops it after an external full reindex so it never
+	// serves stale nodes.
+	cachedNI *nodeIndex
 }
 
 // registerLSP spawns and registers a language-server-backed extractor for each
@@ -804,6 +810,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	var pending []extract.Reference
 	var embedAcc []embedItem
 	var importFiles []fileTask
+	var touchedFiles []string // files whose nodes changed — used to refresh the cached node index (P7)
 	preciseRelevant, goTouched := false, false
 	for _, rel := range rels {
 		lang := extract.LanguageForPath(rel)
@@ -911,6 +918,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 						return res, err
 					}
 				}
+				touchedFiles = append(touchedFiles, rel)
 				res.FilesDeleted++
 			}
 			continue // a non-NotExist stat error: be conservative, skip
@@ -934,6 +942,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 		if changed {
 			pending = append(pending, refs...)
 			embedAcc = append(embedAcc, toEmbed...)
+			touchedFiles = append(touchedFiles, rel)
 		}
 		importFiles = append(importFiles, ft)
 	}
@@ -942,13 +951,16 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	if err := ix.writeImportEdgesForFiles(ctx, projectID, importFiles, impIdx); err != nil {
 		return res, err
 	}
-	ni, err := ix.buildNodeIndex(projectID)
-	if err != nil {
+	// Refresh the incrementally-maintained node index for the files whose nodes
+	// changed, instead of reloading every node from the DB (P7). The first call
+	// builds the cache fully; later calls drop+re-add only the touched files.
+	if err := ix.refreshCachedNodeIndex(projectID, touchedFiles); err != nil {
 		return res, err
 	}
-	if _, err := ix.resolveEdgesWith(ctx, projectID, pending, ni); err != nil {
+	if _, err := ix.resolveEdgesWith(ctx, projectID, pending, ix.cachedNI); err != nil {
 		return res, err
 	}
+	ni := ix.cachedNI
 	if opts.Precise && preciseRelevant {
 		start := time.Now()
 		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni); err != nil {
@@ -1390,6 +1402,92 @@ func (ix *Indexer) buildNodeIndex(projectID int64) (*nodeIndex, error) {
 		ni.dirOf[n.ID] = filepath.Dir(n.FilePath)
 	}
 	return ni, nil
+}
+
+// addNodes folds nodes into the index, updating every map. Used to refresh the
+// cached index with a file's freshly-indexed nodes during an incremental update.
+func (ni *nodeIndex) addNodes(nodes []graph.Node) {
+	for _, n := range nodes {
+		ni.nodes = append(ni.nodes, n)
+		if n.FQN != "" {
+			ni.fqnTo[n.FQN] = n.ID
+		}
+		if n.Kind == graph.KindFile {
+			ni.fqnTo[n.FilePath] = n.ID
+		}
+		if n.Symbol != "" {
+			ni.symTo[n.Symbol] = append(ni.symTo[n.Symbol], n.ID)
+		}
+		ni.dirOf[n.ID] = filepath.Dir(n.FilePath)
+	}
+}
+
+// removeFiles drops every cached node whose FilePath is in files and rebuilds
+// the lookup maps from the survivors. Used to discard a changed file's stale
+// nodes before re-adding its fresh nodes during an incremental cache refresh.
+func (ni *nodeIndex) removeFiles(files []string) {
+	if len(files) == 0 {
+		return
+	}
+	fileSet := make(map[string]bool, len(files))
+	for _, f := range files {
+		fileSet[f] = true
+	}
+	kept := make([]graph.Node, 0, len(ni.nodes))
+	for _, n := range ni.nodes {
+		if !fileSet[n.FilePath] {
+			kept = append(kept, n)
+		}
+	}
+	ni.nodes = kept
+	ni.fqnTo = make(map[string]int64, len(kept))
+	ni.symTo = make(map[string][]int64, len(kept))
+	ni.dirOf = make(map[int64]string, len(kept))
+	for _, n := range kept {
+		if n.FQN != "" {
+			ni.fqnTo[n.FQN] = n.ID
+		}
+		if n.Kind == graph.KindFile {
+			ni.fqnTo[n.FilePath] = n.ID
+		}
+		if n.Symbol != "" {
+			ni.symTo[n.Symbol] = append(ni.symTo[n.Symbol], n.ID)
+		}
+		ni.dirOf[n.ID] = filepath.Dir(n.FilePath)
+	}
+}
+
+// refreshCachedNodeIndex keeps ix.cachedNI consistent with the DB after an
+// incremental index touched files: it drops their stale nodes and re-adds their
+// current nodes. With no cache yet it builds one fully. This is what lets a
+// long-lived Indexer (the daemon) reuse the node index across watcher events
+// instead of reloading every node each time (P7).
+func (ix *Indexer) refreshCachedNodeIndex(projectID int64, touchedFiles []string) error {
+	if ix.cachedNI == nil {
+		ni, err := ix.buildNodeIndex(projectID)
+		if err != nil {
+			return err
+		}
+		ix.cachedNI = ni
+		return nil
+	}
+	ix.cachedNI.removeFiles(touchedFiles)
+	for _, f := range touchedFiles {
+		nodes, err := ix.graph.NodesInFile(projectID, f)
+		if err != nil {
+			return err
+		}
+		ix.cachedNI.addNodes(nodes)
+	}
+	return nil
+}
+
+// InvalidateNodeIndex drops the cached node index so the next use rebuilds it
+// from the DB. The daemon calls this after a full reindex (performed by a
+// separate Indexer on the same DB) so the incremental cache never serves stale
+// nodes.
+func (ix *Indexer) InvalidateNodeIndex() {
+	ix.cachedNI = nil
 }
 
 // resolveEdges links references (from changed files) to target nodes by name,
