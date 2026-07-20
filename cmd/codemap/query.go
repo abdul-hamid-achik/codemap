@@ -16,8 +16,11 @@ var (
 	callersCmd = &cobra.Command{
 		Use:   "callers [<symbol>]",
 		Short: "List functions/methods that call a symbol",
-		Args:  symbolOrAtArgs,
-		RunE:  runCallers,
+		Example: `  codemap callers Run
+  codemap callers --at internal/app/review.go:120
+  codemap callers Run --precise --json`,
+		Args: symbolOrAtArgs,
+		RunE: runCallers,
 	}
 	referencesCmd = &cobra.Command{
 		Use:   "references [<symbol>]",
@@ -28,26 +31,37 @@ This follows value-reference edges, not calls. Each result is the enclosing
 function, method, or file scope; it is not an exact expression line. Coverage
 and confidence remain explicit because an empty result does not prove there is
 no dynamic or otherwise-unindexed wiring.`,
+		Example: `  codemap references Handler
+  codemap references --at internal/app/review.go:120`,
 		Args: symbolOrAtArgs,
 		RunE: runReferences,
 	}
 	calleesCmd = &cobra.Command{
 		Use:   "callees [<symbol>]",
 		Short: "List functions/methods that a symbol calls",
-		Args:  symbolOrAtArgs,
-		RunE:  runCallees,
+		Example: `  codemap callees Run
+  codemap callees --at internal/app/review.go:120`,
+		Args: symbolOrAtArgs,
+		RunE: runCallees,
 	}
 	impactCmd = &cobra.Command{
 		Use:   "impact [<symbol>]",
 		Short: "Impact analysis: blast radius (transitive callers) + test coverage",
-		Args:  symbolOrAtArgs,
-		RunE:  runImpact,
+		Example: `  codemap impact Run
+  codemap impact --at internal/app/review.go:120 --depth 5
+  codemap impact Run --json`,
+		Args: symbolOrAtArgs,
+		RunE: runImpact,
 	}
 	reviewCmd = &cobra.Command{
 		Use:   "review",
 		Short: "Diff-scoped impact + test selection: what your changes affect, and which tests to run",
-		Args:  cobra.NoArgs,
-		RunE:  runReview,
+		Example: `  codemap review
+  codemap review --staged
+  codemap review --since main --json
+  codemap review --fail-on-risk medium --fail-on-untested`,
+		Args: cobra.NoArgs,
+		RunE: runReview,
 	}
 	readOrderCmd = &cobra.Command{
 		Use:   "read-order [query]",
@@ -64,20 +78,26 @@ no dynamic or otherwise-unindexed wiring.`,
 	fileImpactCmd = &cobra.Command{
 		Use:   "file-impact <file>",
 		Short: "File-level impact: who depends on this file, its blast radius, and whether it's safe to change/delete",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runFileImpact,
+		Example: `  codemap file-impact internal/app/review.go
+  codemap file-impact internal/app/review.go --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: runFileImpact,
 	}
 	fileContextCmd = &cobra.Command{
 		Use:   "file-context <file>",
 		Short: "Orient on a file in one call: its symbols, file-level impact (dependents/blast/tests/delete verdict), and related files",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runFileContext,
+		Example: `  codemap file-context internal/app/review.go
+  codemap file-context internal/app/review.go --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: runFileContext,
 	}
 	riskCmd = &cobra.Command{
 		Use:   "risk [<symbol>]",
 		Short: "Change-risk score: untested + fan-in + cross-package spread + ambiguity, combined into one number",
-		Args:  symbolOrAtArgs,
-		RunE:  runRisk,
+		Example: `  codemap risk Run
+  codemap risk --at internal/app/review.go:120`,
+		Args: symbolOrAtArgs,
+		RunE: runRisk,
 	}
 	symbolAtCmd = &cobra.Command{
 		Use:   "symbol-at <file>:<line> [<file>:<line>...]",
@@ -105,8 +125,10 @@ no dynamic or otherwise-unindexed wiring.`,
 		Use:     "semantic <query>",
 		Aliases: []string{"search"}, // matches the studio "Search" tab and the common mental model
 		Short:   "Semantic search across the code graph by meaning",
-		Args:    cobra.MinimumNArgs(1),
-		RunE:    runSemantic,
+		Example: `  codemap semantic "authentication logic"
+  codemap semantic "where is the config loaded" --top 5`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: runSemantic,
 	}
 	hotspotsCmd = &cobra.Command{
 		Use:   "hotspots",
@@ -141,8 +163,10 @@ result is not strong enough for the decision you are making.`,
 	findCmd = &cobra.Command{
 		Use:   "find <query>",
 		Short: "Find symbols by name (fast, offline — no embeddings needed)",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  runFind,
+		Example: `  codemap find Handler
+  codemap find Review --top 20`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: runFind,
 	}
 	grepCmd = &cobra.Command{
 		Use:   "grep <pattern>",
@@ -168,14 +192,19 @@ Distinct from 'codemap semantic' (meaning/similarity search over embeddings) and
 	sourceCmd = &cobra.Command{
 		Use:   "source [<symbol>]",
 		Short: "Print a symbol's source code (the body behind its signature)",
-		Args:  symbolOrAtArgs,
-		RunE:  runSource,
+		Example: `  codemap source Run
+  codemap source --at internal/app/review.go:120`,
+		Args: symbolOrAtArgs,
+		RunE: runSource,
 	}
 	contextCmd = &cobra.Command{
 		Use:   "context [<symbol>...]",
 		Short: "Everything about a symbol in one call: definition, callers, callees, tests, notes (pass several for a batch + shared callers)",
-		Args:  contextOrAtArgs,
-		RunE:  runContext,
+		Example: `  codemap context Run
+  codemap context Run Helper --json
+  codemap context --at internal/app/review.go:120 --brief`,
+		Args: contextOrAtArgs,
+		RunE: runContext,
 	}
 	projectsCmd = &cobra.Command{
 		Use:   "projects",

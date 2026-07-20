@@ -66,9 +66,13 @@ type SemanticReport struct {
 // fusionWeights resolves the vector/text weight pair for query given the
 // resolved semantic.fusion config, and the profile name to surface in the
 // report.
-func (svc *Service) fusionWeights(query string) (profile string, vectorWeight, textWeight float64) {
+func (svc *Service) fusionWeights(query, fusionOverride string) (profile string, vectorWeight, textWeight float64) {
 	cfg := svc.s.Config.Semantic
-	if cfg.Fusion == "balanced" {
+	fusion := fusionOverride
+	if fusion == "" {
+		fusion = cfg.Fusion
+	}
+	if fusion == "balanced" {
 		return "balanced", 1.0, 1.0
 	}
 	switch classifyQuery(query) {
@@ -81,8 +85,17 @@ func (svc *Service) fusionWeights(query string) (profile string, vectorWeight, t
 	}
 }
 
-// Semantic runs a meaning-based search over the project's embedded nodes.
+// Semantic runs a meaning-based search over the project's embedded nodes using
+// the configured backend/fusion. Per-call overrides are available via
+// SemanticWith (used by the MCP surface so an agent can force a backend/fusion
+// without mutating the server's shared config).
 func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (*SemanticReport, error) {
+	return svc.SemanticWith(ctx, cwd, query, topK, "", "")
+}
+
+// SemanticWith is Semantic with explicit per-call backend/fusion overrides; an
+// empty override falls back to the configured value.
+func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK int, backendOverride, fusionOverride string) (*SemanticReport, error) {
 	if topK <= 0 {
 		topK = 10
 	}
@@ -94,7 +107,10 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	if !found {
 		return rep, nil
 	}
-	backend := strings.ToLower(strings.TrimSpace(svc.s.Config.Semantic.Backend))
+	backend := strings.ToLower(strings.TrimSpace(backendOverride))
+	if backend == "" {
+		backend = strings.ToLower(strings.TrimSpace(svc.s.Config.Semantic.Backend))
+	}
 	if backend == "" {
 		backend = "fallback"
 	}
@@ -162,7 +178,7 @@ func (svc *Service) Semantic(ctx context.Context, cwd, query string, topK int) (
 	// shape (identifier vs natural-language), or stays equal-weighted under
 	// semantic.fusion: balanced. Fall back to pure vector if the index has no
 	// text index (older indexes) so search never hard-fails.
-	profile, vw, tw := svc.fusionWeights(query)
+	profile, vw, tw := svc.fusionWeights(query, fusionOverride)
 	rep.Fusion = profile
 	hits, err := vstore.HybridSearchWeighted(vecs[0], query, topK, name, vw, tw)
 	if err != nil {

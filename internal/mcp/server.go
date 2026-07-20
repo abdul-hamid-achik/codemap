@@ -298,6 +298,11 @@ type pathInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to the server working directory"`
 }
 
+type initInput struct {
+	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to the server working directory"`
+	Local bool   `json:"local,omitempty" jsonschema:"create a repo-local .codemap marker so project config is discovered from subdirectories (graph/vector data still lives in the central store)"`
+}
+
 type indexInput struct {
 	Path         string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Reindex      bool     `json:"reindex,omitempty" jsonschema:"wipe and rebuild the whole index"`
@@ -308,9 +313,11 @@ type indexInput struct {
 }
 
 type semanticInput struct {
-	Query string `json:"query" jsonschema:"natural-language description of the code to find"`
-	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	TopK  int    `json:"top_k,omitempty" jsonschema:"maximum results (default 10)"`
+	Query   string `json:"query" jsonschema:"natural-language description of the code to find"`
+	Path    string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	TopK    int    `json:"top_k,omitempty" jsonschema:"maximum results (default 10)"`
+	Backend string `json:"backend,omitempty" jsonschema:"override the configured semantic backend for this call only: fallback | local | vecgrep (empty = use the server config)"`
+	Fusion  string `json:"fusion,omitempty" jsonschema:"override the hybrid vector/text weighting for this call only: auto | balanced (empty = use the server config)"`
 }
 
 type symbolQueryInput struct {
@@ -814,8 +821,8 @@ func (s *Server) register() {
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
 
-func (s *Server) handleInit(_ context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {
-	rep, err := s.svc.Init(cwdOf(in.Path), false)
+func (s *Server) handleInit(_ context.Context, _ *sdkmcp.CallToolRequest, in initInput) (*sdkmcp.CallToolResult, any, error) {
+	rep, err := s.svc.Init(cwdOf(in.Path), in.Local)
 	return result(rep, err)
 }
 
@@ -991,7 +998,7 @@ func (s *Server) handleSemantic(ctx context.Context, _ *sdkmcp.CallToolRequest, 
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.Semantic(ctx, cwdOf(in.Path), in.Query, in.TopK)
+	rep, err := s.svc.SemanticWith(ctx, cwdOf(in.Path), in.Query, in.TopK, in.Backend, in.Fusion)
 	return result(rep, err)
 }
 

@@ -19,6 +19,8 @@ Confirmed relationships are usable exact-file evidence; candidates require
 verification because they come from name fan-out, package scope, or a stale
 snapshot. Missing evidence never proves that a file is independent or safe to
 delete while any coverage domain remains incomplete.`,
+	Example: `  codemap dependencies internal/app/review.go
+  codemap dependencies internal/app/review.go --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDependencies,
 }
