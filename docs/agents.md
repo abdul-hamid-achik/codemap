@@ -56,7 +56,7 @@ to paste.
 
 Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
 [MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
-*all* servers combined; every other harness above stays on the full 43-tool default.
+*all* servers combined; every other harness above stays on the full 44-tool default.
 For a manually configured harness, choose `CODEMAP_MCP_PROFILE=agent` to bind its
 surface exactly to this page's taught loop. `agent` and the backwards-compatible
 `core` profile both contain 26 tools today; `full` is the explicit expert/admin

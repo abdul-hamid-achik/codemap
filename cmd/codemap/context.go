@@ -202,6 +202,109 @@ func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols [
 	return nil
 }
 
+// runRefactorPlan renders a rename/move impact plan: the definition, the call
+// sites and value references that mention the symbol (every site a rename must
+// update), the files that depend on the definition file (the imports a move
+// would update), the covering tests to re-run, and the blast radius.
+func runRefactorPlan(cmd *cobra.Command, args []string) error {
+	sess, err := openSession(cmd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sess.Close() }()
+	cwd := targetDir(cmd)
+	depth, _ := cmd.Flags().GetInt("depth")
+	svc := app.NewService(sess)
+	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
+		return err
+	}
+	selector, err := selectorFromAtFlag(svc, cwd, cmd)
+	if err != nil {
+		return err
+	}
+	var rep *app.RefactorPlanReport
+	if selector != nil {
+		rep, err = svc.RefactorPlanBySelector(cmd.Context(), cwd, *selector, depth)
+	} else if len(args) > 0 {
+		rep, err = svc.RefactorPlan(cmd.Context(), cwd, args[0], depth)
+	} else {
+		return fmt.Errorf("refactor-plan needs a <symbol> or --at <file>:<line>")
+	}
+	if err != nil {
+		return err
+	}
+	if !rep.Found {
+		return notFoundError(
+			fmt.Sprintf("no symbol named %q in project %s", rep.Symbol, rep.Project),
+			fmt.Sprintf("run: codemap find %q", rep.Symbol))
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+
+	color := term.IsTerminal(os.Stdout.Fd())
+	label := func(s string) string {
+		if color {
+			return ctxLabel.Render(s)
+		}
+		return s
+	}
+
+	fmt.Printf("%s %s (%s)\n", label("Refactor plan:"), rep.Symbol, rep.Project)
+	if rep.Note != "" {
+		fmt.Println("  ⚠ " + rep.Note)
+	}
+	if rep.Resolution != "" {
+		fmt.Println("  ⚠ " + rep.Resolution)
+	}
+	for _, d := range rep.Definitions {
+		fmt.Printf("  %s %s:%d-%d  (%s)\n", label("definition"), d.File, d.StartLine, d.EndLine, d.Kind)
+	}
+	names := func(refs []app.SymbolRef) []string {
+		shown, _ := capList(refs, 8)
+		out := make([]string, 0, len(shown))
+		for _, r := range shown {
+			out = append(out, disp(r.FQN, r.Symbol))
+		}
+		return out
+	}
+	line := func(name string, shown []string, total int) {
+		s := fmt.Sprintf("  %s (%d):", label(name), total)
+		if len(shown) > 0 {
+			s += " " + strings.Join(shown, ", ")
+		}
+		if more := total - len(shown); more > 0 {
+			s += fmt.Sprintf(" … (+%d)", more)
+		}
+		fmt.Println(s)
+	}
+	line("call sites", names(rep.CallSites), rep.CallSitesTotal)
+	refNames := make([]string, 0, len(rep.ValueReferences))
+	for _, r := range rep.ValueReferences {
+		refNames = append(refNames, disp(r.Source.FQN, r.Source.Symbol))
+	}
+	line("value references", refNames, rep.ValueReferencesTotal)
+	if len(rep.MoveSites) > 0 {
+		moves, more := capList(rep.MoveSites, 8)
+		s := fmt.Sprintf("  %s (%d):", label("move sites"), len(rep.MoveSites))
+		if len(moves) > 0 {
+			s += " " + strings.Join(moves, ", ")
+		}
+		if more > 0 {
+			s += fmt.Sprintf(" … (+%d)", more)
+		}
+		fmt.Println(s)
+	}
+	tShown, _ := capList(rep.CoveringTests, 8)
+	tNames := make([]string, 0, len(tShown))
+	for _, tst := range tShown {
+		tNames = append(tNames, disp(tst.FQN, tst.Symbol))
+	}
+	line("covering tests", tNames, rep.TestsTotal)
+	fmt.Printf("  %s %d\n", label("blast radius:"), rep.BlastRadius)
+	return nil
+}
+
 func renderContextPartialErrors(errs []app.ContextPartialError) {
 	shown, more := capList(errs, 5)
 	for _, partial := range shown {

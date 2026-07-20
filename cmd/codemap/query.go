@@ -206,6 +206,14 @@ Distinct from 'codemap semantic' (meaning/similarity search over embeddings) and
 		Args: contextOrAtArgs,
 		RunE: runContext,
 	}
+	refactorPlanCmd = &cobra.Command{
+		Use:   "refactor-plan [<symbol>]",
+		Short: "Plan a rename/move: definition, call sites, value references, dependent files (imports a move updates), covering tests, blast radius",
+		Example: `  codemap refactor-plan Run
+  codemap refactor-plan --at internal/app/review.go:120 --json`,
+		Args: symbolOrAtArgs,
+		RunE: runRefactorPlan,
+	}
 	projectsCmd = &cobra.Command{
 		Use:   "projects",
 		Short: "List all projects registered with codemap and their index sizes",

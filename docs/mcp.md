@@ -52,7 +52,7 @@ index → understand → read workflow on its own.
 
 ## Tool profiles
 
-By default `codemap serve` registers all 43 tools. That's a real cost: a
+By default `codemap serve` registers all 44 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
 measured **+95% input tokens** on the codemap arm, driven by 39 tool schemas riding
 in every session's context — and some clients (Cursor) cap total MCP tools at ~40
@@ -77,10 +77,10 @@ compatibility and is the explicit expert/admin surface.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
-server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **30,834
-schema characters (≈7,709 tokens using the declared chars/4 planning estimate)**;
-`full` serializes **42,585 characters (≈10,647 estimated tokens)**. That is about
-28% less schema context for the taught surface. Reproduce it with:
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **31,151
+schema characters (≈7,788 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **44,487 characters (≈11,122 estimated tokens)**. That is about
+30% less schema context for the taught surface. Reproduce it with:
 
 ```bash
 go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime=100x -benchmem

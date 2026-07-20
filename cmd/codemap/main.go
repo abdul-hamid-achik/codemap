@@ -197,6 +197,8 @@ func init() {
 	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
 	contextCmd.Flags().StringArray("at", nil, "select definition(s) by source position (repeatable): <file>:<line> — pass several to batch exact definitions")
 	contextCmd.Flags().Bool("brief", false, "drop each definition's source body, keeping signature/doc/location (source_omitted:true) — cheaper first look at a hub symbol; follow up with 'codemap source' for the body you actually need")
+	refactorPlanCmd.Flags().Int("depth", 3, "max hops for the blast radius")
+	refactorPlanCmd.Flags().String("at", "", "select one definition by source position instead of a name: <file>:<line>")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
@@ -226,7 +228,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd, serveCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
-		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured

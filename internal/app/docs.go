@@ -88,6 +88,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      (codemap_explore is available in the full MCP profile)
   dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage
   file-impact <file>                 file impact: confidence-aware evidence + coverage + conservative delete verdict
+  refactor-plan <symbol>             plan a rename/move: call sites, value references, dependent files, tests, blast radius
   file-context <file>                one-call file orientation: symbols + file-impact + related files
   risk <sym> [--at file:line]        change-risk: unknown when graph coverage is missing; otherwise low/medium/high
   context <sym> [<sym>...] [--at|--brief]  one-call bundle; pass several symbols for a batch + shared callers;
@@ -121,7 +122,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
-callers, callees, references, impact, file_impact, file_context, dependencies, review, secret_impact,
+callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, secret_impact,
 required_keys, risk, hotspots, orphans, coverage, read_order, map, explore, traverse, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,

@@ -328,6 +328,13 @@ type symbolQueryInput struct {
 	Top      int                 `json:"top,omitempty" jsonschema:"cap the number of returned relations (default uncapped); when trimmed, total/truncated are set — narrow with a selector to see the rest"`
 }
 
+type refactorPlanInput struct {
+	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to plan a rename/move for; omit when selector is provided"`
+	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector; takes precedence over symbol"`
+	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
+}
+
 type referencesInput struct {
 	Symbol   string              `json:"symbol,omitempty" jsonschema:"function/method name to inspect for callback/value wiring; omit when selector is provided"`
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact target definition projected from file/start_line/fqn/kind; takes precedence over symbol"`
@@ -744,6 +751,12 @@ func (s *Server) register() {
 			Name:        "codemap_context_batch",
 			Description: "Fetch the codemap_context bundle for SEVERAL symbols in one call — for building a mental model of a component without N round-trips. Returns each symbol's context plus cross-symbol analysis: combined_blast_radius and common_callers (a likely shared entrypoint/coupling point). Graph-only, deduped, and capped at 25; missing symbols land in not_found. Also accepts selectors:[{file,start_line,fqn,kind}] (e.g. from a prior ambiguous call's candidates) unioned with symbols, same 25-item cap — MCP-only, no CLI batch form for selectors; a malformed selector lands in not_found/partial_errors rather than failing the whole call. Aggregate source bodies share a 64 KiB budget reported by source_budget and per-definition source_truncations, while signatures/docs/locations remain complete. partial_errors preserves optional-component failures. brief:true drops every definition's source body across the whole batch (keeping signature/doc/location) and sets source_omitted:true on each instead of spending the source_budget — the cheapest way to orient across many symbols at once.",
 		}, s.handleContextBatch)
+	}
+	if s.include("codemap_refactor_plan") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_refactor_plan",
+			Description: "Plan a rename/move of a symbol: the definition site(s), the call sites and value references that mention it (every site a rename must update), the files that depend on its definition file (the imports a move would update), the covering tests to re-run, and the transitive blast radius for risk awareness. Pass selector:{file,start_line,fqn,kind} to plan one exact definition. Available in the full MCP profile.",
+		}, s.handleRefactorPlan)
 	}
 	if s.include("codemap_projects") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
@@ -1299,6 +1312,21 @@ func (s *Server) handleContextBatch(ctx context.Context, _ *sdkmcp.CallToolReque
 		return r, v, nil
 	}
 	rep, err := s.svc.ContextBatchWithContext(ctx, cwdOf(in.Path), in.Symbols, in.Selectors, in.Depth, in.Brief)
+	return result(rep, err)
+}
+
+func (s *Server) handleRefactorPlan(ctx context.Context, _ *sdkmcp.CallToolRequest, in refactorPlanInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	if in.Selector != nil {
+		rep, err := s.svc.RefactorPlanBySelector(ctx, cwdOf(in.Path), *in.Selector, in.Depth)
+		return result(rep, err)
+	}
+	if in.Symbol == "" {
+		return invalidInputResult("refactor_plan needs a symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
+	}
+	rep, err := s.svc.RefactorPlan(ctx, cwdOf(in.Path), in.Symbol, in.Depth)
 	return result(rep, err)
 }
 
