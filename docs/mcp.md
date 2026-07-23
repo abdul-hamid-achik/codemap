@@ -54,10 +54,10 @@ index → understand → read workflow on its own.
 
 By default `codemap serve` registers all 44 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
-measured **+95% input tokens** on the codemap arm, driven by 39 tool schemas riding
-in every session's context — and some clients (Cursor) cap total MCP tools at ~40
-*across all servers combined*, so a full codemap registration can crowd out every
-other server.
+measured **+95% input tokens** on the codemap arm, driven by every tool's schema
+riding in every session's context — and some clients (Cursor) cap total MCP tools
+at ~40 *across all servers combined*, so a full codemap registration can crowd out
+every other server.
 
 Set `CODEMAP_MCP_PROFILE=agent` (env), `mcp.profile: agent` (`codemap.yaml`), or pass
 `--profile agent` to `codemap serve` for the exact **26-tool** surface derived from
@@ -71,9 +71,9 @@ compatibility and is the explicit expert/admin surface.
 `codemap_semantic`, `codemap_find`, `codemap_grep`, `codemap_context`,
 `codemap_context_batch`, `codemap_impact`, `codemap_source`, `codemap_callers`,
 `codemap_callees`, `codemap_references`, `codemap_risk`, `codemap_dependencies`,
-`codemap_file_impact`, `codemap_review`, `codemap_path`, `codemap_hotspots`,
-`codemap_orphans`, `codemap_coverage`, `codemap_explore`, `codemap_symbol_at`,
-`codemap_related_files`.
+`codemap_file_impact`, `codemap_file_context`, `codemap_review`, `codemap_path`,
+`codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_explore`,
+`codemap_symbol_at`, `codemap_related_files`.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
@@ -87,12 +87,12 @@ go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime
 ```
 
 Everything else — `codemap_init`, `codemap_doctor`, `codemap_projects`,
-`codemap_symbols`, `codemap_symbol_at`, `codemap_related_files`,
-`codemap_secret_impact`, `codemap_required_keys`, `codemap_annotate` /
-`codemap_annotations` / `codemap_unannotate`, `codemap_branch_status` /
-`codemap_branch_switch`, and `codemap_cache_save` / `codemap_cache_restore` /
-`codemap_cache_list` / `codemap_cache_drop`, plus the full-profile orientation surfaces
-`codemap_map`, `codemap_explore`, and `codemap_traverse` — is admin/ecosystem/extended surface, available
+`codemap_symbols`, `codemap_refactor_plan`, `codemap_secret_impact`,
+`codemap_required_keys`, `codemap_annotate` / `codemap_annotations` /
+`codemap_unannotate`, `codemap_branch_status` / `codemap_branch_switch`, and
+`codemap_cache_save` / `codemap_cache_restore` / `codemap_cache_list` /
+`codemap_cache_drop`, plus the full-profile orientation surfaces `codemap_map`
+and `codemap_traverse` — is admin/ecosystem/extended surface, available
 under the default `full` profile and excluded from both current lean profiles. Precedence is the same three-way order as every
 other codemap setting: config file < environment < CLI flag. An unrecognized value
 is a startup error, not a silent fallback. [`codemap agent setup
@@ -128,7 +128,7 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_coverage` | **Per-file precise call-graph coverage** — rollups by language/directory (worst-covered first) always included; `prefix`/`language`/`uncovered` filters or `files:true` add the bounded per-file list (`top`, default/max 200/2000; `files_total`/`files_truncated` disclose the real count). Each file reports `resolver`/`resolved_at`/`stale`. Complements the per-query `call_graph` enum — use it to calibrate trust per package before asking a symbol question. |
 | `codemap_read_order` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/`, module index files, exported API) + call-graph hubs into a reading guide, each with a reason and score. Optional `query` narrows it. Run on first contact with an unfamiliar repo, then drill the top entries with `codemap_context` |
 | `codemap_map` | **Architecture overview** (full profile) — bounded source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and hubs. Independent `top_subsystems`/`top_bridges`/`top_hubs`/`top_entrypoints` caps; response carries totals/truncation plus freshness and call-graph honesty. |
-| `codemap_explore` | **Intent to exact neighborhoods** (full profile) — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (name fallback otherwise), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. |
+| `codemap_explore` | **Intent to exact neighborhoods** — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (name fallback otherwise), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. |
 | `codemap_traverse` | **Typed heterogeneous graph walk** (full profile) — requires `selector:{file,start_line,fqn,kind}` and never accepts an ambiguous name union. `direction` is `outgoing`, `incoming`, or `both`; `edge_types` is a list drawn from `calls`, `references`, `imports`, `implements`, `overrides`, `depends_on`, `tests`, and `defines`; `depth` is 1–10 and `limit` is 1–500 nodes. Each hop returns durable child/parent selectors, edge provenance, and confirmed/candidate confidence; the report is cycle-safe, bounded, and exposes truncation/domain totals. |
 | `codemap_path` | Shortest call path (`from`, `to`, or paired `from_selector`/`to_selector`), with endpoint-scoped `call_graph`/`resolution` distinguishing disconnected from unresolved. Unique FQNs are exact endpoints too |
 | `codemap_related_files` | Files structurally related to a `file` via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence. Graph-accurate alternative to import-text heuristics |

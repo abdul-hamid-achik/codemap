@@ -935,7 +935,7 @@ func TestConfigProjectFirstMatchWins(t *testing.T) {
 }
 
 // TestMCPProfileDefault pins I01: mcp.profile defaults to "full" — every
-// existing MCP registration keeps back-compat behavior (42 tools) unless a
+// existing MCP registration keeps back-compat behavior (44 tools) unless a
 // project/user opts into "agent" or "core".
 func TestMCPProfileDefault(t *testing.T) {
 	c := DefaultConfig()

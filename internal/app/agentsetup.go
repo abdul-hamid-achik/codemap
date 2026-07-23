@@ -84,7 +84,7 @@ func mcpServerValue() map[string]any {
 // harness in this registry that caps total MCP tools at ~40 across ALL
 // servers (see the "cursor caps tools" note in the cursor Setup below), so it
 // alone defaults to the lean core profile; every other harness here has no
-// such ceiling and stays on the full 42-tool set. Fresh map per call so
+// such ceiling and stays on the full 44-tool set. Fresh map per call so
 // callers never alias it into a config tree.
 func cursorServerValue() map[string]any {
 	return map[string]any{
@@ -122,17 +122,17 @@ var harnesses = []HarnessSetup{
 			}
 			// I01: cursor is the one harness here with a hard tool-count ceiling
 			// (~40 across ALL MCP servers), so codemap defaults to the lean
-			// CODEMAP_MCP_PROFILE=core here (22 tools, not 42) to leave room for
+			// CODEMAP_MCP_PROFILE=core here (26 tools, not 44) to leave room for
 			// other servers — set CODEMAP_MCP_PROFILE=full in this env block for
 			// every tool. No other harness in this registry has that ceiling, so
-			// they all keep the full 42-tool default.
+			// they all keep the full 44-tool default.
 			if err := doJSONServer(&rep, path, "mcpServers", "codemap", cursorServerValue(), opts.DryRun); err != nil {
 				return rep, err
 			}
 			if err := doPlaybook(&rep, opts, filepath.Join(dir, ".cursor", "rules", "codemap.mdc"), RenderPlaybook(FormatCursorRule), true); err != nil {
 				return rep, err
 			}
-			rep.Notes = append(rep.Notes, "cursor caps tools at ~40 across all MCP servers; codemap defaults to CODEMAP_MCP_PROFILE=core here (22 tools) to leave room for other servers — set it to full for all 42")
+			rep.Notes = append(rep.Notes, "cursor caps tools at ~40 across all MCP servers; codemap defaults to CODEMAP_MCP_PROFILE=core here (26 tools) to leave room for other servers — set it to full for all 44")
 			return rep, nil
 		},
 	},

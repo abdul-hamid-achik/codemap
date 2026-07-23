@@ -189,7 +189,7 @@ interactive TUI, or just check what's installed.
 
 | Command | Description |
 |---|---|
-| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile agent\|core\|full` selects the [tool profile](/mcp#tool-profiles): `agent` is exactly 25 taught workflow tools plus `codemap_docs` (26 total), `core` preserves the compatible 26-tool surface, and default `full` exposes all 43. Same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting. |
+| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile agent\|core\|full` selects the [tool profile](/mcp#tool-profiles): `agent` is exactly 25 taught workflow tools plus `codemap_docs` (26 total), `core` preserves the compatible 26-tool surface, and default `full` exposes all 44. Same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting. |
 | `codemap studio` | Open the interactive [TUI](/studio) |
 | `codemap version` | Print version information |
 

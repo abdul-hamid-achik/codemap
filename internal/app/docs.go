@@ -22,7 +22,9 @@ name-based JSX component-usage, import, and Next.js framework-wiring edges),
 Python (pyright-langserver), Ruby and Lua (built-in pure-Go backends, no server
 needed), and Vue script blocks: symbols + structure always, plus a precise call
 graph under 'index --precise' so callers/impact/hotspots/path work for the LSP
-languages. Other languages are recognized and reported as skipped (more in
+languages. CSS/SCSS/Sass/Less and HTML index selector/class nodes plus 'styles'
+edges (which markup uses which class), so frontend styling is queryable too.
+Other languages are recognized and reported as skipped (more in
 progress); --no-lsp disables the LSP backend. Semantic search is language-agnostic.
 
 Data lives under XDG paths (or ~/.codemap): the graph DB, optional local veclite

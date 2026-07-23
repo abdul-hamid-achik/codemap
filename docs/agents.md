@@ -86,15 +86,17 @@ whether to trust what it returned — full tool descriptions live in the
 | Stage | Tool | Check |
 |---|---|---|
 | **Orient** — where do I start? | `codemap_read_order` | ranked entrypoints + hubs, each with a reason — read these first, once per repo |
-| **Locate** — find the symbol | `codemap_find` (by name) / `codemap_semantic` (by meaning) / `codemap_grep` (exact text) | `matched_in` on `find`, `fusion` on `semantic` — why the hit surfaced |
-| **Understand** — read it in full | `codemap_context` (one symbol) / `codemap_context_batch` (several) | `call_graph` — trust level; `candidates` if the name is ambiguous, re-query with `candidates[i].selector` |
+| **Locate** — find the symbol | `codemap_find` (by name) / `codemap_semantic` (by meaning) / `codemap_grep` (exact text) / `codemap_symbol_at` (resolve a `file:line`) | `matched_in` on `find`, `fusion` on `semantic`, `resolution` on `symbol_at` — why/how the hit surfaced |
+| **Understand** — read it in full | `codemap_context` (one symbol) / `codemap_context_batch` (several) / `codemap_file_context` (one-call orientation on a whole file) | `call_graph` — trust level; `candidates` if the name is ambiguous, re-query with `candidates[i].selector` |
 | **Gate** — how careful, and is this even current? | `codemap_risk` (change-risk score) alongside `codemap_impact` / `codemap_file_impact` for the blast surface | `stale` — an index that's drifted since last run makes every other signal provisional |
 | **Edit** — make the change | informed by the tools above; codemap has no write path | — |
 | **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` — the diff's changed symbols, blast radius, and the tests to run |
 
 Deeper tools plug into the same stages on demand: `codemap_dependencies` and
 `codemap_references` sharpen **Locate**/**Gate** with confirmed-vs-candidate file and
-callback evidence; `codemap_hotspots`/`codemap_orphans` support a **Gate**-time survey
+callback evidence; `codemap_related_files` lists the files that co-change with a target
+(callers'/callees'/covering-test files) for a **Gate**-time scoping; `codemap_hotspots`/
+`codemap_orphans` support a **Gate**-time survey
 (hubs, dead-code candidates); `codemap_coverage` tells you which packages' `call_graph`
 answers to trust before you lean on them; `codemap_path` traces the shortest call chain
 between two symbols anywhere in the loop. Run `read_order` once per repo and `review`
