@@ -226,16 +226,26 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err 
 	}
 
 	// 2) Union the blast radius + covering tests across changed symbols; flag the
-	//    untested and load-bearing ones.
-	imps := analyzeReviewImpacts(rep, rep.ChangedSymbols, func(s SymbolRef) (*ImpactReport, error) {
-		// ChangedSymbols already carry a durable source identity. Keep the
-		// per-symbol review exact instead of sending the FQN through the legacy
-		// name resolver, which canonicalizes to a short name and unions unrelated
-		// same-named definitions even on a precise graph.
-		return svc.ImpactBySelector(cwd, SymbolSelector{
-			File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
-		}, opts.Depth)
-	})
+	//    untested and load-bearing ones. Analyze them sharing one project-wide
+	//    load (resolved-coverage map, heuristic test-file scan, coverage hint)
+	//    across the whole diff instead of re-doing it per symbol — review is the
+	//    hot path an agent harness hits after every edit, and a 200-symbol diff
+	//    would otherwise re-scan call_graph_coverage and re-read every test file
+	//    up to 200×. Falls back to the per-symbol path if the shared context
+	//    can't be built.
+	analyze := svc.reviewImpactAnalyzer(cwd, rep.ChangedSymbols, opts.Depth)
+	if analyze == nil {
+		analyze = func(s SymbolRef) (*ImpactReport, error) {
+			// ChangedSymbols already carry a durable source identity. Keep the
+			// per-symbol review exact instead of sending the FQN through the legacy
+			// name resolver, which canonicalizes to a short name and unions unrelated
+			// same-named definitions even on a precise graph.
+			return svc.ImpactBySelector(cwd, SymbolSelector{
+				File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
+			}, opts.Depth)
+		}
+	}
+	imps := analyzeReviewImpacts(rep, rep.ChangedSymbols, analyze)
 	// Fold the per-symbol resolution + risk signals into one diff-scoped band.
 	// call_graph is the worst (least-confident) across changed symbols — a
 	// review is only as trustworthy as its least-resolved change. Risk reuses

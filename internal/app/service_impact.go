@@ -89,13 +89,21 @@ func (svc *Service) Impact(cwd, symbol string, depth int) (*ImpactReport, error)
 	if len(locs) == 0 {
 		return emptyImpactReport(name, symbol, depth, nil), nil // symbol not in the graph
 	}
-	return svc.impactFromLocations(cwd, g, p, symbol, locs, depth, nil)
+	return svc.impactFromLocations(cwd, g, p, symbol, locs, depth, nil, nil)
 }
 
 // ImpactBySelector analyzes one exact definition. The selector resolves to the
 // current node after each reindex; traversal then uses that ephemeral node id so
 // another definition with the same short name is never merged into the result.
 func (svc *Service) ImpactBySelector(cwd string, selector SymbolSelector, depth int) (*ImpactReport, error) {
+	return svc.impactBySelectorShared(cwd, selector, depth, nil)
+}
+
+// impactBySelectorShared is ImpactBySelector with an optional shared impact
+// context. A nil shared keeps the single-symbol load-on-demand behavior; review
+// passes a pre-built one so its per-symbol loop doesn't re-load project-wide
+// state up to 200×.
+func (svc *Service) impactBySelectorShared(cwd string, selector SymbolSelector, depth int, shared *impactShared) (*ImpactReport, error) {
 	if depth <= 0 {
 		depth = 3
 	}
@@ -111,7 +119,56 @@ func (svc *Service) ImpactBySelector(cwd string, selector SymbolSelector, depth 
 		return emptyImpactReport(project, "", depth, &selector), nil
 	}
 	n := res.node
-	return svc.impactFromLocations(cwd, res.graph, res.project, n.Symbol, []graph.Node{n}, depth, &n)
+	return svc.impactFromLocations(cwd, res.graph, res.project, n.Symbol, []graph.Node{n}, depth, &n, shared)
+}
+
+// impactShared hoists the project-wide work a per-symbol impact loop would
+// otherwise repeat for every symbol — review analyzes up to 200 changed symbols,
+// and without this each one re-scans call_graph_coverage, re-reads every test
+// file from disk for the heuristic coverage scan, and re-loads the full node set
+// for the partial-coverage hint. A nil *impactShared keeps the single-symbol
+// path's load-on-demand behavior exactly as before.
+type impactShared struct {
+	resolvedFiles map[string]bool         // g.CallGraphResolvedFiles(pid), loaded once
+	heuristic     map[string][]ImpactNode // heuristicTestCoverageBatch results, keyed by symbol
+	coverageHint  string                  // precomputed partial-coverage suffix ("" when none)
+}
+
+// reviewImpactAnalyzer returns a per-symbol impact analyzer that shares one
+// project-wide load (resolved-coverage map, heuristic test-file scan, coverage
+// hint) across every changed symbol, instead of re-doing that work up to 200×.
+// This is the review hot path an agent harness hits after every edit; on a
+// non-precise TS/JS/Python repo the heuristic test scan alone would otherwise
+// read every test file from disk once per changed symbol. Returns nil if the
+// shared context can't be built so the caller falls back to the per-symbol path.
+func (svc *Service) reviewImpactAnalyzer(cwd string, symbols []SymbolRef, depth int) func(SymbolRef) (*ImpactReport, error) {
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil
+	}
+	_, name, err := svc.resolveProject(cwd)
+	if err != nil {
+		return nil
+	}
+	p, err := g.GetProjectByName(name)
+	if err != nil {
+		return nil
+	}
+	resolved, _ := g.CallGraphResolvedFiles(p.ID)
+	names := make([]string, 0, len(symbols))
+	for _, s := range symbols {
+		names = append(names, s.Symbol)
+	}
+	shared := &impactShared{
+		resolvedFiles: resolved,
+		heuristic:     heuristicTestCoverageBatch(g, p.ID, p.Path, names),
+		coverageHint:  svc.coverageHintResolved(g, p.ID, resolved),
+	}
+	return func(s SymbolRef) (*ImpactReport, error) {
+		return svc.impactBySelectorShared(cwd, SymbolSelector{
+			File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
+		}, depth, shared)
+	}
 }
 
 func emptyImpactReport(project, symbol string, _ int, selector *SymbolSelector) *ImpactReport {
@@ -121,7 +178,7 @@ func emptyImpactReport(project, symbol string, _ int, selector *SymbolSelector) 
 	}
 }
 
-func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Project, symbol string, locs []graph.Node, depth int, exact *graph.Node) (*ImpactReport, error) {
+func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Project, symbol string, locs []graph.Node, depth int, exact *graph.Node, shared *impactShared) (*ImpactReport, error) {
 	rep := emptyImpactReport(p.Name, symbol, depth, nil)
 	if exact != nil {
 		rep.Selector = selectorForNode(*exact)
@@ -135,7 +192,14 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 	// language on a name-based index → unresolved; else name-based. Load the
 	// resolved-files map ONCE here and reuse it for the unavailability check +
 	// coverage hint below (P8: one call_graph_coverage scan per query, not three).
-	resolved, _ := g.CallGraphResolvedFiles(p.ID)
+	// A non-nil shared carries it pre-loaded for the review loop (up to 200
+	// symbols), which would otherwise re-scan call_graph_coverage per symbol.
+	var resolved map[string]bool
+	if shared != nil {
+		resolved = shared.resolvedFiles
+	} else {
+		resolved, _ = g.CallGraphResolvedFiles(p.ID)
+	}
 	rep.CallGraph = callGraphEnum(resolved, locs)
 	if len(locs) > 1 {
 		// Lookup is by name, so the callers/blast-radius/tests below are the union
@@ -201,7 +265,15 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 		}
 	}
 	if len(rep.Tests) == 0 && allowHeuristic {
-		if ht := heuristicTestCoverage(g, p.ID, p.Path, symbol); len(ht) > 0 {
+		// The review loop pre-reads every test file once for all changed symbols
+		// (shared.heuristic); the single-symbol path scans on demand.
+		var ht []ImpactNode
+		if shared != nil {
+			ht = shared.heuristic[symbol]
+		} else {
+			ht = heuristicTestCoverage(g, p.ID, p.Path, symbol)
+		}
+		if len(ht) > 0 {
 			rep.Tests = append(rep.Tests, ht...)
 			rep.Untested = false
 			rep.Note = joinNote(rep.Note, fmt.Sprintf("%d covering test(s) found heuristically (test files referencing %q) — not confirmed via the call graph; run 'codemap index --precise' to confirm", len(ht), symbol))
@@ -212,7 +284,16 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 	// don't claim "untested" (that fired for a function with 106 real tests).
 	if lang, yes := callGraphUnavailableResolved(resolved, locs); yes {
 		rep.Untested = false
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang) + svc.coverageHintResolved(g, p.ID, resolved)
+		// The partial-coverage suffix depends only on project-wide state, so the
+		// review loop precomputes it once instead of re-loading the full node set
+		// (ProjectNodes) for every changed symbol.
+		hint := ""
+		if shared != nil {
+			hint = shared.coverageHint
+		} else {
+			hint = svc.coverageHintResolved(g, p.ID, resolved)
+		}
+		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang) + hint
 	}
 	// Same derivation codemap_review applies to covering_tests, so impact — the
 	// more common pre-edit path — is just as runnable as the post-edit review.

@@ -379,13 +379,10 @@ func (s *Store) CalleesOfNode(projectID, nodeID int64) ([]Node, error) {
 	return s.queryNodes(q, projectID, nodeID, EdgeCalls, EdgeCalls)
 }
 
-func (s *Store) calleeIDs(sourceID int64) ([]int64, error) {
-	return s.scanIDs("SELECT target_id FROM edges WHERE source_id=? AND edge_type=?", sourceID, EdgeCalls)
-}
-
 // calleeIDsBatch returns the distinct target ids called by ANY of the source
 // nodes via `calls` edges, in chunked IN(…) queries — the forward-edge twin of
-// callerIDsBatch, replacing the per-node calleeIDs round-trip in CalleeClosure.
+// callerIDsBatch, replacing a per-node callee round-trip in CalleeClosure and
+// the path BFS expansion.
 func (s *Store) calleeIDsBatch(sources []int64) ([]int64, error) {
 	if len(sources) == 0 {
 		return nil, nil
@@ -421,6 +418,52 @@ func (s *Store) calleeIDsBatch(sources []int64) ([]int64, error) {
 				seen[id] = true
 				out = append(out, id)
 			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// calleePairsBatch returns, for each source node, the target ids it calls via
+// `calls` edges (each list in edge order), fetched in chunked IN(…) queries. It
+// is the path-reconstruction twin of calleeIDsBatch: where calleeIDsBatch
+// flattens to distinct targets for a reachability set, path BFS needs the
+// source→target mapping to record each callee's parent.
+func (s *Store) calleePairsBatch(sources []int64) (map[int64][]int64, error) {
+	if len(sources) == 0 {
+		return nil, nil
+	}
+	out := make(map[int64][]int64, len(sources))
+	for start := 0; start < len(sources); start += inChunkSize {
+		end := start + inChunkSize
+		if end > len(sources) {
+			end = len(sources)
+		}
+		batch := sources[start:end]
+		ph := make([]string, len(batch))
+		args := make([]any, 0, len(batch)+1)
+		for i, id := range batch {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		args = append(args, EdgeCalls)
+		rows, err := s.db.Query(
+			"SELECT source_id, target_id FROM edges WHERE source_id IN ("+strings.Join(ph, ",")+") AND edge_type=? ORDER BY source_id, id",
+			args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var src, tgt int64
+			if err := rows.Scan(&src, &tgt); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[src] = append(out[src], tgt)
 		}
 		err = rows.Err()
 		_ = rows.Close()
@@ -1043,34 +1086,50 @@ func (s *Store) pathFromNodes(projectID int64, starts, targets []int64, maxDepth
 
 	parent := make(map[int64]int64) // node -> parent (-1 for a start)
 	depth := make(map[int64]int)
-	var queue []int64
+	var frontier []int64
 	for _, s0 := range starts {
 		parent[s0] = -1
 		depth[s0] = 0
-		queue = append(queue, s0)
+		frontier = append(frontier, s0)
 	}
 
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
-		if targetSet[cur] {
-			return s.reconstructPath(cur, parent)
+	// Level-by-level BFS over outgoing call edges, batching each level's whole
+	// frontier in one calleePairsBatch query instead of one calleeIDs round-trip
+	// per node — the per-node N+1 that, on a no-path or deep query, walked the
+	// entire reachable call graph one query at a time. Parent assignment iterates
+	// the frontier in queue order and each node's callees in edge order, so the
+	// reconstructed shortest path matches the prior sequential BFS. The parent
+	// map is the visited guard (cycle-safe); maxDepth<=0 stays unbounded but the
+	// graph is finite, so the walk always terminates.
+	for len(frontier) > 0 {
+		// Report a target when its level is reached, checking in frontier order
+		// so the first-reached target wins (as the old dequeue order did).
+		for _, cur := range frontier {
+			if targetSet[cur] {
+				return s.reconstructPath(cur, parent)
+			}
 		}
-		if maxDepth > 0 && depth[cur] >= maxDepth {
-			continue
+		// The whole frontier shares one depth; at the cap it's checked as targets
+		// above but not expanded further.
+		if maxDepth > 0 && depth[frontier[0]] >= maxDepth {
+			break
 		}
-		callees, err := s.calleeIDs(cur)
+		calleesBySource, err := s.calleePairsBatch(frontier)
 		if err != nil {
 			return nil, err
 		}
-		for _, c := range callees {
-			if _, seen := parent[c]; seen {
-				continue
+		var next []int64
+		for _, cur := range frontier {
+			for _, c := range calleesBySource[cur] {
+				if _, seen := parent[c]; seen {
+					continue
+				}
+				parent[c] = cur
+				depth[c] = depth[cur] + 1
+				next = append(next, c)
 			}
-			parent[c] = cur
-			depth[c] = depth[cur] + 1
-			queue = append(queue, c)
 		}
+		frontier = next
 	}
 	return nil, nil // no path
 }
