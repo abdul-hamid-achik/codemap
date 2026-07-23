@@ -118,3 +118,39 @@ func Reindex(opts ReindexOpts) (*app.IndexReport, error) {
 	}
 	return &rep, nil
 }
+
+// ReindexDecision is the outcome of the P0-08 daemon-delegation guard run by
+// every surface that can trigger a reindex.
+type ReindexDecision struct {
+	Delegated bool             // a running daemon handled the reindex
+	Report    *app.IndexReport // the daemon's report (set when Delegated && Err == nil)
+	Refused   bool             // a daemon runs but serves a different project
+	Reason    string           // actionable refusal message (set when Refused)
+	Err       error            // delegation was attempted but failed
+	PID       int              // the daemon's pid (set when Delegated)
+}
+
+// ReindexViaDaemon runs the P0-08 daemon-delegation guard shared by the CLI
+// `codemap index`, the MCP codemap_index handler, and studio's ctrl+r reindex.
+// The daemon's control socket is global per data dir, so opening a second
+// writer would collide with the daemon's exclusive veclite lock; keeping the
+// guard in one place means no surface can forget it (studio previously did).
+//
+//   - Delegated=true, Err=nil: the daemon reindexed root; Report is its report.
+//   - Refused=true: a daemon runs but serves a different project; Reason is the
+//     actionable message the caller surfaces to the user/agent.
+//   - Neither set: no daemon is running; the caller indexes in-process.
+func ReindexViaDaemon(root string, opts ReindexOpts) ReindexDecision {
+	info := QueryStatus()
+	if info == nil {
+		return ReindexDecision{}
+	}
+	if ok, reason := DelegationAllowed(root, info); !ok {
+		return ReindexDecision{Refused: true, Reason: reason}
+	}
+	rep, err := Reindex(opts)
+	if err != nil {
+		return ReindexDecision{Delegated: true, PID: info.PID, Err: fmt.Errorf("delegate to daemon (pid %d): %w", info.PID, err)}
+	}
+	return ReindexDecision{Delegated: true, Report: rep, PID: info.PID}
+}

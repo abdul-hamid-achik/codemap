@@ -32,31 +32,45 @@ func runIndex(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
+	reindex, _ := cmd.Flags().GetBool("reindex")
+	noEmbed, _ := cmd.Flags().GetBool("no-embed")
+	precise, _ := cmd.Flags().GetBool("precise")
+	noLSP, _ := cmd.Flags().GetBool("no-lsp")
 	// If a background daemon already owns the writable handle, delegate the
-	// reindex to it over the control socket. Opening a second write session
+	// reindex to it over the control socket (shared daemon.ReindexViaDaemon
+	// guard — the same one MCP and studio use). Opening a second write session
 	// here would collide with the daemon's exclusive veclite lock (the
 	// "database file is locked by PID ..." error). Delegating keeps the same
 	// output and forwards reindex/precise/no-lsp/no-embed flags.
 	//
 	// Pin P0-08: the daemon's socket is global per data dir, not per-project,
 	// so without a project-identity check here we'd silently reindex the
-	// daemon's own project instead of the user's cwd. Refuse to delegate
-	// when cwd is not inside the daemon's project root.
-	if info := daemon.QueryStatus(); info != nil {
-		if ok, reason := daemon.DelegationAllowed(cwd, info); !ok {
-			return fmt.Errorf("%s", reason)
+	// daemon's own project instead of the user's cwd. The guard refuses to
+	// delegate when cwd is not inside the daemon's project root.
+	dopts := daemon.ReindexOpts{Reindex: reindex, Precise: precise, NoLSP: noLSP}
+	if cmd.Flags().Changed("no-embed") {
+		v := !noEmbed
+		dopts.Embed = &v
+	}
+	switch d := daemon.ReindexViaDaemon(cwd, dopts); {
+	case d.Refused:
+		return fmt.Errorf("%s", d.Reason)
+	case d.Delegated:
+		if d.Err != nil {
+			return fmt.Errorf("%s\n  stop it with 'codemap daemon stop', then re-run", d.Err)
 		}
-		return indexViaDaemon(cmd, info)
+		if jsonOut(cmd) {
+			return printJSON(d.Report)
+		}
+		printIndexReport(cmd, d.Report, precise)
+		fmt.Printf("  via daemon (pid %d)\n", d.PID)
+		return nil
 	}
 	sess, err := openSessionAt(cmd, cwd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	reindex, _ := cmd.Flags().GetBool("reindex")
-	noEmbed, _ := cmd.Flags().GetBool("no-embed")
-	precise, _ := cmd.Flags().GetBool("precise")
-	noLSP, _ := cmd.Flags().GetBool("no-lsp")
 	opts := index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP}
 	svc := app.NewService(sess)
 
@@ -262,35 +276,6 @@ func printIndexReport(cmd *cobra.Command, rep *app.IndexReport, precise bool) {
 	for _, f := range rep.Oversized {
 		fmt.Fprintf(os.Stderr, "  ~ %s: skipped — exceeds index.max_file_bytes (raise it to include this file)\n", f)
 	}
-}
-
-// indexViaDaemon delegates a reindex to an already-running daemon and renders
-// the result exactly like a local `codemap index`. Used when `codemap index` is
-// run while a daemon owns the writable handle, so the CLI never opens a second
-// write session (which would collide with the daemon's exclusive veclite lock).
-// Forwards --reindex/--precise/--no-lsp/--no-embed. --exclude-extra is NOT
-// forwarded (the daemon's excludes are fixed at start); stop + restart the
-// daemon to change them. --watch is a no-op (the daemon is already watching).
-func indexViaDaemon(cmd *cobra.Command, info *daemon.Info) error {
-	reindex, _ := cmd.Flags().GetBool("reindex")
-	precise, _ := cmd.Flags().GetBool("precise")
-	noLSP, _ := cmd.Flags().GetBool("no-lsp")
-	noEmbed, _ := cmd.Flags().GetBool("no-embed")
-	opts := daemon.ReindexOpts{Reindex: reindex, Precise: precise, NoLSP: noLSP}
-	if cmd.Flags().Changed("no-embed") {
-		v := !noEmbed
-		opts.Embed = &v
-	}
-	rep, err := daemon.Reindex(opts)
-	if err != nil {
-		return fmt.Errorf("delegate to daemon (pid %d): %w\n  stop it with 'codemap daemon stop', then re-run", info.PID, err)
-	}
-	if jsonOut(cmd) {
-		return printJSON(rep)
-	}
-	printIndexReport(cmd, rep, precise)
-	fmt.Printf("  via daemon (pid %d)\n", info.PID)
-	return nil
 }
 
 // indexFilesSummary renders the "files:" line of `codemap index`. Recognized

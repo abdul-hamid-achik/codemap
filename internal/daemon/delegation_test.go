@@ -1,10 +1,15 @@
 package daemon
 
 import (
+	"bufio"
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/abdul-hamid-achik/codemap/internal/config"
 )
 
 // TestDelegationAllowed pins P0-08: the daemon-control-socket is global per
@@ -86,5 +91,62 @@ func TestDelegationAllowedNil(t *testing.T) {
 	ok, _ := DelegationAllowed(os.TempDir(), nil)
 	if ok {
 		t.Error("nil info must return !ok (no daemon to delegate to)")
+	}
+}
+
+// serveFakeDaemonStatus starts a one-shot unix-socket listener on the daemon
+// control path that answers a single daemon.status request with info, so
+// ReindexViaDaemon's guard can be exercised without spawning a real daemon.
+func serveFakeDaemonStatus(t *testing.T, info Info) {
+	t.Helper()
+	_ = os.Remove(config.DaemonSocketPath())
+	ln, err := net.Listen("unix", config.DaemonSocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close(); _ = os.Remove(config.DaemonSocketPath()) })
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		sc := bufio.NewScanner(c)
+		if !sc.Scan() {
+			return
+		}
+		body, _ := json.Marshal(info)
+		_, _ = c.Write(append(body, '\n'))
+	}()
+}
+
+// TestReindexViaDaemonNoDaemon pins the common studio case: with no daemon
+// running the guard falls through (neither Delegated nor Refused) so the caller
+// indexes in-process. This is the path studio's ctrl+r relies on.
+func TestReindexViaDaemonNoDaemon(t *testing.T) {
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	d := ReindexViaDaemon(t.TempDir(), ReindexOpts{})
+	if d.Delegated || d.Refused {
+		t.Errorf("no daemon running: want fallthrough, got %+v", d)
+	}
+}
+
+// TestReindexViaDaemonRefusesWrongProject pins the bug the shared guard fixes:
+// studio previously skipped the guard entirely, so with a daemon serving another
+// project a ctrl+r would collide on the veclite lock / reindex the wrong tree.
+// The guard must refuse with a reason naming the daemon's project.
+func TestReindexViaDaemonRefusesWrongProject(t *testing.T) {
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	served := t.TempDir() // project the fake daemon claims to serve
+	serveFakeDaemonStatus(t, Info{PID: 4242, ProjectRoot: served, ProjectName: "other"})
+	cwd := t.TempDir() // a different project the daemon does NOT serve
+	d := ReindexViaDaemon(cwd, ReindexOpts{})
+	if !d.Refused {
+		t.Fatalf("daemon serving %q should refuse cwd %q, got %+v", served, cwd, d)
+	}
+	if !strings.Contains(d.Reason, "other") {
+		t.Errorf("refusal reason %q should name the daemon's project", d.Reason)
 	}
 }

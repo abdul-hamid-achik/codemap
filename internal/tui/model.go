@@ -989,6 +989,18 @@ func (m Model) reindexCmd() tea.Cmd {
 	// Embeddings are skipped either way, so a refresh never needs Ollama.
 	precise := m.reindexPrecise()
 	return func() tea.Msg {
+		// P0-08 daemon-delegation guard (shared with the CLI + MCP): if a daemon
+		// owns the writable handle for this project, delegate the refresh to it
+		// instead of opening a colliding writer; if it serves a different project,
+		// surface the refusal rather than reindexing the wrong tree. Embed stays
+		// off so a studio refresh never needs Ollama, matching the in-process path.
+		embed := false
+		switch d := daemon.ReindexViaDaemon(dir, daemon.ReindexOpts{Precise: precise, Embed: &embed}); {
+		case d.Refused:
+			return indexedMsg{err: fmt.Errorf("%s", d.Reason)}
+		case d.Delegated:
+			return indexedMsg{rep: d.Report, err: d.Err}
+		}
 		rep, err := svc.Index(ctx, dir, index.Options{Precise: precise}, false)
 		return indexedMsg{rep: rep, err: err}
 	}
