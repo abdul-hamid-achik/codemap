@@ -682,36 +682,30 @@ func runReview(cmd *cobra.Command, args []string) error {
 // reviewGateResult evaluates --fail-on-risk/--fail-on-untested against an
 // already-printed ReviewReport. It never changes what was printed — it only
 // turns a tripped threshold into the dedicated gate exit code (errGate; see
-// gate.go). "unknown" risk never trips --fail-on-risk (the honesty rule), and
-// a complete diff with no changed symbols (rep.Risk == nil) never trips it.
-// An explicitly enabled review gate fails closed on a finalized incomplete
-// indexed report; early non-repo/unindexed degradation remains nonblocking.
-// The untested gate also fails closed when mapped symbols have an unresolved
-// call graph: an empty untested_symbols list then means "unknown", not covered.
+// gate.go). It reads the canonical gate signal from rep.ComputeGate() (the
+// same D9 signal carried in the --json report), so the exit-code path and the
+// report-attached gate field can never drift: "unknown" risk never trips
+// --fail-on-risk (the honesty rule), a complete diff with no changed symbols
+// (rep.Risk == nil) never trips it, an enabled gate fails closed on a
+// finalized incomplete indexed report (early non-repo/unindexed degradation
+// stays nonblocking), and the untested gate fails closed when mapped symbols
+// have an unresolved call graph (an empty untested_symbols list then means
+// "unknown", not covered).
 func reviewGateResult(rep *app.ReviewReport, hasFailOnRisk bool, threshold int, failOnUntested bool) error {
-	gateEnabled := hasFailOnRisk || failOnUntested
-	if gateEnabled && rep != nil && rep.IsRepo && rep.Indexed && !rep.AnalysisComplete {
+	if rep == nil {
+		return nil
+	}
+	gate := rep.ComputeGate()
+	if (hasFailOnRisk || failOnUntested) && gate.WouldFailOn.IncompleteAnalysis {
 		return errGate
 	}
-	if hasFailOnRisk && rep.Risk != nil && riskGateTrips(rep.Risk.Level, threshold) {
+	if hasFailOnRisk && rep.Risk != nil && app.RiskGateTrips(rep.Risk.Level, threshold) {
 		return errGate
 	}
-	if failOnUntested && (len(rep.UntestedSymbols) > 0 || reviewTestCoverageUnresolved(rep)) {
+	if failOnUntested && gate.WouldFailOn.Untested {
 		return errGate
 	}
 	return nil
-}
-
-func reviewTestCoverageUnresolved(rep *app.ReviewReport) bool {
-	if rep == nil || rep.TotalSymbols == 0 {
-		return false
-	}
-	switch rep.CallGraph {
-	case app.CallGraphResolved, app.CallGraphName:
-		return false
-	default: // unresolved, none, or absent compatibility metadata
-		return true
-	}
 }
 
 func reviewStalenessLine(rep *app.ReviewReport) string {
@@ -783,7 +777,7 @@ func runRisk(cmd *cobra.Command, args []string) error {
 	// (unchanged) output, human or --json, so a tripped --fail-on-risk
 	// threshold only changes the exit code.
 	riskGate := func() error {
-		if hasFailOnRisk && riskGateTrips(rep.Level, failOnRiskThreshold) {
+		if hasFailOnRisk && app.RiskGateTrips(rep.Level, failOnRiskThreshold) {
 			return errGate
 		}
 		return nil

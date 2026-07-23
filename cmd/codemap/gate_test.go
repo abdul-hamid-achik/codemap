@@ -42,10 +42,10 @@ func TestRiskGateTripsThresholdTable(t *testing.T) {
 		{"high", "high", true},
 	}
 	for _, tc := range cases {
-		threshold := riskLevelOrdinal(tc.threshold)
-		got := riskGateTrips(tc.level, threshold)
+		threshold := app.RiskLevelOrdinal(tc.threshold)
+		got := app.RiskGateTrips(tc.level, threshold)
 		if got != tc.want {
-			t.Errorf("riskGateTrips(%q, ordinal(%q)=%d) = %v, want %v", tc.level, tc.threshold, threshold, got, tc.want)
+			t.Errorf("RiskGateTrips(%q, ordinal(%q)=%d) = %v, want %v", tc.level, tc.threshold, threshold, got, tc.want)
 		}
 	}
 }
@@ -71,7 +71,7 @@ func TestParseFailOnRiskFlag(t *testing.T) {
 				t.Fatal(err)
 			}
 			threshold, set, err := parseFailOnRiskFlag(c)
-			if err != nil || !set || threshold != riskLevelOrdinal(level) {
+			if err != nil || !set || threshold != app.RiskLevelOrdinal(level) {
 				t.Fatalf("parseFailOnRiskFlag(%q) = (%d, %v, %v)", level, threshold, set, err)
 			}
 		})
@@ -113,7 +113,7 @@ func TestReviewGateFailsClosedOnlyForFinalizedIndexedReports(t *testing.T) {
 		IsRepo: true, Indexed: true, AnalysisComplete: false,
 		Risk: &app.ReviewRisk{Level: "unknown", Factors: []app.RiskFactor{}},
 	}
-	if got := reviewGateResult(incomplete, true, riskLevelOrdinal("high"), false); got != errGate {
+	if got := reviewGateResult(incomplete, true, app.RiskLevelOrdinal("high"), false); got != errGate {
 		t.Fatalf("incomplete indexed risk gate = %v, want gate failure", got)
 	}
 	if got := reviewGateResult(incomplete, false, 0, true); got != errGate {
@@ -128,7 +128,7 @@ func TestReviewGateFailsClosedOnlyForFinalizedIndexedReports(t *testing.T) {
 		"not a repo":  {IsRepo: false, Indexed: false, AnalysisComplete: false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := reviewGateResult(early, true, riskLevelOrdinal("low"), true); got != nil {
+			if got := reviewGateResult(early, true, app.RiskLevelOrdinal("low"), true); got != nil {
 				t.Fatalf("early graceful review gate = %v, want nil", got)
 			}
 		})
@@ -139,7 +139,7 @@ func TestReviewGateFailsClosedOnlyForFinalizedIndexedReports(t *testing.T) {
 		CallGraph: app.CallGraphUnresolved,
 		Risk:      &app.ReviewRisk{Level: "unknown", Factors: []app.RiskFactor{}},
 	}
-	if got := reviewGateResult(completeUnknown, true, riskLevelOrdinal("low"), false); got != nil {
+	if got := reviewGateResult(completeUnknown, true, app.RiskLevelOrdinal("low"), false); got != nil {
 		t.Fatalf("complete unresolved review risk gate = %v, want nil", got)
 	}
 	if got := reviewGateResult(completeUnknown, false, 0, true); got != errGate {
