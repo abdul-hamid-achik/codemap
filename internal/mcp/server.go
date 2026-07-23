@@ -25,7 +25,7 @@ import (
 )
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
-// (the default, back-compat) registers every tool (43). ProfileCore preserves
+// (the default, back-compat) registers every tool (44). ProfileCore preserves
 // the shipped lean 26-tool contract. ProfileAgent is a separately pinned
 // 26-tool contract containing exactly the tools named by the canonical
 // playbook plus codemap_docs for self-discovery. Core and agent intentionally
@@ -325,7 +325,7 @@ type symbolQueryInput struct {
 	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from a result's file/start_line/fqn/kind fields; takes precedence over symbol"`
 	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Precise  bool                `json:"precise,omitempty" jsonschema:"use callHierarchy for an exact one-off answer (gopls for Go, typescript-language-server for TypeScript/JavaScript, pyright for Python); slower, but not inflated by same-named symbols"`
-	Top      int                 `json:"top,omitempty" jsonschema:"cap the number of returned relations (default uncapped); when trimmed, total/truncated are set — narrow with a selector to see the rest"`
+	Top      int                 `json:"top,omitempty" jsonschema:"cap the number of returned relations (default 100; pass a negative top for all); when trimmed, total/truncated are set — narrow with a selector to see the rest"`
 }
 
 type refactorPlanInput struct {
@@ -587,7 +587,7 @@ func (s *Server) register() {
 	if s.include("codemap_semantic") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_semantic",
-			Description: "Semantic search across the code graph: find code by meaning, ranked by similarity. The result carries a \"fusion\" field naming the vector/BM25 weighting profile used (\"identifier\", \"natural_language\", or \"balanced\").",
+			Description: "Semantic search across the code graph: find code by meaning, ranked by similarity. The result carries a \"fusion\" field naming the vector/BM25 weighting profile used (\"identifier\", \"natural_language\", or \"balanced\"). Returns raw ranked hits; for hits already joined to their call neighborhoods (source-light), use codemap_explore (full profile).",
 		}, s.handleSemantic)
 	}
 	if s.include("codemap_callers") {
@@ -635,7 +635,7 @@ func (s *Server) register() {
 	if s.include("codemap_explore") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_explore",
-			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source.",
+			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source. For raw ranked hits without neighborhoods, use codemap_semantic.",
 		}, s.handleExplore)
 	}
 	if s.include("codemap_traverse") {
@@ -841,27 +841,22 @@ func (s *Server) handleInit(_ context.Context, _ *sdkmcp.CallToolRequest, in ini
 
 func (s *Server) handleIndex(ctx context.Context, req *sdkmcp.CallToolRequest, in indexInput) (*sdkmcp.CallToolResult, any, error) {
 	root := cwdOf(in.Path)
-	// Pin P0-08: same daemon-delegation guard as the CLI. If a daemon is
-	// serving THIS project, delegate to it (avoids the veclite lock collision).
-	// If a daemon is serving a DIFFERENT project, refuse with an actionable
-	// message — better than opening a colliding writer or silently indexing the
-	// wrong tree.
-	if info := daemon.QueryStatus(); info != nil {
-		if ok, reason := daemon.DelegationAllowed(root, info); ok {
-			dopts := daemon.ReindexOpts{Reindex: in.Reindex, Precise: in.Precise, NoLSP: in.NoLSP, ExcludeExtra: in.ExcludeExtra}
-			embed := !in.NoEmbed
-			dopts.Embed = &embed
-			rep, err := daemon.Reindex(dopts)
-			if err != nil {
-				return result(nil, err)
-			}
-			return result(rep, nil)
-		} else {
-			return &sdkmcp.CallToolResult{
-				Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: reason}},
-				IsError: true,
-			}, nil, nil
-		}
+	// Pin P0-08: same daemon-delegation guard as the CLI and studio (shared
+	// daemon.ReindexViaDaemon). If a daemon serves THIS project, delegate to it
+	// (avoids the veclite lock collision). If a daemon serves a DIFFERENT project,
+	// refuse with an actionable message — better than opening a colliding writer
+	// or silently indexing the wrong tree.
+	dopts := daemon.ReindexOpts{Reindex: in.Reindex, Precise: in.Precise, NoLSP: in.NoLSP, ExcludeExtra: in.ExcludeExtra}
+	embed := !in.NoEmbed
+	dopts.Embed = &embed
+	switch d := daemon.ReindexViaDaemon(root, dopts); {
+	case d.Refused:
+		return &sdkmcp.CallToolResult{
+			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: d.Reason}},
+			IsError: true,
+		}, nil, nil
+	case d.Delegated:
+		return result(d.Report, d.Err)
 	}
 	// P2-02 (O42): wire MCP progress notifications when the client
 	// supplied a progress token. The index.Options.OnFile/OnEmbed hooks
@@ -991,7 +986,7 @@ func (s *Server) handleCacheList(ctx context.Context, _ *sdkmcp.CallToolRequest,
 
 func (s *Server) handleCacheDrop(ctx context.Context, _ *sdkmcp.CallToolRequest, in cacheDropInput) (*sdkmcp.CallToolResult, any, error) {
 	if in.StashID == "" && !in.All {
-		return errResult("specify a stash_id/tree_hash or all:true (tip: codemap_cache_list returns the identifier to drop)"), nil, nil
+		return invalidInputResult("cache_drop needs a stash_id/tree_hash or all:true", "run codemap_cache_list for the identifier to drop"), nil, nil
 	}
 	dropped, err := s.svc.CacheDrop(ctx, cwdOf(in.Path), in.StashID, in.All)
 	if err != nil {
@@ -1035,7 +1030,7 @@ func (s *Server) handleCallers(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	default:
 		rep, err = s.svc.Callers(cwdOf(in.Path), in.Symbol)
 	}
-	return result(capRelation(rep, in.Top), err)
+	return result(capRelation(rep, relationTop(in.Top)), err)
 }
 
 func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, in symbolQueryInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1058,7 +1053,7 @@ func (s *Server) handleCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	default:
 		rep, err = s.svc.Callees(cwdOf(in.Path), in.Symbol)
 	}
-	return result(capRelation(rep, in.Top), err)
+	return result(capRelation(rep, relationTop(in.Top)), err)
 }
 
 func (s *Server) handleReferences(_ context.Context, _ *sdkmcp.CallToolRequest, in referencesInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1198,6 +1193,9 @@ func (s *Server) handleSymbolAt(_ context.Context, _ *sdkmcp.CallToolRequest, in
 	if len(in.Positions) > 0 {
 		rep, err := s.svc.SymbolAtBatch(cwdOf(in.Path), in.Positions)
 		return result(rep, err)
+	}
+	if in.File == "" || in.Line <= 0 {
+		return invalidInputResult("symbol_at needs a file and a positive line, or a positions batch", "pass file+line, or positions:[{file,line}, …]"), nil, nil
 	}
 	rep, err := s.svc.SymbolAt(cwdOf(in.Path), in.File, in.Line)
 	return result(rep, err)
@@ -1358,7 +1356,7 @@ func (s *Server) handleAnnotate(_ context.Context, _ *sdkmcp.CallToolRequest, in
 		}
 		return result(out, err)
 	}
-	return errResult("annotate: provide 'symbol', or both 'from' and 'to'"), nil, nil
+	return invalidInputResult("annotate needs 'symbol', or both 'from' and 'to'", "pass symbol for a node note, or from+to for a path note"), nil, nil
 }
 
 func (s *Server) handleAnnotations(_ context.Context, _ *sdkmcp.CallToolRequest, in annotationsInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1390,7 +1388,7 @@ func (s *Server) handleDoctor(ctx context.Context, _ *sdkmcp.CallToolRequest, _ 
 
 func (s *Server) handleRequiredKeys(ctx context.Context, _ *sdkmcp.CallToolRequest, in requiredKeysInput) (*sdkmcp.CallToolResult, any, error) {
 	if in.Entrypoint == "" {
-		return errResult("specify an entrypoint symbol (the function/method to scope from)"), nil, nil
+		return invalidInputResult("required_keys needs an entrypoint symbol", "pass entrypoint: the function/method to scope the secret-key scan from"), nil, nil
 	}
 	depth := in.Depth
 	if depth <= 0 {
@@ -1512,13 +1510,37 @@ func invalidInputResult(msg, hint string) *sdkmcp.CallToolResult {
 	}
 }
 
+// defaultRelationCap bounds callers/callees when the agent omits `top`. Every
+// other orientation tool is internally bounded; these two historically returned
+// ALL relations, so a high-fan-in hub (Close/Handle/New) or an ambiguous
+// name-union could pull hundreds of refs into an agent's context in one call.
+// The default makes the common case safe while total/truncated tell the agent to
+// narrow with a selector; a negative top is the explicit opt-out to uncapped.
+const defaultRelationCap = 100
+
+// relationTop resolves the effective callers/callees cap: an omitted top (0)
+// falls back to defaultRelationCap, a positive top is used as-is, and a negative
+// top means "return everything" (capRelation treats <=0 as uncapped, so the
+// handler maps the negative opt-out to 0).
+func relationTop(top int) int {
+	switch {
+	case top == 0:
+		return defaultRelationCap
+	case top < 0:
+		return 0
+	default:
+		return top
+	}
+}
+
 // capRelation bounds a callers/callees result set for the MCP surface so an
 // ambiguous name (which unions every same-named definition's relations) or a
 // high-fan-in hub cannot blow up an agent's context window. top<=0 leaves the
-// report untouched (back-compatible uncapped behavior). When top is set, total
-// always reports the pre-cap count and truncated marks an actual trim — the
-// same contract as grep/find — so the agent knows to narrow with a selector
-// rather than silently reading a partial list.
+// report untouched (uncapped); the handlers apply defaultRelationCap when the
+// agent omits `top` (see relationTop). When top is set, total always reports the
+// pre-cap count and truncated marks an actual trim — the same contract as
+// grep/find — so the agent knows to narrow with a selector rather than silently
+// reading a partial list.
 func capRelation(rep *app.RelationReport, top int) *app.RelationReport {
 	if rep == nil || top <= 0 {
 		return rep

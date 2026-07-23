@@ -242,6 +242,7 @@ func (svc *Service) semanticViaVecgrepStrict(ctx context.Context, cwd string, pi
 			hit.Symbol, hit.FQN, hit.Kind = n.Symbol, n.FQN, n.Kind
 			hit.StartLine, hit.EndLine = n.StartLine, n.EndLine
 			hit.Signature, hit.Doc = n.Signature, n.Docstring
+			hit.Selector = selectorForNode(n)
 		}
 		if hit.Symbol == "" {
 			continue // a chunk with no enclosing symbol and no name — drop the noise

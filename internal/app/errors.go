@@ -13,10 +13,11 @@ import (
 //
 // Stable codes (exported so the CLI/MCP can map them without hardcoding strings):
 const (
-	CodeMissing     = "index_missing" // no index for the project (DB absent / unregistered)
-	CodeCorrupt     = "index_corrupt" // the graph DB exists but won't open (schema, disk, perms)
-	CodeNotARepo    = "not_a_repo"    // a git operation was required but cwd isn't a git repository
-	CodeOperational = "operational"   // an unclassified runtime failure (default; exit 1)
+	CodeMissing      = "index_missing" // no index for the project (DB absent / unregistered)
+	CodeCorrupt      = "index_corrupt" // the graph DB exists but won't open (schema, disk, perms)
+	CodeNotARepo     = "not_a_repo"    // a git operation was required but cwd isn't a git repository
+	CodeInvalidInput = "invalid_input" // the call itself is malformed (bad/empty argument); fix the input, not an internal fault
+	CodeOperational  = "operational"   // an unclassified runtime failure (default; exit 1)
 )
 
 type CodedError struct {

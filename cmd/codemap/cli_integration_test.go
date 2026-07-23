@@ -518,9 +518,10 @@ func TestCLIContracts(t *testing.T) {
 		res = runCLI(t, bin, runner, env, "grep", "definitely-not-present-xyz", "-C", project, "--json")
 		assertCLIEnvelope(t, res, exitNotFound, codeNotFound)
 
-		// Invalid regex syntax is an operational error, not a not-found miss.
+		// Invalid regex syntax is an invalid_input error (fix the input, not an
+		// internal fault), not a not-found miss; it still exits 1.
 		res = runCLI(t, bin, runner, env, "grep", "--regex", "(unterminated[", "-C", project, "--json")
-		assertCLIEnvelope(t, res, exitOperational, "operational")
+		assertCLIEnvelope(t, res, exitOperational, "invalid_input")
 	})
 
 	t.Run("value references are distinct, bounded, and selector-aware", func(t *testing.T) {

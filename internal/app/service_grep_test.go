@@ -111,13 +111,13 @@ func TestServiceGrepResolvesHitsToEnclosingSymbol(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid regex is a coded operational error", func(t *testing.T) {
+	t.Run("invalid regex is a coded invalid_input error", func(t *testing.T) {
 		_, err := svc.Grep(proj, "(unterminated[", GrepOptions{Regex: true})
 		if err == nil {
 			t.Fatal("expected an error for invalid regex syntax")
 		}
-		if CodeOf(err) != CodeOperational {
-			t.Errorf("CodeOf(err) = %q, want %q", CodeOf(err), CodeOperational)
+		if CodeOf(err) != CodeInvalidInput {
+			t.Errorf("CodeOf(err) = %q, want %q", CodeOf(err), CodeInvalidInput)
 		}
 	})
 
@@ -291,15 +291,15 @@ func TestServiceGrepEmptyAndOversizedPattern(t *testing.T) {
 	defer sess.Close()
 	svc := NewService(sess)
 
-	if _, err := svc.Grep(proj, "", GrepOptions{}); err == nil || CodeOf(err) != CodeOperational {
-		t.Errorf("empty pattern: err=%v, code=%q, want a CodeOperational error", err, CodeOf(err))
+	if _, err := svc.Grep(proj, "", GrepOptions{}); err == nil || CodeOf(err) != CodeInvalidInput {
+		t.Errorf("empty pattern: err=%v, code=%q, want a CodeInvalidInput error", err, CodeOf(err))
 	}
 	huge := make([]byte, MaxGrepPatternBytes+1)
 	for i := range huge {
 		huge[i] = 'x'
 	}
-	if _, err := svc.Grep(proj, string(huge), GrepOptions{}); err == nil || CodeOf(err) != CodeOperational {
-		t.Errorf("oversized pattern: err=%v, code=%q, want a CodeOperational error", err, CodeOf(err))
+	if _, err := svc.Grep(proj, string(huge), GrepOptions{}); err == nil || CodeOf(err) != CodeInvalidInput {
+		t.Errorf("oversized pattern: err=%v, code=%q, want a CodeInvalidInput error", err, CodeOf(err))
 	}
 }
 

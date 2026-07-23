@@ -18,6 +18,7 @@ type SemanticHit struct {
 	Score       float32            `json:"score"`
 	Signature   string             `json:"signature,omitempty"`
 	Doc         string             `json:"doc,omitempty"`
+	Selector    *SymbolSelector    `json:"selector,omitempty"`    // ready durable selector for chaining into context/source/impact (grep/symbol_at already carry one)
 	MatchedIn   string             `json:"matched_in,omitempty"`  // "symbol"|"fqn"|"docstring" — no-embeddings fallback only (FindSymbols)
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
@@ -198,11 +199,15 @@ func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK in
 	}
 	for _, h := range hits {
 		meta := info[h.Meta.FQN]
-		rep.Hits = append(rep.Hits, SemanticHit{
+		hit := SemanticHit{
 			Symbol: h.Meta.Symbol, FQN: h.Meta.FQN, Kind: h.Meta.Kind, File: h.Meta.File,
 			StartLine: h.Meta.StartLine, EndLine: h.Meta.EndLine, Score: h.Score,
 			Signature: meta.Signature, Doc: meta.Doc,
-		})
+		}
+		if h.Meta.File != "" {
+			hit.Selector = &SymbolSelector{File: h.Meta.File, StartLine: h.Meta.StartLine, FQN: h.Meta.FQN, Kind: h.Meta.Kind}
+		}
+		rep.Hits = append(rep.Hits, hit)
 	}
 	if g, gerr := svc.s.Graph(); gerr == nil {
 		enrichHitAnnotations(g, pid, rep.Hits)
@@ -231,11 +236,15 @@ func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, 
 	}
 	for _, m := range matches {
 		n := m.Node
-		rep.Hits = append(rep.Hits, SemanticHit{
+		hit := SemanticHit{
 			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
 			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Doc: n.Docstring,
 			MatchedIn: m.MatchedIn,
-		})
+		}
+		if n.FilePath != "" {
+			hit.Selector = selectorForNode(n)
+		}
+		rep.Hits = append(rep.Hits, hit)
 	}
 	enrichHitAnnotations(g, pid, rep.Hits)
 	return rep, nil

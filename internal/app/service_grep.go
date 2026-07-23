@@ -112,10 +112,10 @@ func (svc *Service) Grep(cwd, pattern string, opts GrepOptions) (*GrepReport, er
 // (meaning search).
 func (svc *Service) GrepWithContext(ctx context.Context, cwd, pattern string, opts GrepOptions) (*GrepReport, error) {
 	if pattern == "" {
-		return nil, coded(CodeOperational, "supply a non-empty pattern", errGrepEmptyPattern)
+		return nil, coded(CodeInvalidInput, "supply a non-empty pattern", errGrepEmptyPattern)
 	}
 	if len(pattern) > MaxGrepPatternBytes {
-		return nil, coded(CodeOperational, "shorten the pattern", errGrepPatternTooLong)
+		return nil, coded(CodeInvalidInput, "shorten the pattern", errGrepPatternTooLong)
 	}
 
 	pid, name, found, err := svc.project(cwd)
@@ -136,7 +136,7 @@ func (svc *Service) GrepWithContext(ctx context.Context, cwd, pattern string, op
 		}
 		re, err = regexp.Compile(p)
 		if err != nil {
-			return nil, coded(CodeOperational, "fix the regex syntax", err)
+			return nil, coded(CodeInvalidInput, "fix the regex syntax", err)
 		}
 	} else if opts.IgnoreCase {
 		literal = strings.ToLower(pattern)
