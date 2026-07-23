@@ -621,10 +621,11 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 // layer cleanly — exactly the class of bug a mis-tagged JSON field, a
 // dropped "path", or a nil-deref in a handler would cause (the service
 // layer beneath is already unit-tested; the MCP wiring is what this sweeps).
-// Tools that need an external binary or a git repo (review, branch_status/
-// branch_switch, cache_save/restore/list/drop) are covered by their own
-// gated tests and deliberately excluded so this sweep stays hermetic — it
-// must pass in a minimal CI image with no gopls/tsserver/fcheap/git.
+// Tools that need an external binary or a git repo / fcheap store (review,
+// branch_status/branch_switch, cache_save/restore/list/drop) are deliberately
+// excluded so this sweep stays hermetic — it must pass in a minimal CI image
+// with no gopls/tsserver/fcheap/git. Those surfaces are exercised by the
+// glyphrun E2E specs in specs/ (review_gate, cache_cli, …), not by Go tests.
 func TestMCPHandlerWiring(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -691,6 +692,13 @@ func TestMCPHandlerWiring(t *testing.T) {
 		{"codemap_docs", map[string]any{}, "codemap"},
 		{"codemap_required_keys", map[string]any{"path": proj, "entrypoint": "Run", "keys": []string{"TEST_KEY"}}, ""},
 		{"codemap_secret_impact", map[string]any{"path": proj, "keys": []string{"TEST_KEY"}}, ""},
+		{"codemap_refactor_plan", map[string]any{"path": proj, "symbol": "Run"}, ""},
+		{"codemap_references", map[string]any{"path": proj, "symbol": "Run"}, ""},
+		{"codemap_source", map[string]any{"path": proj, "symbol": "Run"}, "Run"},
+		{"codemap_status", map[string]any{"path": proj}, ""},
+		{"codemap_doctor", map[string]any{}, ""},
+		{"codemap_annotate", map[string]any{"path": proj, "symbol": "Run", "note": "wiring-sweep note"}, ""},
+		{"codemap_annotations", map[string]any{"path": proj}, ""},
 	} {
 		res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: tc.tool, Arguments: tc.args})
 		if err != nil {
@@ -1447,7 +1455,7 @@ func listToolNames(t *testing.T, srv *Server) map[string]bool {
 }
 
 // fullToolNames is the exhaustive, hand-maintained list of every tool
-// codemap ships under ProfileFull (43; AGENTS.md's "Current set (43)" line
+// codemap ships under ProfileFull (44; AGENTS.md's "Current set (44)" line
 // must be updated alongside this list if it ever changes).
 var fullToolNames = []string{
 	"codemap_init", "codemap_index", "codemap_status", "codemap_semantic",
@@ -1460,6 +1468,34 @@ var fullToolNames = []string{
 	"codemap_annotate", "codemap_annotations", "codemap_unannotate", "codemap_doctor",
 	"codemap_branch_status", "codemap_branch_switch", "codemap_cache_save",
 	"codemap_cache_restore", "codemap_cache_list", "codemap_cache_drop",
+}
+
+// TestDocsOnlyNameRegisteredTools pins the "one source of truth" discipline for
+// the public docs: every codemap_<tool> token named in docs/mcp.md or
+// docs/agents.md must be a real registered tool. This catches the drift that let
+// the docs list a tool as both taught and excluded, or name a removed/renamed
+// tool — the docs prose is otherwise hand-maintained and rots freely (only
+// SKILL.md is byte-pinned). It complements TestMCPToolsByProfile (which pins the
+// code surface) by guarding the human/agent-facing docs against it.
+func TestDocsOnlyNameRegisteredTools(t *testing.T) {
+	registered := map[string]bool{}
+	for _, name := range fullToolNames {
+		registered[name] = true
+	}
+	// A real tool name is codemap_ + lowercase snake_case ending in an alnum, so
+	// wildcards like codemap_* never match.
+	re := regexp.MustCompile(`codemap_[a-z][a-z_]*[a-z0-9]`)
+	for _, doc := range []string{"../../docs/mcp.md", "../../docs/agents.md"} {
+		body, err := os.ReadFile(doc)
+		if err != nil {
+			t.Skipf("docs file %s not readable from test cwd: %v", doc, err)
+		}
+		for _, tok := range re.FindAllString(string(body), -1) {
+			if !registered[tok] {
+				t.Errorf("%s names %q, which is not a registered MCP tool (typo, removed, or fullToolNames is stale)", doc, tok)
+			}
+		}
+	}
 }
 
 func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
@@ -1490,7 +1526,7 @@ func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
 }
 
 // TestMCPToolsByProfile pins the exact registered-tool set for all profiles:
-// ProfileFull remains all 43 tools, ProfileCore remains its shipped 26-tool
+// ProfileFull remains all 44 tools, ProfileCore remains its shipped 26-tool
 // inventory, and ProfileAgent is the separately versioned taught workflow.
 func TestMCPToolsByProfile(t *testing.T) {
 	t.Run("full", func(t *testing.T) {

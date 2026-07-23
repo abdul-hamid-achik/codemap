@@ -86,3 +86,34 @@ func TestRefactorPlanNotFound(t *testing.T) {
 		t.Error("Nope should not be found")
 	}
 }
+
+// TestRefactorPlanBySelector pins the selector entry point (the form the MCP
+// codemap_refactor_plan handler and studio drill-down use): it resolves one
+// exact definition and produces the same plan as the name-based path, echoing
+// the resolved selector back so a consumer can chain it.
+func TestRefactorPlanBySelector(t *testing.T) {
+	svc, proj := refactorPlanProj(t)
+	sel := SymbolSelector{File: "a.go", StartLine: 3, FQN: "app.Helper", Kind: "function"}
+	rep, err := svc.RefactorPlanBySelector(context.Background(), proj, sel, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found {
+		t.Fatal("Helper (by selector) should be found")
+	}
+	if rep.Selector == nil {
+		t.Error("expected the resolved selector to be echoed back")
+	}
+	if rep.CallSitesTotal < 1 {
+		t.Errorf("CallSitesTotal = %d, want >= 1 (Run calls Helper)", rep.CallSitesTotal)
+	}
+	var foundRun bool
+	for _, c := range rep.CallSites {
+		if c.Symbol == "Run" {
+			foundRun = true
+		}
+	}
+	if !foundRun {
+		t.Errorf("call sites should include Run, got %+v", rep.CallSites)
+	}
+}

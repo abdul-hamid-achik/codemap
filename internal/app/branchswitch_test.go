@@ -135,6 +135,66 @@ func TestBranchSwitchRestoresSnapshot(t *testing.T) {
 	}
 }
 
+// TestBranchStatusReportsGitState covers the read-only branch-status path the
+// MCP codemap_branch_status handler and `codemap branch-status` CLI use: it
+// reports the current branch, HEAD sha, and the per-branch snapshot key for a
+// repo, and degrades to IsRepo:false (no error) for a non-git directory.
+func TestBranchStatusReportsGitState(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Setenv("CODEMAP_DATA", filepath.Join(t.TempDir(), "data"))
+	t.Setenv("CODEMAP_CONFIG", "")
+	ctx := context.Background()
+
+	root := t.TempDir()
+	runGit(t, root, "-c", "init.defaultBranch=main", "init", "-q")
+	runGit(t, root, "config", "user.email", "t@example.com")
+	runGit(t, root, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/m\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-q", "-m", "init")
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	st, err := svc.BranchStatus(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.IsRepo {
+		t.Fatal("expected a git repo")
+	}
+	if st.Branch != "main" {
+		t.Errorf("Branch = %q, want main", st.Branch)
+	}
+	if st.Detached {
+		t.Error("main should not be detached")
+	}
+	if st.SHA == "" {
+		t.Error("expected a non-empty HEAD sha after a commit")
+	}
+	if st.Key != git.SanitizeBranch("main") {
+		t.Errorf("Key = %q, want %q", st.Key, git.SanitizeBranch("main"))
+	}
+
+	// A non-git directory degrades to IsRepo:false without an error.
+	plain := t.TempDir()
+	st2, err := svc.BranchStatus(ctx, plain)
+	if err != nil {
+		t.Fatalf("non-git dir should not error, got %v", err)
+	}
+	if st2.IsRepo {
+		t.Error("a non-git directory should report IsRepo:false")
+	}
+}
+
 // TestInstallPostCheckoutHook checks the hook writer: it creates an executable
 // post-checkout hook with the guarded branch-switch command, is idempotent, and
 // appends to (preserves) a pre-existing hook. Git-gated; no fcheap needed.
