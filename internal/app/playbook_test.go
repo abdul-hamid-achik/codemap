@@ -52,6 +52,7 @@ func TestPlaybookMarkdownTeachesReflex(t *testing.T) {
 	for _, want := range []string{
 		"codemap_context", "codemap_review", "codemap_read_order",
 		"codemap_grep", "codemap_coverage", "candidates", "call_graph", "stale",
+		"degraded", "tooling.issues", "agent_fix",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("PlaybookMarkdown must teach %q", want)

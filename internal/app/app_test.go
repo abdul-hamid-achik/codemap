@@ -16,6 +16,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
+	"github.com/abdul-hamid-achik/codemap/internal/tooling"
 )
 
 // isolate points all codemap dirs at a temp HOME so the test never touches the
@@ -466,9 +467,17 @@ func TestIndexAdvisory(t *testing.T) {
 		FilesScanned:   5,
 		Unsupported:    map[string]int{"typescript": 3},
 		MissingServers: map[string]string{"typescript": "typescript-language-server"},
+		ServerIssues: []tooling.Issue{{
+			Code:      tooling.CodeNotFound,
+			Severity:  "error",
+			Languages: []string{"typescript"},
+			Binary:    "typescript-language-server",
+		}},
 	}
 	if adv := indexAdvisory(r); !strings.Contains(adv, "typescript-language-server") || !strings.Contains(adv, "3 typescript") {
 		t.Errorf("missing-server advisory = %q", adv)
+	} else if !strings.Contains(adv, "not found on PATH") {
+		t.Errorf("structured missing-server advisory should say not found, got %q", adv)
 	}
 	// Genuinely unsupported language, nothing indexed — informational ("planned").
 	r2 := &index.Result{FilesScanned: 0, Unsupported: map[string]int{"ruby": 2}}

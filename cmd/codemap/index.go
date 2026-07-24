@@ -223,6 +223,13 @@ func indexViaVault(cmd *cobra.Command, project, target string) (done bool, err e
 // path and the daemon-delegated path so output is identical regardless of
 // which process did the work. JSON output is handled by the caller.
 func printIndexReport(cmd *cobra.Command, rep *app.IndexReport, precise bool) {
+	if rep.Degraded {
+		reason := rep.DegradedReason
+		if reason == "" {
+			reason = "partial"
+		}
+		fmt.Fprintf(os.Stderr, "DEGRADED (%s): required language server(s) unavailable — graph is incomplete for skipped languages; see tooling.issues in --json\n", reason)
+	}
 	if rep.Warning != "" {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", rep.Warning)
 	}

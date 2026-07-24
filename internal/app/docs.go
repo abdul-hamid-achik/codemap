@@ -59,6 +59,16 @@ definitions when available, emits deletion_analysis, and orders selected tests
 before the reindex that prunes them. (A registered-but-never-indexed project
 reports indexed:false — codemap_index first.)
 
+After codemap_index: if the result has degraded:true (or tooling.issues is
+non-empty), do NOT treat the graph as complete for the skipped languages —
+common on TS/JS/Python when a language server is missing or an asdf/mise shim
+dies under the project pin (code lsp_version_manager_gap). Follow
+tooling.issues[].agent_fix steps, re-run index, and check languages.* counts
+(a TS repo that only indexed html/css is a failed setup, not a partial win).
+Doctor probes (under the project root) exercise servers the same way index
+does — not mere PATH presence — so a dead version-manager shim surfaces before
+you trust languages.*.
+
 Every query takes an optional "path" (project dir; defaults to cwd) and returns
 JSON. Results carry each symbol's signature and docstring, so you rarely open
 files; use codemap_source when you need the implementation. codemap_context's
@@ -77,7 +87,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
 
 	{"commands", `CLI commands (all query commands accept --json):
   init / index / status / projects   register, index (--reindex, --no-embed, --precise), stats, projects
-  doctor                             check toolchains, language servers, embeddings (with install hints)
+  doctor [path]                      probe toolchains/language servers/embeddings (project cwd for asdf pins; codes + agent_fix)
   callers / callees [--precise|--at] who calls X / what X calls (exact definition with --at file:line)
   references <sym> [--at file:line]  enclosing scopes that use X as a callback/value (not callers)
   impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests + runnable test_commands

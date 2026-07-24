@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,12 @@ import (
 // Service implements codemap's operations over a Session.
 type Service struct {
 	s *Session
+	// preciseClientFactory spawns the on-demand --precise call-hierarchy client
+	// preciseRelations drives. nil means the default (spawn the real language
+	// server). Tests override it to exercise the precise selector path
+	// hermetically, with no language server on PATH — the same idea as the
+	// extract.CallResolver seam the indexer's precise pass uses.
+	preciseClientFactory func(ctx context.Context, cmd string, args []string, root string) (preciseLSPClient, error)
 }
 
 // NextAction is one bounded, executable follow-up recommendation attached to

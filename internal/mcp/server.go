@@ -539,8 +539,11 @@ type unannotateInput struct {
 	Path string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
-// doctorInput is empty: doctor inspects the environment, not a project.
-type doctorInput struct{}
+// doctorInput optionally scopes language-server probes to a project root so
+// asdf/mise pins match codemap_index (empty path = process cwd / global PATH).
+type doctorInput struct {
+	Path string `json:"path,omitempty" jsonschema:"description:Optional project directory for language-server probes (asdf/mise pins); defaults to process cwd"`
+}
 
 type branchSwitchInput struct {
 	Path string `json:"path,omitempty" jsonschema:"repository directory; defaults to cwd"`
@@ -574,8 +577,11 @@ func (s *Server) register() {
 	}
 	if s.include("codemap_index") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
-			Name:        "codemap_index",
-			Description: "Index (or reindex) a project: extract its code graph and embed nodes. Incremental by default.",
+			Name: "codemap_index",
+			Description: "Index (or reindex) a project: extract its code graph and embed nodes. Incremental by default. " +
+				"When a required language server is missing or fails under the project runtime (e.g. asdf shim), the result sets degraded:true, " +
+				"degraded_reason:lsp_unavailable, and tooling.issues[] with stable codes (lsp_not_found, lsp_version_manager_gap, …), stderr, and agent_fix steps. " +
+				"Do not treat the graph as complete for skipped languages when degraded is true — follow agent_fix, then reindex and check languages.* counts.",
 		}, s.handleIndex)
 	}
 	if s.include("codemap_status") {
@@ -791,7 +797,7 @@ func (s *Server) register() {
 	if s.include("codemap_doctor") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_doctor",
-			Description: "Check the environment codemap runs in — go toolchain, gopls, the language servers (TypeScript/JavaScript, Python), and Ollama embeddings — each with a present/missing flag and an install hint. Use it to diagnose why a language isn't being indexed or why semantic search is unavailable.",
+			Description: "Check the environment codemap runs in — go toolchain, gopls, the language servers (TypeScript/JavaScript, Python), and Ollama embeddings. Language servers are probed with --version under path/cwd (not mere PATH presence), so asdf/mise shims that die under a project pin report ok:false with code lsp_version_manager_gap, stderr, and agent_fix steps. Optional path scopes probes to a project root. Use before trusting an index that skipped TS/JS/Python.",
 		}, s.handleDoctor)
 	}
 	if s.include("codemap_branch_status") {
@@ -1380,8 +1386,12 @@ func (s *Server) handleUnannotate(_ context.Context, _ *sdkmcp.CallToolRequest, 
 	return result(out, err)
 }
 
-func (s *Server) handleDoctor(ctx context.Context, _ *sdkmcp.CallToolRequest, _ doctorInput) (*sdkmcp.CallToolResult, any, error) {
-	return result(s.svc.Doctor(ctx), nil)
+func (s *Server) handleDoctor(ctx context.Context, _ *sdkmcp.CallToolRequest, in doctorInput) (*sdkmcp.CallToolResult, any, error) {
+	cwd := in.Path
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	return result(s.svc.DoctorAt(ctx, cwd), nil)
 }
 
 // ---- helpers ----

@@ -39,6 +39,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/extract/typesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/vuesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
+	"github.com/abdul-hamid-achik/codemap/internal/tooling"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
 
@@ -127,8 +128,14 @@ type Result struct {
 	// MissingServers maps a recognized language present in the project to the
 	// language-server binary that would index it but isn't on PATH (e.g.
 	// "typescript" -> "typescript-language-server"), so callers can advise the user
-	// (the skipped-file count is in Unsupported[lang]).
+	// (the skipped-file count is in Unsupported[lang]). Kept for back-compat;
+	// prefer ServerIssues for agent-repairable detail (path, stderr, agent_fix).
 	MissingServers map[string]string `json:"missing_servers,omitempty"`
+	// ServerIssues are structured tooling failures for language servers that
+	// were needed for present files but not found, not runnable under the
+	// project cwd (asdf/mise shims), or failed to spawn/initialize. One entry
+	// per binary (languages folded together).
+	ServerIssues []tooling.Issue `json:"server_issues,omitempty"`
 	// Languages maps each indexed language to its file count (e.g. "go" -> 36),
 	// so callers can tailor advice (the --precise tip applies only to Go).
 	Languages map[string]int `json:"languages,omitempty"`
@@ -175,20 +182,23 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 		if len(want) == 0 {
 			continue
 		}
-		if _, err := exec.LookPath(spec.Cmd); err != nil {
-			for _, lb := range want {
-				noteMissingServer(res, lb.Lang, spec.Cmd)
-			}
+		langs := make([]string, len(want))
+		for i, lb := range want {
+			langs[i] = lb.Lang
+		}
+		// Probe under the project root so asdf/mise shims evaluate .tool-versions
+		// (LookPath alone treats a dead shim as success).
+		if iss := tooling.ProbeOrClassify(ctx, spec.Cmd, root, langs); iss != nil {
+			noteServerIssue(res, *iss)
 			continue
 		}
+		path, _ := exec.LookPath(spec.Cmd)
 		// Spawn the server ONCE (the first present language owns it), then bind the
 		// rest to the same connection — one typescript-language-server serves both
 		// TS and JS, each routed with its own languageId.
 		owner, err := lspsrc.New(ctx, want[0].Lang, want[0].LangID, root, spec.Cmd, spec.Args...)
 		if err != nil {
-			for _, lb := range want {
-				noteMissingServer(res, lb.Lang, spec.Cmd) // spawn/init failed — treat as absent
-			}
+			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, path, root, langs, err, ""))
 			continue
 		}
 		ix.Register(owner)
@@ -224,16 +234,24 @@ func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result) bo
 	if ts == nil && js == nil {
 		spec := tsServerSpec()
 		if spec.Cmd == "" {
-			noteMissingServer(res, "vue", "typescript-language-server")
+			noteServerIssue(res, tooling.ClassifyNotFound("typescript-language-server", root, []string{"vue"}))
 			return false
 		}
-		if _, err := exec.LookPath(spec.Cmd); err != nil {
-			noteMissingServer(res, "vue", spec.Cmd)
+		langs := []string{"vue"}
+		for _, lb := range spec.Langs {
+			langs = append(langs, lb.Lang)
+		}
+		if iss := tooling.ProbeOrClassify(ctx, spec.Cmd, root, langs); iss != nil {
+			// Vue-only project: keep languages focused on vue when the shared
+			// TS/JS servers were not otherwise required by present plain files.
+			iss.Languages = []string{"vue"}
+			noteServerIssue(res, *iss)
 			return false
 		}
+		path, _ := exec.LookPath(spec.Cmd)
 		owner, err := lspsrc.New(ctx, spec.Langs[0].Lang, spec.Langs[0].LangID, root, spec.Cmd, spec.Args...)
 		if err != nil {
-			noteMissingServer(res, "vue", spec.Cmd)
+			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, path, root, []string{"vue"}, err, ""))
 			return false
 		}
 		ix.Register(owner)
@@ -259,7 +277,7 @@ func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result) bo
 	}
 
 	if ts == nil && js == nil {
-		noteMissingServer(res, "vue", "typescript-language-server")
+		noteServerIssue(res, tooling.ClassifyNotFound("typescript-language-server", root, []string{"vue"}))
 		return false
 	}
 	ix.Register(vuesrc.New(ts, js))
@@ -333,6 +351,46 @@ func noteMissingServer(res *Result, lang, cmd string) {
 		res.MissingServers = map[string]string{}
 	}
 	res.MissingServers[lang] = cmd
+}
+
+// noteServerIssue records a structured tooling failure and keeps MissingServers
+// in sync (one binary → each affected language) for back-compat consumers.
+func noteServerIssue(res *Result, iss tooling.Issue) {
+	if len(iss.Languages) == 0 && iss.Binary != "" {
+		// Defensive: always pair with MissingServers for something.
+		iss.Languages = []string{"unknown"}
+	}
+	for _, lang := range iss.Languages {
+		if lang == "" || lang == "unknown" {
+			continue
+		}
+		noteMissingServer(res, lang, iss.Binary)
+	}
+	// Dedupe by binary: later failures for the same cmd replace earlier ones
+	// (probe then spawn would otherwise double-report).
+	for i, existing := range res.ServerIssues {
+		if existing.Binary == iss.Binary {
+			// Union languages.
+			seen := map[string]bool{}
+			var langs []string
+			for _, l := range existing.Languages {
+				if !seen[l] {
+					seen[l] = true
+					langs = append(langs, l)
+				}
+			}
+			for _, l := range iss.Languages {
+				if l != "" && !seen[l] {
+					seen[l] = true
+					langs = append(langs, l)
+				}
+			}
+			iss.Languages = langs
+			res.ServerIssues[i] = iss
+			return
+		}
+	}
+	res.ServerIssues = append(res.ServerIssues, iss)
 }
 
 // Close shuts down any stateful resources the indexer spawned (language-server

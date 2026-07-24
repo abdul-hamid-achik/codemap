@@ -13,6 +13,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
+	"github.com/abdul-hamid-achik/codemap/internal/tooling"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
 
@@ -26,16 +27,27 @@ type InitReport struct {
 
 // IndexReport is returned by Index.
 type IndexReport struct {
-	Project        string   `json:"project"`
-	Root           string   `json:"root"`
-	Embedded       bool     `json:"embedded"`
-	Warning        string   `json:"warning,omitempty"`
-	FilesScanned   int      `json:"files_scanned"`
-	FilesIndexed   int      `json:"files_indexed"`
-	FilesSkipped   int      `json:"files_skipped"`
-	FilesUnchanged int      `json:"files_unchanged"` // P2-07 (O108): hash-matched, not a skip
-	FilesDeleted   int      `json:"files_deleted,omitempty"`
-	Oversized      []string `json:"oversized,omitempty"`
+	Project  string `json:"project"`
+	Root     string `json:"root"`
+	Embedded bool   `json:"embedded"`
+	Warning  string `json:"warning,omitempty"`
+	// Degraded is true when present project languages could not be indexed
+	// because a required language server was missing or failed under the
+	// project runtime (asdf shim, spawn/init error, …). Agents must not treat
+	// the graph as complete for those languages when Degraded is set — see
+	// Tooling.Issues for codes, stderr, and agent_fix steps.
+	Degraded bool `json:"degraded,omitempty"`
+	// DegradedReason is a stable machine token when Degraded is true
+	// (currently "lsp_unavailable").
+	DegradedReason string `json:"degraded_reason,omitempty"`
+	// Tooling holds structured external-binary failures. Preferred over parsing Warning.
+	Tooling        *ToolingReport `json:"tooling,omitempty"`
+	FilesScanned   int            `json:"files_scanned"`
+	FilesIndexed   int            `json:"files_indexed"`
+	FilesSkipped   int            `json:"files_skipped"`
+	FilesUnchanged int            `json:"files_unchanged"` // P2-07 (O108): hash-matched, not a skip
+	FilesDeleted   int            `json:"files_deleted,omitempty"`
+	Oversized      []string       `json:"oversized,omitempty"`
 	// Unsupported maps a recognized source language with no available extractor
 	// (e.g. its language server isn't installed) to the count of such files. They
 	// were scanned but couldn't be indexed — the Warning explains how to enable them.
@@ -56,6 +68,12 @@ type IndexReport struct {
 	EmbedMs   int `json:"embed_ms,omitempty"`
 	PreciseMs int `json:"precise_ms,omitempty"`
 	TotalMs   int `json:"total_ms,omitempty"`
+}
+
+// ToolingReport is the agent-facing view of external binaries needed for this
+// index (language servers). Empty/omitted when every required server was healthy.
+type ToolingReport struct {
+	Issues []tooling.Issue `json:"issues,omitempty"`
 }
 
 // StatusReport is returned by Status.
@@ -220,6 +238,7 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.EmbedMs = res.EmbedMs
 	rep.PreciseMs = res.PreciseMs
 	rep.TotalMs = res.TotalMs
+	attachTooling(rep, res)
 	if adv := indexAdvisory(res); adv != "" {
 		if rep.Warning != "" {
 			rep.Warning += "; " + adv
@@ -230,16 +249,48 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	return rep, nil
 }
 
-// indexAdvisory builds the index warning: an actionable note for a recognized
-// language that's present but whose language server isn't installed (shown
-// regardless of what else indexed, so a TS file dropped from a Go+TS repo isn't
-// silent), plus a "planned" note for genuinely-unsupported languages when nothing
-// at all was indexed.
+// attachTooling copies structured server issues onto the report, fills
+// files_affected from Unsupported counts, and sets Degraded when LSP-backed
+// languages were present but unusable.
+func attachTooling(rep *IndexReport, res *index.Result) {
+	if len(res.ServerIssues) == 0 {
+		return
+	}
+	issues := make([]tooling.Issue, len(res.ServerIssues))
+	copy(issues, res.ServerIssues)
+	for i := range issues {
+		n := 0
+		for _, lang := range issues[i].Languages {
+			n += res.Unsupported[lang]
+		}
+		issues[i].FilesAffected = n
+	}
+	rep.Tooling = &ToolingReport{Issues: issues}
+	rep.Degraded = true
+	rep.DegradedReason = "lsp_unavailable"
+}
+
+// indexAdvisory builds the index warning: structured tooling issues first
+// (preferred agent signal lives in Tooling.Issues; Warning is the prose
+// projection), then a "planned" note for genuinely-unsupported languages.
 func indexAdvisory(res *index.Result) string {
 	var msgs []string
-	for _, lang := range sortedStrKeys(res.MissingServers) {
-		msgs = append(msgs, fmt.Sprintf("%d %s file(s) skipped — install %q to index them (or run with --no-lsp)",
-			res.Unsupported[lang], lang, res.MissingServers[lang]))
+	if len(res.ServerIssues) > 0 {
+		// Project issues onto prose with accurate file counts.
+		for _, iss := range res.ServerIssues {
+			n := 0
+			for _, lang := range iss.Languages {
+				n += res.Unsupported[lang]
+			}
+			iss.FilesAffected = n
+			msgs = append(msgs, tooling.WarningLine(iss))
+		}
+	} else {
+		// Back-compat path when only MissingServers is populated (tests/old callers).
+		for _, lang := range sortedStrKeys(res.MissingServers) {
+			msgs = append(msgs, fmt.Sprintf("%d %s file(s) skipped — install %q to index them (or run with --no-lsp); see tooling.issues when present",
+				res.Unsupported[lang], lang, res.MissingServers[lang]))
+		}
 	}
 	planned := map[string]int{}
 	for lang, n := range res.Unsupported {

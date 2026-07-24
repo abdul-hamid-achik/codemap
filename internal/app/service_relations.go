@@ -385,8 +385,13 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 		return nil, nil, project, fmt.Errorf("no precise-resolvable symbol named %q (precise resolution supports Go, TypeScript, JavaScript, Python)", symbol)
 	}
 	cmd, args, langID, _ := lspServerFor(node.Language, node.FilePath)
-	if _, err := exec.LookPath(cmd); err != nil {
-		return nil, nil, project, fmt.Errorf("%s not found on PATH (required for precise %s resolution)", cmd, node.Language)
+	// The real path requires the language server on PATH; a test-injected
+	// factory supplies its own client and skips the LookPath gate so the precise
+	// selector path can be exercised hermetically.
+	if svc.preciseClientFactory == nil {
+		if _, err := exec.LookPath(cmd); err != nil {
+			return nil, nil, project, fmt.Errorf("%s not found on PATH (required for precise %s resolution)", cmd, node.Language)
+		}
 	}
 
 	root := p.Path
@@ -396,14 +401,11 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 		return nil, nil, project, err
 	}
 
-	cl, err := lsp.Spawn(ctx, cmd, args...)
+	cl, err := svc.spawnPreciseClient(ctx, cmd, args, root)
 	if err != nil {
 		return nil, nil, project, err
 	}
 	defer func() { _ = cl.Close() }()
-	if err := cl.Initialize(ctx, root); err != nil {
-		return nil, nil, project, err
-	}
 	uri, _ := lsp.URI(absFile)
 	if err := cl.DidOpen(uri, langID, string(src)); err != nil {
 		return nil, nil, project, err
@@ -442,6 +444,40 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 		callees = append(callees, itemToRef(c.To, root))
 	}
 	return callers, callees, project, nil
+}
+
+// preciseLSPClient is the narrow LSP port the on-demand --precise relation path
+// (preciseRelations) drives. *lsp.Client satisfies it; tests substitute a fake
+// (via Service.preciseClientFactory) to exercise the precise selector path
+// hermetically — no language server on PATH — mirroring the extract.CallResolver
+// seam the indexer's precise pass uses.
+type preciseLSPClient interface {
+	Initialize(ctx context.Context, root string) error
+	DidOpen(uri, languageID, text string) error
+	WaitReady(ctx context.Context, timeout time.Duration)
+	DocumentSymbols(ctx context.Context, uri string) ([]lsp.DocumentSymbol, error)
+	PrepareCallHierarchy(ctx context.Context, uri string, pos lsp.Position) ([]lsp.CallHierarchyItem, error)
+	IncomingCalls(ctx context.Context, item lsp.CallHierarchyItem) ([]lsp.CallHierarchyIncomingCall, error)
+	OutgoingCalls(ctx context.Context, item lsp.CallHierarchyItem) ([]lsp.CallHierarchyOutgoingCall, error)
+	Close() error
+}
+
+// spawnPreciseClient returns the client preciseRelations drives: the
+// test-injected factory when set, otherwise a freshly spawned + initialized
+// language server.
+func (svc *Service) spawnPreciseClient(ctx context.Context, cmd string, args []string, root string) (preciseLSPClient, error) {
+	if svc.preciseClientFactory != nil {
+		return svc.preciseClientFactory(ctx, cmd, args, root)
+	}
+	cl, err := lsp.Spawn(ctx, cmd, args...)
+	if err != nil {
+		return nil, err
+	}
+	if err := cl.Initialize(ctx, root); err != nil {
+		_ = cl.Close()
+		return nil, err
+	}
+	return cl, nil
 }
 
 func nonNil(s []SymbolRef) []SymbolRef {

@@ -57,6 +57,16 @@ definitions when available, emits deletion_analysis, and orders selected tests
 before the reindex that prunes them. (A registered-but-never-indexed project
 reports indexed:false — codemap_index first.)
 
+After codemap_index: if the result has degraded:true (or tooling.issues is
+non-empty), do NOT treat the graph as complete for the skipped languages —
+common on TS/JS/Python when a language server is missing or an asdf/mise shim
+dies under the project pin (code lsp_version_manager_gap). Follow
+tooling.issues[].agent_fix steps, re-run index, and check languages.* counts
+(a TS repo that only indexed html/css is a failed setup, not a partial win).
+Doctor probes (under the project root) exercise servers the same way index
+does — not mere PATH presence — so a dead version-manager shim surfaces before
+you trust languages.*.
+
 Every query takes an optional "path" (project dir; defaults to cwd) and returns
 JSON. Results carry each symbol's signature and docstring, so you rarely open
 files; use codemap_source when you need the implementation. codemap_context's

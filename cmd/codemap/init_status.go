@@ -36,13 +36,19 @@ centrally — set CODEMAP_DATA to a path inside the repo for a repo-local index.
 		RunE:  runStatus,
 	}
 	doctorCmd = &cobra.Command{
-		Use:   "doctor",
+		Use:   "doctor [path]",
 		Short: "Check the environment: toolchains, language servers, and embeddings",
 		Long: `Check which codemap capabilities are ready in this environment, before
 indexing: the go toolchain and gopls (Go precise paths), each language server
 (TypeScript/JavaScript via typescript-language-server, Python via pyright), and
 Ollama embeddings (semantic search). Nothing here is required for the core graph
-— each missing piece just disables one capability, with a hint to enable it.`,
+— each missing piece just disables one capability, with a hint to enable it.
+
+When [path] (or -C) is a project root, language-server probes run with that
+directory as cwd so asdf/mise/nvm project pins match what codemap index will
+see. A PATH shim that dies under the project runtime is reported as failed
+with code lsp_version_manager_gap, not as healthy.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: runDoctor,
 	}
 	serveCmd = &cobra.Command{
@@ -160,17 +166,24 @@ func printDaemonLine(info *daemon.Info) {
 	fmt.Println(line)
 }
 
-func runDoctor(cmd *cobra.Command, _ []string) error {
-	sess, err := openSession(cmd)
+func runDoctor(cmd *cobra.Command, args []string) error {
+	// Optional [path]: probe language servers under that project root so
+	// asdf/mise pins match what `codemap index` will see.
+	cwd := targetDirArg(cmd, args)
+	sess, err := openSessionAt(cmd, cwd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	rep := app.NewService(sess).Doctor(context.Background())
+	rep := app.NewService(sess).DoctorAt(context.Background(), cwd)
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	fmt.Printf("codemap doctor\n  data: %s\n\n", rep.DataDir)
+	fmt.Printf("codemap doctor\n  data: %s\n", rep.DataDir)
+	if rep.ProjectRoot != "" {
+		fmt.Printf("  project: %s\n", rep.ProjectRoot)
+	}
+	fmt.Println()
 	for _, c := range rep.Checks {
 		mark := "✓"
 		if !c.OK {
@@ -179,6 +192,9 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		line := fmt.Sprintf("  %s %s", mark, c.Name)
 		if c.Detail != "" {
 			line += "  " + c.Detail
+		}
+		if c.Code != "" && !c.OK {
+			line += "  [" + c.Code + "]"
 		}
 		fmt.Println(line)
 		if !c.OK && c.Hint != "" {

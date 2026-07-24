@@ -2,7 +2,11 @@ package index
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -377,5 +381,71 @@ func TestMissingServerReportedNotSilent(t *testing.T) {
 	}
 	if res.MissingServers["typescript"] == "" {
 		t.Errorf("server absent: expected MissingServers[typescript] to be set, got %v", res.MissingServers)
+	}
+	if len(res.ServerIssues) != 1 || res.ServerIssues[0].Code != "lsp_not_found" {
+		t.Errorf("server absent: expected ServerIssues lsp_not_found, got %+v", res.ServerIssues)
+	}
+	if res.ServerIssues[0].AgentFix == nil || len(res.ServerIssues[0].AgentFix.Steps) == 0 {
+		t.Errorf("server absent: expected agent_fix steps, got %+v", res.ServerIssues[0].AgentFix)
+	}
+}
+
+// TestDeadVersionManagerShimReportsStructuredIssue proves that a binary which
+// exists on PATH (LookPath succeeds) but fails under the project cwd — the
+// classic asdf/mise "No version is set for command" shim — is classified as
+// lsp_version_manager_gap with stderr and pins, not collapsed to "install X".
+func TestDeadVersionManagerShimReportsStructuredIssue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim")
+	}
+	binDir := t.TempDir()
+	shim := filepath.Join(binDir, "fake-ts-ls")
+	script := "#!/bin/sh\necho 'No version is set for command fake-ts-ls' >&2\necho 'Consider adding one of the following versions in your config file at .tool-versions' >&2\nexit 126\n"
+	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	saved := lspsrc.DefaultServers
+	t.Cleanup(func() { lspsrc.DefaultServers = saved })
+	lspsrc.DefaultServers = []lspsrc.ServerSpec{{
+		Cmd:   "fake-ts-ls",
+		Args:  []string{"--stdio"},
+		Langs: []lspsrc.LangBinding{{Lang: "typescript", LangID: "typescript"}},
+	}}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".tool-versions"), []byte("nodejs 24.17.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "svc.ts", "export function f() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("ts", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	res, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.MissingServers["typescript"] == "" {
+		t.Fatalf("expected MissingServers, got %v", res.MissingServers)
+	}
+	if len(res.ServerIssues) != 1 {
+		t.Fatalf("ServerIssues = %+v", res.ServerIssues)
+	}
+	iss := res.ServerIssues[0]
+	if iss.Code != "lsp_version_manager_gap" {
+		t.Errorf("code = %q, want lsp_version_manager_gap; stderr=%q", iss.Code, iss.Stderr)
+	}
+	if iss.ResolvedPath == "" {
+		t.Error("expected resolved_path of the dead shim")
+	}
+	if iss.ExitCode == nil || *iss.ExitCode != 126 {
+		t.Errorf("exit_code = %v", iss.ExitCode)
+	}
+	if iss.VersionManager == nil || iss.VersionManager.Kind != "asdf" {
+		t.Errorf("version_manager = %+v", iss.VersionManager)
+	}
+	if !strings.Contains(iss.Stderr, "No version is set") {
+		t.Errorf("stderr should carry asdf message, got %q", iss.Stderr)
 	}
 }
