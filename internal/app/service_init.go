@@ -78,23 +78,23 @@ type ToolingReport struct {
 
 // StatusReport is returned by Status.
 type StatusReport struct {
-	Project         string         `json:"project"`
-	Root            string         `json:"root"`
-	Registered      bool           `json:"registered"`
-	Path            string         `json:"path,omitempty"`
-	Nodes           int            `json:"nodes"`
-	Edges           int            `json:"edges"`
-	Files           int            `json:"files"`
-	Vectors         int            `json:"vectors"`          // locally embedded nodes (0 is expected when semantic_backend=vecgrep)
-	SemanticBackend string         `json:"semantic_backend"` // configured retrieval owner: fallback|local|vecgrep
-	PreciseEdges    int            `json:"precise_edges"`    // go/types-resolved call edges (0 = name-based index)
+	Project         string `json:"project"`
+	Root            string `json:"root"`
+	Registered      bool   `json:"registered"`
+	Path            string `json:"path,omitempty"`
+	Nodes           int    `json:"nodes"`
+	Edges           int    `json:"edges"`
+	Files           int    `json:"files"`
+	Vectors         int    `json:"vectors"`          // locally embedded nodes (0 is expected when semantic_backend=vecgrep)
+	SemanticBackend string `json:"semantic_backend"` // configured retrieval owner: fallback|local|vecgrep
+	PreciseEdges    int    `json:"precise_edges"`    // go/types-resolved call edges (0 = name-based index)
 	// Precise reports whether each language has a precise call graph (true)
 	// or only structural edges (false). Consumers like Monitor use this to
 	// decide whether blast-radius/impact results are trustworthy for a given
 	// language. Derived from PreciseEdges and the indexed language set.
-	Precise         map[string]bool `json:"precise,omitempty"`
-	Languages       map[string]int `json:"languages,omitempty"`
-	Kinds           map[string]int `json:"kinds,omitempty"`
+	Precise   map[string]bool `json:"precise,omitempty"`
+	Languages map[string]int  `json:"languages,omitempty"`
+	Kinds     map[string]int  `json:"kinds,omitempty"`
 	// Stale, when set, reports how far the index has drifted from the working tree
 	// (changed/new/deleted files). Status does not compute it (keeps studio fast);
 	// the CLI `status` and MCP codemap_status populate it via Staleness so an agent
