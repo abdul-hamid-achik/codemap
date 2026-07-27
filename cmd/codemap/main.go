@@ -175,7 +175,7 @@ func init() {
 	calleesCmd.Flags().Bool("lsp", false, "(alias for --precise; kept for back-compat)")
 	_ = calleesCmd.Flags().MarkHidden("lsp")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
-	impactCmd.Flags().String("at", "", "resolve the symbol from a position instead of a name: <file>:<line>")
+	impactCmd.Flags().StringArray("at", nil, "resolve the symbol from a position (repeatable for batch): <file>:<line> — pass several to batch impact across multiple frames")
 	reviewCmd.Flags().Int("depth", 3, "max hops for each changed symbol's blast radius")
 	reviewCmd.Flags().String("since", "", "review everything changed since this git ref (committed + uncommitted)")
 	reviewCmd.Flags().Bool("staged", false, "review only staged changes (the git index) instead of the whole working tree")

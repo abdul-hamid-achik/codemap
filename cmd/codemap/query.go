@@ -485,21 +485,25 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	// Resolve the target: a positional name unions matching definitions; --at
-	// carries the exact source selector through the impact traversal.
+	// carries exact source selectors through the impact traversal. Multiple
+	// --at positions batch into one ImpactBatchReport.
 	symbol := ""
 	if len(args) > 0 {
 		symbol = args[0]
 	}
-	selector, err := selectorFromAtFlag(svc, cwd, cmd)
+	selectors, err := selectorsFromAtFlags(svc, cwd, cmd)
 	if err != nil {
 		return err
 	}
-	if selector == nil && symbol == "" {
-		return fmt.Errorf("impact needs a <symbol> argument or --at <file>:<line>")
+	if len(selectors) == 0 && symbol == "" {
+		return fmt.Errorf("impact needs a <symbol> argument or --at <file>:<line> (repeatable for batch)")
+	}
+	if len(selectors) > 1 {
+		return runImpactBatch(cmd, svc, cwd, selectors, depth)
 	}
 	var rep *app.ImpactReport
-	if selector != nil {
-		rep, err = svc.ImpactBySelector(cwd, *selector, depth)
+	if len(selectors) == 1 {
+		rep, err = svc.ImpactBySelector(cwd, selectors[0], depth)
 	} else {
 		rep, err = svc.Impact(cwd, symbol, depth)
 	}
@@ -507,7 +511,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !rep.Found {
-		if selector != nil {
+		if len(selectors) > 0 {
 			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
 		}
 		return notFoundError(
@@ -558,6 +562,34 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		}
 		if more > 0 {
 			fmt.Printf("   … (%d more — use --json for all, or lower --depth)\n", more)
+		}
+	}
+	return nil
+}
+
+// runImpactBatch resolves impact for several --at positions in one call,
+// printing the ImpactBatchReport JSON or a human summary.
+func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, selectors []app.SymbolSelector, depth int) error {
+	rep, err := svc.ImpactBatch(cwd, selectors, depth)
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	fmt.Printf("Batch impact (%d positions, %s)\n", rep.Requested, rep.Project)
+	if rep.Note != "" {
+		fmt.Println("⚠ " + rep.Note)
+	}
+	for i, r := range rep.Results {
+		fmt.Printf("\n[%d] %s\n", i+1, r.Symbol)
+		if !r.Found {
+			fmt.Printf("  not found\n")
+			continue
+		}
+		fmt.Printf("  callers: %d  blast: %d  tests: %d\n", len(r.DirectCallers), len(r.BlastRadius), len(r.Tests))
+		if r.Resolution != "" {
+			fmt.Println("  ⚠ " + r.Resolution)
 		}
 	}
 	return nil

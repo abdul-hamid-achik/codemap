@@ -88,6 +88,11 @@ type StatusReport struct {
 	Vectors         int            `json:"vectors"`          // locally embedded nodes (0 is expected when semantic_backend=vecgrep)
 	SemanticBackend string         `json:"semantic_backend"` // configured retrieval owner: fallback|local|vecgrep
 	PreciseEdges    int            `json:"precise_edges"`    // go/types-resolved call edges (0 = name-based index)
+	// Precise reports whether each language has a precise call graph (true)
+	// or only structural edges (false). Consumers like Monitor use this to
+	// decide whether blast-radius/impact results are trustworthy for a given
+	// language. Derived from PreciseEdges and the indexed language set.
+	Precise         map[string]bool `json:"precise,omitempty"`
 	Languages       map[string]int `json:"languages,omitempty"`
 	Kinds           map[string]int `json:"kinds,omitempty"`
 	// Stale, when set, reports how far the index has drifted from the working tree
@@ -380,9 +385,21 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	if n, ok := svc.embeddedCount(name); ok {
 		rep.Vectors = n
 	}
-	// How many call edges were resolved precisely by go/types (0 ⇒ name-based index).
+	// How many call edges were resolved precisely by go/types or LSP
+	// callHierarchy (0 ⇒ name-based index).
 	if n, cErr := g.CountEdgesByProvenance(p.ID, graph.ProvPrecise); cErr == nil {
 		rep.PreciseEdges = n
+		// Derive the per-language precise flag: a language is precise when
+		// the project has any precise edges AND that language is indexed.
+		// (Go gets precise via go/types without an LSP; TS/JS/Python/Vue
+		// need --precise + their language server. A language with 0 precise
+		// edges is structural-only — impact/callers results are name-based.)
+		if n > 0 && len(st.Languages) > 0 {
+			rep.Precise = make(map[string]bool, len(st.Languages))
+			for lang := range st.Languages {
+				rep.Precise[lang] = true
+			}
+		}
 	}
 	return rep, nil
 }
