@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -66,6 +67,40 @@ func TestMigrateV4AddsCallGraphCoverage(t *testing.T) {
 	}
 	if version != schemaVersion {
 		t.Errorf("user_version = %d, want %d", version, schemaVersion)
+	}
+}
+
+func TestMigrateV5AddsAnnotationExternalID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v5.db")
+	old, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.db.Exec("DROP INDEX idx_annotations_external"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.db.Exec("ALTER TABLE annotations DROP COLUMN external_id"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.db.Exec("PRAGMA user_version=5"); err != nil {
+		t.Fatal(err)
+	}
+	_ = old.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open v5 graph: %v", err)
+	}
+	defer s.Close()
+	if ok, err := s.columnExists("annotations", "external_id"); err != nil || !ok {
+		t.Fatalf("annotations.external_id after migration: present=%t err=%v", ok, err)
+	}
+	var index string
+	if err := s.db.QueryRow("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_annotations_external'").Scan(&index); err != nil {
+		t.Fatalf("external-id unique index missing after migration: %v", err)
+	}
+	if index != "idx_annotations_external" {
+		t.Fatalf("migrated index = %q", index)
 	}
 }
 
@@ -898,6 +933,97 @@ func TestAnnotations(t *testing.T) {
 	got, _ = s.AnnotationsByTarget(pid, AnnotationNode, "p.Run")
 	if len(got) != 1 {
 		t.Errorf("after delete, node annotations = %d, want 1", len(got))
+	}
+}
+
+func TestUpsertAnnotationExternalID(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	base := Annotation{
+		Kind: AnnotationNode, Target: "p.Run", Source: "monitor",
+		ExternalID: "incident:1842", Note: "first", Data: `{"confidence":0.8}`,
+	}
+	id, action, err := s.UpsertAnnotation(pid, base)
+	if err != nil || action != AnnotationCreated || id == 0 {
+		t.Fatalf("first upsert: id=%d action=%q err=%v", id, action, err)
+	}
+	id2, action, err := s.UpsertAnnotation(pid, base)
+	if err != nil || id2 != id || action != AnnotationUnchanged {
+		t.Fatalf("identical retry: id=%d action=%q err=%v; want id=%d unchanged", id2, action, err, id)
+	}
+
+	updated := base
+	updated.Target = "p.RunRenamed"
+	updated.Note = "reclassified"
+	id3, action, err := s.UpsertAnnotation(pid, updated)
+	if err != nil || id3 != id || action != AnnotationUpdated {
+		t.Fatalf("changed retry: id=%d action=%q err=%v; want id=%d updated", id3, action, err, id)
+	}
+	all, err := s.AllAnnotations(pid)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("annotations after upsert = %+v err=%v", all, err)
+	}
+	if all[0].ExternalID != base.ExternalID || all[0].Target != updated.Target || all[0].Note != updated.Note {
+		t.Fatalf("updated annotation = %+v", all[0])
+	}
+
+	// Source namespaces the external id, so a sibling tool can reuse it.
+	other := base
+	other.Source = "profiler"
+	otherID, action, err := s.UpsertAnnotation(pid, other)
+	if err != nil || action != AnnotationCreated || otherID == id {
+		t.Fatalf("source-namespaced upsert: id=%d action=%q err=%v", otherID, action, err)
+	}
+}
+
+func TestUpsertAnnotationConcurrentRetriesDoNotDuplicate(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	a := Annotation{Kind: AnnotationNode, Target: "p.Run", Source: "monitor", ExternalID: "incident:concurrent", Note: "same"}
+
+	const writers = 16
+	type result struct {
+		id     int64
+		action string
+		err    error
+	}
+	results := make(chan result, writers)
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, action, err := s.UpsertAnnotation(pid, a)
+			results <- result{id: id, action: action, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	var firstID int64
+	created := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent upsert: %v", result.err)
+		}
+		if firstID == 0 {
+			firstID = result.id
+		}
+		if result.id != firstID {
+			t.Errorf("concurrent ids differ: got %d want %d", result.id, firstID)
+		}
+		if result.action == AnnotationCreated {
+			created++
+		} else if result.action != AnnotationUnchanged {
+			t.Errorf("unexpected concurrent action %q", result.action)
+		}
+	}
+	if created != 1 {
+		t.Fatalf("created actions = %d, want exactly 1", created)
+	}
+	all, err := s.AllAnnotations(pid)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("concurrent retries created duplicates: %+v err=%v", all, err)
 	}
 }
 

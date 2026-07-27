@@ -49,8 +49,9 @@ no dynamic or otherwise-unindexed wiring.`,
 		Short: "Impact analysis: blast radius (transitive callers) + test coverage",
 		Example: `  codemap impact Run
   codemap impact --at internal/app/review.go:120 --depth 5
+  codemap impact --batch --at internal/app/review.go:120 --json
   codemap impact Run --json`,
-		Args: symbolOrAtArgs,
+		Args: impactArgs,
 		RunE: runImpact,
 	}
 	reviewCmd = &cobra.Command{
@@ -248,6 +249,21 @@ func contextOrAtArgs(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cobra.MinimumNArgs(1)(cmd, args)
+}
+
+func impactArgs(cmd *cobra.Command, args []string) error {
+	ats, _ := cmd.Flags().GetStringArray("at")
+	batch, _ := cmd.Flags().GetBool("batch")
+	if len(ats) > 0 {
+		if len(args) > 0 {
+			return fmt.Errorf("--at and positional symbol arguments are mutually exclusive")
+		}
+		return nil
+	}
+	if batch {
+		return fmt.Errorf("--batch requires at least one --at <file>:<line>")
+	}
+	return cobra.ExactArgs(1)(cmd, args)
 }
 
 func runCallers(cmd *cobra.Command, args []string) error {
@@ -486,24 +502,44 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	}
 	// Resolve the target: a positional name unions matching definitions; --at
 	// carries exact source selectors through the impact traversal. Multiple
-	// --at positions batch into one ImpactBatchReport.
+	// --at positions (or explicit --batch) use the partial-success batch envelope.
 	symbol := ""
 	if len(args) > 0 {
 		symbol = args[0]
 	}
-	selectors, err := selectorsFromAtFlags(svc, cwd, cmd)
-	if err != nil {
-		return err
+	ats, _ := cmd.Flags().GetStringArray("at")
+	positions := make([]app.FilePosition, 0, len(ats))
+	for _, at := range ats {
+		file, line, parseErr := parseFileLine(at)
+		if parseErr != nil {
+			return parseErr
+		}
+		positions = append(positions, app.FilePosition{File: file, Line: line})
 	}
-	if len(selectors) == 0 && symbol == "" {
+	batch, _ := cmd.Flags().GetBool("batch")
+	if len(positions) > 1 || batch {
+		return runImpactBatch(cmd, svc, cwd, positions, depth)
+	}
+	var selector *app.SymbolSelector
+	if len(positions) == 1 {
+		at := positions[0]
+		atRep, atErr := svc.SymbolAt(cwd, at.File, at.Line)
+		if atErr != nil {
+			return atErr
+		}
+		if atRep.Resolution == "none" || atRep.Selector == nil {
+			return notFoundError(
+				fmt.Sprintf("no symbol found at %s:%d", at.File, at.Line),
+				"check the file path and line number")
+		}
+		selector = atRep.Selector
+	}
+	if selector == nil && symbol == "" {
 		return fmt.Errorf("impact needs a <symbol> argument or --at <file>:<line> (repeatable for batch)")
 	}
-	if len(selectors) > 1 {
-		return runImpactBatch(cmd, svc, cwd, selectors, depth)
-	}
 	var rep *app.ImpactReport
-	if len(selectors) == 1 {
-		rep, err = svc.ImpactBySelector(cwd, selectors[0], depth)
+	if selector != nil {
+		rep, err = svc.ImpactBySelector(cwd, *selector, depth)
 	} else {
 		rep, err = svc.Impact(cwd, symbol, depth)
 	}
@@ -511,7 +547,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if !rep.Found {
-		if len(selectors) > 0 {
+		if selector != nil {
 			return notFoundError("the selected definition is no longer in the index", "run: codemap index")
 		}
 		return notFoundError(
@@ -569,22 +605,33 @@ func runImpact(cmd *cobra.Command, args []string) error {
 
 // runImpactBatch resolves impact for several --at positions in one call,
 // printing the ImpactBatchReport JSON or a human summary.
-func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, selectors []app.SymbolSelector, depth int) error {
-	rep, err := svc.ImpactBatch(cwd, selectors, depth)
+func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, positions []app.FilePosition, depth int) error {
+	rep, err := svc.ImpactPositions(cwd, positions, depth)
 	if err != nil {
 		return err
 	}
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}
-	fmt.Printf("Batch impact (%d positions, %s)\n", rep.Requested, rep.Project)
+	fmt.Printf("Batch impact (%d requested, %d processed, %s)\n", rep.Requested, rep.Processed, rep.Project)
 	if rep.Note != "" {
 		fmt.Println("⚠ " + rep.Note)
 	}
 	for i, r := range rep.Results {
-		fmt.Printf("\n[%d] %s\n", i+1, r.Symbol)
+		label := r.Symbol
+		if r.Position != nil {
+			label = fmt.Sprintf("%s:%d", r.Position.File, r.Position.Line)
+			if r.Symbol != "" {
+				label += "  " + r.Symbol
+			}
+		}
+		fmt.Printf("\n[%d] %s\n", i+1, label)
 		if !r.Found {
-			fmt.Printf("  not found\n")
+			if r.Error != nil {
+				fmt.Printf("  %s: %s\n", r.Error.Code, r.Error.Message)
+			} else {
+				fmt.Printf("  not found\n")
+			}
 			continue
 		}
 		fmt.Printf("  callers: %d  blast: %d  tests: %d\n", len(r.DirectCallers), len(r.BlastRadius), len(r.Tests))

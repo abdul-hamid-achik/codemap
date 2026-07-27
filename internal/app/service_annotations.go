@@ -7,6 +7,8 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
+const MaxAnnotationExternalIDBytes = 512
+
 // AnnotationsReport is returned by the annotation read methods.
 type AnnotationsReport struct {
 	Project     string             `json:"project"`
@@ -43,18 +45,30 @@ func (svc *Service) annotateProject(cwd string) (int64, *graph.Store, error) {
 // when it doesn't (they're reindex-durable and may predate the code), but callers
 // warn so a typo isn't silently saved to a name that can never surface.
 func (svc *Service) AnnotateNode(cwd, symbol, source, note, data string) (id int64, matched bool, err error) {
+	id, _, matched, err = svc.AnnotateNodeIdempotent(cwd, symbol, source, note, data, "")
+	return id, matched, err
+}
+
+// AnnotateNodeIdempotent pins or upserts a symbol annotation. externalID is
+// caller-owned and unique within (project, source); empty keeps append-only
+// behavior for humans and existing integrations.
+func (svc *Service) AnnotateNodeIdempotent(cwd, symbol, source, note, data, externalID string) (id int64, action string, matched bool, err error) {
+	externalID, err = validateAnnotationExternalID(externalID)
+	if err != nil {
+		return 0, "", false, err
+	}
 	pid, g, err := svc.annotateProject(cwd)
 	if err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
-	id, err = g.AddAnnotation(pid, graph.Annotation{
-		Kind: graph.AnnotationNode, Target: symbol, Source: source, Note: note, Data: data,
+	id, action, err = g.UpsertAnnotation(pid, graph.Annotation{
+		Kind: graph.AnnotationNode, Target: symbol, Source: source, ExternalID: externalID, Note: note, Data: data,
 	})
 	if err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
 	matched, _ = g.NodeExistsByName(pid, symbol)
-	return id, matched, nil
+	return id, action, matched, nil
 }
 
 // AnnotatePath pins a note / external data to a call path from→to. Returns the
@@ -64,20 +78,38 @@ func (svc *Service) AnnotateNode(cwd, symbol, source, note, data string) (id int
 // path only if they do); like AnnotateNode it's saved either way so callers warn
 // rather than block.
 func (svc *Service) AnnotatePath(cwd, from, to, source, note, data string) (id int64, target string, matched bool, err error) {
+	id, target, _, matched, err = svc.AnnotatePathIdempotent(cwd, from, to, source, note, data, "")
+	return id, target, matched, err
+}
+
+// AnnotatePathIdempotent is the path counterpart of AnnotateNodeIdempotent.
+func (svc *Service) AnnotatePathIdempotent(cwd, from, to, source, note, data, externalID string) (id int64, target, action string, matched bool, err error) {
+	externalID, err = validateAnnotationExternalID(externalID)
+	if err != nil {
+		return 0, "", "", false, err
+	}
 	pid, g, err := svc.annotateProject(cwd)
 	if err != nil {
-		return 0, "", false, err
+		return 0, "", "", false, err
 	}
 	target = pathTarget(from, to)
-	id, err = g.AddAnnotation(pid, graph.Annotation{
-		Kind: graph.AnnotationPath, Target: target, Source: source, Note: note, Data: data,
+	id, action, err = g.UpsertAnnotation(pid, graph.Annotation{
+		Kind: graph.AnnotationPath, Target: target, Source: source, ExternalID: externalID, Note: note, Data: data,
 	})
 	if err != nil {
-		return 0, target, false, err
+		return 0, target, "", false, err
 	}
 	fromOK, _ := g.NodeExistsByName(pid, from)
 	toOK, _ := g.NodeExistsByName(pid, to)
-	return id, target, fromOK && toOK, nil
+	return id, target, action, fromOK && toOK, nil
+}
+
+func validateAnnotationExternalID(externalID string) (string, error) {
+	externalID = strings.TrimSpace(externalID)
+	if len(externalID) > MaxAnnotationExternalIDBytes {
+		return "", fmt.Errorf("annotation external id is %d bytes; maximum is %d", len(externalID), MaxAnnotationExternalIDBytes)
+	}
+	return externalID, nil
 }
 
 // AllAnnotations lists every annotation in the project.

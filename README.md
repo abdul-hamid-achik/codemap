@@ -300,7 +300,7 @@ complete set.
 
 | Group | Command | What it does |
 |---|---|---|
-| Project | `init` / `index` / `status` | register, index (`--reindex`, `--no-embed`, `--no-lsp`, `--precise`), show stats + freshness |
+| Project | `init` / `index` / `status` | register, index (`--reindex`, `--no-embed`, `--no-lsp`, `--precise`), show stats + freshness + per-language precise coverage |
 | Project | `doctor` | check the environment — toolchains, language servers, embeddings — with install hints |
 | Project | `projects` | list all registered projects and their index sizes |
 | Project | `config path` / `config show` | resolved config file path and values (`--json`) |
@@ -312,7 +312,7 @@ complete set.
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, value references, tests, blast radius |
 | Navigate | `read-order` / `map` / `explore` | ranked reading list, bounded architecture overview, or intent-to-structure orientation |
 | Navigate | `traverse --at <file>:<line>` | bounded walk from one exact definition across selected edge types and directions |
-| Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact, file dependency evidence, or diff-scoped tests |
+| Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact (repeat `impact --at` for a partial-success frame batch; `--batch` stabilizes the one-item envelope), file dependency evidence, or diff-scoped tests |
 | Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
 | Analyze | `coverage` | per-file precise call-graph coverage: rollups by language/directory + bounded per-file detail |
 | Analyze | `risk` | 0..1 change-risk score with factors |
@@ -323,7 +323,7 @@ complete set.
 | Cache | `cache export` / `import` | portable `tar.gz` index snapshots — no fcheap needed, for CI/team sharing |
 | Branch | `branch-status` / `branch-switch` / `branch-snapshot` | per-branch index snapshots via fcheap |
 | Daemon | `daemon start` / `status` / `stop` | background watcher that keeps the index fresh |
-| Knowledge | `annotate` / `annotations` | pin / list notes and external data on symbols/paths |
+| Knowledge | `annotate` / `annotations` | pin / list notes and external data on symbols/paths; `--external-id` makes automated writes retry-safe |
 | Agent harness | `agent setup` / `list` / `playbook` | wire codemap (MCP server + playbook) into an AI coding harness |
 | Surfaces | `serve` / `studio` | MCP server (stdio) and interactive TUI |
 
@@ -459,7 +459,9 @@ language-server results (gopls for Go, `typescript-language-server` for TS/JS, a
 Python); `codemap_source` returns a symbol's body; `codemap_projects` lists
 what's indexed; **`codemap_docs`** returns an agent guide so a harness can learn the tool;
 **`codemap_annotate` / `codemap_annotations`** pin notes and external data (DB rows, findings) to
-symbols and call paths — a knowledge layer over the graph (see below).
+symbols and call paths — a knowledge layer over the graph (see below). Automated writers can send
+`external_id`; codemap upserts it within project + source and reports whether the row was created,
+updated, or unchanged.
 
 `codemap_map`, `codemap_explore`, and `codemap_traverse` are extended orientation surfaces registered
 only in the default `full` MCP profile. The CLI commands remain available regardless of MCP profile.

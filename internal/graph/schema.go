@@ -2,9 +2,9 @@ package graph
 
 // schemaVersion is bumped whenever schemaSQL changes in a way that requires a
 // migration. The current version is stored in SQLite's PRAGMA user_version.
-// v2 adds annotations, v3 edge provenance, v4 composite query indexes, and v5
-// per-file precise call-graph coverage.
-const schemaVersion = 5
+// v2 adds annotations, v3 edge provenance, v4 composite query indexes, v5
+// per-file precise call-graph coverage, and v6 idempotent annotation keys.
+const schemaVersion = 6
 
 // Edge provenance: how an edge's target was resolved. Name-based fan-out (the
 // fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS annotations (
     kind        TEXT NOT NULL,
     target      TEXT NOT NULL,
     source      TEXT NOT NULL DEFAULT 'note',
+    external_id TEXT,
     note        TEXT,
     data        TEXT,
     created_at  TEXT NOT NULL,

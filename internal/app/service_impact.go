@@ -31,7 +31,10 @@ type ImpactNode struct {
 // symbol, and which tests cover those paths.
 type ImpactReport struct {
 	Symbol        string               `json:"symbol"`
-	Selector      *SymbolSelector      `json:"selector,omitempty"` // exact selected definition; absent on a name-union query
+	Selector      *SymbolSelector      `json:"selector,omitempty"`            // exact selected definition; absent on a name-union query
+	Position      *FilePosition        `json:"position,omitempty"`            // original raw batch input; absent on ordinary symbol/selector queries
+	PositionMatch string               `json:"position_resolution,omitempty"` // exact|enclosing|none from symbol-at
+	Error         *ImpactItemError     `json:"error,omitempty"`               // item-level batch miss; project/storage failures remain command errors
 	Project       string               `json:"project"`
 	Found         bool                 `json:"found"`
 	Locations     []SymbolRef          `json:"locations,omitempty"`
@@ -50,6 +53,14 @@ type ImpactReport struct {
 	// post-edit one.
 	TestCommands []string     `json:"test_commands,omitempty"`
 	Next         []NextAction `json:"next,omitempty"`
+}
+
+// ImpactItemError is an item-level failure in a raw-position impact batch. It
+// deliberately covers ordinary source misses only; malformed requests and
+// project/storage failures fail the whole operation through error.
+type ImpactItemError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // Impact computes impact analysis for a symbol: its definition site(s), direct
@@ -142,6 +153,25 @@ type impactShared struct {
 // read every test file from disk once per changed symbol. Returns nil if the
 // shared context can't be built so the caller falls back to the per-symbol path.
 func (svc *Service) reviewImpactAnalyzer(cwd string, symbols []SymbolRef, depth int) func(SymbolRef) (*ImpactReport, error) {
+	names := make([]string, 0, len(symbols))
+	for _, s := range symbols {
+		names = append(names, s.Symbol)
+	}
+	shared := svc.impactSharedForNames(cwd, names)
+	if shared == nil {
+		return nil
+	}
+	return func(s SymbolRef) (*ImpactReport, error) {
+		return svc.impactBySelectorShared(cwd, SymbolSelector{
+			File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
+		}, depth, shared)
+	}
+}
+
+// impactSharedForNames builds the shared project-wide state used by review and
+// raw-position batches. A nil result asks the caller to fall back to ordinary
+// per-symbol analysis rather than return a partially populated report.
+func (svc *Service) impactSharedForNames(cwd string, names []string) *impactShared {
 	g, err := svc.s.Graph()
 	if err != nil {
 		return nil
@@ -155,19 +185,10 @@ func (svc *Service) reviewImpactAnalyzer(cwd string, symbols []SymbolRef, depth 
 		return nil
 	}
 	resolved, _ := g.CallGraphResolvedFiles(p.ID)
-	names := make([]string, 0, len(symbols))
-	for _, s := range symbols {
-		names = append(names, s.Symbol)
-	}
-	shared := &impactShared{
+	return &impactShared{
 		resolvedFiles: resolved,
 		heuristic:     heuristicTestCoverageBatch(g, p.ID, p.Path, names),
 		coverageHint:  svc.coverageHintResolved(g, p.ID, resolved),
-	}
-	return func(s SymbolRef) (*ImpactReport, error) {
-		return svc.impactBySelectorShared(cwd, SymbolSelector{
-			File: s.File, StartLine: s.StartLine, FQN: s.FQN, Kind: s.Kind,
-		}, depth, shared)
 	}
 }
 

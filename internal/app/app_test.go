@@ -552,6 +552,52 @@ func TestServiceAnnotations(t *testing.T) {
 	}
 }
 
+func TestServiceIdempotentAnnotations(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"), []byte("package app\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+
+	id, action, matched, err := svc.AnnotateNodeIdempotent(
+		proj, "app.Run", "monitor", "first diagnosis", `{"incident_id":"1842"}`, "incident:1842")
+	if err != nil || action != graph.AnnotationCreated || matched {
+		t.Fatalf("pre-index create: id=%d action=%q matched=%t err=%v", id, action, matched, err)
+	}
+	id2, action, _, err := svc.AnnotateNodeIdempotent(
+		proj, "app.Run", "monitor", "first diagnosis", `{"incident_id":"1842"}`, " incident:1842 ")
+	if err != nil || id2 != id || action != graph.AnnotationUnchanged {
+		t.Fatalf("retry: id=%d action=%q err=%v; want id=%d unchanged", id2, action, err, id)
+	}
+	id3, action, _, err := svc.AnnotateNodeIdempotent(
+		proj, "app.Run", "monitor", "reclassified", `{"incident_id":"1842","confidence":0.9}`, "incident:1842")
+	if err != nil || id3 != id || action != graph.AnnotationUpdated {
+		t.Fatalf("update: id=%d action=%q err=%v; want id=%d updated", id3, action, err, id)
+	}
+
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.NodeAnnotations(proj, "app.Run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Annotations) != 1 || rep.Annotations[0].ExternalID != "incident:1842" || rep.Annotations[0].Note != "reclassified" {
+		t.Fatalf("idempotent annotation after reindex = %+v", rep.Annotations)
+	}
+
+	tooLong := strings.Repeat("x", MaxAnnotationExternalIDBytes+1)
+	if _, _, _, err := svc.AnnotateNodeIdempotent(proj, "app.Run", "monitor", "bad", "", tooLong); err == nil {
+		t.Fatal("oversized external id must be rejected")
+	}
+}
+
 func TestImpactSurfacesAnnotations(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
@@ -1415,6 +1461,103 @@ func TestStatusReportsPreciseEdges(t *testing.T) {
 	}
 	if st, _ := svc.Status(proj); st.PreciseEdges == 0 {
 		t.Errorf("precise index PreciseEdges = %d, want > 0", st.PreciseEdges)
+	}
+}
+
+func TestStatusPreciseUsesPerLanguageFileCoverage(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	initRep, err := svc.Init(proj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := g.GetProjectByName(initRep.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addFile := func(file, lang string) {
+		t.Helper()
+		if err := g.SetFileHash(p.ID, file, "hash-"+file); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := g.AddNode(&graph.Node{
+			ProjectID: p.ID, FilePath: file, Kind: graph.KindFile,
+			Language: lang, SourceHash: "hash-" + file,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	addFile("leaf.go", "go")
+	addFile("a.ts", "typescript")
+	addFile("b.ts", "typescript")
+	addFile("a.js", "javascript")
+	addFile("styles.css", "css")
+
+	st, err := svc.Status(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range []string{"go", "typescript", "javascript"} {
+		if got, ok := st.Precise[lang]; !ok || got {
+			t.Errorf("initial precise[%q] = %t, present=%t; want explicit false", lang, got, ok)
+		}
+	}
+	if _, ok := st.Precise["css"]; ok {
+		t.Errorf("recognized-only CSS must not appear in call-graph precision: %+v", st.Precise)
+	}
+
+	// Successful zero-edge resolution must count, while one covered TypeScript
+	// file must not upgrade its uncovered sibling. JavaScript is independent even
+	// though it shares the TypeScript language-server process.
+	for file, resolver := range map[string]string{
+		"leaf.go": "go/types",
+		"a.ts":    "lsp",
+		"a.js":    "lsp",
+	} {
+		if err := g.MarkCallGraphResolved(p.ID, file, resolver); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err = svc.Status(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Precise["go"] || !st.Precise["javascript"] || st.Precise["typescript"] {
+		t.Fatalf("mixed precise status = %+v, want go/js true and typescript false", st.Precise)
+	}
+	if st.PreciseEdges != 0 {
+		t.Fatalf("leaf-only coverage produced %d precise edges; test requires zero", st.PreciseEdges)
+	}
+
+	if err := g.MarkCallGraphResolved(p.ID, "b.ts", "lsp"); err != nil {
+		t.Fatal(err)
+	}
+	st, err = svc.Status(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Precise["typescript"] {
+		t.Fatalf("fully covered TypeScript status = %+v, want true", st.Precise)
+	}
+	if err := g.ClearCallGraphResolved(p.ID, "a.js"); err != nil {
+		t.Fatal(err)
+	}
+	st, err = svc.Status(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Precise["typescript"] || st.Precise["javascript"] {
+		t.Fatalf("shared LSP process leaked coverage across languages: %+v", st.Precise)
 	}
 }
 

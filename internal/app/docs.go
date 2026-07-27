@@ -54,7 +54,10 @@ authority in codemap and delegates retrieval through a versioned one-hop CLI.`},
 
 Stay fresh: codemap_status returns a "stale" object (files changed/new/deleted
 since the last index) — normally codemap_index before trusting snapshot-based
-results. Deletion review is the exception: codemap_review uses retained old
+results. Its "precise" map is true per call-graph language only when every
+indexed file completed precise resolution at the last index; combine it with
+stale and each query's call_graph enum. Deletion review is the exception:
+codemap_review uses retained old
 definitions when available, emits deletion_analysis, and orders selected tests
 before the reindex that prunes them. (A registered-but-never-indexed project
 reports indexed:false — codemap_index first.)
@@ -91,6 +94,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   callers / callees [--precise|--at] who calls X / what X calls (exact definition with --at file:line)
   references <sym> [--at file:line]  enclosing scopes that use X as a callback/value (not callers)
   impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests + runnable test_commands
+                                       repeat --at for a <=25 partial-success frame batch; --batch stabilizes a one-item envelope
   review [--since R] [--staged]      diff-scoped: changed/deleted symbols, blast radius, tests to run, risk band
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
   map [--top-subsystems N ...]       architecture overview: subsystems, directed bridges, entrypoints, hubs
@@ -124,7 +128,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   coverage [--prefix P] [--lang L] [--uncovered] [--files] [--top N]
                                      per-file precise call-graph coverage: rollups by
                                      language/directory + bounded per-file detail
-  annotate <sym> | <from> <to>       pin a note/data to a symbol or call path
+  annotate <sym> | <from> <to>       pin a note/data; --external-id makes automated retries idempotent
   annotations [sym] | [from] [to]    list annotations (--rm <id> to remove)
   structural-manifest               source-free identity/freshness preflight for export-symbols
   export-symbols [--offset N --limit N --max-content-bytes N]
@@ -158,10 +162,10 @@ external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to
 symbol or a call path, then read them back alongside structure. They persist
 across reindex.
 
-  codemap_annotate {symbol|from+to, source, note, data}   attach
+  codemap_annotate {symbol|from+to, source, external_id, note, data}   attach/upsert
   codemap_annotations {symbol|from+to|none}               read (all / node / path)
   codemap_unannotate {id}                                 remove one (prune/correct the layer)
-  CLI: codemap annotate <sym> --source postgres --data '{...}' --note "..."
+  CLI: codemap annotate <sym> --source postgres --external-id "finding:42" --data '{...}' --note "..."
        codemap annotate <from> <to> --note "entry path to fix"
        codemap annotations [<sym> | <from> <to>]   (--rm <id> to delete)
 
@@ -170,7 +174,10 @@ matches an indexed symbol (renamed/removed since) — prune those with
 codemap_unannotate, or re-add against the new name.
 
 'source' is a free label (note, mongosh, postgres, vidtrace, …); 'data' is stored
-opaquely (often JSON). Annotations on a symbol surface INLINE in EVERY query result
+opaquely (often JSON). Automated writers should pass a stable external_id:
+uniqueness is scoped to project + source, retries preserve the annotation id, and
+the write reports action:"created|updated|unchanged". Omitting it keeps append-only
+behavior. Annotations on a symbol surface INLINE in EVERY query result
 — codemap_impact, codemap_callers/callees (by-name and precise:true), codemap_references, codemap_source,
 and codemap_semantic/codemap_find — matched by name or resolved FQN, so once pinned
 the knowledge shows up wherever you look at the symbol (and on every studio tab).

@@ -52,7 +52,10 @@ Index once, then query. The typical agent loop for understanding or fixing code:
 
 Stay fresh: codemap_status returns a "stale" object (files changed/new/deleted
 since the last index) — normally codemap_index before trusting snapshot-based
-results. Deletion review is the exception: codemap_review uses retained old
+results. Its "precise" map is true per call-graph language only when every
+indexed file completed precise resolution at the last index; combine it with
+stale and each query's call_graph enum. Deletion review is the exception:
+codemap_review uses retained old
 definitions when available, emits deletion_analysis, and orders selected tests
 before the reindex that prunes them. (A registered-but-never-indexed project
 reports indexed:false — codemap_index first.)

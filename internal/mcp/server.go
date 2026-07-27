@@ -518,13 +518,14 @@ type docsInput struct {
 }
 
 type annotateInput struct {
-	Symbol string `json:"symbol,omitempty" jsonschema:"symbol (FQN) to annotate; use this OR from+to"`
-	From   string `json:"from,omitempty" jsonschema:"path start symbol (with 'to') to annotate a call path"`
-	To     string `json:"to,omitempty" jsonschema:"path end symbol (with 'from')"`
-	Source string `json:"source,omitempty" jsonschema:"source label: note (default), mongosh, postgres, vidtrace, …"`
-	Note   string `json:"note,omitempty" jsonschema:"free-form note text"`
-	Data   string `json:"data,omitempty" jsonschema:"opaque data payload, e.g. JSON from a DB query — stored as-is"`
-	Path   string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Symbol     string `json:"symbol,omitempty" jsonschema:"symbol (FQN) to annotate; use this OR from+to"`
+	From       string `json:"from,omitempty" jsonschema:"path start symbol (with 'to') to annotate a call path"`
+	To         string `json:"to,omitempty" jsonschema:"path end symbol (with 'from')"`
+	Source     string `json:"source,omitempty" jsonschema:"source label: note (default), mongosh, postgres, vidtrace, …"`
+	ExternalID string `json:"external_id,omitempty" jsonschema:"optional caller-owned idempotency key, unique within project + source; retries update the same annotation"`
+	Note       string `json:"note,omitempty" jsonschema:"free-form note text"`
+	Data       string `json:"data,omitempty" jsonschema:"opaque data payload, e.g. JSON from a DB query — stored as-is"`
+	Path       string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 }
 
 type annotationsInput struct {
@@ -1347,16 +1348,22 @@ func (s *Server) handleDocs(_ context.Context, _ *sdkmcp.CallToolRequest, in doc
 
 func (s *Server) handleAnnotate(_ context.Context, _ *sdkmcp.CallToolRequest, in annotateInput) (*sdkmcp.CallToolResult, any, error) {
 	if in.From != "" && in.To != "" {
-		id, target, matched, err := s.svc.AnnotatePath(cwdOf(in.Path), in.From, in.To, in.Source, in.Note, in.Data)
-		out := map[string]any{"id": id, "kind": "path", "target": target, "matched": matched}
+		id, target, action, matched, err := s.svc.AnnotatePathIdempotent(cwdOf(in.Path), in.From, in.To, in.Source, in.Note, in.Data, in.ExternalID)
+		out := map[string]any{"id": id, "kind": "path", "target": target, "matched": matched, "action": action}
+		if in.ExternalID != "" {
+			out["external_id"] = strings.TrimSpace(in.ExternalID)
+		}
 		if err == nil && !matched {
 			out["note"] = "one or both path endpoints aren't indexed symbols — saved, but it won't surface until they are"
 		}
 		return result(out, err)
 	}
 	if in.Symbol != "" {
-		id, matched, err := s.svc.AnnotateNode(cwdOf(in.Path), in.Symbol, in.Source, in.Note, in.Data)
-		out := map[string]any{"id": id, "kind": "node", "target": in.Symbol, "matched": matched}
+		id, action, matched, err := s.svc.AnnotateNodeIdempotent(cwdOf(in.Path), in.Symbol, in.Source, in.Note, in.Data, in.ExternalID)
+		out := map[string]any{"id": id, "kind": "node", "target": in.Symbol, "matched": matched, "action": action}
+		if in.ExternalID != "" {
+			out["external_id"] = strings.TrimSpace(in.ExternalID)
+		}
 		if err == nil && !matched {
 			out["note"] = "no indexed symbol matches this target — saved, but it won't surface in queries until one does (typo, or not indexed yet?)"
 		}

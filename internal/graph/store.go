@@ -186,6 +186,19 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("create provenance index: %w", err)
 		}
 	}
+	// v5 -> v6: caller-owned annotation ids make incident writes retry-safe.
+	// The partial unique index preserves append-only behavior for legacy writes
+	// whose external_id is NULL/empty while enforcing one row per tool-owned id.
+	if v < 6 {
+		if err := s.addColumnIfMissing("annotations", "external_id", "TEXT"); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_annotations_external
+			ON annotations(project_id, source, external_id)
+			WHERE external_id IS NOT NULL AND external_id <> ''`); err != nil {
+			return fmt.Errorf("create annotation external-id index: %w", err)
+		}
+	}
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
 		return fmt.Errorf("set schema version: %w", err)
 	}
@@ -923,9 +936,9 @@ func AddAnnotationTx(tx *sql.Tx, projectID int64, a Annotation) (int64, error) {
 		a.Source = "note"
 	}
 	res, err := tx.Exec(
-		`INSERT INTO annotations (project_id, kind, target, source, note, data, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		projectID, a.Kind, a.Target, a.Source, a.Note, a.Data, now())
+		`INSERT INTO annotations (project_id, kind, target, source, external_id, note, data, created_at)
+		 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
+		projectID, a.Kind, a.Target, a.Source, a.ExternalID, a.Note, a.Data, now())
 	if err != nil {
 		return 0, err
 	}

@@ -863,6 +863,32 @@ func TestMCPAnnotateUnknownTarget(t *testing.T) {
 	if txt := textOf(real); !strings.Contains(txt, `"matched":true`) {
 		t.Errorf("annotating an indexed symbol should report matched true: %s", txt)
 	}
+	// Caller-owned external ids make retries idempotent and report what happened.
+	var firstID int64
+	for i, tc := range []struct {
+		note   string
+		action string
+	}{{"incident-v1", "created"}, {"incident-v1", "unchanged"}, {"incident-v2", "updated"}} {
+		res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_annotate",
+			Arguments: map[string]any{"path": proj, "symbol": "Real", "source": "monitor", "external_id": "incident:mcp-1", "note": tc.note}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out struct {
+			ID         int64  `json:"id"`
+			Action     string `json:"action"`
+			ExternalID string `json:"external_id"`
+		}
+		if err := json.Unmarshal([]byte(textOf(res)), &out); err != nil {
+			t.Fatalf("decode idempotent annotate: %v: %s", err, textOf(res))
+		}
+		if i == 0 {
+			firstID = out.ID
+		}
+		if out.ID != firstID || out.Action != tc.action || out.ExternalID != "incident:mcp-1" {
+			t.Errorf("idempotent annotate[%d] = %+v, want id=%d action=%s", i, out, firstID, tc.action)
+		}
+	}
 	// Ghost symbol → matched false + an explanatory note so the agent doesn't
 	// think it pinned knowledge that can never surface.
 	ghost, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_annotate",

@@ -87,11 +87,11 @@ type StatusReport struct {
 	Files           int    `json:"files"`
 	Vectors         int    `json:"vectors"`          // locally embedded nodes (0 is expected when semantic_backend=vecgrep)
 	SemanticBackend string `json:"semantic_backend"` // configured retrieval owner: fallback|local|vecgrep
-	PreciseEdges    int    `json:"precise_edges"`    // go/types-resolved call edges (0 = name-based index)
-	// Precise reports whether each language has a precise call graph (true)
-	// or only structural edges (false). Consumers like Monitor use this to
-	// decide whether blast-radius/impact results are trustworthy for a given
-	// language. Derived from PreciseEdges and the indexed language set.
+	PreciseEdges    int    `json:"precise_edges"`    // exact call edges from go/types/LSP; diagnostic only (leaf files can be precise with 0)
+	// Precise reports whether every indexed file in each call-graph language
+	// completed precise resolution at the last index. Staleness is independent;
+	// consumers combine this project-level preflight with stale and the queried
+	// report's call_graph enum.
 	Precise   map[string]bool `json:"precise,omitempty"`
 	Languages map[string]int  `json:"languages,omitempty"`
 	Kinds     map[string]int  `json:"kinds,omitempty"`
@@ -386,22 +386,63 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 		rep.Vectors = n
 	}
 	// How many call edges were resolved precisely by go/types or LSP
-	// callHierarchy (0 ⇒ name-based index).
+	// callHierarchy. This is a diagnostic count only: leaf files can complete
+	// precise resolution without producing an edge, so readiness comes from the
+	// per-file coverage table below.
 	if n, cErr := g.CountEdgesByProvenance(p.ID, graph.ProvPrecise); cErr == nil {
 		rep.PreciseEdges = n
-		// Derive the per-language precise flag: a language is precise when
-		// the project has any precise edges AND that language is indexed.
-		// (Go gets precise via go/types without an LSP; TS/JS/Python/Vue
-		// need --precise + their language server. A language with 0 precise
-		// edges is structural-only — impact/callers results are name-based.)
-		if n > 0 && len(st.Languages) > 0 {
-			rep.Precise = make(map[string]bool, len(st.Languages))
-			for lang := range st.Languages {
-				rep.Precise[lang] = true
-			}
-		}
+	}
+	// A language is precise only when every indexed file for that language has a
+	// successful call_graph_coverage row. Never infer this from precise edges:
+	// one Go edge must not upgrade an uncovered TypeScript file, and a precisely
+	// resolved leaf file with zero calls must still count as covered. Languages
+	// with a shipped call-graph backend are included explicitly as false when
+	// uncovered so machine consumers never have to interpret an omitted key.
+	if rows, covErr := g.ProjectFileCoverage(p.ID); covErr == nil {
+		rep.Precise = preciseStatusByLanguage(st.Languages, rows)
 	}
 	return rep, nil
+}
+
+// preciseStatusByLanguage derives the conservative status.precise contract from
+// per-file coverage. Ruby/Lua are included even though their current graph is
+// name-based only; explicit false is more useful than omission and will become
+// true naturally if a precise backend is added later. Markup/recognized-only
+// languages are omitted because they do not own a call graph.
+func preciseStatusByLanguage(languages map[string]int, rows []graph.FileCoverage) map[string]bool {
+	precise := make(map[string]bool)
+	for lang := range languages {
+		if callGraphLanguage(lang) {
+			precise[lang] = false
+		}
+	}
+	if len(precise) == 0 {
+		return nil
+	}
+	total := make(map[string]int, len(precise))
+	covered := make(map[string]int, len(precise))
+	for _, row := range rows {
+		if _, ok := precise[row.Language]; !ok {
+			continue
+		}
+		total[row.Language]++
+		if row.Resolver != "" {
+			covered[row.Language]++
+		}
+	}
+	for lang := range precise {
+		precise[lang] = total[lang] > 0 && covered[lang] == total[lang]
+	}
+	return precise
+}
+
+func callGraphLanguage(lang string) bool {
+	switch lang {
+	case "go", "typescript", "javascript", "python", "vue", "ruby", "lua":
+		return true
+	default:
+		return false
+	}
 }
 
 // Staleness reports how far the project's index has drifted from the working

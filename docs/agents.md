@@ -203,8 +203,8 @@ code is responsible."
 
 Monitor (`monitor investigate`) resolves hot profile frames to codemap
 symbols via `symbol-at`, then stashes an incident bundle to fcheap. To close
-the loop, Monitor can `codemap annotate <fqn> --source monitor --note
-"<stash-id>: <diagnosis summary>"` after each investigate, so the incident is
+the loop, Monitor can `codemap annotate <fqn> --source monitor --external-id
+"incident:<incident-id>" --note "<stash-id>: <diagnosis summary>"` after each investigate, so the incident is
 pinned to the responsible code. Future `codemap context <fqn>` or
 `codemap impact <fqn>` calls surface these annotations — turning the call
 graph into a local-first "issue board" where a symbol's past incidents are
@@ -214,4 +214,7 @@ The recommended tag convention for sibling-scoped annotations is
 `--source monitor` (or `--source <tool>`), with the fcheap stash ID and a
 short diagnosis summary in `--note`. Use `--data` for structured metadata
 (JSON incident id, alert rule, confidence level) that a downstream agent
-can parse without re-reading the note prose.
+can parse without re-reading the note prose. Automated writers should always
+pass a stable `--external-id`: its uniqueness scope is project + source, so a
+retry returns the same annotation ID and reports `action` as `unchanged` or
+`updated` instead of creating duplicates. Human append-only notes can omit it.

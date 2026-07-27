@@ -141,7 +141,7 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_context_batch` | **Context for several symbols in one call** — each symbol's bundle (including its own `test_commands`) plus `combined_blast_radius` and `common_callers` (callers that reach two or more of them — a shared entrypoint/coupling). Build a component's mental model without N round-trips; deduped and capped at 25. Aggregate source bodies are capped at 64 KiB with `source_budget` and per-definition `source_truncations` metadata — or pass `brief:true` to drop every body up front (`source_omitted:true` per definition) instead of spending that budget |
 | `codemap_projects` | List all registered projects and their index sizes |
 | `codemap_docs` | Return the agent guide (`topic`: overview/workflow/commands/annotations/accuracy/ecosystem) so a harness can learn the tool |
-| `codemap_annotate` | Pin a note / opaque `data` to a `symbol` or a `from`→`to` path (`source` label) |
+| `codemap_annotate` | Pin a note / opaque `data` to a `symbol` or a `from`→`to` path (`source` label). Automated writers should pass a stable `external_id`; retries upsert within project + source and return the same annotation `id` with `action:"created\|updated\|unchanged"`. |
 | `codemap_annotations` | List annotations: all, for a `symbol`, or for a `from`→`to` path |
 | `codemap_unannotate` | Remove an annotation by `id` — prune/correct the knowledge layer |
 | `codemap_branch_status` | Read-only git branch/commit state + the stable repo/branch keys used to key per-branch index snapshots |

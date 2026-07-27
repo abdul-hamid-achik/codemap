@@ -80,11 +80,12 @@ type snapEdge struct {
 
 // snapAnnotation drops the DB id and timestamp so annotations dedup by content.
 type snapAnnotation struct {
-	Kind   string `json:"kind"`
-	Target string `json:"target"`
-	Source string `json:"source"`
-	Note   string `json:"note,omitempty"`
-	Data   string `json:"data,omitempty"`
+	Kind       string `json:"kind"`
+	Target     string `json:"target"`
+	Source     string `json:"source"`
+	ExternalID string `json:"external_id,omitempty"`
+	Note       string `json:"note,omitempty"`
+	Data       string `json:"data,omitempty"`
 }
 
 // snapVector carries an embedding by node POSITION (index into the sorted node
@@ -196,7 +197,7 @@ func Export(g *graph.Store, vec *vector.Store, projectID int64, project, dir, pr
 	}
 	sanns := make([]snapAnnotation, len(anns))
 	for i, a := range anns {
-		sanns[i] = snapAnnotation{Kind: a.Kind, Target: a.Target, Source: a.Source, Note: a.Note, Data: a.Data}
+		sanns[i] = snapAnnotation{Kind: a.Kind, Target: a.Target, Source: a.Source, ExternalID: a.ExternalID, Note: a.Note, Data: a.Data}
 	}
 	sort.SliceStable(sanns, func(i, j int) bool { return annKey(sanns[i]) < annKey(sanns[j]) })
 	aAny := make([]any, len(sanns))
@@ -385,13 +386,13 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 	}
 	have := make(map[string]bool, len(existing))
 	for _, a := range existing {
-		have[annKey(snapAnnotation{Kind: a.Kind, Target: a.Target, Source: a.Source, Note: a.Note, Data: a.Data})] = true
+		have[annKey(snapAnnotation{Kind: a.Kind, Target: a.Target, Source: a.Source, ExternalID: a.ExternalID, Note: a.Note, Data: a.Data})] = true
 	}
 	for _, a := range sanns {
 		if have[annKey(a)] {
 			continue // already present — merge, don't duplicate or blow away
 		}
-		if _, err := g.AddAnnotation(projectID, graph.Annotation{Kind: a.Kind, Target: a.Target, Source: a.Source, Note: a.Note, Data: a.Data}); err != nil {
+		if _, _, err := g.UpsertAnnotation(projectID, graph.Annotation{Kind: a.Kind, Target: a.Target, Source: a.Source, ExternalID: a.ExternalID, Note: a.Note, Data: a.Data}); err != nil {
 			_ = g.WipeProject(projectID)
 			return nil, err
 		}
@@ -431,7 +432,7 @@ func Import(g *graph.Store, vec *vector.Store, projectID int64, project, dir, wa
 }
 
 func annKey(a snapAnnotation) string {
-	return a.Kind + "\x00" + a.Target + "\x00" + a.Source + "\x00" + a.Note + "\x00" + a.Data
+	return a.Kind + "\x00" + a.Target + "\x00" + a.Source + "\x00" + a.ExternalID + "\x00" + a.Note + "\x00" + a.Data
 }
 
 // --- jsonl/json io ---

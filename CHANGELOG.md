@@ -10,15 +10,26 @@ releases page is the authoritative history.
 
 ### Added
 
-- **Batch impact API.** `codemap impact --at f1:l1 --at f2:l2 ... --json`
-  resolves impact for multiple source positions in one call (≤25), reducing
-  N subprocess round-trips to 1. The `--at` flag is now a repeatable
-  StringArray (same pattern as `context`). A new `ImpactBatchReport` JSON
-  shape carries per-position results.
-- **Per-language precise status.** `codemap status --json` now includes a
-  `precise` map (`{"go": true, "typescript": false}`) so consumers like
-  Monitor know whether blast-radius/impact results are trustworthy for a
-  given language or structural-only.
+- **Partial-success batch impact.** `codemap impact --at f1:l1 --at f2:l2 ...
+  --json` resolves up to 25 raw source positions in one process and preserves
+  input order. Unresolved frames return item-level `symbol_not_found` data
+  without discarding successful siblings. `--batch` forces the same stable
+  `ImpactBatchReport` envelope for one position; `requested`, `processed`, and
+  `truncated` make the cap explicit.
+- **Idempotent annotations.** CLI `annotate --external-id <id>` and MCP
+  `codemap_annotate.external_id` upsert within `(project, source, external_id)`.
+  Responses report `created`, `updated`, or `unchanged`; annotation reads and
+  portable snapshots preserve the external ID.
 - **Annotate-for-incidents pattern** documented in `docs/agents.md`: sibling
-  tools (Monitor) can `codemap annotate <fqn> --source monitor --note
-  "<stash-id>: <diagnosis>"` to pin incidents onto the call graph.
+  tools (Monitor) can pin retry-safe incidents onto the call graph.
+
+### Fixed
+
+- **Honest per-language precise status.** `status.precise` is now derived from
+  per-file `call_graph_coverage`, not the existence of any precise edge in the
+  project. Mixed-language indexes no longer upgrade uncovered languages, leaf
+  files with zero calls count correctly, and uncovered call-graph languages
+  appear explicitly as `false`.
+- Fixed Cobra validation for repeatable `impact --at`; the original StringArray
+  flag could be rejected before its handler ran because it was validated as a
+  scalar flag.

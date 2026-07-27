@@ -39,7 +39,7 @@ func TestRoundTrip(t *testing.T) {
 	if err := g.MarkCallGraphResolved(pid, "a.go", "go/types"); err != nil {
 		t.Fatal(err)
 	}
-	annID, err := g.AddAnnotation(pid, graph.Annotation{Kind: "node", Target: "app.Helper", Source: "note", Note: "the helper"})
+	annID, err := g.AddAnnotation(pid, graph.Annotation{Kind: "node", Target: "app.Helper", Source: "monitor", ExternalID: "incident:snapshot-1", Note: "the helper"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("after import, Helper's callers should include Run, got %+v", callers)
 	}
 	// The annotation was restored from the snapshot (it had been deleted).
-	if anns, _ := g.AllAnnotations(pid); len(anns) != 1 || anns[0].Note != "the helper" {
+	if anns, _ := g.AllAnnotations(pid); len(anns) != 1 || anns[0].Note != "the helper" || anns[0].ExternalID != "incident:snapshot-1" {
 		t.Errorf("annotations after import = %+v, want 1 'the helper'", anns)
 	}
 	// index_state restored.

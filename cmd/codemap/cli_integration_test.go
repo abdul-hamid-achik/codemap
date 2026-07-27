@@ -184,6 +184,111 @@ func TestCLIContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("impact batch has stable partial-success json", func(t *testing.T) {
+		setup := runCLI(t, bin, runner, env, "index", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
+		if setup.exit != 0 {
+			t.Fatalf("impact batch setup index exit=%d stderr=%q stdout=%s", setup.exit, setup.stderr, setup.stdout)
+		}
+		// Explicit --batch keeps the envelope stable even for one input.
+		res := runCLI(t, bin, runner, env, "impact", "-C", project, "--batch", "--at", "main.go:3", "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("single impact batch exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var single app.ImpactBatchReport
+		mustJSON(t, res.stdout, &single)
+		if single.Requested != 1 || single.Processed != 1 || len(single.Results) != 1 || !single.Results[0].Found {
+			t.Fatalf("single impact batch = %+v", single)
+		}
+
+		// A normal source miss is item-level and does not discard its valid sibling.
+		res = runCLI(t, bin, runner, env, "impact", "-C", project,
+			"--at", "main.go:3", "--at", "main.go:999", "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("partial impact batch exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var partial app.ImpactBatchReport
+		mustJSON(t, res.stdout, &partial)
+		if partial.Requested != 2 || partial.Processed != 2 || len(partial.Results) != 2 || !partial.Results[0].Found || partial.Results[1].Error == nil || partial.Results[1].Error.Code != "symbol_not_found" {
+			t.Fatalf("partial impact batch = %+v", partial)
+		}
+
+		// All misses are still a valid batch report, not a command-level not-found.
+		res = runCLI(t, bin, runner, env, "impact", "-C", project,
+			"--batch", "--at", "main.go:998", "--at", "main.go:999", "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("all-miss impact batch exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var misses app.ImpactBatchReport
+		mustJSON(t, res.stdout, &misses)
+		if len(misses.Results) != 2 || misses.Results[0].Error == nil || misses.Results[1].Error == nil {
+			t.Fatalf("all-miss impact batch = %+v", misses)
+		}
+
+		// Without --batch, one position retains the established single-report shape.
+		res = runCLI(t, bin, runner, env, "impact", "-C", project, "--at", "main.go:3", "--json")
+		if res.exit != 0 {
+			t.Fatalf("single impact exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var shape map[string]json.RawMessage
+		mustJSON(t, res.stdout, &shape)
+		if _, hasResults := shape["results"]; hasResults {
+			t.Fatalf("ordinary single impact unexpectedly returned batch shape: %s", res.stdout)
+		}
+
+		args := []string{"impact", "-C", project, "--batch", "--json"}
+		for range 30 {
+			args = append(args, "--at", "main.go:3")
+		}
+		res = runCLI(t, bin, runner, env, args...)
+		if res.exit != 0 {
+			t.Fatalf("capped impact batch exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var capped app.ImpactBatchReport
+		mustJSON(t, res.stdout, &capped)
+		if capped.Requested != 30 || capped.Processed != app.MaxImpactBatchPositions || capped.Truncated != 5 || len(capped.Results) != app.MaxImpactBatchPositions {
+			t.Fatalf("capped impact batch = %+v", capped)
+		}
+
+		res = runCLI(t, bin, runner, env, "impact", "-C", cold, "--batch", "--at", "main.go:1", "--json")
+		assertCLIEnvelope(t, res, exitNotFound, "not_indexed")
+	})
+
+	t.Run("annotation external id is retry-safe", func(t *testing.T) {
+		setup := runCLI(t, bin, runner, env, "index", project, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json")
+		if setup.exit != 0 {
+			t.Fatalf("annotation setup index exit=%d stderr=%q stdout=%s", setup.exit, setup.stderr, setup.stdout)
+		}
+		type writeReport struct {
+			ID         int64  `json:"id"`
+			Action     string `json:"action"`
+			ExternalID string `json:"external_id"`
+		}
+		write := func(note string) writeReport {
+			t.Helper()
+			res := runCLI(t, bin, runner, env, "annotate", "Main", "-C", project,
+				"--source", "monitor", "--external-id", "incident:cli-1", "--note", note, "--json")
+			if res.exit != 0 || res.stderr != "" {
+				t.Fatalf("annotate exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+			}
+			var rep writeReport
+			mustJSON(t, res.stdout, &rep)
+			return rep
+		}
+		created := write("first")
+		unchanged := write("first")
+		updated := write("updated")
+		if created.ID == 0 || unchanged.ID != created.ID || updated.ID != created.ID ||
+			created.Action != "created" || unchanged.Action != "unchanged" || updated.Action != "updated" ||
+			updated.ExternalID != "incident:cli-1" {
+			t.Fatalf("idempotent writes: created=%+v unchanged=%+v updated=%+v", created, unchanged, updated)
+		}
+
+		res := runCLI(t, bin, runner, env, "annotations", "Main", "-C", project, "--json")
+		if res.exit != 0 || !strings.Contains(res.stdout, `"external_id": "incident:cli-1"`) || !strings.Contains(res.stdout, `"note": "updated"`) {
+			t.Fatalf("annotation readback exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+	})
+
 	t.Run("structural symbol export is versioned and paginated", func(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "init", "-C", project, "--json")
 		if res.exit != 0 {

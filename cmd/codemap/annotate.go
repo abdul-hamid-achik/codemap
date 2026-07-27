@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/spf13/cobra"
@@ -32,6 +33,8 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 	defer func() { _ = sess.Close() }()
 	cwd := targetDir(cmd)
 	source, _ := cmd.Flags().GetString("source")
+	externalID, _ := cmd.Flags().GetString("external-id")
+	externalID = strings.TrimSpace(externalID)
 	note, _ := cmd.Flags().GetString("note")
 	data, _ := cmd.Flags().GetString("data")
 	if note == "" && data == "" {
@@ -41,19 +44,20 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 	var (
 		id     int64
 		match  bool
+		action string
 		warn   string
 		kind   = "node"
 		target string
 	)
 	if len(args) == 1 {
 		target = args[0]
-		id, match, err = svc.AnnotateNode(cwd, target, source, note, data)
+		id, action, match, err = svc.AnnotateNodeIdempotent(cwd, target, source, note, data, externalID)
 		if err == nil && !match {
 			warn = fmt.Sprintf("no indexed symbol named %q — saved, but it won't surface in queries until one is (typo? not indexed yet?)", target)
 		}
 	} else {
 		kind = "path"
-		id, target, match, err = svc.AnnotatePath(cwd, args[0], args[1], source, note, data)
+		id, target, action, match, err = svc.AnnotatePathIdempotent(cwd, args[0], args[1], source, note, data, externalID)
 		if err == nil && !match {
 			warn = fmt.Sprintf("path endpoints %q and %q aren't both indexed symbols — saved, but it won't surface until they are", args[0], args[1])
 		}
@@ -62,7 +66,10 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if jsonOut(cmd) {
-		out := map[string]any{"id": id, "kind": kind, "target": target, "source": source, "matched": match}
+		out := map[string]any{"id": id, "kind": kind, "target": target, "source": source, "matched": match, "action": action}
+		if externalID != "" {
+			out["external_id"] = externalID
+		}
 		if warn != "" {
 			out["note"] = warn
 		}
@@ -72,7 +79,7 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 	if kind == "path" {
 		label = "path " + target
 	}
-	fmt.Printf("annotated %s  (#%d, source=%s)\n", label, id, source)
+	fmt.Printf("%s %s  (#%d, source=%s)\n", action, label, id, source)
 	if warn != "" {
 		fmt.Println("⚠ " + warn)
 	}

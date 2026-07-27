@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"sort"
 	"strings"
@@ -121,14 +123,21 @@ func (s *Store) nodesByIDs(ids []int64) ([]Node, error) {
 // Annotation is user-attached knowledge (a note or external data) pinned to a
 // symbol (kind="node") or a call path (kind="path").
 type Annotation struct {
-	ID        int64  `json:"id"`
-	Kind      string `json:"kind"`
-	Target    string `json:"target"`
-	Source    string `json:"source"`
-	Note      string `json:"note,omitempty"`
-	Data      string `json:"data,omitempty"`
-	CreatedAt string `json:"created_at"`
+	ID         int64  `json:"id"`
+	Kind       string `json:"kind"`
+	Target     string `json:"target"`
+	Source     string `json:"source"`
+	ExternalID string `json:"external_id,omitempty"`
+	Note       string `json:"note,omitempty"`
+	Data       string `json:"data,omitempty"`
+	CreatedAt  string `json:"created_at"`
 }
+
+const (
+	AnnotationCreated   = "created"
+	AnnotationUpdated   = "updated"
+	AnnotationUnchanged = "unchanged"
+)
 
 // AddAnnotation stores an annotation and returns its id.
 func (s *Store) AddAnnotation(projectID int64, a Annotation) (int64, error) {
@@ -136,26 +145,76 @@ func (s *Store) AddAnnotation(projectID int64, a Annotation) (int64, error) {
 		a.Source = "note"
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO annotations (project_id, kind, target, source, note, data, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		projectID, a.Kind, a.Target, a.Source, a.Note, a.Data, now())
+		`INSERT INTO annotations (project_id, kind, target, source, external_id, note, data, created_at)
+		 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
+		projectID, a.Kind, a.Target, a.Source, a.ExternalID, a.Note, a.Data, now())
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
+// UpsertAnnotation makes a caller-owned external id retry-safe. The uniqueness
+// scope is (project, source, external_id); the same id can retarget a renamed
+// symbol and update its payload without creating another row. Empty external ids
+// retain the historical append-only AddAnnotation behavior.
+func (s *Store) UpsertAnnotation(projectID int64, a Annotation) (int64, string, error) {
+	if a.Source == "" {
+		a.Source = "note"
+	}
+	if a.ExternalID == "" {
+		id, err := s.AddAnnotation(projectID, a)
+		return id, AnnotationCreated, err
+	}
+	tx, err := s.BeginTx(context.Background())
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var existing Annotation
+	err = tx.QueryRow(`
+		SELECT id, kind, target, source, COALESCE(external_id, ''), note, data, created_at
+		FROM annotations WHERE project_id=? AND source=? AND external_id=?`,
+		projectID, a.Source, a.ExternalID).
+		Scan(&existing.ID, &existing.Kind, &existing.Target, &existing.Source,
+			&existing.ExternalID, &existing.Note, &existing.Data, &existing.CreatedAt)
+	action := AnnotationCreated
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		id, insertErr := AddAnnotationTx(tx, projectID, a)
+		if insertErr != nil {
+			return 0, "", insertErr
+		}
+		existing.ID = id
+	case err != nil:
+		return 0, "", err
+	case existing.Kind == a.Kind && existing.Target == a.Target && existing.Note == a.Note && existing.Data == a.Data:
+		action = AnnotationUnchanged
+	default:
+		action = AnnotationUpdated
+		if _, err := tx.Exec(`UPDATE annotations SET kind=?, target=?, note=?, data=? WHERE id=?`,
+			a.Kind, a.Target, a.Note, a.Data, existing.ID); err != nil {
+			return 0, "", err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, "", err
+	}
+	return existing.ID, action, nil
+}
+
 // AnnotationsByTarget returns annotations for a specific node/path target.
 func (s *Store) AnnotationsByTarget(projectID int64, kind, target string) ([]Annotation, error) {
 	return s.scanAnnotations(
-		`SELECT id, kind, target, source, note, data, created_at FROM annotations
+		`SELECT id, kind, target, source, COALESCE(external_id, ''), note, data, created_at FROM annotations
 		 WHERE project_id=? AND kind=? AND target=? ORDER BY id`, projectID, kind, target)
 }
 
 // AllAnnotations returns every annotation in a project, newest last.
 func (s *Store) AllAnnotations(projectID int64) ([]Annotation, error) {
 	return s.scanAnnotations(
-		`SELECT id, kind, target, source, note, data, created_at FROM annotations
+		`SELECT id, kind, target, source, COALESCE(external_id, ''), note, data, created_at FROM annotations
 		 WHERE project_id=? ORDER BY kind, target, id`, projectID)
 }
 
@@ -179,7 +238,7 @@ func (s *Store) scanAnnotations(query string, args ...any) ([]Annotation, error)
 	var out []Annotation
 	for rows.Next() {
 		var a Annotation
-		if err := rows.Scan(&a.ID, &a.Kind, &a.Target, &a.Source, &a.Note, &a.Data, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Kind, &a.Target, &a.Source, &a.ExternalID, &a.Note, &a.Data, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
