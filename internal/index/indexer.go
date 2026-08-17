@@ -31,6 +31,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/csssrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/gdsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/gosrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/htmlsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
@@ -424,6 +425,7 @@ func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.Index
 	ix.Register(gosrc.New())
 	ix.Register(rubysrc.New())
 	ix.Register(luasrc.New())
+	ix.Register(gdsrc.New())
 	for _, lang := range []string{"css", "scss", "sass", "less"} {
 		ix.Register(csssrc.New(lang))
 	}

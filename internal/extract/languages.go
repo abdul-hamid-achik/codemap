@@ -29,6 +29,7 @@ var languageByExtension = map[string]string{
 	// Existing recognized-only languages and markup.
 	".lua":  "lua",
 	".rb":   "ruby",
+	".gd":   "gdscript",
 	".html": "html",
 	".htm":  "html",
 	".css":  "css",
