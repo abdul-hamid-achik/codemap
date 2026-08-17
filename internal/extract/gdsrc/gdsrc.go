@@ -34,10 +34,8 @@ var (
 	extendsRe = regexp.MustCompile(`^extends\s+([A-Za-z]\w*|"[^"]+")`)
 	// class InnerClass / class InnerClass extends Node
 	innerClassRe = regexp.MustCompile(`^class\s+([A-Z]\w*)`)
-	// func foo() / func _ready() -> void / func bar(x: int, y = 5) -> int
-	funcRe = regexp.MustCompile(`^func\s+([A-Za-z_]\w*)`)
-	// static func foo() / static var x
-	staticRe = regexp.MustCompile(`^static\s+(func|var)\s+`)
+	// func foo() / func _ready() -> void / static func bar() / func bar(x: int, y = 5) -> int
+	funcRe = regexp.MustCompile(`^(?:static\s+)?func\s+([A-Za-z_]\w*)`)
 	// var hp: int = 100 / var speed := 50.0 / @export var x
 	varRe = regexp.MustCompile(`^(?:@\w+\s+)*var\s+([A-Za-z_]\w*)`)
 	// const SPEED = 200 / const MAX_HP: int = 100
@@ -116,7 +114,7 @@ func (*Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, 
 
 	for i, raw := range lines {
 		lineNo := i + 1
-		
+
 		// Detect multiline strings: """ or '''
 		if !inMultilineString {
 			if strings.Contains(raw, `"""`) || strings.Contains(raw, "'''") {
@@ -135,7 +133,7 @@ func (*Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, 
 			}
 			continue
 		}
-		
+
 		code := stripComment(raw)
 		trimmed := strings.TrimSpace(code)
 		if trimmed == "" {
@@ -183,9 +181,7 @@ func (*Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, 
 		for _, m := range preloadRe.FindAllStringSubmatch(code, -1) {
 			spec := m[2]
 			// res:// paths are project-relative
-			if strings.HasPrefix(spec, "res://") {
-				spec = strings.TrimPrefix(spec, "res://")
-			}
+			spec = strings.TrimPrefix(spec, "res://")
 			res.Imports = append(res.Imports, spec)
 		}
 
@@ -355,8 +351,7 @@ func indentOf(line string) int {
 
 func isDecl(trimmed string) bool {
 	return classNameRe.MatchString(trimmed) || innerClassRe.MatchString(trimmed) ||
-		funcRe.MatchString(trimmed) || enumRe.MatchString(trimmed) ||
-		staticRe.MatchString(trimmed)
+		funcRe.MatchString(trimmed) || enumRe.MatchString(trimmed)
 }
 
 func joinFQN(container, name string) string {
