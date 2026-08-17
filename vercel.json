@@ -5,5 +5,11 @@
   "buildCommand": "bun run site:build",
   "outputDirectory": "docs/.vitepress/dist",
   "cleanUrls": true,
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- docs/ package.json bun.lock vercel.json"
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "main": true
+    }
+  },
+  "ignoreCommand": "git diff --quiet ${VERCEL_GIT_PREVIOUS_SHA:-HEAD^} HEAD -- docs/ package.json bun.lock vercel.json"
 }
