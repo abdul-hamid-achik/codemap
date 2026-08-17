@@ -36,7 +36,7 @@ instead of dozens of file reads.
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
   (name-based by default for Go, exact via `go/types` with `--precise`) and **defines** edges
   (file → symbol). Test coverage is derived by walking the call graph to test nodes. The graph is
-  stored in pure-Go SQLite and remains queryable offline. **Go**, **Ruby**, **Lua**, and **CSS/HTML** use
+  stored in pure-Go SQLite and remains queryable offline. **Go**, **Ruby**, **Lua**, **GDScript**, and **CSS/HTML** use
   built-in pure-Go backends (symbols + name-based calls/imports, no server needed).
   With the listed language server installed, **TypeScript + JavaScript** and **Python** provide
   symbols + structure and a **precise call graph** under `--precise`; one

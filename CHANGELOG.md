@@ -10,6 +10,11 @@ releases page is the authoritative history.
 
 ### Added
 
+- **GDScript support (T1 symbols + T2 navigation).** Pure-Go scanner extracts
+  `class_name`, inner classes, functions, methods, signals, enums, variables,
+  and constants from Godot Engine `.gd` files. Name-based call graph plus
+  `preload`/`load` imports. No external dependencies — works offline like
+  Ruby/Lua. Test-path detection for `*_test.gd` and `test_*.gd`.
 - **Partial-success batch impact.** `codemap impact --at f1:l1 --at f2:l2 ...
   --json` resolves up to 25 raw source positions in one process and preserves
   input order. Unresolved frames return item-level `symbol_not_found` data
