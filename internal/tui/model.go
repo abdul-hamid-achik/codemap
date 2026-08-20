@@ -463,7 +463,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) statusCmd() tea.Cmd {
 	svc, dir := m.service, m.startDir
 	return func() tea.Msg {
-		st, err := svc.Status(dir)
+		st, err := svc.LightweightStatus(dir)
 		return statusMsg{st: st, err: err}
 	}
 }

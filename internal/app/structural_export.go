@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,6 +28,10 @@ const (
 	MaxStructuralExportLimit            = 5000
 	DefaultStructuralExportContentBytes = 16 * 1024
 	MaxStructuralExportContentBytes     = 256 * 1024
+	// MaxStructuralExportSourceFileBytes bounds source materialization when
+	// verifying a live file against the index. Larger files remain eligible
+	// for structural records, but their source body is omitted.
+	MaxStructuralExportSourceFileBytes = 1 << 20
 )
 
 // StructuralExportOptions controls one deterministic page of symbol records.
@@ -296,6 +301,22 @@ func loadStructuralFile(indexedHash, root, rel string) structuralFileSource {
 	if !info.Mode().IsRegular() {
 		return structuralFileSource{omission: "file_unreadable"}
 	}
+	if info.Size() > MaxStructuralExportSourceFileBytes {
+		currentHash, err := sha256File(abs)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return structuralFileSource{omission: "file_missing", fileStale: true}
+			}
+			return structuralFileSource{omission: "file_unreadable"}
+		}
+		if indexedHash == "" {
+			return structuralFileSource{omission: "index_hash_missing", fileStale: true}
+		}
+		if currentHash != indexedHash {
+			return structuralFileSource{omission: "stale_index", fileStale: true}
+		}
+		return structuralFileSource{omission: "file_too_large"}
+	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -310,6 +331,20 @@ func loadStructuralFile(indexedHash, root, rel string) structuralFileSource {
 		return structuralFileSource{omission: "stale_index", fileStale: true}
 	}
 	return structuralFileSource{data: data}
+}
+
+func sha256File(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = file.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // structuralExportFileInfo follows a symlink only for classification. The

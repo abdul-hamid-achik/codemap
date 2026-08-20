@@ -137,11 +137,24 @@ func TestCLIContracts(t *testing.T) {
 			t.Fatalf("status -C exit=%d stderr=%s stdout=%s", res.exit, res.stderr, res.stdout)
 		}
 		var status struct {
-			Path string `json:"path"`
+			Path         string `json:"path"`
+			VectorsKnown bool   `json:"vectors_known"`
 		}
 		mustJSON(t, res.stdout, &status)
 		if status.Path != project {
 			t.Fatalf("status path = %q, want %q", status.Path, project)
+		}
+		if status.VectorsKnown {
+			t.Fatal("default status must not load or claim a vector count")
+		}
+
+		res = runCLI(t, bin, runner, env, "status", "-C", project, "--full", "--json")
+		if res.exit != 0 {
+			t.Fatalf("full status -C exit=%d stderr=%s stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		mustJSON(t, res.stdout, &status)
+		if !status.VectorsKnown {
+			t.Fatal("--full status must report whether vectors were counted")
 		}
 
 		res = runCLI(t, bin, runner, env, "config", "show", "-C", project, "--json")

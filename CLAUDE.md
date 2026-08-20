@@ -45,8 +45,9 @@ Surfaces / key files:
 
 ## Two documentation surfaces — do not mix them
 
-- `docs/` → VitePress **product docs**, deployed to **Vercel** (no GitHub Pages). Public
-  configuration belongs in `docs/configuration.md`; agent usage belongs in `docs/agents.md`.
+- `docs/` → VitePress **product docs**, deployed to **Vercel** (no GitHub Pages). Git
+  auto-builds **`main` only**; do not `vercel promote`. CLI binaries ship from tags.
+  Public configuration belongs in `docs/configuration.md`; agent usage belongs in `docs/agents.md`.
 - `~/notes/projects/codemap/` → Obsidian vault for **working notes / handoffs**, via the
   `obsidian-cli` skill. **Never** write scratch `.md` into the repo. Repo root `.md` is
   limited to: README, AGENTS, CLAUDE — the backlog lives in the vault

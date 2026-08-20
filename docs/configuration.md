@@ -114,7 +114,7 @@ embedding:
   dimensions: 768
   distance: cosine
 index:
-  max_file_bytes: 1048576 # 0 = no size limit
+  max_file_bytes: 1048576 # 0 = 64 MiB hard safety cap; never unbounded
   exclude:                # REPLACES the built-in defaults — set only to override wholesale
     - .git
     - node_modules     # JS/TS deps (any depth)

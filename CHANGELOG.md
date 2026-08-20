@@ -8,8 +8,17 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+## [0.59.0] — 2026-08-20
+
 ### Added
 
+- **`codemap status` is lightweight by default** — skips opening the local vector
+  store so readiness probes stay bounded-memory. Pass `--full` when the exact
+  local vector count is required; JSON exposes `vectors_known` to distinguish a
+  skipped count from zero. `stale` is reported as
+  `{changed,new,deleted}` (plus legacy int compatibility for older consumers).
+- **Indexer phase progress (`OnPhase`)** — LSP spawn, wipe, precise resolution,
+  and store phases report free-form labels for honest CLI/TUI progress.
 - **GDScript support (T1 symbols).** Pure-Go scanner extracts `class_name`,
   inner classes, functions, methods, signals, enums, variables, and constants
   from Godot Engine `.gd` files. Name-based call graph plus `preload`/`load`
@@ -27,6 +36,12 @@ releases page is the authoritative history.
   portable snapshots preserve the external ID.
 - **Annotate-for-incidents pattern** documented in `docs/agents.md`: sibling
   tools (Monitor) can pin retry-safe incidents onto the call graph.
+
+### Changed
+
+- **Safer source materialization** — incremental/staleness hashing streams
+  files without retaining bodies; oversized files are rejected under a hard
+  64 MiB safety ceiling even when the configured limit is “unlimited.”
 
 ### Fixed
 

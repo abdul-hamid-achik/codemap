@@ -235,7 +235,8 @@ codemap map                              # architecture: subsystems + bridges + 
 codemap hotspots --top 20          # most-referenced symbols (hubs)
 codemap orphans                    # functions with no callers (dead-code candidates)
 codemap review                     # diff-scoped impact + tests to run
-codemap status                     # stats + warns if the index is stale vs your files
+codemap status                     # bounded-memory stats + warns if the index is stale
+codemap status --full              # include the local vector count (may use substantial memory)
 
 # 6. Search by meaning (needs an embedded index)
 codemap semantic "jwt validation middleware" --top 10

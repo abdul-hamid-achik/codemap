@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/term"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
@@ -34,27 +36,40 @@ type (
 		file        string
 	}
 	embedMsg struct{ done, total int } // embedding-phase progress (the long part)
-	doneMsg  struct{}
+	phaseMsg struct {
+		phase       string
+		done, total int
+	}
+	doneMsg struct{}
 )
 
 // progressModel is a minimal inline Bubble Tea program: a single animated
 // progress bar that tracks the extraction pass, file by file.
 type progressModel struct {
 	prog        progress.Model
+	spin        spinner.Model
 	done, total int
 	file        string
-	embedding   bool      // switched to the embedding phase (the long part of a reindex)
-	finished    bool      // indexing reported done
-	canceled    bool      // user pressed ctrl+c
+	phase       string // free-form label for non-file work (LSP, precise, …)
+	embedding   bool   // switched to the embedding phase (the long part of a reindex)
+	finished    bool   // indexing reported done
+	canceled    bool   // user pressed ctrl+c
 	start       time.Time // when the first progress event arrived
 	embedStart  time.Time // when the embedding phase started (for ETA)
 }
 
 func newProgressModel() progressModel {
-	return progressModel{prog: progress.New(progress.WithDefaultBlend(), progress.WithWidth(30))}
+	spin := spinner.New(
+		spinner.WithSpinner(spinner.MiniDot),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("#66D9EF"))),
+	)
+	return progressModel{
+		prog: progress.New(progress.WithDefaultBlend(), progress.WithWidth(30)),
+		spin: spin,
+	}
 }
 
-func (m progressModel) Init() tea.Cmd { return nil }
+func (m progressModel) Init() tea.Cmd { return m.spin.Tick }
 
 func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -62,6 +77,7 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.start.IsZero() {
 			m.start = time.Now()
 		}
+		m.phase = ""
 		m.done, m.total, m.file = msg.done, msg.total, msg.file
 		var pct float64
 		if msg.total > 0 {
@@ -74,12 +90,26 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.embedStart.IsZero() {
 			m.embedStart = time.Now()
 		}
+		m.phase = ""
 		m.embedding, m.done, m.total, m.file = true, msg.done, msg.total, ""
 		var pct float64
 		if msg.total > 0 {
 			pct = float64(msg.done) / float64(msg.total)
 		}
 		return m, m.prog.SetPercent(pct)
+	case phaseMsg:
+		if m.start.IsZero() {
+			m.start = time.Now()
+		}
+		m.phase = msg.phase
+		m.embedding = false
+		m.file = ""
+		if msg.total > 0 {
+			m.done, m.total = msg.done, msg.total
+			return m, m.prog.SetPercent(float64(msg.done) / float64(msg.total))
+		}
+		// Indeterminate phase: keep a low fill so the bar still animates.
+		return m, m.prog.SetPercent(0.08)
 	case doneMsg:
 		m.finished = true
 		return m, tea.Quit
@@ -92,6 +122,13 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		pm, cmd := m.prog.Update(msg)
 		m.prog = pm
 		return m, cmd
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		if !m.finished {
+			return m, cmd
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -99,6 +136,14 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m progressModel) View() tea.View {
 	if m.finished {
 		return tea.NewView("") // clear the bar; the summary prints after the program quits
+	}
+	spin := m.spin.View()
+	if m.phase != "" && !m.embedding && m.file == "" {
+		line := spin + "  " + m.phase
+		if m.total > 0 {
+			line += fmt.Sprintf("  %d/%d", m.done, m.total)
+		}
+		return tea.NewView(line)
 	}
 	line := m.prog.View()
 	if m.total > 0 {
@@ -115,6 +160,10 @@ func (m progressModel) View() tea.View {
 		if eta := m.eta(m.start); eta != "" {
 			line += "  ~" + eta + " left"
 		}
+	case m.phase != "":
+		line += "  " + m.phase
+	default:
+		line = spin + "  starting…"
 	}
 	return tea.NewView(line) // inline (AltScreen defaults false) — a transient one-liner
 }
@@ -183,6 +232,9 @@ func runIndexWithBar(ctx context.Context, svc *app.Service, cwd string, opts ind
 	}
 	opts.OnEmbed = func(done, total int) {
 		prog.Send(embedMsg{done: done, total: total})
+	}
+	opts.OnPhase = func(phase string, done, total int) {
+		prog.Send(phaseMsg{phase: phase, done: done, total: total})
 	}
 
 	type indexOut struct {

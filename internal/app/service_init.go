@@ -86,6 +86,7 @@ type StatusReport struct {
 	Edges           int    `json:"edges"`
 	Files           int    `json:"files"`
 	Vectors         int    `json:"vectors"`          // locally embedded nodes (0 is expected when semantic_backend=vecgrep)
+	VectorsKnown    bool   `json:"vectors_known"`    // false when lightweight status skips the vector store
 	SemanticBackend string `json:"semantic_backend"` // configured retrieval owner: fallback|local|vecgrep
 	PreciseEdges    int    `json:"precise_edges"`    // exact call edges from go/types/LSP; diagnostic only (leaf files can be precise with 0)
 	// Precise reports whether every indexed file in each call-graph language
@@ -110,6 +111,13 @@ type StatusReport struct {
 	// value (not a re-derived one), so a global memory store can be recalled per
 	// project without cross-project leakage. See the G2 memory governance spec.
 	ProjectKey string `json:"project_key,omitempty"`
+}
+
+// StatusOptions controls optional status work. Vector counts require opening
+// the semantic store, which may materialize a large in-memory index. Keep that
+// cost explicit for diagnostics that truly need it.
+type StatusOptions struct {
+	IncludeVectors bool
 }
 
 // Init registers cwd as a codemap project in the global registry.
@@ -340,6 +348,17 @@ func summarizeUnsupported(m map[string]int) string {
 
 // Status reports index statistics for the project containing cwd.
 func (svc *Service) Status(cwd string) (*StatusReport, error) {
+	return svc.StatusWithOptions(cwd, StatusOptions{IncludeVectors: true})
+}
+
+// LightweightStatus reports graph statistics and project identity without
+// opening the semantic vector store. It is safe for health checks and agents.
+func (svc *Service) LightweightStatus(cwd string) (*StatusReport, error) {
+	return svc.StatusWithOptions(cwd, StatusOptions{})
+}
+
+// StatusWithOptions reports index statistics with explicitly selected costs.
+func (svc *Service) StatusWithOptions(cwd string, options StatusOptions) (*StatusReport, error) {
 	g, err := svc.s.Graph()
 	if err != nil {
 		return nil, err
@@ -382,8 +401,11 @@ func (svc *Service) Status(cwd string) (*StatusReport, error) {
 	rep.Kinds = st.Kinds
 	// Best-effort: how many of this project's nodes are embedded (so callers know
 	// whether semantic search is available).
-	if n, ok := svc.embeddedCount(name); ok {
-		rep.Vectors = n
+	if options.IncludeVectors {
+		if n, ok := svc.embeddedCount(name); ok {
+			rep.Vectors = n
+			rep.VectorsKnown = true
+		}
 	}
 	// How many call edges were resolved precisely by go/types or LSP
 	// callHierarchy. This is a diagnostic count only: leaf files can complete

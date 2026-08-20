@@ -44,6 +44,13 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
 
+// maxSafeSourceFileBytes is an absolute memory-safety ceiling for source
+// materialization. The configured limit may be lower, but zero (documented as
+// "unlimited") and an accidentally excessive value must not turn indexing into
+// an unbounded io.ReadAll. Files above the effective limit are hashed and
+// reported as oversized without retaining their body.
+const maxSafeSourceFileBytes = 64 << 20
+
 // Options controls an index run.
 type Options struct {
 	// Reindex wipes the project and rebuilds all nodes, edges, and vectors.
@@ -74,6 +81,16 @@ type Options struct {
 	// It is called concurrently from embed workers, so it must be cheap and
 	// goroutine-safe (the CLI just forwards to a thread-safe Bubble Tea Send).
 	OnEmbed func(done, total int)
+	// OnPhase, if non-nil, reports a free-form phase label for work that is not
+	// file/embed counted (LSP spawn, wipe, precise, edge resolution, storing…).
+	// done/total are optional counters (0/0 when indeterminate). Must be cheap.
+	OnPhase func(phase string, done, total int)
+}
+
+func reportPhase(opts Options, phase string, done, total int) {
+	if opts.OnPhase != nil && phase != "" {
+		opts.OnPhase(phase, done, total)
+	}
 }
 
 // FileError records a per-file failure that didn't abort the whole run. It may
@@ -468,15 +485,69 @@ func (ix *Indexer) changedFilePaths(projectID int64, files []fileTask) ([]string
 
 	changed := make([]string, 0)
 	for _, ft := range files {
-		content, err := os.ReadFile(ft.abs)
+		currentHash, err := hashFile(ft.abs)
 		if err != nil {
 			continue // indexFile will surface the read error in the normal pass
 		}
-		if indexed[ft.rel] != sha256hex(content) {
+		if indexed[ft.rel] != currentHash {
 			changed = append(changed, ft.rel)
 		}
 	}
 	return changed, nil
+}
+
+// readFileUnderLimit reads at most maxBytes+1 bytes. The extra byte lets the
+// caller distinguish an exact-limit file from an oversized one without ever
+// materializing an unbounded source file. A nil body is returned for an
+// oversized file; callers that need its identity can use hashFile, which
+// streams through the file with constant memory.
+func readFileUnderLimit(path string, maxBytes int) ([]byte, bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = file.Close() }()
+
+	maxBytes = effectiveSourceFileLimit(maxBytes)
+	// Most oversized files can be rejected from metadata alone. This avoids
+	// allocating the full limit merely to discover that a large regular file
+	// is too big; the bounded read below remains the race-safe fallback when a
+	// file grows after this stat or when its size cannot be inspected.
+	if info, statErr := file.Stat(); statErr == nil && info.Mode().IsRegular() && info.Size() > int64(maxBytes) {
+		return nil, true, nil
+	}
+	content, err := io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if len(content) > maxBytes {
+		return nil, true, nil
+	}
+	return content, false, nil
+}
+
+func effectiveSourceFileLimit(configured int) int {
+	if configured <= 0 || configured > maxSafeSourceFileBytes {
+		return maxSafeSourceFileBytes
+	}
+	return configured
+}
+
+// hashFile computes a content hash without retaining the file body. It is
+// used by incremental/staleness checks and for oversized files whose hash is
+// still needed to prevent perpetual "changed" reports.
+func hashFile(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = file.Close() }()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // expandWithInboundSources adds every file whose current outbound graph edges
@@ -568,16 +639,19 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// merely "do not update changed vectors". Clear the full project scope before
 	// any hash short-circuit or cancellation can leave old embeddings queryable.
 	if ix.embedder == nil && ix.vectors != nil {
+		reportPhase(opts, "clearing local vectors…", 0, 0)
 		if err := ix.clearProjectVectors(projectName); err != nil {
 			return nil, err
 		}
 	}
 
 	if opts.Reindex {
+		reportPhase(opts, "wiping project graph…", 0, 0)
 		if err := ix.graph.WipeProject(projectID); err != nil {
 			return nil, err
 		}
 		if ix.vectors != nil && ix.embedder != nil {
+			reportPhase(opts, "clearing local vectors…", 0, 0)
 			if err := ix.clearProjectVectors(projectName); err != nil {
 				return nil, err
 			}
@@ -587,6 +661,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	indexStart := time.Now()
 	var extractStart, embedStart, preciseStart time.Time
 
+	reportPhase(opts, "scanning project tree…", 0, 0)
 	files, unsupported, err := ix.walk(root)
 	if err != nil {
 		return nil, err
@@ -594,9 +669,13 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// Auto-register language-server-backed extractors for recognized languages that
 	// are actually present (so a Go-only repo never spawns a server), then re-walk
 	// to route their files to the new extractor. Skipped entirely under --no-lsp.
-	if !opts.NoLSP && ix.registerLSP(ctx, root, unsupported, res) {
-		if files, unsupported, err = ix.walk(root); err != nil {
-			return nil, err
+	if !opts.NoLSP {
+		reportPhase(opts, "starting language servers…", 0, 0)
+		if ix.registerLSP(ctx, root, unsupported, res) {
+			reportPhase(opts, "rescanning with language servers…", 0, 0)
+			if files, unsupported, err = ix.walk(root); err != nil {
+				return nil, err
+			}
 		}
 	}
 	res.FilesScanned = len(files)
@@ -706,6 +785,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 
 	extractStart = time.Now()
+	reportPhase(opts, "extracting symbols…", 0, total)
 
 	// LSP files: bounded concurrency (P4). Same pattern as the Go pass — a
 	// per-worker local Result merged under mu — overlapping the slow
@@ -832,6 +912,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// Re-extraction is intentional: cheap, no graph writes, and it
 	// keeps the worker pipeline simple (workers stay oblivious to
 	// import resolution).
+	reportPhase(opts, "resolving imports…", 0, len(files))
 	if err := ix.writeImportEdgesForFiles(ctx, projectID, files, impIdx); err != nil {
 		return res, err
 	}
@@ -841,18 +922,21 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// resolveLSPCallEdges). On a --precise index all three run, and previously each
 	// called ProjectNodes independently — 3 full table scans + 3 map builds. Now we
 	// load once and pass the same index to all three.
+	reportPhase(opts, "building symbol index…", 0, 0)
 	ni, err := ix.buildNodeIndex(projectID)
 	if err != nil {
 		return res, err
 	}
 
 	// Pass 2: resolve references into edges against the project-wide symbol map.
+	reportPhase(opts, "resolving call edges…", 0, len(pending))
 	if _, err := ix.resolveEdgesWith(ctx, projectID, pending, ni); err != nil {
 		return res, err
 	}
 
 	// Pass 3 (opt-in): exact call edges.
 	if opts.Precise {
+		reportPhase(opts, "precise call graph…", 0, 0)
 		preciseStart = time.Now()
 		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni); err != nil {
 			return res, err
@@ -1206,12 +1290,20 @@ func segPrefixMatch(parts, segs []string) bool {
 }
 
 func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result) (bool, []extract.Reference, []embedItem, error) {
-	content, err := os.ReadFile(ft.abs)
+	content, oversized, err := readFileUnderLimit(ft.abs, ix.cfg.MaxFileBytes)
 	if err != nil {
 		return false, nil, nil, err
 	}
-	hash := sha256hex(content)
-	if ix.cfg.MaxFileBytes > 0 && len(content) > ix.cfg.MaxFileBytes {
+	hash := ""
+	if oversized {
+		hash, err = hashFile(ft.abs)
+		if err != nil {
+			return false, nil, nil, err
+		}
+	} else {
+		hash = sha256hex(content)
+	}
+	if oversized {
 		res.FilesSkipped++
 		res.Oversized = append(res.Oversized, ft.rel)
 		// P1-01 (B16): clear the file's old nodes + vectors BEFORE
@@ -1420,6 +1512,7 @@ func (ix *Indexer) embedAndStore(ctx context.Context, projectName string, items 
 		vecID  string
 	}
 	updates := make([]vecUpdate, 0, len(items))
+	reportPhase(opts, "storing vectors…", 0, len(items))
 	for i, item := range items {
 		vid, err := ix.vectors.Insert(vecs[i], item.content, item.meta)
 		if err != nil {

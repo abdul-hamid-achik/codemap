@@ -605,8 +605,11 @@ func (ix *Indexer) writeImportEdgesForFiles(ctx context.Context, projectID int64
 		// Re-extract to recover fr.Imports (the worker
 		// didn't keep them; the result struct is dropped
 		// at the end of indexFile).
-		content, rerr := os.ReadFile(ft.abs)
+		content, oversized, rerr := readFileUnderLimit(ft.abs, ix.cfg.MaxFileBytes)
 		if rerr != nil {
+			continue
+		}
+		if oversized {
 			continue
 		}
 		fr, eerr := ft.ext.ExtractFile(ft.rel, content)

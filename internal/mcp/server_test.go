@@ -993,22 +993,40 @@ func TestMCPDoctor(t *testing.T) {
 	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
 	t.Setenv("CODEMAP_CONFIG", "")
 	t.Setenv("XDG_DATA_HOME", "")
+	// The doctor probes `go version`. Use a tiny deterministic shim so the real
+	// Go binary cannot start its asynchronous telemetry writer under HOME while
+	// testing the MCP response shape. Keep the probe PATH hermetic so an
+	// installed gopls cannot invoke the real toolchain either.
+	binDir := t.TempDir()
+	goShim := filepath.Join(binDir, "go")
+	if err := os.WriteFile(goShim, []byte("#!/bin/sh\nprintf '%s\\n' 'go version go1.26.5 test/test'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
 
 	sess, err := app.Open("") // no index needed — doctor checks the environment
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sess.Close()
 	srv := NewServer(sess)
 	clientT, serverT := sdkmcp.NewInMemoryTransports()
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = srv.serve(ctx, serverT) }()
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		_ = srv.serve(ctx, serverT)
+	}()
+	defer func() {
+		cancel()
+		<-serverDone
+		_ = sess.Close()
+	}()
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test", Version: "0"}, nil)
 	cs, err := client.Connect(ctx, clientT, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer cs.Close()
 
 	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_doctor", Arguments: map[string]any{}})
 	if err != nil {

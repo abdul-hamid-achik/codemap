@@ -323,6 +323,26 @@ func TestStructuralExportValidatesBoundsAndPaths(t *testing.T) {
 	}
 }
 
+func TestLoadStructuralFileOmitsOversizedSourceBody(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "large.go")
+	if err := os.WriteFile(path, []byte("package large\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, MaxStructuralExportSourceFileBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	indexedHash, err := sha256File(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := loadStructuralFile(indexedHash, root, "large.go")
+	if source.omission != "file_too_large" || source.data != nil || source.fileStale {
+		t.Fatalf("oversized source = %#v, want bounded omission", source)
+	}
+}
+
 func TestStructuralManifestAndExportCanonicalizeLegacyBackslashPaths(t *testing.T) {
 	isolate(t)
 	root := t.TempDir()

@@ -561,6 +561,59 @@ func TestIndexSurfacesOversizedFiles(t *testing.T) {
 	}
 }
 
+func TestReadFileUnderLimitDoesNotMaterializeOversizedSparseFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.go")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, 1<<30); err != nil {
+		t.Fatal(err)
+	}
+
+	content, oversized, err := readFileUnderLimit(path, 1<<20)
+	if err != nil {
+		t.Fatalf("readFileUnderLimit() error = %v", err)
+	}
+	if !oversized {
+		t.Fatal("readFileUnderLimit() did not report the sparse file as oversized")
+	}
+	if len(content) != 0 {
+		t.Fatalf("oversized content length = %d, want no materialized file body", len(content))
+	}
+}
+
+func TestReadFileUnderLimitAppliesHardSafetyCapToUnlimitedConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.go")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, int64(maxSafeSourceFileBytes)+1); err != nil {
+		t.Fatal(err)
+	}
+
+	content, oversized, err := readFileUnderLimit(path, 0)
+	if err != nil {
+		t.Fatalf("readFileUnderLimit() error = %v", err)
+	}
+	if !oversized {
+		t.Fatal("unlimited config must still honor the hard safety cap")
+	}
+	if len(content) != 0 {
+		t.Fatalf("oversized content length = %d, want no materialized file body", len(content))
+	}
+}
+
+func TestEffectiveSourceFileLimitClampsExcessiveConfig(t *testing.T) {
+	for _, configured := range []int{-1, 0, maxSafeSourceFileBytes, maxSafeSourceFileBytes + 1} {
+		if got := effectiveSourceFileLimit(configured); got != maxSafeSourceFileBytes {
+			t.Errorf("effectiveSourceFileLimit(%d) = %d, want hard cap %d", configured, got, maxSafeSourceFileBytes)
+		}
+	}
+	if got := effectiveSourceFileLimit(1024); got != 1024 {
+		t.Fatalf("effectiveSourceFileLimit(1024) = %d, want configured lower limit", got)
+	}
+}
+
 // TestIndexExcludesDependencyDirs checks that the default excludes keep
 // dependency/build dirs out of the graph — critically Python virtualenvs
 // (venv/site-packages), which would otherwise flood it with library code.

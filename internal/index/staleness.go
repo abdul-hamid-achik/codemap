@@ -85,7 +85,7 @@ func (ix *Indexer) stalenessFromSnapshot(root string, fileHashes map[string]stri
 			}
 			continue
 		}
-		content, rerr := os.ReadFile(path)
+		currentHash, rerr := hashFile(path)
 		if rerr != nil {
 			if os.IsNotExist(rerr) {
 				st.Deleted++
@@ -96,7 +96,7 @@ func (ix *Indexer) stalenessFromSnapshot(root string, fileHashes map[string]stri
 			}
 			continue // ordinary status is conservative for other read failures
 		}
-		if prev != "" && sha256hex(content) != prev {
+		if prev != "" && currentHash != prev {
 			st.Changed++
 		}
 	}

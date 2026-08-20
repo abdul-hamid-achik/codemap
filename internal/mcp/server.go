@@ -928,7 +928,10 @@ func (p *mcpProgress) onEmbed(done, total int) {
 }
 
 func (s *Server) handleStatus(_ context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {
-	rep, err := s.svc.Status(cwdOf(in.Path))
+	// Status is an agent health check. Keep it bounded by skipping the local
+	// vector-store count; callers that need that diagnostic can use the CLI's
+	// explicit `status --full` path.
+	rep, err := s.svc.LightweightStatus(cwdOf(in.Path))
 	// Surface index drift (changed/new/deleted files since indexing) so the agent
 	// knows whether to call codemap_index before trusting query results.
 	if err == nil && rep != nil && rep.Registered {

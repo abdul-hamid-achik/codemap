@@ -31,8 +31,8 @@ centrally — set CODEMAP_DATA to a path inside the repo for a repo-local index.
 		RunE: runInit,
 	}
 	statusCmd = &cobra.Command{
-		Use:   "status",
-		Short: "Show index status and statistics (nodes, edges, coverage, languages)",
+		Use:   "status [--full]",
+		Short: "Show index status and statistics without loading vectors by default",
 		RunE:  runStatus,
 	}
 	doctorCmd = &cobra.Command{
@@ -96,7 +96,16 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	defer func() { _ = sess.Close() }()
 	cwd := targetDir(cmd)
 	svc := app.NewService(sess)
-	rep, err := svc.Status(cwd)
+	full, err := cmd.Flags().GetBool("full")
+	if err != nil {
+		return err
+	}
+	var rep *app.StatusReport
+	if full {
+		rep, err = svc.Status(cwd)
+	} else {
+		rep, err = svc.LightweightStatus(cwd)
+	}
 	if err != nil {
 		return err
 	}
@@ -122,7 +131,9 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	edges := fmt.Sprintf("%d", rep.Edges) + preciseEdgeNote(rep.PreciseEdges, rep.Languages)
 	fmt.Printf("Project: %s\n  path:  %s\n  nodes: %d\n  edges: %s\n  files: %d\n",
 		rep.Project, rep.Path, rep.Nodes, edges, rep.Files)
-	if rep.SemanticBackend == "vecgrep" {
+	if !full {
+		fmt.Println("  vectors: skipped (use --full to inspect local semantic vectors)")
+	} else if rep.SemanticBackend == "vecgrep" {
 		fmt.Println("  vectors: 0 local (semantic owner: vecgrep)")
 	} else if rep.Vectors > 0 {
 		fmt.Printf("  vectors: %d (semantic search ready)\n", rep.Vectors)

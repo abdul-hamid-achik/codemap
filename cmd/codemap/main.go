@@ -161,6 +161,7 @@ func init() {
 	indexCmd.Flags().Bool("cache", true, "save/restore the index to/from the fcheap stash vault (best-effort; auto-restore before --reindex, auto-save after index)")
 	indexCmd.Flags().Bool("no-tips", false, "suppress post-index advisory tips (useful in scripts/CI)")
 	initCmd.Flags().Bool("local", false, "drop a .codemap marker (so a repo-local codemap.yaml is found; index stays central)")
+	statusCmd.Flags().Bool("full", false, "include the local vector-store count (may use substantial memory)")
 	// P1-09: --precise is the primary flag; --lsp is kept as a hidden alias
 	// so existing agent scripts don't break. The capability drives
 	// gopls (Go), typescript-language-server (TS/JS/Vue), or pyright

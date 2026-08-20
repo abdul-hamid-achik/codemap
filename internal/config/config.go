@@ -119,7 +119,7 @@ type EmbeddingConfig struct {
 
 // IndexConfig controls what gets indexed.
 type IndexConfig struct {
-	MaxFileBytes int `yaml:"max_file_bytes"` // skip files larger than this (0 = no limit)
+	MaxFileBytes int `yaml:"max_file_bytes"` // skip files larger than this (0 = hard safety cap)
 	// Exclude fully REPLACES the built-in default skip list (.git, node_modules,
 	// vendor, …). Set it only to override those defaults wholesale. A pattern
 	// without a slash matches any path segment ("migrations" skips a migrations
@@ -303,7 +303,7 @@ func (c *Config) Validate() error {
 		zeroMeaning string
 	}{
 		{name: "embedding.dimensions", value: c.Embedding.Dimensions, zeroMeaning: "0 = auto-detect from the model"},
-		{name: "index.max_file_bytes", value: c.Index.MaxFileBytes, zeroMeaning: "0 = no size limit"},
+		{name: "index.max_file_bytes", value: c.Index.MaxFileBytes, zeroMeaning: "0 = use the hard safety cap"},
 		{name: "index.embed_batch_size", value: c.Index.EmbedBatchSize, zeroMeaning: "0 = use the default"},
 		{name: "index.embed_concurrency", value: c.Index.EmbedConcurrency, zeroMeaning: "0 = use the default"},
 		{name: "index.extract_concurrency", value: c.Index.ExtractConcurrency, zeroMeaning: "0 = use the default"},

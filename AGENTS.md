@@ -174,7 +174,10 @@ for its own MCP package.)
 ## Documentation Discipline (read this)
 
 - `docs/` is a **deployed VitePress site** for product documentation **only**. Single
-  hosting path: **Vercel** — no GitHub Pages. Keep public usage/configuration in the relevant
+  hosting path: **Vercel** — no GitHub Pages. Git auto-builds **`main` only**
+  (`vercel.json`). Feature branches do not create Preview deployments.
+  `ignoreCommand` skips non-docs commits. Do not `vercel promote`; `main` is the
+  docs release. CLI binaries ship from tags. Keep public usage/configuration in the relevant
   product pages (`docs/quick-start.md`, `docs/configuration.md`, `docs/agents.md`,
   `docs/mcp.md`, `docs/languages.md`) instead of making users depend on this contributor guide.
 - Repo root carries exactly these markdown files: `README.md`, `AGENTS.md`, `CLAUDE.md`.

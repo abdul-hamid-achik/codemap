@@ -52,6 +52,11 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		v := !noEmbed
 		dopts.Embed = &v
 	}
+	if info := daemon.QueryStatus(); info != nil && !jsonOut(cmd) {
+		if ok, _ := daemon.DelegationAllowed(cwd, info); ok {
+			fmt.Fprintf(os.Stderr, "indexing via daemon (pid %d; no live progress)…\n", info.PID)
+		}
+	}
 	switch d := daemon.ReindexViaDaemon(cwd, dopts); {
 	case d.Refused:
 		return fmt.Errorf("%s", d.Reason)
@@ -281,7 +286,7 @@ func printIndexReport(cmd *cobra.Command, rep *app.IndexReport, precise bool) {
 		fmt.Fprintf(os.Stderr, "  ! %s: %s\n", e.File, e.Err)
 	}
 	for _, f := range rep.Oversized {
-		fmt.Fprintf(os.Stderr, "  ~ %s: skipped — exceeds index.max_file_bytes (raise it to include this file)\n", f)
+		fmt.Fprintf(os.Stderr, "  ~ %s: skipped — exceeds the effective source-file safety limit (index.max_file_bytes may be lower; the hard cap is never unbounded)\n", f)
 	}
 }
 

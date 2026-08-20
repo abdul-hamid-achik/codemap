@@ -722,6 +722,8 @@ func (m Model) renderMetrics(w, h int) string {
 		vec = fmt.Sprintf("%d embedded · semantic search ready", m.status.Vectors)
 	} else if m.status.SemanticBackend == "fallback" && slices.Contains(m.status.Siblings, "vecgrep") {
 		vec = "no local embeddings · vecgrep fallback available"
+	} else if !m.status.VectorsKnown {
+		vec = "no embeddings counted · use codemap status --full"
 	}
 	edges := fmt.Sprintf("%d edges", m.status.Edges)
 	if m.status.PreciseEdges > 0 { // go/types-resolved; vs name-based default

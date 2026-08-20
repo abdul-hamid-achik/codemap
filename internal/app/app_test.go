@@ -84,6 +84,13 @@ func TestServiceLifecycle(t *testing.T) {
 	if st.Kinds["function"] < 2 {
 		t.Errorf("kinds = %v, want >= 2 functions", st.Kinds)
 	}
+	light, err := svc.LightweightStatus(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if light.VectorsKnown {
+		t.Fatal("LightweightStatus must not claim a vector count")
+	}
 }
 
 func TestInitReportsCanonicalNameForSameBasenameProjects(t *testing.T) {
