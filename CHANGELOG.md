@@ -8,6 +8,13 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+## [0.61.0] — 2026-08-20
+
+### Fixed
+
+- **Release formatting** — `gofmt` on `cmd/codemap/index_progress.go` so
+  `task verify:source` passes in CI.
+
 ## [0.60.0] — 2026-08-20
 
 ### Added

@@ -50,10 +50,10 @@ type progressModel struct {
 	spin        spinner.Model
 	done, total int
 	file        string
-	phase       string // free-form label for non-file work (LSP, precise, …)
-	embedding   bool   // switched to the embedding phase (the long part of a reindex)
-	finished    bool   // indexing reported done
-	canceled    bool   // user pressed ctrl+c
+	phase       string    // free-form label for non-file work (LSP, precise, …)
+	embedding   bool      // switched to the embedding phase (the long part of a reindex)
+	finished    bool      // indexing reported done
+	canceled    bool      // user pressed ctrl+c
 	start       time.Time // when the first progress event arrived
 	embedStart  time.Time // when the embedding phase started (for ETA)
 }
