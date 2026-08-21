@@ -8,6 +8,8 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+## [0.62.0] — 2026-08-21
+
 ### Added
 
 - **`codemap status --skip-stale`** — skips the working-tree drift walk for cheap
