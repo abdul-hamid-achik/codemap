@@ -162,6 +162,7 @@ func init() {
 	indexCmd.Flags().Bool("no-tips", false, "suppress post-index advisory tips (useful in scripts/CI)")
 	initCmd.Flags().Bool("local", false, "drop a .codemap marker (so a repo-local codemap.yaml is found; index stays central)")
 	statusCmd.Flags().Bool("full", false, "include the local vector-store count (may use substantial memory)")
+	statusCmd.Flags().Bool("skip-stale", false, "skip the working-tree drift walk (faster readiness probes)")
 	// P1-09: --precise is the primary flag; --lsp is kept as a hidden alias
 	// so existing agent scripts don't break. The capability drives
 	// gopls (Go), typescript-language-server (TS/JS/Vue), or pyright

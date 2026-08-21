@@ -100,6 +100,10 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	skipStale, err := cmd.Flags().GetBool("skip-stale")
+	if err != nil {
+		return err
+	}
 	var rep *app.StatusReport
 	if full {
 		rep, err = svc.Status(cwd)
@@ -111,8 +115,9 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 	// Drift check (only meaningful once indexed): so you/an agent know whether the
 	// graph is behind the code before trusting a query. Best-effort — a failure
-	// here never breaks status.
-	if rep.Registered {
+	// here never breaks status. Readiness probes (Cortex setup) may skip this
+	// walk on large dirty trees via --skip-stale.
+	if rep.Registered && !skipStale {
 		if st, sErr := svc.Staleness(cwd); sErr == nil {
 			rep.Stale = st
 		}

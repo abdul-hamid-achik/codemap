@@ -8,6 +8,11 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+### Added
+
+- **`codemap status --skip-stale`** — skips the working-tree drift walk for cheap
+  readiness probes (Cortex setup). Default status still reports stale.
+
 ## [0.61.0] — 2026-08-20
 
 ### Fixed
