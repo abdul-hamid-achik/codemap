@@ -205,18 +205,24 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 			langs[i] = lb.Lang
 		}
 		// Probe under the project root so asdf/mise shims evaluate .tool-versions
-		// (LookPath alone treats a dead shim as success).
-		if iss := tooling.ProbeOrClassify(ctx, spec.Cmd, root, langs); iss != nil {
-			noteServerIssue(res, *iss)
+		// (LookPath alone treats a dead shim as success). A dead shim with a
+		// real install under ~/.asdf/installs is unwrapped to that binary.
+		pr := tooling.Probe(ctx, spec.Cmd, root)
+		if !pr.OK {
+			iss := classifyLSPProbe(spec.Cmd, root, langs, pr)
+			noteServerIssue(res, iss)
 			continue
 		}
-		path, _ := exec.LookPath(spec.Cmd)
+		cmd := pr.Path
+		if cmd == "" {
+			cmd = spec.Cmd
+		}
 		// Spawn the server ONCE (the first present language owns it), then bind the
 		// rest to the same connection — one typescript-language-server serves both
 		// TS and JS, each routed with its own languageId.
-		owner, err := lspsrc.New(ctx, want[0].Lang, want[0].LangID, root, spec.Cmd, spec.Args...)
+		owner, err := lspsrc.New(ctx, want[0].Lang, want[0].LangID, root, cmd, spec.Args...)
 		if err != nil {
-			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, path, root, langs, err, ""))
+			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, cmd, root, langs, err, ""))
 			continue
 		}
 		ix.Register(owner)
@@ -259,17 +265,20 @@ func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result) bo
 		for _, lb := range spec.Langs {
 			langs = append(langs, lb.Lang)
 		}
-		if iss := tooling.ProbeOrClassify(ctx, spec.Cmd, root, langs); iss != nil {
-			// Vue-only project: keep languages focused on vue when the shared
-			// TS/JS servers were not otherwise required by present plain files.
+		pr := tooling.Probe(ctx, spec.Cmd, root)
+		if !pr.OK {
+			iss := classifyLSPProbe(spec.Cmd, root, langs, pr)
 			iss.Languages = []string{"vue"}
-			noteServerIssue(res, *iss)
+			noteServerIssue(res, iss)
 			return false
 		}
-		path, _ := exec.LookPath(spec.Cmd)
-		owner, err := lspsrc.New(ctx, spec.Langs[0].Lang, spec.Langs[0].LangID, root, spec.Cmd, spec.Args...)
+		cmd := pr.Path
+		if cmd == "" {
+			cmd = spec.Cmd
+		}
+		owner, err := lspsrc.New(ctx, spec.Langs[0].Lang, spec.Langs[0].LangID, root, cmd, spec.Args...)
 		if err != nil {
-			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, path, root, []string{"vue"}, err, ""))
+			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, cmd, root, []string{"vue"}, err, ""))
 			return false
 		}
 		ix.Register(owner)
@@ -307,6 +316,13 @@ func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result) bo
 // an *lspsrc.Extractor (defensive — every current registration of "typescript"/
 // "javascript" is, but this degrades gracefully rather than panicking if that
 // ever changes).
+func classifyLSPProbe(bin, cwd string, langs []string, pr tooling.ProbeResult) tooling.Issue {
+	if pr.Path == "" {
+		return tooling.ClassifyNotFound(bin, cwd, langs)
+	}
+	return tooling.ClassifyProbeFailure(bin, cwd, langs, pr)
+}
+
 func bindOther(e extract.Extractor, lang, langID string) extract.Extractor {
 	if le, ok := e.(*lspsrc.Extractor); ok {
 		return le.Bind(lang, langID)
@@ -467,6 +483,79 @@ type fileTask struct {
 	// importIndex is the project-wide package→file map built once per index
 	// operation and shared by both IndexProject and IndexFiles tasks.
 	importIndex *importIndex
+}
+
+// usesLanguageServer reports whether extracting this file talks to a language
+// server over stdio. Those files stay at one in-flight request; cheap
+// pure-Go backends share the extract-concurrency pool.
+func usesLanguageServer(ft fileTask) bool {
+	switch ft.ext.(type) {
+	case *lspsrc.Extractor, *vuesrc.Extractor:
+		return true
+	}
+	switch ft.lang {
+	case "typescript", "javascript", "python", "vue":
+		return true
+	}
+	return false
+}
+
+// extractFiles runs indexFile over files with at most limit workers. Cheap
+// backends pass the configured extract-concurrency; language-server files
+// pass 1. onErrUnchanged records a per-file extract failure as up-to-date
+// (LSP: last-good graph stays) instead of skipped (cheap parse errors).
+func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int, onErrUnchanged bool, projectID int64, projectName string, opts Options, res *Result, pending *[]extract.Reference, embedAcc *[]embedItem, mu *sync.Mutex, fileDone *int64, total int) error {
+	if len(files) == 0 {
+		return nil
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > len(files) {
+		limit = len(files)
+	}
+	eg, gctx := errgroup.WithContext(ctx)
+	eg.SetLimit(limit)
+	for _, ft := range files {
+		ft := ft
+		eg.Go(func() error {
+			if gctx.Err() != nil {
+				return gctx.Err()
+			}
+			localRes := &Result{}
+			changed, refs, toEmbed, err := ix.indexFile(gctx, projectID, projectName, ft, opts, localRes)
+			done := int(atomic.AddInt64(fileDone, 1))
+			if opts.OnFile != nil {
+				opts.OnFile(done, total, ft.rel)
+			}
+			mu.Lock()
+			res.FilesIndexed += localRes.FilesIndexed
+			res.FilesSkipped += localRes.FilesSkipped
+			res.FilesUnchanged += localRes.FilesUnchanged
+			res.Oversized = append(res.Oversized, localRes.Oversized...)
+			res.Generated = append(res.Generated, localRes.Generated...)
+			if len(localRes.Errors) > 0 {
+				res.Errors = append(res.Errors, localRes.Errors...)
+			}
+			if err != nil {
+				res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
+				if onErrUnchanged {
+					res.FilesUnchanged++
+				} else {
+					res.FilesSkipped++
+				}
+				mu.Unlock()
+				return nil
+			}
+			if changed {
+				*pending = append(*pending, refs...)
+				*embedAcc = append(*embedAcc, toEmbed...)
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+	return eg.Wait()
 }
 
 // changedFilePaths returns the files whose current content differs from the
@@ -747,26 +836,18 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// for edge resolution and the nodes to embed (embedded together in Pass 4, not
 	// per-file, so the slow Ollama calls batch and run concurrently).
 	//
-	// Go files (gosrc, pure go/parser — stateless and thread-safe) and LSP-backed
-	// files (TypeScript, JavaScript, Python, Vue) are both extracted concurrently
-	// with a bounded worker pool. Graph writes serialize naturally on the
-	// single-connection pool (SetMaxOpenConns(1)), so the parallelism overlaps the
-	// slow per-file work (go/parser; the LSP DidOpen+documentSymbol round trips)
-	// with I/O-bound graph writes. The language-server connection is safe for
-	// concurrent requests — each JSON-RPC call has a unique id, writes serialize
-	// on the conn mutex, and the read loop routes responses by id — and the
-	// Extractor holds no shared mutable state, so a bounded worker pool is safe;
-	// the server's parseWait retry already paces codemap to the parse rate under
-	// load (P4).
+	// Cheap extractors (gosrc, rubysrc, luasrc, csssrc, htmlsrc, gdsrc) share
+	// one bounded worker pool. Language-server files (TypeScript, JavaScript,
+	// Python, Vue) stay at one in-flight request: concurrent DidOpen+
+	// documentSymbol on a single stdio connection deadlocks tsserver/pyright.
 	var pending []extract.Reference
 	var embedAcc []embedItem
-	var mu sync.Mutex   // guards res, embedAcc, pending across parallel Go workers
+	var mu sync.Mutex   // guards res, embedAcc, pending across parallel workers
 	total := len(files) // == res.FilesScanned; the bar's denominator
 	var fileDone int64  // atomic counter for OnFile progress reporting
 	// P2-04 (O30): build the project-wide import index once after the
-	// LSP re-walk and before the Go/LSP split, so every indexFile call
-	// (both the parallel Go workers and the sequential LSP pass) shares
-	// the same goFiles / relFiles maps. Pure data — no DB access, no
+	// LSP re-walk and before the cheap/LSP split, so every indexFile call
+	// shares the same goFiles / relFiles maps. Pure data — no DB access, no
 	// mutation after construction — so it's safe to share across the
 	// errgroup without coordination.
 	impIdx := newImportIndex(root, files)
@@ -774,117 +855,33 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		files[i].importIndex = impIdx
 	}
 
-	// Split into Go files (parallel) and LSP files (sequential).
-	var goFiles, lspFiles []fileTask
+	var cheapFiles, lspFiles []fileTask
 	for _, ft := range files {
-		if ft.lang == "go" {
-			goFiles = append(goFiles, ft)
-		} else {
+		if usesLanguageServer(ft) {
 			lspFiles = append(lspFiles, ft)
+		} else {
+			cheapFiles = append(cheapFiles, ft)
 		}
 	}
 
 	extractStart = time.Now()
 	reportPhase(opts, "extracting symbols…", 0, total)
 
-	// Go files first: parallel, pure go/parser, finishes quickly and leaves a
-	// usable graph even if a later LSP pass is slow on a large monorepo.
 	concurrency := ix.cfg.ExtractConcurrency
 	if concurrency < 1 {
 		concurrency = 4
 	}
-	if concurrency > len(goFiles) {
-		concurrency = len(goFiles)
-	}
-	if len(goFiles) > 0 {
-		eg, gctx := errgroup.WithContext(ctx)
-		eg.SetLimit(concurrency)
-		for _, ft := range goFiles {
-			ft := ft // capture
-			eg.Go(func() error {
-				if gctx.Err() != nil {
-					return gctx.Err()
-				}
-				localRes := &Result{}
-				changed, refs, toEmbed, err := ix.indexFile(gctx, projectID, projectName, ft, opts, localRes)
-				done := int(atomic.AddInt64(&fileDone, 1))
-				if opts.OnFile != nil {
-					opts.OnFile(done, total, ft.rel)
-				}
-				mu.Lock()
-				res.FilesIndexed += localRes.FilesIndexed
-				res.FilesSkipped += localRes.FilesSkipped
-				res.FilesUnchanged += localRes.FilesUnchanged
-				res.Oversized = append(res.Oversized, localRes.Oversized...)
-				res.Generated = append(res.Generated, localRes.Generated...)
-				if len(localRes.Errors) > 0 {
-					res.Errors = append(res.Errors, localRes.Errors...)
-				}
-				if err != nil {
-					res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
-					res.FilesSkipped++
-					mu.Unlock()
-					return nil
-				}
-				if changed {
-					pending = append(pending, refs...)
-					embedAcc = append(embedAcc, toEmbed...)
-				}
-				mu.Unlock()
-				return nil
-			})
-		}
-		if err := eg.Wait(); err != nil {
-			return res, err
-		}
+	// Cheap files first: parallel, finish quickly and leave a usable graph
+	// even if a later LSP pass is slow on a large monorepo.
+	if err := ix.extractFiles(ctx, cheapFiles, concurrency, false, projectID, projectName, opts, res, &pending, &embedAcc, &mu, &fileDone, total); err != nil {
+		return res, err
 	}
 
-	// LSP files: ONE in-flight DidOpen+documentSymbol at a time. Concurrent
-	// requests against a single typescript-language-server / pyright stdio
-	// connection deadlock the server on large monorepos (idle node, stuck
-	// clients, progress bar frozen at ~100%). Documents are closed after each
-	// extract (see lspsrc.ExtractFile) so open buffers do not accumulate.
-	if len(lspFiles) > 0 {
-		leg, lgctx := errgroup.WithContext(ctx)
-		leg.SetLimit(1)
-		for _, ft := range lspFiles {
-			ft := ft // capture
-			leg.Go(func() error {
-				if lgctx.Err() != nil {
-					return lgctx.Err()
-				}
-				localRes := &Result{}
-				changed, refs, toEmbed, err := ix.indexFile(lgctx, projectID, projectName, ft, opts, localRes)
-				done := int(atomic.AddInt64(&fileDone, 1))
-				if opts.OnFile != nil {
-					opts.OnFile(done, total, ft.rel)
-				}
-				mu.Lock()
-				res.FilesIndexed += localRes.FilesIndexed
-				res.FilesSkipped += localRes.FilesSkipped
-				res.FilesUnchanged += localRes.FilesUnchanged
-				res.Oversized = append(res.Oversized, localRes.Oversized...)
-				res.Generated = append(res.Generated, localRes.Generated...)
-				if len(localRes.Errors) > 0 {
-					res.Errors = append(res.Errors, localRes.Errors...)
-				}
-				if err != nil {
-					res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
-					res.FilesUnchanged++
-					mu.Unlock()
-					return nil
-				}
-				if changed {
-					pending = append(pending, refs...)
-					embedAcc = append(embedAcc, toEmbed...)
-				}
-				mu.Unlock()
-				return nil
-			})
-		}
-		if err := leg.Wait(); err != nil {
-			return res, err
-		}
+	// Language-server files: ONE in-flight extract at a time. Documents are
+	// closed after DidOpen (see lspsrc.ExtractFile) so open buffers do not
+	// accumulate.
+	if err := ix.extractFiles(ctx, lspFiles, 1, true, projectID, projectName, opts, res, &pending, &embedAcc, &mu, &fileDone, total); err != nil {
+		return res, err
 	}
 	res.ExtractMs = int(time.Since(extractStart).Milliseconds())
 	if res.ExtractMs == 0 {
@@ -898,9 +895,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// imports edge that the previous worker just wrote, because
 	// the file node it points to gets removed. The final pass runs
 	// after all workers join, so every file node is settled.
-	// Re-extraction is intentional: cheap, no graph writes, and it
-	// keeps the worker pipeline simple (workers stay oblivious to
-	// import resolution).
+	// Specifiers come from cheap scanners, never a second LSP ExtractFile.
 	reportPhase(opts, "resolving imports…", 0, len(files))
 	if err := ix.writeImportEdgesForFiles(ctx, projectID, files, impIdx); err != nil {
 		return res, err
@@ -1728,6 +1723,25 @@ type precisePos struct {
 	line int
 }
 
+// lookupPreciseNode resolves a callHierarchy position to an indexed node ID.
+// callHierarchy often lands on a doc-comment line while documentSymbol uses the
+// declaration line; try a small neighborhood before treating the join as failed.
+func lookupPreciseNode(posTo map[precisePos]int64, file string, line int) (int64, bool) {
+	if id, ok := posTo[precisePos{file, line}]; ok {
+		return id, true
+	}
+	for _, d := range []int{-1, 1, -2, 2} {
+		adj := line + d
+		if adj < 1 {
+			continue
+		}
+		if id, ok := posTo[precisePos{file, adj}]; ok {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 const (
 	preciseResolverGoTypes = "go/types"
 	preciseResolverLSP     = "lsp"
@@ -1912,7 +1926,7 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 				}
 				continue
 			}
-			from, ok := posTo[precisePos{e.FromFile, e.FromLine}]
+			from, ok := lookupPreciseNode(posTo, e.FromFile, e.FromLine)
 			if !ok {
 				joinFailures++
 				skipped++
@@ -1921,7 +1935,7 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 				}
 				continue
 			}
-			to, ok := posTo[precisePos{e.ToFile, e.ToLine}]
+			to, ok := lookupPreciseNode(posTo, e.ToFile, e.ToLine)
 			if !ok {
 				joinFailures++
 				skipped++

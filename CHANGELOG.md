@@ -8,6 +8,16 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+## [0.63.1] — 2026-08-22
+
+### Fixed
+
+- **LSP precise joins treat `node_modules` as external** — callHierarchy callees under
+  `node_modules`/`vendor` are skipped during precise edge joins instead of failing
+  whole-file coverage when those paths are not indexed.
+- **Precise position join tolerance** — when callHierarchy lands on a doc-comment
+  line, join indexed symbols within ±2 lines before marking coverage incomplete.
+
 ## [0.63.0] — 2026-08-22
 
 ### Fixed

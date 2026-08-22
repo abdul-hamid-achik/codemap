@@ -160,20 +160,33 @@ func hasDeclarations(src []byte) bool {
 	return false
 }
 
-// ExtractFile opens relPath (resolved against the project root) in the server and
-// maps its document symbols to codemap symbols. src is the file content. The
-// 2-arg signature matches extract.Extractor; the abs file:// URI is derived here.
-// The document is closed before return so large monorepos do not accumulate
-// thousands of open buffers in the language server.
+// ExtractFile maps document symbols to codemap symbols. It first asks
+// documentSymbol without DidOpen (tsserver/pyright can read on-disk files
+// after initialize). If that returns empty for a file that has declarations,
+// it falls back to DidOpen+documentSymbol+DidClose so orphans and files
+// outside the server's project still index. DidClose runs only when DidOpen
+// ran, so successful disk-backed extracts do not accumulate buffers.
 func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, error) {
 	uri, _ := lsp.URI(filepath.Join(e.root, relPath))
-	if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
-		return nil, err
-	}
-	defer func() { _ = e.client.DidClose(uri) }()
-	syms, err := e.documentSymbolsParsed(uri, src)
+	syms, err := e.client.DocumentSymbols(e.ctx, uri)
 	if err != nil {
 		return nil, wrapExtractErr(e.lang, relPath, err)
+	}
+	opened := false
+	defer func() {
+		if opened {
+			_ = e.client.DidClose(uri)
+		}
+	}()
+	if len(syms) == 0 && hasDeclarations(src) {
+		if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
+			return nil, err
+		}
+		opened = true
+		syms, err = e.documentSymbolsParsed(uri, src)
+		if err != nil {
+			return nil, wrapExtractErr(e.lang, relPath, err)
+		}
 	}
 	res := &extract.FileResult{Path: relPath, Language: e.lang}
 	lines := strings.Split(string(src), "\n")
@@ -194,8 +207,8 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 // CallEdges resolves the outgoing calls of every function/method in relPath via
 // the server's callHierarchy, returning one edge per resolved call (the callee
 // located by its declaration position). Implements extract.CallResolver.
-// Re-opens the file when it exists on disk (ExtractFile closes after each
-// extract so the server does not retain every buffer).
+// Re-opens the file when it exists on disk (DidOpen buffers from extract
+// are closed, so callHierarchy cannot assume the document is still open).
 func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
 	if !e.client.SupportsCallHierarchy() {
 		return nil, fmt.Errorf("%s language server does not advertise callHierarchy", e.lang)
@@ -299,7 +312,27 @@ func (e *Extractor) relOf(uri string) (rel string, external bool) {
 	if err != nil || strings.HasPrefix(r, "..") {
 		return "", true
 	}
+	if dependencyPath(r) {
+		return r, true
+	}
 	return r, false
+}
+
+// dependencyPath reports whether rel lies under dependency trees codemap never
+// indexes (node_modules, vendor, …). callHierarchy still resolves callees there;
+// they must be external so precise joins do not fail on missing graph nodes.
+func dependencyPath(rel string) bool {
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+	if rel == "" {
+		return false
+	}
+	for _, seg := range strings.Split(rel, "/") {
+		switch seg {
+		case "node_modules", "vendor", "bower_components":
+			return true
+		}
+	}
+	return false
 }
 
 // Close shuts the language server down.

@@ -26,6 +26,9 @@ type stubLanguageClient struct {
 	outgoingErr     error
 	opened          []string
 	closed          []string
+	// requireOpen makes DocumentSymbols return empty until DidOpen (the
+	// disk-backed miss that must fall back to DidOpen+DidClose).
+	requireOpen bool
 }
 
 func (s *stubLanguageClient) SupportsDocumentSymbols() bool { return s.documentSymbols }
@@ -38,8 +41,26 @@ func (s *stubLanguageClient) DidClose(uri string) error {
 	s.closed = append(s.closed, uri)
 	return nil
 }
-func (s *stubLanguageClient) DocumentSymbols(context.Context, string) ([]lsp.DocumentSymbol, error) {
+func (s *stubLanguageClient) DocumentSymbols(_ context.Context, uri string) ([]lsp.DocumentSymbol, error) {
+	if s.requireOpen && !s.isOpen(uri) {
+		return nil, nil
+	}
 	return s.syms, nil
+}
+
+func (s *stubLanguageClient) isOpen(uri string) bool {
+	n := 0
+	for _, u := range s.opened {
+		if u == uri {
+			n++
+		}
+	}
+	for _, u := range s.closed {
+		if u == uri {
+			n--
+		}
+	}
+	return n > 0
 }
 
 func (s *stubLanguageClient) PrepareCallHierarchy(_ context.Context, _ string, pos lsp.Position) ([]lsp.CallHierarchyItem, error) {
@@ -332,6 +353,35 @@ func TestRelOf(t *testing.T) {
 			t.Errorf("relOf(%q) external = false, want true (outside root)", uri)
 		}
 	})
+
+	t.Run("node_modules under root is external", func(t *testing.T) {
+		uri := "file:///Users/dev/My%20Project/node_modules/typescript/lib/lib.dom.d.ts"
+		rel, external := e.relOf(uri)
+		if !external {
+			t.Fatalf("relOf(node_modules) external = false, want true")
+		}
+		if !strings.Contains(rel, "node_modules") {
+			t.Errorf("relOf(node_modules) = %q", rel)
+		}
+	})
+
+	t.Run("nested node_modules is external", func(t *testing.T) {
+		uri := "file:///Users/dev/My%20Project/packages/app/node_modules/vue/dist/vue.d.ts"
+		if _, external := e.relOf(uri); !external {
+			t.Error("nested node_modules should be external")
+		}
+	})
+
+	t.Run("project source is not external", func(t *testing.T) {
+		uri := "file:///Users/dev/My%20Project/app/composables/useAuth.ts"
+		rel, external := e.relOf(uri)
+		if external {
+			t.Fatalf("relOf(project source) external = true, want false")
+		}
+		if rel != filepath.Join("app", "composables", "useAuth.ts") {
+			t.Errorf("relOf(project source) = %q", rel)
+		}
+	})
 }
 
 // TestWrapExtractErr verifies a request timeout becomes an actionable message
@@ -440,7 +490,7 @@ func TestExtractFileEnrichesTSX(t *testing.T) {
 	}
 }
 
-func TestExtractFileClosesDocument(t *testing.T) {
+func TestExtractFileSkipsDidOpenWhenDiskSymbolsExist(t *testing.T) {
 	stub := &stubLanguageClient{
 		documentSymbols: true,
 		syms: []lsp.DocumentSymbol{{
@@ -452,14 +502,61 @@ func TestExtractFileClosesDocument(t *testing.T) {
 		ctx: context.Background(), lang: "typescript", langID: "typescript",
 		root: "/proj", client: stub,
 	}
-	if _, err := e.ExtractFile("app/page.tsx", []byte("export function Page() {}\n")); err != nil {
+	res, err := e.ExtractFile("app/page.tsx", []byte("export function Page() {}\n"))
+	if err != nil {
 		t.Fatal(err)
 	}
+	if len(res.Symbols) == 0 {
+		t.Fatal("expected symbols from disk-backed documentSymbol")
+	}
+	if len(stub.opened) != 0 || len(stub.closed) != 0 {
+		t.Fatalf("opened=%v closed=%v, want no DidOpen/DidClose when disk symbols exist", stub.opened, stub.closed)
+	}
+}
+
+func TestExtractFileFallsBackToDidOpenWhenEmpty(t *testing.T) {
+	stub := &stubLanguageClient{
+		documentSymbols: true,
+		requireOpen:     true,
+		syms: []lsp.DocumentSymbol{{
+			Name: "Page", Kind: lsp.SymbolFunction,
+			Range: lsp.Range{Start: lsp.Position{Line: 0}, End: lsp.Position{Line: 0}},
+		}},
+	}
+	e := &Extractor{
+		ctx: context.Background(), lang: "typescript", langID: "typescript",
+		root: "/proj", client: stub,
+	}
+	res, err := e.ExtractFile("app/page.tsx", []byte("export function Page() {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Symbols) == 0 {
+		t.Fatal("fallback DidOpen must still return symbols")
+	}
 	if len(stub.opened) != 1 || len(stub.closed) != 1 {
-		t.Fatalf("opened=%v closed=%v, want one DidOpen and one DidClose", stub.opened, stub.closed)
+		t.Fatalf("opened=%v closed=%v, want one DidOpen and one DidClose after empty disk result", stub.opened, stub.closed)
 	}
 	if stub.opened[0] != stub.closed[0] {
 		t.Fatalf("open/close URI mismatch: %q vs %q", stub.opened[0], stub.closed[0])
+	}
+}
+
+func TestExtractFileEmptyBarrelSkipsDidOpen(t *testing.T) {
+	stub := &stubLanguageClient{documentSymbols: true, requireOpen: true}
+	e := &Extractor{
+		ctx: context.Background(), lang: "typescript", langID: "typescript",
+		root: "/proj", client: stub,
+	}
+	res, err := e.ExtractFile("index.ts", []byte("export * from './a'\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Symbols) != 0 {
+		t.Fatalf("barrel file symbols = %d, want 0", len(res.Symbols))
+	}
+	if len(stub.opened) != 0 || len(stub.closed) != 0 {
+		t.Fatalf("opened=%v closed=%v, want no DidOpen for an empty barrel file", stub.opened, stub.closed)
 	}
 }
 
