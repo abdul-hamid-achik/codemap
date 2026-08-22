@@ -24,11 +24,18 @@ type stubLanguageClient struct {
 	prepared        []lsp.Position
 	outgoingFn      func(lsp.CallHierarchyItem) ([]lsp.CallHierarchyOutgoingCall, error)
 	outgoingErr     error
+	opened          []string
+	closed          []string
 }
 
 func (s *stubLanguageClient) SupportsDocumentSymbols() bool { return s.documentSymbols }
 func (s *stubLanguageClient) SupportsCallHierarchy() bool   { return s.callHierarchy }
-func (s *stubLanguageClient) DidOpen(string, string, string) error {
+func (s *stubLanguageClient) DidOpen(uri, _, _ string) error {
+	s.opened = append(s.opened, uri)
+	return nil
+}
+func (s *stubLanguageClient) DidClose(uri string) error {
+	s.closed = append(s.closed, uri)
 	return nil
 }
 func (s *stubLanguageClient) DocumentSymbols(context.Context, string) ([]lsp.DocumentSymbol, error) {
@@ -433,6 +440,60 @@ func TestExtractFileEnrichesTSX(t *testing.T) {
 	}
 }
 
+func TestExtractFileClosesDocument(t *testing.T) {
+	stub := &stubLanguageClient{
+		documentSymbols: true,
+		syms: []lsp.DocumentSymbol{{
+			Name: "Page", Kind: lsp.SymbolFunction,
+			Range: lsp.Range{Start: lsp.Position{Line: 0}, End: lsp.Position{Line: 0}},
+		}},
+	}
+	e := &Extractor{
+		ctx: context.Background(), lang: "typescript", langID: "typescript",
+		root: "/proj", client: stub,
+	}
+	if _, err := e.ExtractFile("app/page.tsx", []byte("export function Page() {}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.opened) != 1 || len(stub.closed) != 1 {
+		t.Fatalf("opened=%v closed=%v, want one DidOpen and one DidClose", stub.opened, stub.closed)
+	}
+	if stub.opened[0] != stub.closed[0] {
+		t.Fatalf("open/close URI mismatch: %q vs %q", stub.opened[0], stub.closed[0])
+	}
+}
+
+func TestCallEdgesReopensDocumentOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	rel := "src/app.ts"
+	abs := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte("export function helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stub := &stubLanguageClient{
+		documentSymbols: true,
+		callHierarchy:   true,
+		syms: []lsp.DocumentSymbol{{
+			Name: "helper", Kind: lsp.SymbolFunction,
+			Range: lsp.Range{Start: lsp.Position{Line: 0}, End: lsp.Position{Line: 0}},
+		}},
+		prepareItems: []lsp.CallHierarchyItem{{Name: "helper"}},
+	}
+	e := &Extractor{
+		ctx: context.Background(), lang: "typescript", langID: "typescript",
+		root: dir, client: stub,
+	}
+	if _, err := e.CallEdges(context.Background(), rel); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.opened) != 1 || len(stub.closed) != 1 {
+		t.Fatalf("CallEdges should DidOpen/DidClose once, got opened=%v closed=%v", stub.opened, stub.closed)
+	}
+}
+
 func TestCallEdgesTypeScript(t *testing.T) {
 	if _, err := exec.LookPath("typescript-language-server"); err != nil {
 		t.Skip("typescript-language-server not on PATH")
@@ -450,7 +511,7 @@ func TestCallEdgesTypeScript(t *testing.T) {
 	defer cancel()
 	e, err := New(ctx, "typescript", "typescript", dir, "typescript-language-server", "--stdio")
 	if err != nil {
-		t.Fatal(err)
+		t.Skipf("typescript-language-server unavailable: %v", err)
 	}
 	defer e.Close()
 	// Open both files so callHierarchy resolves cross-file.

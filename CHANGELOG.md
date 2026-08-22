@@ -8,6 +8,19 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+## [0.63.0] — 2026-08-22
+
+### Fixed
+
+- **LSP indexing on large monorepos** — close each document after `DidOpen`+
+  `documentSymbol` and run LSP extraction plus precise `callHierarchy` with one
+  in-flight request per server. Concurrent stdio requests against
+  `typescript-language-server` / `pyright` could deadlock (idle server, frozen
+  progress). Go files still index in parallel via `extract_concurrency`.
+- **Precise pass progress** — report `precise call hierarchy…` and
+  `writing precise edges…` phases so long `--precise` runs do not sit on a blank
+  label.
+
 ## [0.62.0] — 2026-08-21
 
 ### Added

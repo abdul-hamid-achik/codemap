@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ type languageClient interface {
 	SupportsDocumentSymbols() bool
 	SupportsCallHierarchy() bool
 	DidOpen(uri, languageID, text string) error
+	DidClose(uri string) error
 	DocumentSymbols(ctx context.Context, uri string) ([]lsp.DocumentSymbol, error)
 	PrepareCallHierarchy(ctx context.Context, uri string, pos lsp.Position) ([]lsp.CallHierarchyItem, error)
 	OutgoingCalls(ctx context.Context, item lsp.CallHierarchyItem) ([]lsp.CallHierarchyOutgoingCall, error)
@@ -161,11 +163,14 @@ func hasDeclarations(src []byte) bool {
 // ExtractFile opens relPath (resolved against the project root) in the server and
 // maps its document symbols to codemap symbols. src is the file content. The
 // 2-arg signature matches extract.Extractor; the abs file:// URI is derived here.
+// The document is closed before return so large monorepos do not accumulate
+// thousands of open buffers in the language server.
 func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, error) {
 	uri, _ := lsp.URI(filepath.Join(e.root, relPath))
 	if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
 		return nil, err
 	}
+	defer func() { _ = e.client.DidClose(uri) }()
 	syms, err := e.documentSymbolsParsed(uri, src)
 	if err != nil {
 		return nil, wrapExtractErr(e.lang, relPath, err)
@@ -188,14 +193,21 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 
 // CallEdges resolves the outgoing calls of every function/method in relPath via
 // the server's callHierarchy, returning one edge per resolved call (the callee
-// located by its declaration position). Implements extract.CallResolver. The file
-// must already be open in the server (ExtractFile did didOpen); callHierarchy
-// resolves cross-file because the whole project's files were opened first.
+// located by its declaration position). Implements extract.CallResolver.
+// Re-opens the file when it exists on disk (ExtractFile closes after each
+// extract so the server does not retain every buffer).
 func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
 	if !e.client.SupportsCallHierarchy() {
 		return nil, fmt.Errorf("%s language server does not advertise callHierarchy", e.lang)
 	}
-	uri, _ := lsp.URI(filepath.Join(e.root, relPath))
+	abs := filepath.Join(e.root, relPath)
+	uri, _ := lsp.URI(abs)
+	if src, rerr := os.ReadFile(abs); rerr == nil {
+		if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
+			return nil, err
+		}
+		defer func() { _ = e.client.DidClose(uri) }()
+	}
 	syms, err := e.client.DocumentSymbols(ctx, uri)
 	if err != nil {
 		return nil, err

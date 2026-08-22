@@ -10,14 +10,13 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 )
 
-// TestIndexTypeScriptConcurrentNoDroppedFiles indexes a multi-file TypeScript
-// project through the bounded-concurrency LSP pass (P4) and asserts every
-// file's symbols land. The concurrent DidOpen+documentSymbol round trips must
-// not drop files to the parseWait race the sequential pass was originally paced
-// against — a regression there would silently lose symbols, so this guards it.
-// Server-gated (skips without typescript-language-server, e.g. in CI). Run with
-// -race to also catch data races in the concurrent merge.
-func TestIndexTypeScriptConcurrentNoDroppedFiles(t *testing.T) {
+// TestIndexTypeScriptSequentialNoDroppedFiles indexes a multi-file TypeScript
+// project through the serial LSP pass and asserts every file's symbols land.
+// Concurrent DidOpen+documentSymbol against one stdio language-server connection
+// deadlocks on large monorepos, so extraction is capped at one in-flight request;
+// this test guards against silently losing symbols when files are closed after
+// each extract. Server-gated (skips without typescript-language-server).
+func TestIndexTypeScriptSequentialNoDroppedFiles(t *testing.T) {
 	if _, err := exec.LookPath("typescript-language-server"); err != nil {
 		t.Skip("typescript-language-server not on PATH")
 	}
@@ -59,7 +58,7 @@ func TestIndexTypeScriptConcurrentNoDroppedFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(nodes) == 0 {
-			t.Errorf("symbol %q not indexed — a file was dropped under concurrent LSP extraction", sym)
+			t.Errorf("symbol %q not indexed — a file was dropped under serial LSP extraction", sym)
 		}
 	}
 	if res.FilesIndexed != n {

@@ -56,7 +56,7 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_EXCLUDE_EXTRA` | `index.exclude_extra` (comma-separated; appended) |
 | `CODEMAP_EMBED_BATCH_SIZE` | `index.embed_batch_size` |
 | `CODEMAP_EMBED_CONCURRENCY` | `index.embed_concurrency` |
-| `CODEMAP_EXTRACT_CONCURRENCY` | `index.extract_concurrency` (parallel Go extraction workers; no flag) |
+| `CODEMAP_EXTRACT_CONCURRENCY` | `index.extract_concurrency` (parallel Go extraction workers; LSP stays serial; no flag) |
 | `CODEMAP_EMBED_MAX_CHARS` | `index.embed_max_chars` |
 | `CODEMAP_VECGREP_ENABLED` | `vecgrep.enabled` |
 | `CODEMAP_VECGREP_BIN` | `vecgrep.bin` |
@@ -129,7 +129,7 @@ index:
     - "**/testdata"
   embed_batch_size: 64    # node texts per request (0 = default 64)
   embed_concurrency: 4    # concurrent requests (0 = default 4)
-  extract_concurrency: 4 # parallel Go extraction workers (default 4; 1 = sequential)
+  extract_concurrency: 4 # parallel Go (go/parser) extraction workers; LSP indexing is always serial per server
   embed_max_chars: 0      # cap per-node embed text (0 = no cap); lower = faster, less body recall
 daemon:                   # background indexer (codemap daemon)
   debounce_ms: 500        # coalesce edit bursts (0 = default 500)

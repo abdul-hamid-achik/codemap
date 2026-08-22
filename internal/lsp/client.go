@@ -293,6 +293,15 @@ func (c *Client) DidOpen(uri, languageID, text string) error {
 	})
 }
 
+// DidClose releases a document previously opened with DidOpen. Large indexes
+// must close after each extract — leaving thousands of buffers open stalls
+// typescript-language-server to near-zero throughput.
+func (c *Client) DidClose(uri string) error {
+	return c.conn.Notify("textDocument/didClose", map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+	})
+}
+
 // DocumentSymbols returns the symbols declared in a document.
 func (c *Client) DocumentSymbols(ctx context.Context, uri string) ([]DocumentSymbol, error) {
 	raw, err := c.conn.Call(ctx, "textDocument/documentSymbol", map[string]any{

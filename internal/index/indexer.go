@@ -787,31 +787,30 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	extractStart = time.Now()
 	reportPhase(opts, "extracting symbols…", 0, total)
 
-	// LSP files: bounded concurrency (P4). Same pattern as the Go pass — a
-	// per-worker local Result merged under mu — overlapping the slow
-	// DidOpen+documentSymbol round trips while graph writes serialize on the
-	// single DB connection.
-	lspConcurrency := ix.cfg.ExtractConcurrency
-	if lspConcurrency < 1 {
-		lspConcurrency = 4
+	// Go files first: parallel, pure go/parser, finishes quickly and leaves a
+	// usable graph even if a later LSP pass is slow on a large monorepo.
+	concurrency := ix.cfg.ExtractConcurrency
+	if concurrency < 1 {
+		concurrency = 4
 	}
-	if lspConcurrency > len(lspFiles) {
-		lspConcurrency = len(lspFiles)
+	if concurrency > len(goFiles) {
+		concurrency = len(goFiles)
 	}
-	if lspConcurrency > 0 {
-		leg, lgctx := errgroup.WithContext(ctx)
-		leg.SetLimit(lspConcurrency)
-		for _, ft := range lspFiles {
+	if len(goFiles) > 0 {
+		eg, gctx := errgroup.WithContext(ctx)
+		eg.SetLimit(concurrency)
+		for _, ft := range goFiles {
 			ft := ft // capture
-			leg.Go(func() error {
-				if lgctx.Err() != nil {
-					return lgctx.Err()
-				}
-				if opts.OnFile != nil {
-					opts.OnFile(int(atomic.AddInt64(&fileDone, 1)), total, ft.rel)
+			eg.Go(func() error {
+				if gctx.Err() != nil {
+					return gctx.Err()
 				}
 				localRes := &Result{}
-				changed, refs, toEmbed, err := ix.indexFile(lgctx, projectID, projectName, ft, opts, localRes)
+				changed, refs, toEmbed, err := ix.indexFile(gctx, projectID, projectName, ft, opts, localRes)
+				done := int(atomic.AddInt64(&fileDone, 1))
+				if opts.OnFile != nil {
+					opts.OnFile(done, total, ft.rel)
+				}
 				mu.Lock()
 				res.FilesIndexed += localRes.FilesIndexed
 				res.FilesSkipped += localRes.FilesSkipped
@@ -823,10 +822,57 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 				}
 				if err != nil {
 					res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
-					// P2-07 (O108): unchanged LSP files are up-to-date too.
+					res.FilesSkipped++
+					mu.Unlock()
+					return nil
+				}
+				if changed {
+					pending = append(pending, refs...)
+					embedAcc = append(embedAcc, toEmbed...)
+				}
+				mu.Unlock()
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return res, err
+		}
+	}
+
+	// LSP files: ONE in-flight DidOpen+documentSymbol at a time. Concurrent
+	// requests against a single typescript-language-server / pyright stdio
+	// connection deadlock the server on large monorepos (idle node, stuck
+	// clients, progress bar frozen at ~100%). Documents are closed after each
+	// extract (see lspsrc.ExtractFile) so open buffers do not accumulate.
+	if len(lspFiles) > 0 {
+		leg, lgctx := errgroup.WithContext(ctx)
+		leg.SetLimit(1)
+		for _, ft := range lspFiles {
+			ft := ft // capture
+			leg.Go(func() error {
+				if lgctx.Err() != nil {
+					return lgctx.Err()
+				}
+				localRes := &Result{}
+				changed, refs, toEmbed, err := ix.indexFile(lgctx, projectID, projectName, ft, opts, localRes)
+				done := int(atomic.AddInt64(&fileDone, 1))
+				if opts.OnFile != nil {
+					opts.OnFile(done, total, ft.rel)
+				}
+				mu.Lock()
+				res.FilesIndexed += localRes.FilesIndexed
+				res.FilesSkipped += localRes.FilesSkipped
+				res.FilesUnchanged += localRes.FilesUnchanged
+				res.Oversized = append(res.Oversized, localRes.Oversized...)
+				res.Generated = append(res.Generated, localRes.Generated...)
+				if len(localRes.Errors) > 0 {
+					res.Errors = append(res.Errors, localRes.Errors...)
+				}
+				if err != nil {
+					res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
 					res.FilesUnchanged++
 					mu.Unlock()
-					return nil // don't fail the group — record and continue
+					return nil
 				}
 				if changed {
 					pending = append(pending, refs...)
@@ -839,63 +885,6 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		if err := leg.Wait(); err != nil {
 			return res, err
 		}
-	}
-
-	// Go files: parallel with a bounded errgroup. The gosrc extractor is
-	// stateless (pure go/parser), and graph writes serialize on the single
-	// connection — so N goroutines overlap parsing with writes safely.
-	// Each worker gets its own local Result to avoid races on res; the
-	// results are merged under a mutex after each file completes.
-	concurrency := ix.cfg.ExtractConcurrency
-	if concurrency < 1 {
-		concurrency = 4
-	}
-	// Cap by file count — no point spinning up more workers than files.
-	if concurrency > len(goFiles) {
-		concurrency = len(goFiles)
-	}
-	eg, gctx := errgroup.WithContext(ctx)
-	eg.SetLimit(concurrency)
-	for _, ft := range goFiles {
-		ft := ft // capture
-		eg.Go(func() error {
-			if gctx.Err() != nil {
-				return gctx.Err()
-			}
-			if opts.OnFile != nil {
-				opts.OnFile(int(atomic.AddInt64(&fileDone, 1)), total, ft.rel)
-			}
-			// Use a per-worker local result to avoid races on res.
-			// indexFile writes FilesSkipped, FilesIndexed, Oversized,
-			// Generated, Errors on res — all of which would race.
-			localRes := &Result{}
-			changed, refs, toEmbed, err := ix.indexFile(gctx, projectID, projectName, ft, opts, localRes)
-			mu.Lock()
-			// Merge localRes into the shared res.
-			res.FilesIndexed += localRes.FilesIndexed
-			res.FilesSkipped += localRes.FilesSkipped
-			res.FilesUnchanged += localRes.FilesUnchanged
-			res.Oversized = append(res.Oversized, localRes.Oversized...)
-			res.Generated = append(res.Generated, localRes.Generated...)
-			if len(localRes.Errors) > 0 {
-				res.Errors = append(res.Errors, localRes.Errors...)
-			}
-			if err != nil {
-				res.Errors = append(res.Errors, FileError{File: ft.rel, Err: err.Error()})
-				res.FilesSkipped++
-				mu.Unlock()
-				return nil // don't fail the group — record and continue
-			}
-			if changed {
-				pending = append(pending, refs...)
-				embedAcc = append(embedAcc, toEmbed...)
-			}
-			mu.Unlock()
-			return nil
-		})
-	}
-	if err := eg.Wait(); err != nil {
-		return res, err
 	}
 	res.ExtractMs = int(time.Since(extractStart).Milliseconds())
 	if res.ExtractMs == 0 {
@@ -938,7 +927,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	if opts.Precise {
 		reportPhase(opts, "precise call graph…", 0, 0)
 		preciseStart = time.Now()
-		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni); err != nil {
+		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni, opts); err != nil {
 			return res, err
 		}
 		res.PreciseMs = int(time.Since(preciseStart).Milliseconds())
@@ -1143,7 +1132,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	ni := ix.cachedNI
 	if opts.Precise && preciseRelevant {
 		start := time.Now()
-		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni); err != nil {
+		if err := ix.resolveAllPreciseEdges(ctx, projectID, root, res, ni, opts); err != nil {
 			return res, err
 		}
 		res.PreciseMs = int(time.Since(start).Milliseconds())
@@ -1750,7 +1739,7 @@ const (
 // while LSP callHierarchy coverage must delete and rebuild the complete set for
 // every registered language atomically so an edit cannot leave stale exact
 // edges in an unchanged package mate.
-func (ix *Indexer) resolveAllPreciseEdges(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex) error {
+func (ix *Indexer) resolveAllPreciseEdges(ctx context.Context, projectID int64, root string, res *Result, ni *nodeIndex, opts Options) error {
 	hasGo := false
 	for _, n := range ni.nodes {
 		if n.Language == "go" && n.Kind == graph.KindFile {
@@ -1772,7 +1761,7 @@ func (ix *Indexer) resolveAllPreciseEdges(ctx context.Context, projectID int64, 
 		return fmt.Errorf("begin LSP precise transaction: %w", err)
 	}
 	defer func() { _ = lsptx.Rollback() }()
-	if err := ix.resolveLSPCallEdgesWith(ctx, lsptx, projectID, root, res, ni); err != nil {
+	if err := ix.resolveLSPCallEdgesWith(ctx, lsptx, projectID, root, res, ni, opts); err != nil {
 		return err
 	}
 	if err := lsptx.Commit(); err != nil {
@@ -1789,7 +1778,7 @@ func (ix *Indexer) resolveAllPreciseEdges(ctx context.Context, projectID int64, 
 // callHierarchy errors downgrade that file's coverage and continue; database
 // errors abort and roll back the pass. The servers remain alive until Indexer.Close.
 // resolveLSPCallEdgesWith is the shared resolver that takes a pre-built nodeIndex.
-func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, projectID int64, root string, res *Result, ni *nodeIndex) error {
+func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, projectID int64, root string, res *Result, ni *nodeIndex, opts Options) error {
 	resolvers := map[string]extract.CallResolver{} // language -> resolver
 	for lang, e := range ix.extractors {
 		if cr, ok := e.(extract.CallResolver); ok {
@@ -1846,37 +1835,35 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 
 	type preciseEdgeIDs struct{ from, to int64 }
 
-	// Phase 1 (P5): gather callHierarchy edges for every file concurrently — the
-	// slow LSP round trips — without touching the DB. posTo is read-only here and
-	// the position join stays sequential in phase 2, so only the CallEdges fan-out
-	// is parallel. The documents were opened during extraction and stay open, so
-	// callHierarchy can run before the transactional supersede below.
+	// Phase 1: gather callHierarchy edges for every file. Concurrent CallEdges
+	// on a single stdio LSP connection can deadlock typescript-language-server /
+	// pyright (idle server, blocked clients) — cap at 1 in-flight request per
+	// process. Progress ticks so the CLI bar does not sit on a blank
+	// "precise call graph…" for multi-thousand-file monorepos.
 	type fileCallEdges struct {
 		edges []extract.CallEdge
 		err   error
 	}
 	gathered := make([]fileCallEdges, len(files))
-	lspConcurrency := ix.cfg.ExtractConcurrency
-	if lspConcurrency < 1 {
-		lspConcurrency = 4
-	}
-	if lspConcurrency > len(files) {
-		lspConcurrency = len(files)
-	}
-	if lspConcurrency > 0 {
+	reportPhase(opts, "precise call hierarchy…", 0, len(files))
+	if len(files) > 0 {
 		eg, gctx := errgroup.WithContext(ctx)
-		eg.SetLimit(lspConcurrency)
+		eg.SetLimit(1)
+		var done int64
 		for i, current := range files {
 			i, current := i, current
 			eg.Go(func() error {
 				edges, cErr := resolvers[current.lang].CallEdges(gctx, current.file)
 				gathered[i] = fileCallEdges{edges: edges, err: cErr}
+				n := int(atomic.AddInt64(&done, 1))
+				reportPhase(opts, "precise call hierarchy…", n, len(files))
 				return nil
 			})
 		}
 		_ = eg.Wait()
 	}
 
+	reportPhase(opts, "writing precise edges…", 0, len(files))
 	// Phase 2: apply each file's gathered edges to the single transaction
 	// sequentially — supersede prior coverage + exact calls, join positions, write
 	// the new exact edges, and re-mark coverage — preserving the per-language
@@ -1884,6 +1871,9 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 	upgraded, skipped, failedFiles := 0, 0, 0
 	for i, current := range files {
 		file := current.file
+		if i == 0 || (i+1)%50 == 0 || i+1 == len(files) {
+			reportPhase(opts, "writing precise edges…", i+1, len(files))
+		}
 		// Supersede prior coverage for this file, then re-mark it only after
 		// every indexed callable and every internal position join succeeds. An
 		// empty result remains a successful precise resolution for a leaf file.
