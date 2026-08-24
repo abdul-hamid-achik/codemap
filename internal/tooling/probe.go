@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -47,22 +49,98 @@ func Probe(ctx context.Context, name, cwd string) ProbeResult {
 	}
 
 	pr := runProbe(ctx, path, probeArgs(name), cwd)
-	if pr.OK {
-		return pr
+	if probeUsable(pr) {
+		return markProbeOK(pr)
 	}
-	// Dead asdf/mise shim: definitive failure regardless of args.
-	if isVersionManagerFailure(pr.Stderr, pr.ExitCode) {
-		return pr
+	// asdf/mise shims on PATH exit 126 when the project doesn't pin the
+	// plugin's runtime (e.g. typescript-language-server installed under
+	// nodejs 22.22.0, cwd only pins golang). The real binary still lives
+	// under the version-manager install tree — spawn that instead of
+	// skipping the language.
+	if alt := unwrapVersionManagerShim(path); alt != "" && alt != path {
+		pr2 := runProbe(ctx, alt, probeArgs(name), cwd)
+		if probeUsable(pr2) {
+			return markProbeOK(pr2)
+		}
 	}
 	// Binary ran and rejected the probe args → still usable for LSP spawn.
 	if isRunnableReject(pr.Stderr, pr.Stdout, pr.ExitCode) {
-		pr.OK = true
-		pr.Err = nil
-		return pr
+		return markProbeOK(pr)
 	}
 	// Some tools only speak stdio; a near-instant exit with empty stderr after
 	// --version can still mean "not the real server". Leave OK=false.
 	return pr
+}
+
+func probeUsable(pr ProbeResult) bool {
+	return pr.OK || isRunnableReject(pr.Stderr, pr.Stdout, pr.ExitCode)
+}
+
+func markProbeOK(pr ProbeResult) ProbeResult {
+	pr.OK = true
+	pr.Err = nil
+	return pr
+}
+
+// unwrapVersionManagerShim maps an asdf shim to the real install binary
+// (…/installs/<plugin>/<version>/bin/<name>) when the shim itself cannot run
+// under the project cwd. Empty when this is not an asdf shim or no install
+// exists.
+func unwrapVersionManagerShim(shimPath string) string {
+	data, err := os.ReadFile(shimPath)
+	if err != nil || len(data) == 0 || len(data) > 8<<10 {
+		return ""
+	}
+	text := string(data)
+	if !strings.Contains(text, "asdf exec") && !strings.Contains(text, "asdf-plugin") {
+		return ""
+	}
+	base := filepath.Base(shimPath)
+	asdfData := os.Getenv("ASDF_DATA_DIR")
+	if asdfData == "" {
+		home, herr := os.UserHomeDir()
+		if herr != nil || home == "" {
+			return ""
+		}
+		asdfData = filepath.Join(home, ".asdf")
+	}
+	if plugin, version := parseAsdfPluginComment(text); plugin != "" && version != "" {
+		cand := filepath.Join(asdfData, "installs", plugin, version, "bin", base)
+		if isExecutableFile(cand) {
+			return cand
+		}
+	}
+	matches, _ := filepath.Glob(filepath.Join(asdfData, "installs", "*", "*", "bin", base))
+	sort.Strings(matches)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if isExecutableFile(matches[i]) {
+			return matches[i]
+		}
+	}
+	return ""
+}
+
+func parseAsdfPluginComment(text string) (plugin, version string) {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		rest, ok := strings.CutPrefix(line, "# asdf-plugin:")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) >= 2 {
+			return fields[0], fields[1]
+		}
+	}
+	return "", ""
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode()&0o111 != 0
 }
 
 // ProbeOrClassify is a convenience for doctor/index: resolve+probe and return

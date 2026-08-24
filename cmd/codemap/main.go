@@ -2,7 +2,7 @@
 
 // Command codemap is local-first code intelligence: a structural code graph
 // (LSP + parsers) fused with semantic vector search (veclite), exposed via a
-// CLI, an MCP server, and the studio TUI. See AGENTS.md for architecture.
+// CLI and an MCP server. See AGENTS.md for architecture.
 package main
 
 import (
@@ -52,7 +52,7 @@ func targetDir(cmd *cobra.Command) string {
 // targetDirArg gives an optional positional project path the same semantics as
 // -C. An explicitly-set -C wins when both are supplied; otherwise the positional
 // path wins, then cwd. Commands with a historical [path] argument (index,
-// studio, daemon start, branch-status) use this helper consistently.
+// daemon start, branch-status) use this helper consistently.
 func targetDirArg(cmd *cobra.Command, args []string) string {
 	if pathFlagChanged(cmd) || len(args) == 0 || args[0] == "" {
 		return targetDir(cmd)
@@ -115,13 +115,10 @@ var rootCmd = &cobra.Command{
 	Long: `codemap combines a structural code graph (LSP + parsers) with semantic
 vector search (veclite) and exposes both as a unified query layer.
 
-Three surfaces over one store: a CLI (with --json for agents), an MCP server
-(codemap serve), and the interactive studio TUI (codemap studio).`,
+Two surfaces over one store: a CLI (with --json for agents) and an MCP server
+(codemap serve).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !isInteractiveTerminal() {
-			return cmd.Help()
-		}
-		return runStudio(cmd, args)
+		return cmd.Help()
 	},
 }
 
@@ -133,16 +130,6 @@ var versionCmd = &cobra.Command{
 		fmt.Printf("  commit: %s\n", version.Commit)
 		fmt.Printf("  built:  %s\n", version.Date)
 	},
-}
-
-// isInteractiveTerminal reports whether both stdin and stdout are TTYs.
-func isInteractiveTerminal() bool {
-	so, err1 := os.Stdout.Stat()
-	si, err2 := os.Stdin.Stat()
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	return so.Mode()&os.ModeCharDevice != 0 && si.Mode()&os.ModeCharDevice != 0
 }
 
 func init() {
@@ -231,7 +218,7 @@ func init() {
 	// Per-setting override flags (config file < env < flag) for every tunable.
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd, serveCmd)
 
-	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd, studioCmd,
+	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd,
 		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
 

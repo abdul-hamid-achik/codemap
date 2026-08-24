@@ -18,10 +18,11 @@ or a single LSP call cannot — *"who calls this and what tests cover it"*, *"wh
 radius of changing this type across all my projects"*, *"find auth-like code, then show me
 what calls it."*
 
-Three surfaces over one structural store (semantic retrieval may be delegated to vecgrep):
+Two surfaces over one structural store (semantic retrieval may be delegated to vecgrep):
 - **CLI** — human commands *and* `--json` machine output for agents (Cobra).
 - **MCP server** — `codemap serve` (stdio), `codemap_*` tools for agents.
-- **studio TUI** — `codemap studio` (Charm v2), interactive code map for humans.
+
+Product docs for humans start at `docs/quick-start.md`; agent workflows at `docs/agents.md` and `docs/mcp.md`. The former Studio TUI is not shipped — use CLI + MCP instead (see `docs/studio.md`).
 
 Key features:
 - **Structural graph** — nodes (files, functions, types, methods, tests) + `calls`/`defines` edges
@@ -342,7 +343,7 @@ task install         # go install ./cmd/codemap
   flag-for-field mirror: CLI `index` additionally has `--watch` and `--no-lsp` (MCP
   `codemap_index` currently has neither), and several operational surfaces are CLI-only. Current
   commands: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`; repeat `--at`, optionally `--batch`, for bounded partial-success frame batches), `file-impact`, `dependencies`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read-order`, `map` (`--top-subsystems`/`--top-bridges`/`--top-hubs`/`--top-entrypoints`), `explore <query>` (`--seeds`/`--edges`/`--depth`), `traverse --at <file>:<line>` (`--direction outgoing|incoming|both`/`--edge-types` CSV/`--depth`/`--limit`), `symbols`, `symbol-at`, `find`, `grep` (`--regex`/`-i`), `source`, `context` (multi-arg → batch), `related-files`, `annotate` (`--external-id` for retry-safe writes)/`annotations`, `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `cache export`/`import` (`--force`; portable team/CI-shareable
-index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start`/`status`/`stop`, `agent setup`/`list`/`playbook` (register codemap with an AI coding harness — CLI-only, no MCP tool), `docs`, `serve`, `studio` — all query commands accept `--json`.
+index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start`/`status`/`stop`, `agent setup`/`list`/`playbook` (register codemap with an AI coding harness — CLI-only, no MCP tool), `docs`, `serve` — query commands accept `--json`.
   `structural-manifest` and `export-symbols` are also CLI-only: the former is a lightweight
   `codemap.structural-manifest.v1` identity/freshness preflight that streams indexed metadata
   without source bodies; the latter is the deterministic paginated `codemap.structural-export.v1`

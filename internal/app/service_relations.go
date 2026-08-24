@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
+	"github.com/abdul-hamid-achik/codemap/internal/tooling"
 )
 
 // SymbolRef is a lightweight reference to a graph node (for query results).
@@ -385,14 +385,10 @@ func (svc *Service) preciseRelations(ctx context.Context, cwd, symbol, hintFile 
 		return nil, nil, project, fmt.Errorf("no precise-resolvable symbol named %q (precise resolution supports Go, TypeScript, JavaScript, Python)", symbol)
 	}
 	cmd, args, langID, _ := lspServerFor(node.Language, node.FilePath)
-	// The real path requires the language server on PATH; a test-injected
-	// factory supplies its own client and skips the LookPath gate so the precise
-	// selector path can be exercised hermetically.
-	if svc.preciseClientFactory == nil {
-		if _, err := exec.LookPath(cmd); err != nil {
-			return nil, nil, project, fmt.Errorf("%s not found on PATH (required for precise %s resolution)", cmd, node.Language)
-		}
-	}
+	// The real path requires a runnable language server; a test-injected
+	// factory supplies its own client and skips the probe so the precise
+	// selector path can be exercised hermetically. Probe unwraps asdf shims
+	// to the real install when the project cwd doesn't pin that runtime.
 
 	root := p.Path
 	absFile := filepath.Join(root, node.FilePath)
@@ -469,7 +465,18 @@ func (svc *Service) spawnPreciseClient(ctx context.Context, cmd string, args []s
 	if svc.preciseClientFactory != nil {
 		return svc.preciseClientFactory(ctx, cmd, args, root)
 	}
-	cl, err := lsp.Spawn(ctx, cmd, args...)
+	pr := tooling.Probe(ctx, cmd, root)
+	if !pr.OK {
+		if pr.Path == "" {
+			return nil, fmt.Errorf("%s not found on PATH", cmd)
+		}
+		return nil, fmt.Errorf("%s not runnable under %s", cmd, root)
+	}
+	spawnCmd := cmd
+	if pr.Path != "" {
+		spawnCmd = pr.Path
+	}
+	cl, err := lsp.Spawn(ctx, spawnCmd, args...)
 	if err != nil {
 		return nil, err
 	}

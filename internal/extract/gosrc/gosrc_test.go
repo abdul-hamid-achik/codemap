@@ -71,6 +71,13 @@ func TestExtractGo(t *testing.T) {
 			t.Errorf("missing import %q", imp)
 		}
 	}
+	only, err := ImportSpecs("sample.go", []byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(only) != len(res.Imports) {
+		t.Errorf("ImportSpecs count = %d, ExtractFile imports = %d", len(only), len(res.Imports))
+	}
 
 	// type
 	if g := findSym(res.Symbols, "Greeter"); g == nil {

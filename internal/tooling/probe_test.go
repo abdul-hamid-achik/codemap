@@ -1,8 +1,10 @@
 package tooling
 
 import (
+	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -80,5 +82,67 @@ func TestProbeFailingShim(t *testing.T) {
 	}
 	if iss.ExitCode == nil || *iss.ExitCode != 126 {
 		t.Fatalf("exit_code = %v", iss.ExitCode)
+	}
+}
+
+func TestProbeUnwrapsAsdfShimToInstall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim script")
+	}
+	dir := t.TempDir()
+	asdf := filepath.Join(dir, "asdf")
+	realBin := filepath.Join(asdf, "installs", "nodejs", "22.22.0", "bin", "typescript-language-server")
+	if err := os.MkdirAll(filepath.Dir(realBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(realBin, []byte("#!/bin/sh\necho 5.1.3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shimDir := filepath.Join(dir, "shims")
+	if err := os.MkdirAll(shimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(shimDir, "typescript-language-server")
+	script := "#!/usr/bin/env bash\n# asdf-plugin: nodejs 22.22.0\necho 'No version is set for command typescript-language-server' >&2\nexit 126\n"
+	if err := os.WriteFile(shim, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ASDF_DATA_DIR", asdf)
+
+	pr := Probe(context.Background(), "typescript-language-server", dir)
+	if !pr.OK {
+		t.Fatalf("expected unwrap to the real install: %+v", pr)
+	}
+	if pr.Path != realBin {
+		t.Fatalf("Path = %q, want %q", pr.Path, realBin)
+	}
+	if iss := ProbeOrClassify(context.Background(), "typescript-language-server", dir, []string{"typescript"}); iss != nil {
+		t.Fatalf("ProbeOrClassify after unwrap = %+v", iss)
+	}
+}
+
+func TestProbeUnwrapsLiveAsdfShim(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("asdf shims")
+	}
+	shim, err := exec.LookPath("typescript-language-server")
+	if err != nil {
+		t.Skip("typescript-language-server not on PATH")
+	}
+	data, err := os.ReadFile(shim)
+	if err != nil || !bytes.Contains(data, []byte("asdf-plugin")) {
+		t.Skip("PATH typescript-language-server is not an asdf shim")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".tool-versions"), []byte("golang 1.25.5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pr := Probe(context.Background(), "typescript-language-server", dir)
+	if !pr.OK {
+		t.Fatalf("asdf shim failed under a golang-only project and was not unwrapped: %+v", pr)
+	}
+	if pr.Path == shim {
+		t.Fatalf("still probing the dead shim %q", shim)
 	}
 }

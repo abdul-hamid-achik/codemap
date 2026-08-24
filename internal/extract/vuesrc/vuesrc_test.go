@@ -64,6 +64,21 @@ func TestParseScriptBlocksOffsets(t *testing.T) {
 	}
 }
 
+func TestImportSpecs(t *testing.T) {
+	got := ImportSpecs([]byte(fixture))
+	want := map[string]bool{"vue": false, "./useCounter": false}
+	for _, spec := range got {
+		if _, ok := want[spec]; ok {
+			want[spec] = true
+		}
+	}
+	for spec, found := range want {
+		if !found {
+			t.Errorf("ImportSpecs missing %q (got %v)", spec, got)
+		}
+	}
+}
+
 // TestParseScriptBlocksTwoBlocks covers the combined <script> + <script
 // setup> pattern (options-API export default alongside setup bindings), which
 // real Vue SFCs use to declare `name`/`inheritAttrs` outside setup.

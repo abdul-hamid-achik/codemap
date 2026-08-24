@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/tsscan"
 )
 
 var _ extract.Extractor = (*Extractor)(nil)
@@ -93,6 +94,25 @@ func parseScriptBlocks(src []byte) []scriptBlock {
 		})
 	}
 	return blocks
+}
+
+// ImportSpecs returns every import/require specifier in the file's
+// <script>/<script setup> blocks. Used by the indexer's import-edge pass so
+// .vue files do not need a language-server ExtractFile round-trip just to
+// recover specifiers tsscan already knows how to scan.
+func ImportSpecs(src []byte) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, b := range parseScriptBlocks(src) {
+		for _, spec := range tsscan.Imports(b.content) {
+			if spec == "" || seen[spec] {
+				continue
+			}
+			seen[spec] = true
+			out = append(out, spec)
+		}
+	}
+	return out
 }
 
 func langAttr(attrs string) string {

@@ -14,7 +14,6 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/daemon"
 	mcpserver "github.com/abdul-hamid-achik/codemap/internal/mcp"
-	"github.com/abdul-hamid-achik/codemap/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -58,13 +57,6 @@ with code lsp_version_manager_gap, not as healthy.`,
 with AI assistants (Claude Code, Codex, OpenCode, ...). Uses newline-delimited
 JSON-RPC framing.`,
 		RunE: runServe,
-	}
-	studioCmd = &cobra.Command{
-		Use:     "studio [path]",
-		Aliases: []string{"browse"},
-		Short:   "Open the interactive studio TUI (Graph / Metrics / Impact / Search / Path)",
-		Args:    cobra.MaximumNArgs(1),
-		RunE:    runStudio,
 	}
 )
 
@@ -218,16 +210,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
-}
-
-func runStudio(cmd *cobra.Command, args []string) error {
-	cwd := targetDirArg(cmd, args)
-	sess, err := openSessionAt(cmd, cwd)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = sess.Close() }()
-	return tui.Run(cmd.Context(), sess, cwd)
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {

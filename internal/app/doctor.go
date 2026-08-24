@@ -150,43 +150,60 @@ func (svc *Service) DoctorAt(ctx context.Context, cwd string) *DoctorReport {
 }
 
 func addTool(ctx context.Context, add func(DoctorCheck), name, bin, cwd, purpose, installHint string) {
-	if iss := tooling.ProbeOrClassify(ctx, bin, cwd, nil); iss != nil {
+	pr := tooling.Probe(ctx, bin, cwd)
+	if !pr.OK {
+		iss := classifyProbeResult(bin, cwd, nil, pr)
 		c := DoctorCheck{
 			Name:     name,
 			OK:       false,
-			Detail:   doctorDetail(iss, purpose),
-			Hint:     doctorHint(iss, installHint),
+			Detail:   doctorDetail(&iss, purpose),
+			Hint:     doctorHint(&iss, installHint),
 			Code:     iss.Code,
 			AgentFix: iss.AgentFix,
-			Probe:    doctorProbeFromIssue(iss),
+			Probe:    doctorProbeFromIssue(&iss),
 		}
 		add(c)
 		return
 	}
-	path, _ := exec.LookPath(bin)
+	path := pr.Path
+	if path == "" {
+		path, _ = exec.LookPath(bin)
+	}
 	add(DoctorCheck{Name: name, OK: true, Detail: path})
 }
 
 func addLanguageServer(ctx context.Context, add func(DoctorCheck), name, bin, cwd string, langs []string) {
-	if iss := tooling.ProbeOrClassify(ctx, bin, cwd, langs); iss != nil {
+	pr := tooling.Probe(ctx, bin, cwd)
+	if !pr.OK {
+		iss := classifyProbeResult(bin, cwd, langs, pr)
 		c := DoctorCheck{
 			Name:     name,
 			OK:       false,
-			Detail:   doctorDetail(iss, "index "+strings.Join(langs, "/")),
-			Hint:     doctorHint(iss, "install "+bin+" to index "+strings.Join(langs, "/")),
+			Detail:   doctorDetail(&iss, "index "+strings.Join(langs, "/")),
+			Hint:     doctorHint(&iss, "install "+bin+" to index "+strings.Join(langs, "/")),
 			Code:     iss.Code,
 			AgentFix: iss.AgentFix,
-			Probe:    doctorProbeFromIssue(iss),
+			Probe:    doctorProbeFromIssue(&iss),
 		}
 		add(c)
 		return
 	}
-	path, _ := exec.LookPath(bin)
+	path := pr.Path
+	if path == "" {
+		path, _ = exec.LookPath(bin)
+	}
 	detail := path
 	if cwd != "" {
 		detail = path + " (probe ok under " + cwd + ")"
 	}
 	add(DoctorCheck{Name: name, OK: true, Detail: detail})
+}
+
+func classifyProbeResult(bin, cwd string, langs []string, pr tooling.ProbeResult) tooling.Issue {
+	if pr.Path == "" {
+		return tooling.ClassifyNotFound(bin, cwd, langs)
+	}
+	return tooling.ClassifyProbeFailure(bin, cwd, langs, pr)
 }
 
 func doctorDetail(iss *tooling.Issue, purpose string) string {

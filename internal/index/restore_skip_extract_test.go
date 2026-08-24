@@ -41,12 +41,9 @@ func (c *countingExtractor) ExtractFile(relPath string, src []byte) (*extract.Fi
 //     reported FilesUnchanged and FilesIndexed stays 0. This is the "skip
 //     extract+embed" guarantee the cache exists for.
 //
-// The extractor counter is asserted only across the restore step. It is NOT
-// asserted across the follow-up incremental index because IndexProject's final
-// import-edges pass (writeImportEdgesForFiles) deliberately re-extracts every
-// file on EVERY run to rebuild file→file import edges; that pass is unrelated to
-// the node-producing extraction the cache skips, so FilesUnchanged/FilesIndexed
-// (set only in indexFile's hash short-circuit) are the authoritative signal there.
+// The extractor counter is also asserted across the follow-up incremental
+// index: the import-edges pass recovers specifiers with cheap scanners
+// (gosrc.ImportSpecs) and must not call ExtractFile on hash-unchanged files.
 func TestRestoreSkipsExtraction(t *testing.T) {
 	g, err := graph.Open(filepath.Join(t.TempDir(), "graph.db"))
 	if err != nil {
@@ -125,6 +122,9 @@ func TestRestoreSkipsExtraction(t *testing.T) {
 	}
 	if res2.FilesUnchanged != len(files) {
 		t.Errorf("incremental index after restore: FilesUnchanged = %d, want %d (every restored file should be up-to-date)", res2.FilesUnchanged, len(files))
+	}
+	if got := atomic.LoadInt64(&calls); got != callsBeforeRestore {
+		t.Errorf("incremental index after restore re-extracted: ExtractFile %d -> %d, want unchanged", callsBeforeRestore, got)
 	}
 	st2, err := g.Stats(pid)
 	if err != nil {

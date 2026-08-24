@@ -4,10 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
+	"github.com/abdul-hamid-achik/codemap/internal/extract"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/vuesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
@@ -201,5 +204,181 @@ func TestImportsEdgesExternal(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("external import must NOT produce an EdgeImports edge (dangling), got %d", n)
+	}
+}
+
+type stubLangExtractor struct{ lang string }
+
+func (s stubLangExtractor) Language() string { return s.lang }
+
+func (s stubLangExtractor) ExtractFile(relPath string, _ []byte) (*extract.FileResult, error) {
+	return &extract.FileResult{
+		Path:     relPath,
+		Language: s.lang,
+		Symbols: []extract.Symbol{{
+			Name: "x", FQN: "x", Kind: extract.KindFunction,
+			Language: s.lang, StartLine: 1, EndLine: 1,
+		}},
+	}, nil
+}
+
+func importTargets(t *testing.T, g *graph.Store, pid int64, from string) []string {
+	t.Helper()
+	rows, err := g.DB().Query(`
+		SELECT dst.file_path
+		FROM edges e
+		JOIN nodes src ON src.id=e.source_id
+		JOIN nodes dst ON dst.id=e.target_id
+		WHERE src.project_id=? AND src.file_path=? AND src.kind=? AND e.edge_type=?
+		ORDER BY dst.file_path`,
+		pid, from, graph.KindFile, graph.EdgeImports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, filepath.ToSlash(p))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestImportPassDoesNotReextractLSP(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "b.ts", "export function b() { return 1 }\n")
+	writeFile(t, dir, "a.ts", "import { b } from './b'\nexport function a() { return b() }\n")
+
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("ts", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	var calls int64
+	ix.Register(&countingExtractor{Extractor: stubLangExtractor{lang: "typescript"}, calls: &calls})
+
+	if _, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt64(&calls); got != 2 {
+		t.Fatalf("ExtractFile calls after first index = %d, want 2 (one per file, not import-pass doubles)", got)
+	}
+	if got := importTargets(t, g, pid, "a.ts"); len(got) != 1 || got[0] != "b.ts" {
+		t.Fatalf("a.ts imports = %v, want [b.ts]", got)
+	}
+
+	if _, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt64(&calls); got != 2 {
+		t.Fatalf("ExtractFile calls after no-op index = %d, want 2 (import pass must not re-extract)", got)
+	}
+	if got := importTargets(t, g, pid, "a.ts"); len(got) != 1 || got[0] != "b.ts" {
+		t.Fatalf("after no-op, a.ts imports = %v, want [b.ts]", got)
+	}
+}
+
+func TestUnchangedImporterGainsEdgeWhenTargetAppears(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "a.ts", "import { b } from './b'\nexport function a() { return 1 }\n")
+
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("ts", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix.Register(stubLangExtractor{lang: "typescript"})
+
+	if _, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := importTargets(t, g, pid, "a.ts"); len(got) != 0 {
+		t.Fatalf("a.ts imports = %v, want none before b.ts exists", got)
+	}
+
+	writeFile(t, dir, "b.ts", "export function b() { return 1 }\n")
+	if _, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := importTargets(t, g, pid, "a.ts"); len(got) != 1 || got[0] != "b.ts" {
+		t.Fatalf("a.ts imports after adding b.ts = %v, want [b.ts] (unchanged importer must re-resolve)", got)
+	}
+}
+
+func TestPythonImportEdgesWithoutLSP(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "pkg/__init__.py", "")
+	writeFile(t, dir, "pkg/helper.py", "def h():\n    return 1\n")
+	writeFile(t, dir, "pkg/a.py", "from . import helper\nfrom .helper import h\ndef a():\n    return helper.h()\n")
+
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("py", dir, "python")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	var calls int64
+	ix.Register(&countingExtractor{Extractor: stubLangExtractor{lang: "python"}, calls: &calls})
+
+	if _, err := ix.IndexProject(context.Background(), pid, "py", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt64(&calls); got != 3 {
+		t.Fatalf("ExtractFile calls = %d, want 3 (no import-pass re-extract)", got)
+	}
+	got := importTargets(t, g, pid, "pkg/a.py")
+	if len(got) != 2 || got[0] != "pkg/__init__.py" || got[1] != "pkg/helper.py" {
+		t.Fatalf("pkg/a.py imports = %v, want [pkg/__init__.py pkg/helper.py]", got)
+	}
+}
+
+func TestVueImportEdgesWithoutLSP(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "useCounter.ts", "export function useCounter() { return 1 }\n")
+	writeFile(t, dir, "Counter.vue", `<script setup lang="ts">
+import { useCounter } from './useCounter'
+export function go() { return useCounter() }
+</script>
+`)
+
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("vue", dir, "vue")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	var tsCalls, vueCalls int64
+	ts := stubLangExtractor{lang: "typescript"}
+	ix.Register(&countingExtractor{Extractor: ts, calls: &tsCalls})
+	ix.Register(&countingExtractor{Extractor: vuesrc.New(ts, nil), calls: &vueCalls})
+
+	if _, err := ix.IndexProject(context.Background(), pid, "vue", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	firstTS, firstVue := atomic.LoadInt64(&tsCalls), atomic.LoadInt64(&vueCalls)
+	if firstTS < 1 || firstVue != 1 {
+		t.Fatalf("first index ExtractFile ts=%d vue=%d, want ts>=1 vue=1", firstTS, firstVue)
+	}
+	if got := importTargets(t, g, pid, "Counter.vue"); len(got) != 1 || got[0] != "useCounter.ts" {
+		t.Fatalf("Counter.vue imports = %v, want [useCounter.ts]", got)
+	}
+
+	if _, err := ix.IndexProject(context.Background(), pid, "vue", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt64(&tsCalls) != firstTS || atomic.LoadInt64(&vueCalls) != firstVue {
+		t.Fatalf("no-op index re-extracted (ts %d→%d vue %d→%d)", firstTS, atomic.LoadInt64(&tsCalls), firstVue, atomic.LoadInt64(&vueCalls))
+	}
+}
+
+func TestGDScriptImportEdges(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "scripts/helper.gd", "func help():\n\treturn 1\n")
+	writeFile(t, dir, "main.gd", "extends Node\nvar S = load(\"res://scripts/helper.gd\")\n")
+
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("gd", dir, "gdscript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "gd", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := importTargets(t, g, pid, "main.gd"); len(got) != 1 || got[0] != "scripts/helper.gd" {
+		t.Fatalf("main.gd imports = %v, want [scripts/helper.gd]", got)
 	}
 }

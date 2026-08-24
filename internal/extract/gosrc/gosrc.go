@@ -37,9 +37,7 @@ func (e Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult,
 	pkg := f.Name.Name
 	isTest := strings.HasSuffix(relPath, "_test.go")
 
-	for _, imp := range f.Imports {
-		res.Imports = append(res.Imports, strings.Trim(imp.Path.Value, `"`))
-	}
+	res.Imports = importPaths(f)
 
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
@@ -73,6 +71,29 @@ func (e Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult,
 	// table) — attributed to the file so the handlers aren't flagged as dead code.
 	res.References = append(res.References, fileValueRefs(fset, relPath, f)...)
 	return res, nil
+}
+
+// ImportSpecs returns the file's import paths using parser.ImportsOnly — no
+// symbol walk, no language server. The indexer's deferred import-edge pass
+// uses this so a no-op incremental index never re-runs ExtractFile.
+func ImportSpecs(relPath string, src []byte) ([]string, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, relPath, src, parser.ImportsOnly)
+	if err != nil {
+		return nil, err
+	}
+	return importPaths(f), nil
+}
+
+func importPaths(f *ast.File) []string {
+	if f == nil {
+		return nil
+	}
+	out := make([]string, 0, len(f.Imports))
+	for _, imp := range f.Imports {
+		out = append(out, strings.Trim(imp.Path.Value, `"`))
+	}
+	return out
 }
 
 func (e Extractor) funcSymbol(fset *token.FileSet, src []byte, pkg string, d *ast.FuncDecl, isTest bool) extract.Symbol {

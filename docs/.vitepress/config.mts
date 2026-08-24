@@ -57,7 +57,6 @@ export default defineConfig({
       { text: 'Quick Start', link: '/quick-start' },
       { text: 'For Agents', link: '/agents' },
       { text: 'CLI', link: '/cli' },
-      { text: 'studio', link: '/studio' },
       { text: 'MCP', link: '/mcp' },
       { text: 'CI', link: '/ci' },
     ],
@@ -76,7 +75,6 @@ export default defineConfig({
         text: 'Surfaces',
         items: [
           { text: 'CLI', link: '/cli' },
-          { text: 'studio (TUI)', link: '/studio' },
           { text: 'MCP server', link: '/mcp' },
         ],
       },

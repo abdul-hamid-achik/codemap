@@ -14,9 +14,9 @@ and Next.js framework-wiring edges — with precise calls resolving across the `
 routed to the same TS server
 for symbols + `defines` + import edges only). Tree-sitter remains planned and has no implementation today.
 The graph is fused with semantic retrieval (local veclite plus an optional one-hop vecgrep
-fallback, or vecgrep as the explicit owner) and exposed as a unified query layer. Three surfaces
-share the structural store: CLI (`--json` for agents), MCP server (`codemap serve`: 44 tools in
-`full`, 26 in `agent`/`core`), and the `studio` TUI.
+fallback, or vecgrep as the explicit owner) and exposed as a unified query layer. Two surfaces
+share the structural store: CLI (`--json` for agents) and MCP server (`codemap serve`: 44 tools in
+`full`, 26 in `agent`/`core`).
 
 Surfaces / key files:
 - CLI: `cmd/codemap/` — cobra CLI split per-command (main.go plus agent/annotate/branch/cache/
@@ -29,8 +29,7 @@ Surfaces / key files:
   vecgrep_client).
 - MCP server (thin, 42 full; agent/core 22): `internal/mcp/server.go`. `agent` is
   pinned exactly to the taught workflow; `core` is the separate compatible lean contract.
-- studio TUI: `internal/tui/` (model.go/view.go/theme.go/run.go + anim.go [harmonica springs]
-  + highlight.go [chroma syntax]; tabs graph/metrics/impact/search/path)
+- Legacy TUI (not wired to CLI): `internal/tui/`
 - Graph store + traversal: `internal/graph/`  ·  vectors (veclite wrapper): `internal/vector/`
 - Extraction: `internal/extract/` (`gosrc` = go/parser · `typesrc` = go/types [`--precise`] ·
   `lspsrc` = LSP-backed [TS/JS/Python] · `tsscan` = name-based TS/JS imports/JSX/Next.js wiring ·

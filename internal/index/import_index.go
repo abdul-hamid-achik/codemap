@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
@@ -189,12 +188,16 @@ func resolveImportFile(language, fromRel, spec string, idx *importIndex) string 
 		return resolveGoImport(spec, idx)
 	case "typescript", "javascript", "vue":
 		return resolveJSImport(fromRel, spec, idx)
+	case "python":
+		return resolvePythonImport(fromRel, spec, idx)
 	case "ruby":
 		return resolveRubyImport(fromRel, spec, idx)
 	case "lua":
 		return resolveLuaImport(spec, idx)
 	case "css", "scss", "sass", "less":
 		return resolveCSSImport(fromRel, spec, idx)
+	case "gdscript":
+		return resolveGDScriptImport(fromRel, spec, idx)
 	}
 	return ""
 }
@@ -578,10 +581,8 @@ func stripVersionSuffix(s string) string {
 // gets removed. The final pass runs after all workers join, so every
 // file node is settled.
 //
-// Re-extracting each file here is intentional: the workers stay
-// oblivious to import resolution (the worker pipeline stays simple),
-// and re-extract is cheap — no graph writes, no I/O beyond the
-// already-warm file cache.
+// Import specifiers are recovered with cheap scanners (go/parser ImportsOnly,
+// tsscan, vuesrc script-block scan, …) — never a second LSP ExtractFile.
 func (ix *Indexer) writeImportEdgesForFiles(ctx context.Context, projectID int64, files []fileTask, impIdx *importIndex) error {
 	if impIdx == nil {
 		return nil
@@ -602,21 +603,15 @@ func (ix *Indexer) writeImportEdgesForFiles(ctx context.Context, projectID int64
 		if !found {
 			continue
 		}
-		// Re-extract to recover fr.Imports (the worker
-		// didn't keep them; the result struct is dropped
-		// at the end of indexFile).
 		content, oversized, rerr := readFileUnderLimit(ft.abs, ix.cfg.MaxFileBytes)
-		if rerr != nil {
+		if rerr != nil || oversized {
 			continue
 		}
-		if oversized {
-			continue
+		specs, ok := fileImportSpecs(ft, content)
+		if !ok {
+			continue // parse failure: keep last-good import edges
 		}
-		fr, eerr := ft.ext.ExtractFile(ft.rel, content)
-		if eerr != nil || fr == nil {
-			continue
-		}
-		if err := writeImportEdgesForFileTx(tx, projectID, ft, fromID, fr); err != nil {
+		if err := writeImportEdgesForFileTx(tx, projectID, ft, fromID, specs); err != nil {
 			return err
 		}
 	}
@@ -631,7 +626,7 @@ func (ix *Indexer) writeImportEdgesForFiles(ctx context.Context, projectID int64
 // called every project file has its own file node, so no fresh tiny
 // file node is needed for the target — the real file node (with its
 // real line range) is used.
-func writeImportEdgesForFileTx(tx *sql.Tx, projectID int64, ft fileTask, fromID int64, fr *extract.FileResult) error {
+func writeImportEdgesForFileTx(tx *sql.Tx, projectID int64, ft fileTask, fromID int64, imports []string) error {
 	if ft.importIndex == nil {
 		return nil
 	}
@@ -641,11 +636,11 @@ func writeImportEdgesForFileTx(tx *sql.Tx, projectID int64, ft fileTask, fromID 
 	if _, err := tx.Exec("DELETE FROM edges WHERE source_id=? AND edge_type=?", fromID, graph.EdgeImports); err != nil {
 		return err
 	}
-	if len(fr.Imports) == 0 {
+	if len(imports) == 0 {
 		return nil
 	}
-	targets := make(map[string]int64, len(fr.Imports))
-	for _, imp := range fr.Imports {
+	targets := make(map[string]int64, len(imports))
+	for _, imp := range imports {
 		t := resolveImportFile(ft.lang, ft.rel, imp, ft.importIndex)
 		if t == "" {
 			continue
