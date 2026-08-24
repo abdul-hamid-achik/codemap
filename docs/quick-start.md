@@ -93,7 +93,7 @@ reindex before trusting a query.
 - **Wiring up an AI coding agent?** Skip to `codemap agent setup <harness>` — it registers
   the MCP server and drops the playbook that teaches your agent when to reach for these
   tools, in one command. See [codemap for agents](/agents#one-command-setup).
-- **Exploring by hand?** Run `codemap studio` for the interactive TUI — see [studio](/studio).
+- **Exploring by hand?** Use the [CLI](/cli) with `--json` when scripting — see [Surfaces](/studio).
 - **Wiring up CI?** The [GitHub Action](/ci) posts impact + risk on every PR and can fail
   the build on untested or high-risk changes.
 

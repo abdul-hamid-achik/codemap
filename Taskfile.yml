@@ -59,7 +59,7 @@ tasks:
       - go mod tidy
 
   tools:
-    desc: Install dev tools (air for hot reload, gopls for precise Studio flows)
+    desc: Install dev tools (air for hot reload, gopls for precise glyphrun flows)
     cmds:
       - go install github.com/air-verse/air@latest
       - go install golang.org/x/tools/gopls@latest

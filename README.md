@@ -2,8 +2,8 @@
 
 Local-first code intelligence that gives AI agents and people **structural awareness** of
 codebases — combining a code graph (LSP + parsers) with semantic retrieval
-(local veclite, with an optional one-hop vecgrep CLI fallback or owner), exposed through a CLI,
-an MCP server, and an interactive terminal UI.
+(local veclite, with an optional one-hop vecgrep CLI fallback or owner), exposed through a **CLI**
+and an **MCP server**.
 
 > Working on the code? Read [AGENTS.md](./AGENTS.md) first — it is the source of truth for
 > conventions, architecture, and gotchas.
@@ -83,8 +83,7 @@ instead of dozens of file reads.
   `callers`/`callees` also take `--precise` (language-server `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider, model, dimensions, or distance changes instead of corrupting the vector space.
-- **Three surfaces, one structural store** — a Cobra **CLI** (with `--json` for agents), a stdio **MCP
-  server**, and the **studio** TUI for humans.
+- **Two surfaces, one structural store** — a Cobra **CLI** (with `--json` for agents) and a stdio **MCP server**.
 - **Graph analytics** — `map` (subsystems, directed bridges, entrypoints, hubs), `hotspots`
   (hubs), `orphans` (dead-code candidates), `explore` (intent → bounded exact neighborhoods),
   `traverse` (typed, heterogeneous graph walks), and `path` (shortest call path between two symbols).
@@ -95,45 +94,9 @@ instead of dozens of file reads.
   Homebrew. Optional LSP-backed indexing and embeddings use separately installed language servers
   or Ollama.
 
-## studio (TUI)
+## Surfaces
 
-`codemap studio` opens an interactive, full-screen explorer of your code (Charm v2 — Bubble
-Tea / Lip Gloss / Bubbles). Switch tabs with `1`–`5` or `tab`; navigate with `↑`/`↓`.
-
-```
- codemap studio                       codemap · 509 nodes · 1849 edges · 35 files
-  1 Graph   2 Metrics   3 Impact   4 Search   5 Path
- Hubs (164)                           │ lspsrc.Extractor.Close
-    57  lspsrc.Extractor.Close        │  Called by (57)
-    56  app.Session.Close             │   ▸ main.runInit   cmd/codemap/init_status.go:64
-    56  graph.Store.Close             │     main.runIndex  cmd/codemap/index.go:24
-    26  app.NewService                │  Calls (9)
-    19  app.Open                      │     app.Session.Close  internal/app/session.go:126
-     ▼ 159 more                       │  ⟩ func runInit(cmd *cobra.Command, ...) error
- ↑/↓ hub · → walk · enter → impact · s source · p precise · ctrl+c quit · ? help
-```
-
-Fully-qualified names disambiguate same-named symbols (six different `Close` methods above), and
-the selected node's signature is previewed (`⟩ func runInit(...)`).
-
-- **Graph** — a call-graph explorer: hubs (most-referenced symbols) on the left as jump
-  points, the centered node's callers and callees on the right. Press `→` to focus the right
-  pane and **walk the graph** — `enter` re-centers on a caller/callee so you can traverse the
-  call chain; `backspace` steps back; `s` reads the selected symbol's **source** in a
-  scrollable overlay, without leaving studio.
-- **Metrics** — an overview dashboard: counts and bar charts (by kind/language) on the left;
-  the call graph's two extremes on the right — top hubs (most-referenced) and dead-code
-  candidates (no callers). Both lists are navigable — `enter` drills a row into Impact, `ctrl+s`
-  reads its source.
-- **Impact** — type a symbol, see its callers, blast radius, and which tests cover it.
-- **Search** — semantic search by meaning, falling back to fast name search when there are no
-  embeddings (so it works even without Ollama).
-- **Path** — choose `FROM` and `TO`, then inspect the shortest directed call chain.
-  The ordered nodes are keyboard-navigable and every answer shows its `call_graph` confidence,
-  keeping “disconnected,” “unresolved,” and “missing endpoint” visibly distinct.
-- **Knowledge capture** — press `a` on an exact selected symbol in Graph, Search, Impact, or Path
-  to write an annotation without leaving Studio. The composer keeps typing isolated from global
-  shortcuts and pins the note to the selected FQN.
+codemap ships as a **CLI** and an **MCP server** (`codemap serve`). Use `--json` on CLI commands for machine output. The former Studio TUI is not shipped — see [docs/studio.md](docs/studio.md).
 
 ## Installation
 
@@ -243,8 +206,8 @@ codemap semantic "jwt validation middleware" --top 10
 codemap semantic "jwt validation middleware" --backend vecgrep  # one semantic owner
 codemap explore "jwt validation middleware" --seeds 5 --edges 5 --depth 2
 
-# 7. Explore visually
-codemap studio
+# 7. Inspect a symbol neighborhood
+codemap context main.go:42 --json
 ```
 
 Add `--json` to any query command for machine-readable output (for agents/scripts).
@@ -326,7 +289,7 @@ complete set.
 | Daemon | `daemon start` / `status` / `stop` | background watcher that keeps the index fresh |
 | Knowledge | `annotate` / `annotations` | pin / list notes and external data on symbols/paths; `--external-id` makes automated writes retry-safe |
 | Agent harness | `agent setup` / `list` / `playbook` | wire codemap (MCP server + playbook) into an AI coding harness |
-| Surfaces | `serve` / `studio` | MCP server (stdio) and interactive TUI |
+| Surfaces | `serve` | MCP server (stdio) |
 
 All query commands accept `--json`.
 
