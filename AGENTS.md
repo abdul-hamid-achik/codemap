@@ -55,7 +55,7 @@ Key features:
 codemap/
 ├── cmd/codemap/              # cobra CLI, split by domain (vecgrep style): main.go +
 │                            #   agent/annotate/branch/cache/config/context/coverage/daemon/
-│                            #   dependencies/explore_traverse/gate/index/init_status/map/query/
+│                            #   dependencies/explore_traverse/index/init_status/map/query/task_context/
 │                            #   structural_export/structural_manifest (plus tests/helpers).
 │                            #   Each RunE handler is THIN → opens a session → calls internal/app.
 │                            #   Files carry the header `/* Copyright © 2026 abdul hamid <abdulachik@icloud.com> */`.
@@ -82,6 +82,7 @@ codemap/
 │   │   ├── service_map.go         #   bounded architecture overview (subsystems/bridges/hubs/entrypoints)
 │   │   ├── service_explore.go     #   intent search → bounded exact structural neighborhoods
 │   │   ├── service_traverse.go    #   durable-selector heterogeneous graph traversal
+│   │   ├── service_task_context.go #  mode-scoped task orientation bundle (task-context/codemap_task_context)
 │   │   ├── secret_impact.go       #   secret-key rotation blast radius (names only)
 │   │   ├── secret_scan.go         #   candidate secret-key name discovery (never values)
 │   │   ├── branchswitch.go        #   branch-aware index switching

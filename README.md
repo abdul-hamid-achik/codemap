@@ -86,7 +86,9 @@ instead of dozens of file reads.
 - **Two surfaces, one structural store** — a Cobra **CLI** (with `--json` for agents) and a stdio **MCP server**.
 - **Graph analytics** — `map` (subsystems, directed bridges, entrypoints, hubs), `hotspots`
   (hubs), `orphans` (dead-code candidates), `explore` (intent → bounded exact neighborhoods),
-  `traverse` (typed, heterogeneous graph walks), and `path` (shortest call path between two symbols).
+  `traverse` (typed, heterogeneous graph walks), `task-context` (one-call, mode-scoped
+  orientation for a task: freshness + neighborhoods + impact + related files), and `path`
+  (shortest call path between two symbols).
 - **Local-first by default** — the structural graph, local vectors, and default Ollama endpoint stay
   on your machine. If you explicitly configure a remote Ollama-compatible endpoint, codemap sends
   the source text being embedded to that endpoint; see the [configuration guide](docs/configuration.md).
@@ -205,6 +207,7 @@ codemap status --full              # include the local vector count (may use sub
 codemap semantic "jwt validation middleware" --top 10
 codemap semantic "jwt validation middleware" --backend vecgrep  # one semantic owner
 codemap explore "jwt validation middleware" --seeds 5 --edges 5 --depth 2
+codemap task-context "jwt validation middleware" --mode change  # freshness + contexts + impact + related files in one call
 
 # 7. Inspect a symbol neighborhood
 codemap context main.go:42 --json
@@ -274,7 +277,7 @@ complete set.
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, value references, tests, blast radius |
-| Navigate | `read-order` / `map` / `explore` | ranked reading list, bounded architecture overview, or intent-to-structure orientation |
+| Navigate | `read-order` / `map` / `explore` / `task-context` | ranked reading list, bounded architecture overview, intent-to-structure orientation, or one-call mode-scoped task orientation (`--mode understand\|change\|debug`, alias `brief`) |
 | Navigate | `traverse --at <file>:<line>` | bounded walk from one exact definition across selected edge types and directions |
 | Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact (repeat `impact --at` for a partial-success frame batch; `--batch` stabilizes the one-item envelope), file dependency evidence, or diff-scoped tests |
 | Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
@@ -427,8 +430,9 @@ symbols and call paths — a knowledge layer over the graph (see below). Automat
 `external_id`; codemap upserts it within project + source and reports whether the row was created,
 updated, or unchanged.
 
-`codemap_map`, `codemap_explore`, and `codemap_traverse` are extended orientation surfaces registered
-only in the default `full` MCP profile. The CLI commands remain available regardless of MCP profile.
+`codemap_map`, `codemap_traverse`, `codemap_refactor_plan`, and `codemap_task_context` are
+extended surfaces registered only in the default `full` MCP profile; `codemap_explore` is part of
+the taught workflow and ships in every profile. The CLI commands remain available regardless of MCP profile.
 
 For same-named definitions, pass `selector:{file,start_line,fqn,kind}` to `codemap_source`,
 `codemap_context`, `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`,

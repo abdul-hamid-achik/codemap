@@ -101,7 +101,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      (codemap_map is available in the full MCP profile)
   explore <query> [--seeds N --edges N --depth N]
                                      intent search → bounded exact context neighborhoods, no source bodies
-                                     (codemap_explore is available in the full MCP profile)
+                                     (codemap_explore is taught and registered in every MCP profile)
   dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage
   file-impact <file>                 file impact: confidence-aware evidence + coverage + conservative delete verdict
   refactor-plan <symbol>             plan a rename/move: call sites, value references, dependent files, tests, blast radius

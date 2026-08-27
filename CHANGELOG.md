@@ -8,6 +8,28 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+### Added
+
+- **`codemap task-context` / `codemap_task_context`** — mode-scoped task orientation in one
+  call (CLI alias `brief`; 45th full-profile MCP tool). The task text is used verbatim as the
+  retrieval query (intent never interpreted); `--mode understand|change|debug` selects the
+  deterministic composition — understand: freshness + explore neighborhoods; change: exact
+  selectors or explore-joined targets + brief context bundles + per-target impact drill-downs
+  (totals before the 25-cap, one shared impact state) + related files; debug: explore with
+  caller/callee-emphasized contexts. `review` is not a mode (diff-scoped analysis stays
+  `codemap review`); selectors require change/debug. Freshness is always assembled-and-flagged
+  (`freshness.checked` guards against a failed staleness walk reading as fresh), `call_graph`
+  is the weakest across sections, `partial_errors` is capped at 20 with a truncation count, and
+  next actions are advisory only. Contract: `schemas/codemap.task-context.v1.schema.json`
+  (envelope-pinned, additive within v1). E2E: `specs/task_context.yml`.
+
+### Fixed
+
+- **Stale profile claim for `codemap_explore`** — docs/README said it was full-profile-only;
+  it is part of the taught workflow and registered in every profile (agent/core stay at 26
+  tools; `codemap_task_context` joins `codemap_map`/`codemap_traverse`/`codemap_refactor_plan`
+  as full-profile surfaces).
+
 ## [0.63.1] — 2026-08-22
 
 ### Fixed
