@@ -114,6 +114,11 @@ you don't need a separate find/symbols round-trip to build that selector.`},
            [--edge-types calls,references,...] [--depth N] [--limit N]
                                      bounded typed-edge walk from one exact definition; no name union
                                      (codemap_traverse is available in the full MCP profile)
+  task-context <task> [--mode understand|change|debug] [--at <file>:<line>]
+                                     one-call task orientation: freshness + explore seeds + brief contexts,
+                                     plus impact drill-downs and related files in change mode; 'brief' is an alias;
+                                     review is not a mode — that stays codemap review
+                                     (codemap_task_context is available in the full MCP profile)
   symbols <file>                     a file's outline (signatures)
   find <query>                       name search (offline, no embeddings); tokenizes on
                                      whitespace/camelCase and also matches docstrings —
@@ -139,7 +144,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
 callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, secret_impact,
-required_keys, risk, hotspots, orphans, coverage, read_order, map, explore, traverse, path, related_files, symbols,
+required_keys, risk, hotspots, orphans, coverage, read_order, map, explore, traverse, task_context, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
@@ -155,7 +160,9 @@ and to_selector. codemap_context_batch also accepts selectors:[{file,start_line,
 unioned with symbols (same 25-cap; MCP-only, no CLI batch form yet). codemap_symbol_at accepts
 positions:[{file,line}] as a batch alternative to file/line — a pasted multi-frame stack trace
 resolves in one call. explore accepts query+seeds+edges+depth; traverse requires its selector and
-accepts direction+edge_types+depth+limit. Both MCP tools are full-profile only. codemap_docs returns this guide.`},
+accepts direction+edge_types+depth+limit; task-context accepts a task + mode (understand|change|debug)
++ optional selectors (change/debug only) and never interprets the task text. All three MCP tools are
+full-profile only. codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
 external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a

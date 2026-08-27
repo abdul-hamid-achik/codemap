@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:codemap:task-context:v1",
+  "title": "codemap task-context report v1",
+  "description": "The successful or gracefully degraded JSON report emitted by codemap task-context / codemap_task_context. This schema pins the top-level envelope only: the embedded explore and contexts sections are the JSON produced by codemap_explore / codemap_context_batch and inherit those surfaces' additive-evolution rules. Hard-failure envelopes (CLI {ok,error,code,hint}, MCP IsError+Meta) are outside this schema. Additive optional top-level fields are compatible within v1; renames, removals, required-field additions, enum narrowing, or section-shape changes require v2.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "task",
+    "mode",
+    "project",
+    "indexed",
+    "freshness",
+    "call_graph"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The caller's task text, echoed verbatim; it was used as the retrieval query without interpretation."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["understand", "change", "debug"],
+      "description": "The deterministic composition the caller selected. review is deliberately absent: diff-scoped analysis is codemap_review."
+    },
+    "project": {
+      "type": "string"
+    },
+    "indexed": {
+      "type": "boolean"
+    },
+    "freshness": {
+      "type": "object",
+      "required": ["checked", "stale"],
+      "properties": {
+        "checked": {
+          "type": "boolean",
+          "description": "False when no staleness comparison was possible (unindexed project, or the walk failed — see partial_errors). stale:false must never be read as fresh when checked is false."
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "staleness": {
+          "type": "object",
+          "required": ["changed", "new", "deleted"],
+          "properties": {
+            "changed": { "type": "integer", "minimum": 0 },
+            "new": { "type": "integer", "minimum": 0 },
+            "deleted": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "targets": {
+      "type": "array",
+      "maxItems": 25,
+      "items": {
+        "$ref": "#/$defs/task_target"
+      }
+    },
+    "explore": {
+      "type": "object",
+      "description": "The codemap_explore report (schema_version 1), embedded verbatim."
+    },
+    "contexts": {
+      "type": "object",
+      "description": "The codemap_context_batch report, embedded verbatim; bodies are brief (source_omitted) and memory recall is disabled."
+    },
+    "impacts": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/task_impact"
+      }
+    },
+    "related_files": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/task_related_files"
+      }
+    },
+    "call_graph": {
+      "type": "string",
+      "enum": ["resolved", "name", "unresolved", "none"],
+      "description": "The weakest call-graph confidence across the assembled sections."
+    },
+    "partial_errors": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/partial_error"
+      }
+    },
+    "partial_errors_truncated": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Additional partial errors omitted after the bounded 20-item list."
+    },
+    "next": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["tool", "why"],
+        "properties": {
+          "tool": { "type": "string" },
+          "args": { "type": "object", "additionalProperties": true },
+          "why": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "selector": {
+      "type": "object",
+      "required": ["file", "start_line"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "start_line": { "type": "integer", "minimum": 0, "description": "0 when an fqn-only caller selector (start_line is the disambiguator/fallback, not the identity) failed to resolve and is echoed verbatim." },
+        "fqn": { "type": "string" },
+        "kind": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "task_target": {
+      "type": "object",
+      "required": ["selector", "found"],
+      "properties": {
+        "selector": { "$ref": "#/$defs/selector" },
+        "symbol": { "type": "string" },
+        "source": { "type": "string", "enum": ["selector", "explore"] },
+        "found": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "task_impact": {
+      "type": "object",
+      "required": ["selector", "impact", "direct_callers_total", "blast_radius_total", "tests_total"],
+      "properties": {
+        "selector": { "$ref": "#/$defs/selector" },
+        "symbol": { "type": "string" },
+        "impact": {
+          "type": "object",
+          "description": "The codemap_impact report with direct_callers/blast_radius/tests capped at 25; the totals below carry the true counts."
+        },
+        "direct_callers_total": { "type": "integer", "minimum": 0 },
+        "blast_radius_total": { "type": "integer", "minimum": 0 },
+        "tests_total": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "task_related_files": {
+      "type": "object",
+      "required": ["file", "related", "related_total"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "related": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": ["relative_path", "reason", "confidence"],
+            "properties": {
+              "relative_path": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string" },
+              "confidence": { "type": "number" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "related_total": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "partial_error": {
+      "type": "object",
+      "required": ["component", "error"],
+      "properties": {
+        "symbol": { "type": "string" },
+        "component": {
+          "type": "string",
+          "description": "Which section degraded: staleness|explore|contexts|impact|related_files|selector, plus labels flowing through from embedded reports."
+        },
+        "error": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

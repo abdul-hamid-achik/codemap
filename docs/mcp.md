@@ -52,7 +52,7 @@ index → understand → read workflow on its own.
 
 ## Tool profiles
 
-By default `codemap serve` registers all 44 tools. That's a real cost: a
+By default `codemap serve` registers all 45 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
 measured **+95% input tokens** on the codemap arm, driven by every tool's schema
 riding in every session's context — and some clients (Cursor) cap total MCP tools
@@ -77,10 +77,10 @@ compatibility and is the explicit expert/admin surface.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
-server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **31,151
-schema characters (≈7,788 tokens using the declared chars/4 planning estimate)**;
-`full` serializes **44,487 characters (≈11,122 estimated tokens)**. That is about
-30% less schema context for the taught surface. Reproduce it with:
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **31,808
+schema characters (≈7,952 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **47,784 characters (≈11,946 estimated tokens)**. That is about
+33% less schema context for the taught surface. Reproduce it with:
 
 ```bash
 go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime=100x -benchmem
@@ -91,8 +91,8 @@ Everything else — `codemap_init`, `codemap_doctor`, `codemap_projects`,
 `codemap_required_keys`, `codemap_annotate` / `codemap_annotations` /
 `codemap_unannotate`, `codemap_branch_status` / `codemap_branch_switch`, and
 `codemap_cache_save` / `codemap_cache_restore` / `codemap_cache_list` /
-`codemap_cache_drop`, plus the full-profile orientation surfaces `codemap_map`
-and `codemap_traverse` — is admin/ecosystem/extended surface, available
+`codemap_cache_drop`, plus the full-profile orientation surfaces `codemap_map`,
+`codemap_traverse`, and `codemap_task_context` — is admin/ecosystem/extended surface, available
 under the default `full` profile and excluded from both current lean profiles. Precedence is the same three-way order as every
 other codemap setting: config file < environment < CLI flag. An unrecognized value
 is a startup error, not a silent fallback. [`codemap agent setup

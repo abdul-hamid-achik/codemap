@@ -25,7 +25,7 @@ import (
 )
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
-// (the default, back-compat) registers every tool (44). ProfileCore preserves
+// (the default, back-compat) registers every tool (45). ProfileCore preserves
 // the shipped lean 26-tool contract. ProfileAgent is a separately pinned
 // 26-tool contract containing exactly the tools named by the canonical
 // playbook plus codemap_docs for self-discovery. Core and agent intentionally
@@ -510,6 +510,13 @@ type contextInput struct {
 	Brief    bool                `json:"brief,omitempty" jsonschema:"drop each definition's source body, keeping signature/doc/location; sets source_omitted:true so you know to call codemap_source for the one definition you actually need — everything else in the bundle is unchanged"`
 }
 
+type taskContextInput struct {
+	Task      string               `json:"task" jsonschema:"the task or question to orient on; used verbatim as the retrieval query — codemap never interprets intent beyond its deterministic identifier/natural-language fusion classifier"`
+	Mode      string               `json:"mode,omitempty" jsonschema:"what the caller plans to do next: understand (orient on unfamiliar code — freshness + explore neighborhoods), change (prepare an edit — contexts + impact drill-downs + related files), debug (trace a failure — caller/callee-emphasized contexts); default understand; review is not a mode — use codemap_review"`
+	Selectors []app.SymbolSelector `json:"selectors,omitempty" jsonschema:"optional exact definitions the caller already holds (e.g. projected from a prior candidates list), deduped and capped at 25; requires mode change or debug"`
+	Path      string               `json:"path,omitempty" jsonschema:"project directory; defaults to the server working directory"`
+}
+
 // emptyInput is for tools that take no arguments (e.g. codemap_projects).
 type emptyInput struct{}
 
@@ -644,6 +651,12 @@ func (s *Server) register() {
 			Name:        "codemap_explore",
 			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source. For raw ranked hits without neighborhoods, use codemap_semantic.",
 		}, s.handleExplore)
+	}
+	if s.include("codemap_task_context") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_task_context",
+			Description: "Mode-scoped task orientation in one call (full profile): the task text is used verbatim as the retrieval query (intent is never interpreted), then a deterministic composition per mode — understand: freshness + explore neighborhoods; change: brief context bundles + per-target impact drill-downs + related files; debug: explore + caller/callee-emphasized contexts. Bounded throughout (caps with *_total, partial_errors with truncation), freshness is always assembled-and-flagged (never acted on), and call_graph is the weakest across sections. Selectors require mode change/debug; review is not a mode — use codemap_review.",
+		}, s.handleTaskContext)
 	}
 	if s.include("codemap_traverse") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
@@ -1145,6 +1158,19 @@ func (s *Server) handleTraverse(_ context.Context, _ *sdkmcp.CallToolRequest, in
 	}
 	rep, err := s.svc.TraverseBySelector(cwdOf(in.Path), in.Selector, app.TraverseOptions{
 		Direction: in.Direction, EdgeTypes: in.EdgeTypes, Depth: in.Depth, Limit: in.Limit,
+	})
+	return result(rep, err)
+}
+
+// handleTaskContext delegates to Service.TaskContext, which performs all input
+// validation (blank task, unknown mode, review, selectors-with-understand) as
+// CodedError invalid_input so both surfaces see identical codes and hints.
+func (s *Server) handleTaskContext(ctx context.Context, _ *sdkmcp.CallToolRequest, in taskContextInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.TaskContext(ctx, cwdOf(in.Path), in.Task, app.TaskContextOptions{
+		Mode: in.Mode, Selectors: in.Selectors,
 	})
 	return result(rep, err)
 }

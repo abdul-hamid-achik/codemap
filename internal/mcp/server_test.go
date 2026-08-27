@@ -1499,12 +1499,12 @@ func listToolNames(t *testing.T, srv *Server) map[string]bool {
 }
 
 // fullToolNames is the exhaustive, hand-maintained list of every tool
-// codemap ships under ProfileFull (44; AGENTS.md's "Current set (44)" line
+// codemap ships under ProfileFull (45; AGENTS.md's "Current set (45)" line
 // must be updated alongside this list if it ever changes).
 var fullToolNames = []string{
 	"codemap_init", "codemap_index", "codemap_status", "codemap_semantic",
 	"codemap_callers", "codemap_callees", "codemap_references", "codemap_impact",
-	"codemap_review", "codemap_read_order", "codemap_map", "codemap_explore", "codemap_traverse", "codemap_related_files", "codemap_dependencies",
+	"codemap_review", "codemap_read_order", "codemap_map", "codemap_explore", "codemap_traverse", "codemap_task_context", "codemap_related_files", "codemap_dependencies",
 	"codemap_file_impact", "codemap_file_context", "codemap_refactor_plan", "codemap_risk", "codemap_symbol_at", "codemap_secret_impact",
 	"codemap_required_keys", "codemap_hotspots", "codemap_orphans", "codemap_coverage",
 	"codemap_path", "codemap_symbols", "codemap_find", "codemap_grep", "codemap_source",
@@ -1570,7 +1570,7 @@ func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
 }
 
 // TestMCPToolsByProfile pins the exact registered-tool set for all profiles:
-// ProfileFull remains all 44 tools, ProfileCore remains its shipped 26-tool
+// ProfileFull remains all 45 tools, ProfileCore remains its shipped 26-tool
 // inventory, and ProfileAgent is the separately versioned taught workflow.
 func TestMCPToolsByProfile(t *testing.T) {
 	t.Run("full", func(t *testing.T) {

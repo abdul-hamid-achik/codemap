@@ -219,7 +219,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd, serveCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd,
-		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, taskContextCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured

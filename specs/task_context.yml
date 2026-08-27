@@ -1,0 +1,65 @@
+version: 1
+name: task_context
+intent: |
+    a mode-scoped task orientation lands as one bounded call on both surfaces:
+    `codemap task-context <task> --mode understand|change|debug` (alias `brief`)
+    and the full-profile MCP tool codemap_task_context. The task text is used
+    verbatim as the retrieval query (intent is never interpreted); understand
+    returns freshness + explore neighborhoods only; change with --at adds brief
+    context bundles, impact drill-downs with true totals before capping, and
+    related files; `review` is not a mode (that stays codemap review) and
+    selectors are rejected in understand mode with invalid_input. Freshness is
+    always assembled-and-flagged, never acted on.
+target:
+    cmd:
+        - "/bin/sh"
+        - "-lc"
+        - "ROOT=$(pwd); TMP=$(mktemp -d); export HOME=\"$TMP/home\"; export CODEMAP_DATA=\"$TMP/data\"; P=\"$TMP/proj\"; mkdir -p \"$HOME\" \"$P\" \"$TMP/cold\"; printf 'module example.com/taskctx\n\ngo 1.25\n' > \"$P/go.mod\"; printf 'package sample\n\nfunc Hub() {}\n\nfunc Entry() { Hub() }\n' > \"$P/main.go\"; { echo 'package sample'; echo; for i in $(seq 0 29); do echo \"func C$i() { Hub() }\"; done; } > \"$P/hub30.go\"; cd \"$P\"; CM=\"$ROOT/bin/codemap\"; \"$CM\" index --no-embed --no-lsp >/dev/null 2>&1; \"$CM\" task-context Hub --mode understand --json > \"$TMP/u.json\" && grep -q '\"schema_version\": 1' \"$TMP/u.json\" && grep -q '\"mode\": \"understand\"' \"$TMP/u.json\" && grep -q '\"explore\"' \"$TMP/u.json\" && grep -q '\"freshness\"' \"$TMP/u.json\" && grep -q '\"checked\": true' \"$TMP/u.json\" && echo UNDERSTAND_OK; \"$CM\" task-context 'make Hub safer' --mode change --at main.go:3 --json > \"$TMP/c.json\" && grep -q '\"targets\"' \"$TMP/c.json\" && grep -q '\"source\": \"selector\"' \"$TMP/c.json\" && grep -q '\"source_omitted\": true' \"$TMP/c.json\" && grep -q '\"direct_callers_total\": 3[0-9]' \"$TMP/c.json\" && grep -q '\"related_files\"' \"$TMP/c.json\" && echo CHANGE_OK; \"$CM\" brief Hub --json > \"$TMP/b.json\" && grep -q '\"mode\": \"understand\"' \"$TMP/b.json\" && echo ALIAS_OK; \"$CM\" task-context Hub --mode debug --json > \"$TMP/d.json\" && grep -q '\"mode\": \"debug\"' \"$TMP/d.json\" && grep -q '\"contexts\"' \"$TMP/d.json\" && echo DEBUG_OK; \"$CM\" task-context x --mode review --json > \"$TMP/r.json\" 2>/dev/null; test $? -eq 1 && grep -q '\"code\": \"invalid_input\"' \"$TMP/r.json\" && echo REVIEW_REJECTED; \"$CM\" task-context x --at main.go:3 --json > \"$TMP/s.json\" 2>/dev/null; test $? -eq 1 && grep -q '\"code\": \"invalid_input\"' \"$TMP/s.json\" && echo SELECTORS_REJECTED; cd \"$TMP/cold\"; \"$CM\" task-context anything --json > \"$TMP/n.json\" 2>/dev/null; test $? -eq 2 && grep -q '\"code\": \"not_indexed\"' \"$TMP/n.json\" && echo NOT_INDEXED_OK"
+    cwd: "."
+terminal:
+    cols: 100
+    rows: 24
+    profile: xterm-256color
+steps:
+    - wait:
+        process:
+            exitCode: 0
+        timeoutMs: 30000
+    - snapshot: task_context
+outcomes:
+    - id: understand_mode
+      description: understand returns schema_version 1 with freshness and explore, no change sections required
+      verify:
+        screen:
+            contains: "UNDERSTAND_OK"
+    - id: change_mode
+      description: change with --at yields exact selector targets, brief contexts, impact totals above the 25-cap, and related files
+      verify:
+        screen:
+            contains: "CHANGE_OK"
+    - id: brief_alias
+      description: the brief alias runs the same command
+      verify:
+        screen:
+            contains: "ALIAS_OK"
+    - id: debug_mode
+      description: debug assembles explore plus edge-capped contexts
+      verify:
+        screen:
+            contains: "DEBUG_OK"
+    - id: review_rejected
+      description: mode review exits 1 with the invalid_input envelope pointing at codemap review
+      verify:
+        screen:
+            contains: "REVIEW_REJECTED"
+    - id: selectors_rejected_in_understand
+      description: --at without change/debug exits 1 invalid_input, not an exit-2 miss
+      verify:
+        screen:
+            contains: "SELECTORS_REJECTED"
+    - id: not_indexed_envelope
+      description: an unindexed project exits 2 with the not_indexed envelope
+      verify:
+        screen:
+            contains: "NOT_INDEXED_OK"
+contractHash: sha256:26c1df78029d482eb33b01a7fd455c5bb5e696d32004383e73c4ad649d9c8298

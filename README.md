@@ -400,14 +400,14 @@ Once connected, an agent can call `codemap_docs` to learn the tools and workflow
 
 `CODEMAP_MCP_PROFILE=agent` selects exactly the 26-tool surface derived from the taught agent
 workflow (25 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
-today; the default `full` profile remains the explicit 44-tool expert/admin surface. See
+today; the default `full` profile remains the explicit 45-tool expert/admin surface. See
 [MCP tool profiles](docs/mcp.md#tool-profiles) for the measured schema cost and precedence rules.
 
-Tools (44): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+Tools (45): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
 `codemap_file_context`, `codemap_refactor_plan`, `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
 `codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_read_order`,
-`codemap_map`, `codemap_explore`, `codemap_traverse`, `codemap_path`,
+`codemap_map`, `codemap_explore`, `codemap_traverse`, `codemap_task_context`, `codemap_path`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_grep`, `codemap_source`,
 `codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,
