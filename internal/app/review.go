@@ -421,21 +421,33 @@ func mapReviewChangedFiles(rep *ReviewReport, changed []git.ChangedFile, lookup 
 				syms = nil
 			}
 		}
-		if structural && cf.Status != "D" && cf.DeletedLines > 0 {
-			code := "deletion_hunk_unmapped"
-			if len(cf.Hunks) == 0 {
-				code = "deletion_only_hunk"
+		if structural && cf.Status != "D" {
+			// Classify pure-deletion hunks instead of blanket-erroring every diff
+			// that removes a line. Deleted lines either (a) sat inside a surviving
+			// symbol — mapped below via deletionStraddled, so the enclosing symbol
+			// is analyzed; (b) removed a recognized declaration — the
+			// removed-definition error, whose prior callers really are unanalyzable;
+			// or (c) belong to no symbol at all (blank lines, comments, imports
+			// between definitions) — informational, never a partial error. Only a
+			// structural file whose symbols could not be read at all (lookup error,
+			// already reported, or a file with zero indexed definitions) keeps the
+			// conservative deletion codes: its deletions cannot be classified.
+			switch {
+			case len(cf.RemovedDefinitions) > 0:
+				rep.addPartialError(ReviewPartialError{
+					Stage: "mapping", Code: "removed_definition_unavailable", File: cf.Path,
+					Message: fmt.Sprintf("%d old definition(s) are absent from the post-image hunk and cannot be analyzed from the current index", len(cf.RemovedDefinitions)),
+				})
+			case cf.DeletedLines > 0 && err == nil && len(syms) == 0:
+				code := "deletion_hunk_unmapped"
+				if len(cf.Hunks) == 0 {
+					code = "deletion_only_hunk"
+				}
+				rep.addPartialError(ReviewPartialError{
+					Stage: "mapping", Code: code, File: cf.Path,
+					Message: fmt.Sprintf("%d deleted line(s) have no post-image range and cannot be mapped to an enclosing symbol", cf.DeletedLines),
+				})
 			}
-			rep.addPartialError(ReviewPartialError{
-				Stage: "mapping", Code: code, File: cf.Path,
-				Message: fmt.Sprintf("%d deleted line(s) have no post-image range and cannot be mapped to an enclosing symbol", cf.DeletedLines),
-			})
-		}
-		if structural && cf.Status != "D" && cf.DeletedLines == 0 && len(cf.RemovedDefinitions) > 0 {
-			rep.addPartialError(ReviewPartialError{
-				Stage: "mapping", Code: "removed_definition_unavailable", File: cf.Path,
-				Message: fmt.Sprintf("%d old definition(s) are absent from the post-image hunk and cannot be analyzed from the current index", len(cf.RemovedDefinitions)),
-			})
 		}
 		if structural && cf.Renamed && len(syms) == 0 && err == nil {
 			rep.addPartialError(ReviewPartialError{
@@ -458,7 +470,7 @@ func mapReviewChangedFiles(rep *ReviewReport, changed []git.ChangedFile, lookup 
 			// A deleted file has no post-image line ranges. Treat every retained
 			// definition as changed; modified/added files still use exact hunks.
 			wholeFile := cf.Status == "D" || cf.Status == "?" || cf.Renamed
-			if !wholeFile && !symbolTouched(s, cf.Hunks) {
+			if !wholeFile && !symbolTouched(s, cf.Hunks) && !deletionStraddled(s, cf.DeletionPoints) {
 				continue
 			}
 			key := symKey(s.FQN, s.File, s.StartLine)
@@ -535,6 +547,32 @@ func symbolTouched(s SymbolRef, hunks []git.LineRange) bool {
 	}
 	for _, h := range hunks {
 		if h.Overlaps(s.StartLine, end) {
+			return true
+		}
+	}
+	return false
+}
+
+// deletionStraddled reports whether any pure-deletion point falls inside the
+// symbol's surviving post-image span. A pure-deletion hunk contributes no
+// post-image range, but its deletion point locates the edit precisely: git's
+// `+c,0` header reports c = the number of post-image lines strictly before the
+// deleted block, i.e. the last surviving line above it (0 when deleted at the
+// top of the file). The deleted block therefore sat in the gap between
+// post-image lines c and c+1, and a symbol whose span contains BOTH sides of
+// that gap (StartLine <= c && EndLine >= c+1) had lines deleted from inside it,
+// so it changed. c=0 (deleted at the top) and c at EOF never straddle: there is
+// no surviving line on one side of the gap.
+func deletionStraddled(s SymbolRef, points []int) bool {
+	if s.StartLine == 0 {
+		return false
+	}
+	end := s.EndLine
+	if end < s.StartLine {
+		end = s.StartLine
+	}
+	for _, p := range points {
+		if s.StartLine <= p && end >= p+1 {
 			return true
 		}
 	}

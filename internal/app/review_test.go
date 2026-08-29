@@ -264,8 +264,339 @@ func TestReviewPureDeletionHunkIsIncomplete(t *testing.T) {
 	if rep.Risk == nil || rep.Risk.Level != "unknown" {
 		t.Fatalf("pure deletion risk = %+v, want unknown", rep.Risk)
 	}
-	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Stage != "mapping" || rep.PartialErrors[0].Code != "deletion_only_hunk" || rep.PartialErrors[0].File != "a.go" {
+	// The deleted block removed a recognized declaration, so the honest signal is
+	// the removed-definition code (its prior callers are unanalyzable from the
+	// refreshed index), not the generic deletion-hunk mapping artifact.
+	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Stage != "mapping" || rep.PartialErrors[0].Code != "removed_definition_unavailable" || rep.PartialErrors[0].File != "a.go" {
 		t.Fatalf("pure deletion partial_errors = %+v", rep.PartialErrors)
+	}
+}
+
+func TestReviewPureDeletionInsideSurvivingSymbolIsMappedAndComplete(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	baseSource := "package app\n\nfunc Keep() {\n\tfirst()\n\tsecond()\n}\n\nfunc first() {}\nfunc second() {}\n"
+	mustWrite(t, proj, "a.go", baseSource)
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Delete one body line — a pure-deletion hunk whose deleted line sat inside
+	// the surviving Keep definition. The deletion point straddles Keep's
+	// post-image span, so Keep is a changed symbol and the diff is fully mapped.
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Keep() {\n\tfirst()\n}\n\nfunc first() {}\nfunc second() {}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale {
+		t.Fatalf("fixture must be fresh after reindex, got staleness %+v", rep.Staleness)
+	}
+	if !hasSymbol(rep.ChangedSymbols, "Keep") {
+		t.Fatalf("pure body deletion must map to the enclosing symbol, got %+v", rep.ChangedSymbols)
+	}
+	if len(rep.PartialErrors) != 0 || !rep.AnalysisComplete {
+		t.Fatalf("pure body deletion inside a symbol = errors:%+v complete:%v — an ordinary edit must not read as incomplete analysis", rep.PartialErrors, rep.AnalysisComplete)
+	}
+	if rep.Risk == nil || rep.Risk.Level == "unknown" {
+		t.Fatalf("complete deletion review must carry a real risk band, got %+v", rep.Risk)
+	}
+	if strings.Contains(rep.Note, "review analysis is incomplete") {
+		t.Fatalf("mapped deletion must not print the incomplete-analysis note: %q", rep.Note)
+	}
+	if rep.Gate == nil || rep.Gate.WouldFailOn.IncompleteAnalysis {
+		t.Fatalf("complete deletion review must not trip the incomplete-analysis gate: %+v", rep.Gate)
+	}
+}
+
+func TestReviewDeletionOutsideSymbolsIsInformational(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	baseSource := "package app\n\nfunc A() {}\n\nfunc B() {}\n"
+	mustWrite(t, proj, "a.go", baseSource)
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Delete the blank line between the two definitions. The deleted line
+	// belongs to no symbol, so there is nothing to analyze — informational,
+	// never a partial error that would fail the review gates closed.
+	mustWrite(t, proj, "a.go", "package app\n\nfunc A() {}\nfunc B() {}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale {
+		t.Fatalf("fixture must be fresh after reindex, got staleness %+v", rep.Staleness)
+	}
+	if len(rep.PartialErrors) != 0 || !rep.AnalysisComplete {
+		t.Fatalf("no-symbol deletion = errors:%+v complete:%v — deleted lines that belong to no symbol are informational", rep.PartialErrors, rep.AnalysisComplete)
+	}
+	if rep.TotalSymbols != 0 || rep.Risk != nil {
+		t.Fatalf("no-symbol deletion should analyze nothing, got total:%d risk:%+v", rep.TotalSymbols, rep.Risk)
+	}
+	if strings.Contains(rep.Note, "review analysis is incomplete") {
+		t.Fatalf("informational deletion must not print the incomplete-analysis note: %q", rep.Note)
+	}
+	if rep.Gate == nil || rep.Gate.WouldFailOn.IncompleteAnalysis {
+		t.Fatalf("informational deletion must not trip the incomplete-analysis gate: %+v", rep.Gate)
+	}
+}
+
+func TestReviewBlankLineDeletionBetweenMultiLineSymbolsIsInformational(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	baseSource := "package app\n\nfunc Multi() {\n\tone()\n\ttwo()\n}\n\nfunc Other() {\n\tthree()\n}\n"
+	mustWrite(t, proj, "a.go", baseSource)
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Delete ONLY the blank line between the two multi-line definitions (git
+	// emits `@@ -7 +6,0 @@` — the deleted line sat between post-image lines 6
+	// and 7, i.e. after Multi's closing brace and before Other). It belongs to
+	// no symbol: Multi must NOT be mapped (its last line is 6, not 7), or a
+	// formatting-only deletion would fail the gates closed again.
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Multi() {\n\tone()\n\ttwo()\n}\nfunc Other() {\n\tthree()\n}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale {
+		t.Fatalf("fixture must be fresh after reindex, got staleness %+v", rep.Staleness)
+	}
+	if len(rep.ChangedSymbols) != 0 || hasSymbol(rep.ChangedSymbols, "Multi") {
+		t.Fatalf("blank-line deletion between multi-line symbols must map nothing, got %+v", rep.ChangedSymbols)
+	}
+	if len(rep.PartialErrors) != 0 || !rep.AnalysisComplete {
+		t.Fatalf("blank-line deletion = errors:%+v complete:%v — a between-symbol deletion is informational", rep.PartialErrors, rep.AnalysisComplete)
+	}
+	if strings.Contains(rep.Note, "review analysis is incomplete") {
+		t.Fatalf("informational deletion must not print the incomplete-analysis note: %q", rep.Note)
+	}
+	if rep.Gate == nil || rep.Gate.WouldFailOn.IncompleteAnalysis || rep.Gate.WouldFailOn.Untested {
+		t.Fatalf("blank-line deletion must leave every gate clean: %+v", rep.Gate)
+	}
+}
+
+func TestReviewFirstBodyLineDeletionMapsSymbol(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	baseSource := "package app\n\nfunc Multi() {\n\tone()\n\ttwo()\n}\n\nfunc Other() {\n\tthree()\n}\n"
+	mustWrite(t, proj, "a.go", baseSource)
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Delete Multi's FIRST body line (old line 4; git emits `@@ -4 +3,0 @@` —
+	// the deleted line sat between post-image lines 3 and 4, i.e. directly
+	// after Multi's declaration line). The gap falls inside Multi's span
+	// [3,5], so Multi is a changed symbol — anything else analyzes nothing for
+	// an in-symbol edit and passes the gate open.
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Multi() {\n\ttwo()\n}\n\nfunc Other() {\n\tthree()\n}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale {
+		t.Fatalf("fixture must be fresh after reindex, got staleness %+v", rep.Staleness)
+	}
+	if !hasSymbol(rep.ChangedSymbols, "Multi") {
+		t.Fatalf("first-body-line deletion must map the enclosing symbol, got %+v", rep.ChangedSymbols)
+	}
+	if len(rep.PartialErrors) != 0 || !rep.AnalysisComplete {
+		t.Fatalf("first-body-line deletion = errors:%+v complete:%v — an in-symbol deletion is an ordinary mapped edit", rep.PartialErrors, rep.AnalysisComplete)
+	}
+	if rep.Gate == nil || rep.Gate.WouldFailOn.IncompleteAnalysis {
+		t.Fatalf("mapped in-symbol deletion must not trip the incomplete-analysis gate: %+v", rep.Gate)
+	}
+}
+
+func TestReviewDeletionAtEOFAfterLastSymbolIsInformational(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	baseSource := "package app\n\nfunc Multi() {\n\tone()\n\ttwo()\n}\n\nfunc Other() {\n\tthree()\n}\n\n"
+	mustWrite(t, proj, "a.go", baseSource)
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Delete the trailing blank line after the last definition (git emits
+	// `@@ -11 +10,0 @@` — nothing survives below the gap, so no symbol can
+	// contain both sides). EOF deletions after the last symbol belong to no
+	// symbol: informational, never a partial error.
+	mustWrite(t, proj, "a.go", "package app\n\nfunc Multi() {\n\tone()\n\ttwo()\n}\n\nfunc Other() {\n\tthree()\n}\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale {
+		t.Fatalf("fixture must be fresh after reindex, got staleness %+v", rep.Staleness)
+	}
+	if len(rep.PartialErrors) != 0 || !rep.AnalysisComplete || len(rep.ChangedSymbols) != 0 {
+		t.Fatalf("EOF deletion after last symbol = errors:%+v complete:%v symbols:%+v — informational, nothing to analyze", rep.PartialErrors, rep.AnalysisComplete, rep.ChangedSymbols)
+	}
+	if strings.Contains(rep.Note, "review analysis is incomplete") {
+		t.Fatalf("EOF deletion must not print the incomplete-analysis note: %q", rep.Note)
+	}
+}
+
+func TestReviewDeletionInFileWithoutIndexedSymbolsStaysPartial(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "c.go", "package app\n\n// TODO cleanup\n")
+	reviewGit(t, proj, "init")
+	reviewGit(t, proj, "config", "user.email", "t@t")
+	reviewGit(t, proj, "config", "user.name", "t")
+	reviewGit(t, proj, "config", "commit.gpgsign", "false")
+	reviewGit(t, proj, "add", "-A")
+	reviewGit(t, proj, "commit", "-m", "base")
+	base, err := git.HeadSHA(context.Background(), proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// A structural file with no indexed definitions: deleted lines there cannot
+	// be classified (excluded from the index or predating it), so the
+	// conservative mapping error must remain.
+	mustWrite(t, proj, "c.go", "package app\n")
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := svc.Review(proj, ReviewOpts{Mode: "since", Since: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stale {
+		t.Fatalf("fixture must be fresh after reindex, got staleness %+v", rep.Staleness)
+	}
+	if rep.AnalysisComplete || rep.Risk == nil || rep.Risk.Level != "unknown" {
+		t.Fatalf("unclassifiable deletion = complete:%v risk:%+v, want incomplete with unknown risk", rep.AnalysisComplete, rep.Risk)
+	}
+	if len(rep.PartialErrors) != 1 || rep.PartialErrors[0].Code != "deletion_only_hunk" || rep.PartialErrors[0].File != "c.go" {
+		t.Fatalf("unclassifiable deletion partial_errors = %+v", rep.PartialErrors)
 	}
 }
 

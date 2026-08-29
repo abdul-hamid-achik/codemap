@@ -26,14 +26,20 @@ func (r LineRange) Overlaps(start, end int) bool {
 // ChangedFile is one file in a diff with the changed line ranges in its new image.
 // Status is the single-letter git status: "A" added, "M" modified, "D" deleted,
 // "?" untracked. Rename metadata is additive while Status remains "M" for
-// compatibility. DeletedLines counts pure-deletion hunks; RemovedDefinitions
-// records syntactically recognized callable/type declarations removed by mixed
-// or equal-count hunks.
+// compatibility. DeletedLines counts pure-deletion hunks; DeletionPoints keeps
+// each such hunk's post-image position: git's `+c,0` header reports c = the
+// number of post-image lines strictly before the deleted block (the last
+// surviving line above it, 0 when deleted at the top of the file), so the block
+// sat in the gap between post-image lines c and c+1 — what a consumer needs to
+// tell whether the deleted lines fell inside a surviving symbol. RemovedDefinitions records
+// syntactically recognized callable/type declarations removed by mixed or
+// equal-count hunks.
 type ChangedFile struct {
 	Path               string      `json:"path"`
 	Status             string      `json:"status"`
 	Hunks              []LineRange `json:"hunks,omitempty"`
 	DeletedLines       int         `json:"deleted_lines,omitempty"`
+	DeletionPoints     []int       `json:"deletion_points,omitempty"`
 	RemovedDefinitions []string    `json:"removed_definitions,omitempty"`
 	Renamed            bool        `json:"renamed,omitempty"`
 	OldPath            string      `json:"old_path,omitempty"`
@@ -145,6 +151,7 @@ func mergeChangedFiles(fs []ChangedFile) []ChangedFile {
 		if i, ok := byPath[f.Path]; ok {
 			out[i].Hunks = append(out[i].Hunks, f.Hunks...)
 			out[i].DeletedLines += f.DeletedLines
+			out[i].DeletionPoints = append(out[i].DeletionPoints, f.DeletionPoints...)
 			out[i].RemovedDefinitions = append(out[i].RemovedDefinitions, f.RemovedDefinitions...)
 			if f.Renamed {
 				out[i].Renamed = true
@@ -233,6 +240,13 @@ func parseUnifiedDiff(out string) []ChangedFile {
 				}
 				if newCount <= 0 {
 					cur.DeletedLines += oldCount
+					// start counts the post-image lines strictly BEFORE the
+					// deleted block — the last surviving line above it (0 when
+					// the block began at the top of the file). The deleted
+					// block sat in the gap between post-image lines start and
+					// start+1; that gap is the deletion point a consumer needs
+					// to place the block relative to surviving symbols.
+					cur.DeletionPoints = append(cur.DeletionPoints, start)
 					continue
 				}
 				if start <= 0 {

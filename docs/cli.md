@@ -335,16 +335,20 @@ isn't a git repo; hard-failure error envelopes are separate from the success sch
 
 `analysis_complete` is false when the index is stale, a supporting stage fails, an individual
 symbol cannot be analyzed, deleted definitions are unavailable, or the 200-symbol work cap omits part of the
-diff. Fresh indexed untracked source files and exact source-file renames are mapped as whole files
+diff. Pure-deletion hunks are classified before they can make a review incomplete: a deleted block that fell
+inside a surviving symbol's span maps to that symbol (it is analyzed), deleted lines that belong to no symbol
+at all (blank lines, comments, imports — in the gaps between definitions or at the top/end of the file) are
+informational, and only a removed declaration or an unclassifiable file is an error. Fresh indexed untracked source files and exact source-file renames are mapped as whole files
 because they have no post-image hunks; an empty renamed source file remains partial. Documentation,
 assets, and configuration files stay visible in `changed_files` but do not create structural mapping errors. Compare `total_symbols`,
 `analyzed_symbols`, and `truncated_symbols`; bounded
 `partial_errors` entries carry stable `stage`/`code` fields plus an actionable message. An
 incomplete review's aggregate `risk.level` is always `unknown`, even when the successfully
 analyzed subset produced a numeric score. Mapping-stage codes distinguish a failed symbol lookup
-(`symbol_mapping_failed`), a structural-source pure-deletion hunk with no post-image line range
-(`deletion_only_hunk` or `deletion_hunk_unmapped` when the file also has mapped hunks), a recognized
-callable or type declaration line removed from structural source by a mixed/equal-count hunk
+(`symbol_mapping_failed`), a structural-source pure-deletion hunk whose file has no indexed symbols to
+classify it against (`deletion_only_hunk` when the file has no mapped hunks, `deletion_hunk_unmapped`
+otherwise), a recognized
+callable or type declaration line removed from structural source by any hunk shape
 (`removed_definition_unavailable`), and an exact structural-source rename whose new path has no
 indexed symbols (`rename_unmapped`). These signals prevent a
 successfully mapped post-image subset from hiding old definitions that review could not analyze.

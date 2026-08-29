@@ -383,9 +383,12 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   analysis is incomplete, otherwise `low`/`medium`/`high`. `analysis_complete` and the additive
   `total_symbols`/`analyzed_symbols`/`truncated_symbols` counts expose staleness, the 200-symbol work cap, and
   any bounded structured `partial_errors` (including failed structural-source symbol mapping, deletion-only source hunks
-  with no post-image range, recognized callable/type declaration lines removed in mixed or equal-count source hunks, and
-  exact source renames with no mapped symbols), so a successful subset never looks authoritative for
-  the whole diff. The `blast_radius`/`covering_tests` elements are `ImpactNode` objects
+  in files with no indexed symbols to classify them against, recognized callable/type declaration lines removed by any hunk
+  shape, and exact source renames with no mapped symbols), so a successful subset never looks authoritative for
+  the whole diff. Pure-deletion hunks in files whose symbols are readable are classified first: deletions inside a
+  surviving symbol's span map to that symbol (it is analyzed), and deletions belonging to no symbol (blank/comment/import
+  lines in the gaps between definitions, or at the top/end of the file) are informational — an ordinary edit that removes
+  lines no longer reads as incomplete analysis. The `blast_radius`/`covering_tests` elements are `ImpactNode` objects
   (`symbol`/`fqn`/`kind`/`file`/`start_line`/`depth`; no `end_line`) — the stable element shape.
   Successful review JSON always emits `schema_version: 1` and is governed by
   `schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case; additive optional fields

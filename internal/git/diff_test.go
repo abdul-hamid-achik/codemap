@@ -213,11 +213,16 @@ func TestParseUnifiedDiffQuotedDelete(t *testing.T) {
 }
 
 func TestParseUnifiedDiffPreservesPureDeletionCount(t *testing.T) {
+	// Verbatim `git diff -U0 --no-color` output for removing a blank line plus
+	// a 3-line function (old lines 4-7) from a 4-line prefix: git emits the
+	// post-image start 3 — the LAST SURVIVING LINE ABOVE the deleted block, so
+	// the block sat between post-image lines 3 and 4.
 	sample := "diff --git a/f.go b/f.go\n" +
 		"index 1111111..2222222 100644\n" +
 		"--- a/f.go\n" +
 		"+++ b/f.go\n" +
-		"@@ -5,3 +4,0 @@ func Removed() {\n" +
+		"@@ -4,4 +3,0 @@ func Keep() {}\n" +
+		"-\n" +
 		"-func Removed() {\n" +
 		"-  work()\n" +
 		"-}\n"
@@ -225,8 +230,38 @@ func TestParseUnifiedDiffPreservesPureDeletionCount(t *testing.T) {
 	if f == nil {
 		t.Fatal("f.go should be reported")
 	}
-	if len(f.Hunks) != 0 || f.DeletedLines != 3 {
-		t.Fatalf("pure-deletion metadata = hunks:%+v deleted_lines:%d, want no post-image hunk and 3 deleted lines", f.Hunks, f.DeletedLines)
+	if len(f.Hunks) != 0 || f.DeletedLines != 4 {
+		t.Fatalf("pure-deletion metadata = hunks:%+v deleted_lines:%d, want no post-image hunk and 4 deleted lines", f.Hunks, f.DeletedLines)
+	}
+	// The deletion point (last surviving post-image line above the deleted
+	// block) is what lets review decide whether the deleted lines fell inside a
+	// surviving symbol — keep it alongside the aggregate count.
+	if len(f.DeletionPoints) != 1 || f.DeletionPoints[0] != 3 {
+		t.Fatalf("pure-deletion points = %+v, want [3] (deleted block sat between post-image lines 3 and 4)", f.DeletionPoints)
+	}
+}
+
+func TestParseUnifiedDiffRecordsDeletionPointsPerHunk(t *testing.T) {
+	// Verbatim `git diff -U0 --no-color` output (hunk-context suffixes kept as
+	// git printed them) for two deletions in one file: a body line inside
+	// Multi (old line 4; 3 survivors above → +3,0) and the blank line between
+	// Multi and Other (old line 7; 5 post-image survivors above after the first
+	// deletion → +5,0). Both points must be preserved in order so review can
+	// classify each block independently.
+	sample := "diff --git a/f.go b/f.go\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/f.go\n" +
+		"+++ b/f.go\n" +
+		"@@ -4 +3,0 @@ func Multi() {\n" +
+		"-\tone()\n" +
+		"@@ -7 +5,0 @@ func Multi() {\n" +
+		"-\n"
+	f := findFile(parseUnifiedDiff(sample), "f.go")
+	if f == nil {
+		t.Fatal("f.go should be reported")
+	}
+	if f.DeletedLines != 2 || len(f.DeletionPoints) != 2 || f.DeletionPoints[0] != 3 || f.DeletionPoints[1] != 5 {
+		t.Fatalf("deletion points = %v deleted_lines:%d, want points [3 5] with 2 deleted lines", f.DeletionPoints, f.DeletedLines)
 	}
 }
 
