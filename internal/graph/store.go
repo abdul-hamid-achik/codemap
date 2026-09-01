@@ -213,7 +213,7 @@ func (s *Store) migrate() error {
 
 // addColumnIfMissing adds a column to a table if it isn't already present. It is
 // idempotent and race-safe across the multiple processes that may open the same
-// DB (CLAUDE.md's multi-MCP model): if another process wins the race and adds the
+// DB (AGENTS.md's multi-MCP model): if another process wins the race and adds the
 // column first, SQLite's "duplicate column name" error is treated as success
 // rather than relying on a TOCTOU table_info check.
 func (s *Store) addColumnIfMissing(table, col, decl string) error {

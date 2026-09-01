@@ -6,7 +6,7 @@ intent: |
     breaks Claude Code). This drives a real client lifecycle over a pipe —
     initialize, tools/list, tools/call codemap_docs — and confirms the server
     answers with the right tools (incl. codemap_context) and shuts down cleanly
-    when the client disconnects. Guards CLAUDE.md's #1 gotcha (the stdio framing).
+    when the client disconnects. Guards AGENTS.md's #1 gotcha (the stdio framing).
 target:
     cmd:
         - "/bin/sh"
@@ -44,4 +44,4 @@ outcomes:
       verify:
         screen:
             contains: "serve exit: 0"
-contractHash: sha256:8403191e461350864f2126cd61a5fdfdcfe0cfe0b3fafb0adcb54b390cfa7d68
+contractHash: sha256:a917be47618f66f18206a8dafc0db974f729ad6b115298ef2682b805dcd8804c

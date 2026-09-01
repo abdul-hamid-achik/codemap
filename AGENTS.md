@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Instructions for AI agents (and humans) working on the **codemap** codebase. This is the
-canonical source-of-truth doc; `CLAUDE.md` defers to it. `README.md` is the public-facing
+canonical source-of-truth doc. `README.md` is the public-facing
 intro; product usage lives in `docs/`, including `docs/configuration.md` and the public
 agent guide at `docs/agents.md`. The design rationale (architecture, why-it-is-what-it-is)
 lives in the Obsidian vault at `~/notes/projects/codemap/design-rationale.md`. Live work is
@@ -164,7 +164,7 @@ codemap/
 │                              #   review_deletion/references/studio_annotations/agent_setup/review_gate/task_context
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml .pre-commit-hooks.yaml
 ├── .github/workflows/         # ci.yml + release.yml
-└── README.md AGENTS.md CLAUDE.md LICENSE
+└── README.md AGENTS.md LICENSE
 ```
 
 **Package boundaries are part of the contract.** The dependency direction is one-way:
@@ -182,7 +182,7 @@ for its own MCP package.)
   docs release. CLI binaries ship from tags. Keep public usage/configuration in the relevant
   product pages (`docs/quick-start.md`, `docs/configuration.md`, `docs/agents.md`,
   `docs/mcp.md`, `docs/languages.md`) instead of making users depend on this contributor guide.
-- Repo root carries exactly these markdown files: `README.md`, `AGENTS.md`, `CLAUDE.md`.
+- Repo root carries exactly these markdown files: `README.md`, `AGENTS.md`.
   **Do not** create scratch / handoff / TODO / design `.md` files anywhere in the repo.
   (Design rationale lives in the vault: `design-rationale.md`.)
   The discipline restricts only root `.md` files: `.claude-plugin/marketplace.json` at the
@@ -480,7 +480,7 @@ version; never break an existing index without a rebuild path.
 state/keys in `model.go` (there is no `update.go` — model.go holds the update logic; no
 `tab_*.go` convention). Use Charm **v2** (`charm.land/...`). For charts use the hand-rolled
 ASCII bars + the harmonica spring frame loop in `anim.go` — **not** ntcharts (its go.mod
-`replace`s bubbletea to a fork that fights stock `charm.land/bubbletea/v2`; see CLAUDE.md).
+`replace`s bubbletea to a fork that fights stock `charm.land/bubbletea/v2`; see the Gotchas section).
 
 ## Code Style
 
@@ -506,6 +506,25 @@ ASCII bars + the harmonica spring frame loop in `anim.go` — **not** ntcharts (
 for CI/release verification. Then `task build` → `task flows` if specs changed. Keep docs
 discipline (no stray `.md`; product docs in `docs/`, notes in `~/notes`). Commit/push only
 when the user asks.
+
+## Gotchas (learned the hard way)
+
+- **Lazy-open the DB.** Don't open SQLite/veclite at startup — multiple MCP clients spawn
+  multiple servers and would fight over the lock. Open on first query.
+- **Detect cycles in graph traversal.** Call graphs have cycles; every BFS/DFS needs a
+  visited set or it loops forever (`graph_path`, `blast_radius`).
+- **veclite payload vs content**: filterable fields (`path`, `lang`, `kind`, `node_id`) go
+  in Payload; the embeddable/searchable source text goes in Content (or a `WithTextIndex`
+  field). `HybridSearch` needs a text index enabled.
+- **Tree-sitter is planned, not present.** Do not describe it as a current backend. If it
+  is introduced, use the official `github.com/tree-sitter/go-tree-sitter` (not the
+  abandoned `smacker` fork) and keep the default release pure-Go.
+- **Flows are local-only (CI skips them)**, and each needs its toolchain:
+  `studio.yml`→`gopls` · `semantic.yml`→local Ollama with `nomic-embed-text` ·
+  `precise.yml`→`go` (runs `index --precise`) · `typescript.yml`/`javascript.yml`/`jsx.yml`/
+  `studio_ts.yml`→`typescript-language-server`+`node` · `python.yml`→`pyright-langserver`+
+  `node` · `polyglot.yml`→all of them. The toolchain-dependent flows only isolate
+  `CODEMAP_DATA`, not `HOME`, so an asdf shim still resolves.
 
 ## Related projects (Obsidian wikilinks)
 
