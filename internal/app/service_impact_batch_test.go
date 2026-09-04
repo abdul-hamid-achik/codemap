@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestImpactPositionsPartialSuccessPreservesOrder(t *testing.T) {
 	svc, proj := relatedProj(t)
@@ -119,5 +123,26 @@ func TestImpactPositionsUnindexed(t *testing.T) {
 	}
 	if rep.Indexed || rep.Requested != 1 || rep.Processed != 0 || len(rep.Results) != 0 {
 		t.Fatalf("unindexed batch = %+v", rep)
+	}
+}
+
+func TestImpactBatchFreshnessTracksWorkingTree(t *testing.T) {
+	svc, root := relatedProj(t)
+	selectors := []SymbolSelector{{File: "a.go", StartLine: 2}}
+	before, err := svc.ImpactBatch(root, selectors, 3)
+	if err != nil || !before.Freshness.Checked || before.Freshness.Stale {
+		t.Fatalf("before=%+v err=%v", before, err)
+	}
+	path := filepath.Join(root, "a.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, []byte("\n// changed\n")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	after, err := svc.ImpactBatch(root, selectors, 3)
+	if err != nil || !after.Freshness.Checked || !after.Freshness.Stale || !after.Results[0].Found {
+		t.Fatalf("after=%+v err=%v", after, err)
 	}
 }

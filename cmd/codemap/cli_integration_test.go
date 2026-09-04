@@ -207,6 +207,17 @@ func TestCLIContracts(t *testing.T) {
 		if res.exit != 0 || res.stderr != "" {
 			t.Fatalf("single impact batch exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
 		}
+		selected := runCLI(t, bin, runner, env, "impact", "-C", project, "--selector", `{"file":"main.go","start_line":3}`, "--json")
+		if selected.exit != 0 {
+			t.Fatalf("selector batch: %s %s", selected.stdout, selected.stderr)
+		}
+		var selectedBatch app.ImpactBatchReport
+		if err := json.Unmarshal([]byte(selected.stdout), &selectedBatch); err != nil {
+			t.Fatal(err)
+		}
+		if len(selectedBatch.Results) != 1 || !selectedBatch.Results[0].Found || !selectedBatch.Freshness.Checked {
+			t.Fatalf("selector batch=%+v", selectedBatch)
+		}
 		var single app.ImpactBatchReport
 		mustJSON(t, res.stdout, &single)
 		if single.Requested != 1 || single.Processed != 1 || len(single.Results) != 1 || !single.Results[0].Found {

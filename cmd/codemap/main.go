@@ -165,6 +165,7 @@ func init() {
 	_ = calleesCmd.Flags().MarkHidden("lsp")
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	impactCmd.Flags().StringArray("at", nil, "resolve the symbol from a position (repeatable for batch): <file>:<line> — pass several to batch impact across multiple frames")
+	impactCmd.Flags().StringArray("selector", nil, "durable source selector as JSON (repeatable); preserves file, fqn, kind and start_line across reindex")
 	impactCmd.Flags().Bool("batch", false, "always return the stable batch envelope, including for one --at; position misses are item-level results")
 	reviewCmd.Flags().Int("depth", 3, "max hops for each changed symbol's blast radius")
 	reviewCmd.Flags().String("since", "", "review everything changed since this git ref (committed + uncommitted)")

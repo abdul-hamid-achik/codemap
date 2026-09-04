@@ -434,3 +434,21 @@ The non-zero exit codes follow a documented taxonomy:
 
 So a consumer can map `code`→action deterministically either way (the JSON `code`
 matches the exit-code suffix) for exit codes 0-5; exit 6 is exit-code-only by design.
+
+### Durable impact batches
+
+For hits returned by Vecgrep's structural chunks, pass each `selector` unchanged:
+
+```sh
+codemap impact --selector '{"file":"main.go","start_line":12,"fqn":"main.Run","kind":"function"}' --json
+```
+
+Repeat `--selector` for up to 25 definitions. It always returns the ordered batch
+shape, including for one selector. It cannot be combined with positional names
+or `--at`. Each JSON selector is bounded to 16 KiB and rejects unknown fields.
+File, FQN and kind retain identity across ordinary line shifts after reindexing.
+
+Impact batches (`--selector`, repeated `--at`, or `--at --batch`) include
+`freshness.checked` and `freshness.stale`. A false `checked` is unknown freshness,
+not a fresh index. This is a working-tree observation, not a transaction spanning
+concurrent edits. Check each item's `found` and `call_graph` independently.

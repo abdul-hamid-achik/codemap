@@ -3,7 +3,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -252,6 +254,14 @@ func contextOrAtArgs(cmd *cobra.Command, args []string) error {
 }
 
 func impactArgs(cmd *cobra.Command, args []string) error {
+	selectors, _ := cmd.Flags().GetStringArray("selector")
+	if len(selectors) > 0 {
+		ats, _ := cmd.Flags().GetStringArray("at")
+		if len(args) > 0 || len(ats) > 0 {
+			return fmt.Errorf("--selector cannot be combined with --at or positional symbols")
+		}
+		return nil
+	}
 	ats, _ := cmd.Flags().GetStringArray("at")
 	batch, _ := cmd.Flags().GetBool("batch")
 	if len(ats) > 0 {
@@ -507,6 +517,33 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		symbol = args[0]
 	}
+	rawSelectors, _ := cmd.Flags().GetStringArray("selector")
+	if len(rawSelectors) > 0 {
+		selectors := make([]app.SymbolSelector, 0, len(rawSelectors))
+		for _, raw := range rawSelectors {
+			var selector app.SymbolSelector
+			if len(raw) > 16*1024 {
+				return fmt.Errorf("selector exceeds 16 KiB")
+			}
+			decoder := json.NewDecoder(strings.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&selector); err != nil {
+				return fmt.Errorf("decode selector: %w", err)
+			}
+			if err := decoder.Decode(new(any)); err != io.EOF {
+				return fmt.Errorf("selector must contain one JSON object")
+			}
+			if strings.TrimSpace(selector.File) == "" || (selector.StartLine <= 0 && strings.TrimSpace(selector.FQN) == "") {
+				return fmt.Errorf("selector requires file and a positive start_line or fqn")
+			}
+			selectors = append(selectors, selector)
+		}
+		rep, err := svc.ImpactBatch(cwd, selectors, depth)
+		if err != nil {
+			return err
+		}
+		return renderImpactBatch(cmd, rep)
+	}
 	ats, _ := cmd.Flags().GetStringArray("at")
 	positions := make([]app.FilePosition, 0, len(ats))
 	for _, at := range ats {
@@ -610,6 +647,10 @@ func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, positions 
 	if err != nil {
 		return err
 	}
+	return renderImpactBatch(cmd, rep)
+}
+
+func renderImpactBatch(cmd *cobra.Command, rep *app.ImpactBatchReport) error {
 	if jsonOut(cmd) {
 		return printJSON(rep)
 	}

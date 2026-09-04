@@ -1,6 +1,9 @@
 package app
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // MaxImpactBatchPositions is the public request bound shared by the service and
 // CLI. Callers should cap before expensive resolution; the service enforces it
@@ -19,6 +22,7 @@ type ImpactBatchReport struct {
 	Truncated int             `json:"truncated,omitempty"`
 	Results   []*ImpactReport `json:"results"`
 	Note      string          `json:"note,omitempty"`
+	Freshness TaskFreshness   `json:"freshness"`
 }
 
 // ImpactPositions resolves raw source positions and computes impact for every
@@ -35,9 +39,15 @@ func (svc *Service) ImpactPositions(cwd string, positions []FilePosition, depth 
 	if !found {
 		return rep, nil
 	}
+	stale, staleErr := svc.Staleness(cwd)
+	if staleErr != nil {
+		rep.Note = "freshness unchecked: " + boundedErrorText(staleErr)
+	} else if stale != nil {
+		rep.Freshness = TaskFreshness{Checked: true, Stale: stale.Any(), Staleness: stale}
+	}
 	if len(positions) > MaxImpactBatchPositions {
 		rep.Truncated = len(positions) - MaxImpactBatchPositions
-		rep.Note = fmt.Sprintf("requested %d positions — resolved the first %d", len(positions), MaxImpactBatchPositions)
+		rep.Note = strings.TrimSpace(rep.Note + " " + fmt.Sprintf("requested %d positions — resolved the first %d", len(positions), MaxImpactBatchPositions))
 		positions = positions[:MaxImpactBatchPositions]
 	}
 	rep.Processed = len(positions)
@@ -96,9 +106,15 @@ func (svc *Service) ImpactBatch(cwd string, selectors []SymbolSelector, depth in
 	if !found {
 		return rep, nil
 	}
+	stale, staleErr := svc.Staleness(cwd)
+	if staleErr != nil {
+		rep.Note = "freshness unchecked: " + boundedErrorText(staleErr)
+	} else if stale != nil {
+		rep.Freshness = TaskFreshness{Checked: true, Stale: stale.Any(), Staleness: stale}
+	}
 	if len(selectors) > MaxImpactBatchPositions {
 		rep.Truncated = len(selectors) - MaxImpactBatchPositions
-		rep.Note = fmt.Sprintf("requested %d positions — resolved the first %d", len(selectors), MaxImpactBatchPositions)
+		rep.Note = strings.TrimSpace(rep.Note + " " + fmt.Sprintf("requested %d positions — resolved the first %d", len(selectors), MaxImpactBatchPositions))
 		selectors = selectors[:MaxImpactBatchPositions]
 	}
 	rep.Processed = len(selectors)
