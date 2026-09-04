@@ -370,6 +370,54 @@ func TestIndexIncremental(t *testing.T) {
 	}
 }
 
+// TestIndexForcePathsReextractsUnchangedFile pins the escape hatch for a file
+// whose hash was recorded during a degraded run (e.g. the LSP parse-wait
+// breaker in lspsrc tripped and it "indexed" with zero symbols): ForcePaths
+// re-extracts a matching file even though its content hash is unchanged,
+// while every non-matching file still takes the normal unchanged/skip path.
+func TestIndexForcePathsReextractsUnchangedFile(t *testing.T) {
+	g, v := newStores(t)
+	dir := setupProject(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plain incremental re-run: nothing changed on disk, ForcePaths unset —
+	// both files stay unchanged (sanity baseline for the assertion below).
+	res, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesIndexed != 0 || res.FilesUnchanged != 2 {
+		t.Fatalf("baseline re-run: indexed=%d unchanged=%d, want 0/2", res.FilesIndexed, res.FilesUnchanged)
+	}
+
+	// Force a.go despite its unchanged content hash: only it re-extracts.
+	res, err = ix.IndexProject(context.Background(), pid, "app", dir, Options{ForcePaths: []string{"a.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesIndexed != 1 || res.FilesUnchanged != 1 {
+		t.Errorf("forced run: indexed=%d unchanged=%d, want 1/1 (only a.go re-extracted)", res.FilesIndexed, res.FilesUnchanged)
+	}
+	if res.Nodes != 5 {
+		t.Errorf("forced run nodes = %d, want stable 5 (re-extracting unchanged content must not change the graph)", res.Nodes)
+	}
+
+	// Reindex still wins outright: ForcePaths is a no-op once the whole
+	// project is already being wiped and rebuilt.
+	res, err = ix.IndexProject(context.Background(), pid, "app", dir, Options{Reindex: true, ForcePaths: []string{"a.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FilesIndexed != 2 || res.FilesUnchanged != 0 {
+		t.Errorf("reindex+forcepaths: indexed=%d unchanged=%d, want 2/0", res.FilesIndexed, res.FilesUnchanged)
+	}
+}
+
 // TestIndexProjectRebuildsInboundEdges pins the full-project incremental path:
 // editing a callee file replaces its nodes (and cascades inbound edges), so
 // unchanged caller files must be re-extracted before edge resolution. IndexFiles

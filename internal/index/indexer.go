@@ -69,6 +69,21 @@ type Options struct {
 	// Same glob semantics as config (bare = any depth, slash = root-anchored,
 	// **/ = any depth).
 	ExcludeExtra []string
+	// ForcePaths re-extracts matching files even when their content hash is
+	// unchanged, ignored when Reindex is already set (which re-extracts
+	// everything). Same glob semantics as ExcludeExtra.
+	//
+	// A file's hash is recorded once it is processed AT ALL, including a run
+	// that hit the LSP parse-wait breaker (see lspsrc.parseWaitGiveUpStreak):
+	// that file "indexed" successfully with zero symbols, and a later
+	// unscoped incremental run sees the unchanged hash and skips it forever —
+	// the degradation is permanent in the graph even after the language
+	// server recovers. ForcePaths is the escape hatch: reindex a narrower,
+	// safe-sized batch (e.g. one subdirectory) and force just that batch's
+	// files through extraction again with a fresh server connection, without
+	// paying a project-wide --reindex (which would also re-embed and re-walk
+	// everything already correct).
+	ForcePaths []string
 	// OnFile, if non-nil, is called once per scanned file just before it is
 	// indexed: done is the 1-based position, total is the number of scanned files
 	// (== Result.FilesScanned), rel is the project-relative path. Used only by the
@@ -1378,7 +1393,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		return false, nil, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
 	}
 
-	if !opts.Reindex {
+	if !opts.Reindex && !matchExclude(opts.ForcePaths, ft.rel) {
 		prev, err := ix.graph.FileHash(projectID, ft.rel)
 		if err != nil {
 			return false, nil, nil, err

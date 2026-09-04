@@ -30,6 +30,7 @@ func registerConfigFlags(root, index, daemonStart, semantic, serve *cobra.Comman
 		c.Flags().StringSlice("exclude-extra", nil, "extra path globs to skip, appended to the configured excludes (e.g. migrations,db/migrations,**/testdata)")
 	}
 	index.Flags().StringSlice("exclude", nil, "path globs to skip, REPLACING the built-in defaults (.git, node_modules, …)")
+	index.Flags().StringSlice("force-extra", nil, "extra path globs to re-extract even if their content hash is unchanged (recovery from a language server that degraded mid-run and left files indexed with zero symbols); same glob semantics as --exclude-extra")
 	index.Flags().Int("max-file-bytes", 1<<20, "skip files larger than this many bytes")
 	index.Flags().Int("embed-batch-size", 64, "node texts sent to the embedder per request")
 	index.Flags().Int("embed-concurrency", 4, "concurrent embedding requests")

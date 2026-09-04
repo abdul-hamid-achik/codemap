@@ -36,6 +36,11 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
 	precise, _ := cmd.Flags().GetBool("precise")
 	noLSP, _ := cmd.Flags().GetBool("no-lsp")
+	// forceExtra is deliberately NOT threaded into daemon.ReindexOpts below: it
+	// is a one-off recovery flag (see index.Options.ForcePaths), not a setting
+	// worth extending the daemon control-socket protocol for. A daemon-owned
+	// index still needs this run direct (stop the daemon first).
+	forceExtra, _ := cmd.Flags().GetStringSlice("force-extra")
 	// If a background daemon already owns the writable handle, delegate the
 	// reindex to it over the control socket (shared daemon.ReindexViaDaemon
 	// guard — the same one MCP and studio use). Opening a second write session
@@ -76,7 +81,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	opts := index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP}
+	opts := index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP, ForcePaths: forceExtra}
 	svc := app.NewService(sess)
 
 	// Auto-restore from fcheap cache before a costly --reindex: if a matching
