@@ -22,6 +22,12 @@ releases page is the authoritative history.
   is the weakest across sections, `partial_errors` is capped at 20 with a truncation count, and
   next actions are advisory only. Contract: `schemas/codemap.task-context.v1.schema.json`
   (envelope-pinned, additive within v1). E2E: `specs/task_context.yml`.
+- **`codemap index --force-extra <glob>`** — re-extracts matching files even when their
+  content hash is unchanged, without paying a project-wide `--reindex`. Recovers a file that
+  was left with an empty symbol set by the parse-wait breaker above: its hash was recorded as
+  processed at the time, so a later plain incremental run skips it forever even after the
+  language server would have recovered on a fresh connection. Same glob semantics as
+  `--exclude-extra`; a no-op once `--reindex` is already set.
 
 ### Fixed
 
