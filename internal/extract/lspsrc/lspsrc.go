@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
@@ -29,11 +30,95 @@ import (
 // server. Bounded, and gated by hasDeclarations so symbol-less files aren't retried.
 const parseWait = 8 * time.Second
 
+// parseWaitGiveUpStreak is how many CONSECUTIVE files may burn the whole
+// parseWait budget without recovering a single symbol before codemap stops
+// betting on the retry entirely for the rest of the run.
+//
+// parseWait is a bet on a TRANSIENT race: the server is parsing, wait and it
+// answers. It is a catastrophic bet against a server that has stopped answering
+// for good. tsserver does exactly that on a large monorepo — after a few
+// thousand didOpen/didClose cycles it starts returning an EMPTY documentSymbol
+// for every file, instantly and without an error. Each file then walks the full
+// backoff ladder (40ms…2s, capped by parseWait) for ~10s of pure sleeping,
+// recovers nothing, and the whole process sits at ~0% CPU — codemap AND the
+// server both idle. Measured on a ~3.8k-file TS/Vue monorepo the server went
+// quiet around file 2.7k, leaving 11+ hours of doing nothing that is
+// indistinguishable from a hang.
+//
+// Three files is the threshold because a genuine parse race is per-file and
+// uncorrelated (in practice a healthy server needs zero retries; a slow one
+// recovers on the first or second), while a dead server fails every file. So
+// the streak costs ~30s once, then the run proceeds at full speed with the
+// same (empty) results it was going to get anyway.
+const parseWaitGiveUpStreak = 3
+
 // Extractor satisfies extract.Extractor (and CallResolver) by driving a language server.
 var (
 	_ extract.Extractor    = (*Extractor)(nil)
 	_ extract.CallResolver = (*Extractor)(nil)
 )
+
+// serverHealth is the parse-wait breaker for ONE language-server connection.
+// It lives behind a pointer shared by the owning Extractor and every Bind()'d
+// extractor, because degradation is a property of the CONNECTION, not of the
+// languageId routed over it: a single typescript-language-server backs
+// "typescript", "javascript" and — through vuesrc's synthetic script-block
+// paths — every .vue file. A per-Extractor counter would need three separate
+// streaks to trip on a repo that interleaves the three.
+type serverHealth struct {
+	mu      sync.Mutex
+	streak  int  // consecutive files that burned all of parseWait and still got nothing
+	tripped bool // breaker open — stop paying parseWait on this connection
+}
+
+// retryAllowed reports whether an empty documentSymbol is still worth waiting
+// on. Nil-safe: an Extractor built by a test literal has no health record and
+// keeps the original always-retry behavior.
+func (h *serverHealth) retryAllowed() bool {
+	if h == nil {
+		return true
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return !h.tripped
+}
+
+// recovered records a file the server answered with symbols — proof it is
+// alive and merely slow, so the streak restarts.
+func (h *serverHealth) recovered() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.streak = 0
+}
+
+// exhausted records a file that spent the whole parseWait budget and still got
+// nothing. Once tripped the breaker STAYS tripped for the rest of the run: a
+// connection that has demonstrated it cannot be trusted with a 10s bet must not
+// be re-offered the bet by the next file that happens to answer, or a server
+// flapping between the two states pays the streak over and over.
+func (h *serverHealth) exhausted() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.streak++
+	if h.streak >= parseWaitGiveUpStreak {
+		h.tripped = true
+	}
+}
+
+func (h *serverHealth) degraded() bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.tripped
+}
 
 // Extractor wraps an LSP session for one language at one project root.
 type Extractor struct {
@@ -41,8 +126,20 @@ type Extractor struct {
 	lang   string // codemap language id (e.g. "typescript")
 	langID string // LSP languageId (e.g. "typescript")
 	root   string // project root, to resolve a relative path to a file:// URI
+	cmd    string // server binary that backs this extractor, for degradation reporting
 	client languageClient
-	shared bool // true for a Bind()'d extractor sharing another's server; it must not close it
+	health *serverHealth // shared with every Bind()'d extractor on the same connection
+	shared bool          // true for a Bind()'d extractor sharing another's server; it must not close it
+	// budget overrides parseWait. Zero means parseWait; only tests set it, so the
+	// breaker's real trip path can be exercised without sleeping for 24 seconds.
+	budget time.Duration
+}
+
+func (e *Extractor) parseBudget() time.Duration {
+	if e.budget > 0 {
+		return e.budget
+	}
+	return parseWait
 }
 
 // languageClient is the narrow LSP port the extractor needs. Keeping it as an
@@ -75,7 +172,7 @@ func New(ctx context.Context, lang, langID, root, command string, args ...string
 		_ = client.Close()
 		return nil, fmt.Errorf("%s does not advertise textDocument/documentSymbol", command)
 	}
-	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, client: client}, nil
+	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, cmd: command, client: client, health: &serverHealth{}}, nil
 }
 
 // wrapExtractErr turns the bare context-deadline error a stalled language server
@@ -107,9 +204,16 @@ func lspLanguageID(relPath, fallback string) string {
 // codemap spawns it once and binds each language with its own LSP languageId. The
 // returned extractor shares the client and does NOT own it: only the original
 // (from New) shuts the server down, so Close on a bound extractor is a no-op.
+// It shares the parse-wait breaker too — see serverHealth.
 func (e *Extractor) Bind(lang, langID string) *Extractor {
-	return &Extractor{ctx: e.ctx, lang: lang, langID: langID, root: e.root, client: e.client, shared: true}
+	return &Extractor{ctx: e.ctx, lang: lang, langID: langID, root: e.root, cmd: e.cmd, client: e.client, health: e.health, budget: e.budget, shared: true}
 }
+
+// Degraded reports whether this extractor's language server stopped answering
+// documentSymbol part-way through a run (the parse-wait breaker tripped), and
+// the binary it was driving. Files extracted after that point carry no symbols,
+// so the indexer must surface this rather than report a complete graph.
+func (e *Extractor) Degraded() (bool, string) { return e.health.degraded(), e.cmd }
 
 // Language implements the extractor contract.
 func (e *Extractor) Language() string { return e.lang }
@@ -123,23 +227,44 @@ func (e *Extractor) Language() string { return e.lang }
 // codemap to the server's parse rate instead of flooding it.
 func (e *Extractor) documentSymbolsParsed(uri string, src []byte) ([]lsp.DocumentSymbol, error) {
 	syms, err := e.client.DocumentSymbols(e.ctx, uri)
-	if err != nil || len(syms) > 0 || !hasDeclarations(src) {
+	if err != nil || !hasDeclarations(src) {
 		return syms, err
 	}
-	deadline := time.Now().Add(parseWait)
+	if len(syms) > 0 {
+		// Answered on the first ask: the server is healthy, so a later empty
+		// answer is worth waiting on again.
+		e.health.recovered()
+		return syms, nil
+	}
+	// The breaker is open: this connection has already proven it is not racing
+	// us, it has stopped answering. Walking the backoff ladder again buys the
+	// same empty result for ~10s of sleeping. See parseWaitGiveUpStreak.
+	if !e.health.retryAllowed() {
+		return syms, nil
+	}
+	deadline := time.Now().Add(e.parseBudget())
 	for backoff := 40 * time.Millisecond; time.Now().Before(deadline); {
 		select {
 		case <-e.ctx.Done():
 			return nil, e.ctx.Err()
 		case <-time.After(backoff):
 		}
-		if syms, err = e.client.DocumentSymbols(e.ctx, uri); err != nil || len(syms) > 0 {
+		syms, err = e.client.DocumentSymbols(e.ctx, uri)
+		if err != nil {
+			// A transport/protocol failure is a different fault than "server
+			// went quiet"; it surfaces to the caller as a per-file error and
+			// must not be scored against the parse-wait bet either way.
 			return syms, err
+		}
+		if len(syms) > 0 {
+			e.health.recovered()
+			return syms, nil
 		}
 		if backoff < 2*time.Second {
 			backoff *= 2
 		}
 	}
+	e.health.exhausted()
 	return syms, nil // still empty after waiting — accept it
 }
 

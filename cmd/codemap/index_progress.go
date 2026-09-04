@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/progress"
@@ -262,4 +263,65 @@ func runIndexWithBar(ctx context.Context, svc *app.Service, cwd string, opts ind
 	}
 	out := <-resCh // doneMsg path: indexing already finished; authoritative result
 	return out.rep, out.err
+}
+
+// heartbeatEvery is the floor between non-interactive progress lines. Long
+// enough that a fast repo prints a handful of lines instead of thousands, short
+// enough that a human never waits more than a few seconds to learn the run is
+// alive.
+const heartbeatEvery = 5 * time.Second
+
+// runIndexPlain runs an index without the Bubble Tea bar — the --json, piped,
+// or CI path — while still emitting a throttled heartbeat on STDERR.
+//
+// Without it, a long index is indistinguishable from a hang: opts.OnFile stays
+// nil off the bar path, so `codemap index --reindex --json` on a large monorepo
+// prints absolutely nothing until it finishes. A 12.5k-file repo whose language
+// server has gone quiet sits at ~0% CPU for hours looking exactly like a
+// deadlock, and the only recourse is to kill it and lose the whole run.
+//
+// STDERR is the deliberate choice: stdout stays a single valid JSON document
+// under --json, so an agent parsing it is unaffected. The heartbeat is gated on
+// stderr being a terminal so redirected and piped output stays byte-identical
+// for scripts that capture it.
+func runIndexPlain(ctx context.Context, svc *app.Service, cwd string, opts index.Options, withEmbed bool) (*app.IndexReport, error) {
+	if !term.IsTerminal(os.Stderr.Fd()) {
+		return svc.Index(ctx, cwd, opts, withEmbed)
+	}
+	start := time.Now()
+	// OnFile is called from the extract workers (several at once for cheap
+	// backends), OnPhase and OnEmbed from other goroutines, so every field
+	// below is guarded — a progress hook must never be the thing that races.
+	var mu sync.Mutex
+	last := start
+	phase := "indexing"
+	line := func(detail string) {
+		fmt.Fprintf(os.Stderr, "  … %4.0fs  %s%s\n", time.Since(start).Seconds(), phase, detail)
+	}
+	opts.OnPhase = func(p string, _, _ int) {
+		mu.Lock()
+		defer mu.Unlock()
+		phase = p
+		last = time.Now() // a phase line just spoke; don't immediately follow it with a file line
+		line("")
+	}
+	opts.OnFile = func(done, total int, rel string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if time.Since(last) < heartbeatEvery {
+			return
+		}
+		last = time.Now()
+		line(fmt.Sprintf(" %d/%d — %s", done, total, rel))
+	}
+	opts.OnEmbed = func(done, total int) {
+		mu.Lock()
+		defer mu.Unlock()
+		if time.Since(last) < heartbeatEvery {
+			return
+		}
+		last = time.Now()
+		line(fmt.Sprintf(" %d/%d nodes", done, total))
+	}
+	return svc.Index(ctx, cwd, opts, withEmbed)
 }

@@ -387,6 +387,55 @@ func noteMissingServer(res *Result, lang, cmd string) {
 	res.MissingServers[lang] = cmd
 }
 
+// noteDegradedServers records one issue per language server whose parse-wait
+// breaker tripped during extraction — it answered for a while and then went
+// quiet (see lspsrc.parseWaitGiveUpStreak). Unlike every other server issue this
+// one is raised MID-RUN, and deliberately does NOT touch MissingServers: the
+// binary was found, spawned, and did index files, so calling its languages
+// "unsupported" would contradict the nodes already in the graph. The issue
+// itself still marks the report degraded, which is the honest reading — the
+// graph is missing every file extracted after the server fell silent.
+//
+// Extractors are keyed by language, and one server backs several (typescript +
+// javascript on one connection, plus vuesrc delegating to it), so issues are
+// deduped by binary and their languages unioned.
+func noteDegradedServers(res *Result, extractors map[string]extract.Extractor) {
+	type degradation struct {
+		binary string
+		langs  []string
+	}
+	byBinary := map[string]*degradation{}
+	var order []string
+	for lang, ext := range extractors {
+		d, ok := ext.(interface{ Degraded() (bool, string) })
+		if !ok {
+			continue
+		}
+		down, binary := d.Degraded()
+		if !down {
+			continue
+		}
+		if byBinary[binary] == nil {
+			byBinary[binary] = &degradation{binary: binary}
+			order = append(order, binary)
+		}
+		byBinary[binary].langs = append(byBinary[binary].langs, lang)
+	}
+	sort.Strings(order)
+	for _, binary := range order {
+		d := byBinary[binary]
+		sort.Strings(d.langs) // map iteration order must not leak into the report
+		res.ServerIssues = append(res.ServerIssues, tooling.Issue{
+			Code:      tooling.CodeStoppedResponding,
+			Severity:  "warning",
+			Binary:    binary,
+			Languages: d.langs,
+			Detail: "Re-run the index; if it recurs, the server is likely being churned by files that are not really source — " +
+				"exclude build output (index.exclude_extra, e.g. \"**/dist/\", \"**/out/\") so far fewer documents pass through it.",
+		})
+	}
+}
+
 // noteServerIssue records a structured tooling failure and keeps MissingServers
 // in sync (one binary → each affected language) for back-compat consumers.
 func noteServerIssue(res *Result, iss tooling.Issue) {
@@ -887,6 +936,11 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	if res.ExtractMs == 0 {
 		res.ExtractMs = 1 // sub-millisecond; show in breakdown not nothing
 	}
+	// A server that went quiet mid-pass returned an empty documentSymbol for
+	// every file after that point, with no error and no failed file. Staying
+	// silent would report a clean index over a graph that is missing thousands
+	// of files — so route it through the same channel a missing binary uses.
+	noteDegradedServers(res, ix.extractors)
 
 	// P2-04 (O30): write the file→file EdgeImports edges in a final
 	// pass. Doing it inside indexFile races with the target file's

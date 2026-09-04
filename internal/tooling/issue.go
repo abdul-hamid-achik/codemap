@@ -20,6 +20,12 @@ const (
 	CodeSpawnFailed       = "lsp_spawn_failed"
 	CodeInitFailed        = "lsp_init_failed"
 	CodeCapabilityMissing = "lsp_capability_missing"
+	// CodeStoppedResponding is the only code raised MID-RUN rather than at
+	// startup: the server spawned, initialized, extracted files, and then went
+	// quiet — answering documentSymbol with an empty result instead of symbols.
+	// Every file after that point is structurally empty, so the index is partial
+	// even though nothing errored and no binary is missing.
+	CodeStoppedResponding = "lsp_stopped_responding"
 )
 
 // Issue is one tooling failure that blocked or degraded a codemap capability.
@@ -321,6 +327,12 @@ func WarningLine(iss Issue) string {
 		return files + fmt.Sprintf("%q is not executable — check permissions/arch; see tooling.issues", iss.Binary)
 	case CodeCapabilityMissing:
 		return files + iss.Detail
+	case CodeStoppedResponding:
+		// FilesAffected is unknown for this code — the server answered for an
+		// unknown prefix of the run and went quiet for the rest — so lead with
+		// the binary and the remedy instead of the usual "N files skipped".
+		return fmt.Sprintf("%s — %q stopped returning symbols part-way through the index; the graph is partial. %s",
+			lang, iss.Binary, iss.Detail)
 	default:
 		path := iss.ResolvedPath
 		if path == "" {

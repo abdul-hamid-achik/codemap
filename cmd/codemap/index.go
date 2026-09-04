@@ -100,13 +100,15 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	}
 
 	// Live progress bar only for an interactive `codemap index` (TTY, no --json).
-	// Under --json, MCP, studio reindex, or a pipe, opts.OnFile stays nil and
-	// indexing runs exactly as before — no bar, no stdout noise.
+	// Every other shape (--json, a pipe, CI) takes runIndexPlain: stdout stays
+	// exactly as before, and a throttled heartbeat goes to stderr when stderr is
+	// a terminal, so a slow run is distinguishable from a hung one without
+	// changing a single byte that a script or agent parses.
 	var rep *app.IndexReport
 	if !jsonOut(cmd) && isInteractiveTTY() {
 		rep, err = runIndexWithBar(cmd.Context(), svc, cwd, opts, !noEmbed)
 	} else {
-		rep, err = svc.Index(cmd.Context(), cwd, opts, !noEmbed)
+		rep, err = runIndexPlain(cmd.Context(), svc, cwd, opts, !noEmbed)
 	}
 	if err != nil {
 		return err

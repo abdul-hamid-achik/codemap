@@ -755,3 +755,116 @@ func TestLSPExtractGopls(t *testing.T) {
 		t.Errorf("Bar kind = %q, want type", kinds["Bar"])
 	}
 }
+
+// silentClient models the failure this breaker exists for: the server is up,
+// answers every request promptly, and returns NO symbols for anything. That is
+// what typescript-language-server does on a large monorepo after a few thousand
+// didOpen/didClose cycles — no error, no latency, just nothing.
+type silentClient struct {
+	stubLanguageClient
+	calls int
+}
+
+func (s *silentClient) DocumentSymbols(context.Context, string) ([]lsp.DocumentSymbol, error) {
+	s.calls++
+	return nil, nil
+}
+
+func newSilentExtractor(budget time.Duration) (*Extractor, *silentClient) {
+	c := &silentClient{stubLanguageClient: stubLanguageClient{documentSymbols: true}}
+	return &Extractor{
+		ctx: context.Background(), lang: "typescript", langID: "typescript",
+		root: "/proj", cmd: "typescript-language-server", client: c,
+		health: &serverHealth{}, budget: budget,
+	}, c
+}
+
+// A server that has gone quiet must stop costing a full parse-wait per file.
+// Before the breaker this was ~10s each, so a 12.5k-file monorepo spent >20h
+// asleep; the run has to converge to "fast and empty" instead.
+func TestParseWaitBreakerTripsAfterConsecutiveEmptyFiles(t *testing.T) {
+	const budget = 120 * time.Millisecond
+	e, client := newSilentExtractor(budget)
+	src := []byte("export const a = () => {}\n")
+
+	for i := 0; i < parseWaitGiveUpStreak; i++ {
+		start := time.Now()
+		if _, err := e.ExtractFile("src/f.ts", src); err != nil {
+			t.Fatalf("file %d: %v", i, err)
+		}
+		if time.Since(start) < budget {
+			t.Fatalf("file %d returned in %v — it should still be paying the parse-wait budget", i, time.Since(start))
+		}
+	}
+	if down, binary := e.Degraded(); !down || binary != "typescript-language-server" {
+		t.Fatalf("Degraded() = (%v, %q), want (true, \"typescript-language-server\")", down, binary)
+	}
+
+	before := client.calls
+	start := time.Now()
+	if _, err := e.ExtractFile("src/g.ts", src); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed >= budget {
+		t.Fatalf("post-trip extract took %v — the breaker did not skip the parse wait", elapsed)
+	}
+	// Exactly the two unavoidable asks: once against the file on disk, once
+	// after the DidOpen fallback. No backoff ladder.
+	if got := client.calls - before; got != 2 {
+		t.Fatalf("post-trip documentSymbol calls = %d, want 2 (cold + after DidOpen)", got)
+	}
+}
+
+// A healthy answer between two empty ones proves the server is racing, not
+// dead, so the streak must restart rather than accumulate toward a trip.
+func TestParseWaitStreakResetsOnRecovery(t *testing.T) {
+	h := &serverHealth{}
+	for i := 0; i < parseWaitGiveUpStreak-1; i++ {
+		h.exhausted()
+	}
+	h.recovered()
+	h.exhausted()
+	if h.degraded() {
+		t.Fatal("breaker tripped despite a recovery resetting the streak")
+	}
+	for i := 0; i < parseWaitGiveUpStreak; i++ {
+		h.exhausted()
+	}
+	if !h.degraded() {
+		t.Fatalf("breaker did not trip after %d consecutive exhaustions", parseWaitGiveUpStreak)
+	}
+}
+
+// One typescript-language-server backs typescript, javascript and every .vue
+// script block, so the breaker must be shared: whichever languageId happens to
+// hit the dead server first has to spare the others the same 10s-per-file bill.
+func TestBindSharesParseWaitBreaker(t *testing.T) {
+	owner, _ := newSilentExtractor(30 * time.Millisecond)
+	bound := owner.Bind("javascript", "javascript")
+	if down, _ := bound.Degraded(); down {
+		t.Fatal("bound extractor reports degraded before anything failed")
+	}
+	for i := 0; i < parseWaitGiveUpStreak; i++ {
+		owner.health.exhausted()
+	}
+	if down, binary := bound.Degraded(); !down || binary != owner.cmd {
+		t.Fatalf("bound Degraded() = (%v, %q), want (true, %q) — health is not shared", down, binary, owner.cmd)
+	}
+	if bound.health.retryAllowed() {
+		t.Fatal("bound extractor still pays the parse wait after the shared breaker tripped")
+	}
+}
+
+// A nil health record (any Extractor built as a struct literal, as several
+// tests here do) must keep the original always-retry behavior rather than panic.
+func TestNilServerHealthIsInert(t *testing.T) {
+	var h *serverHealth
+	if !h.retryAllowed() {
+		t.Fatal("nil health should allow retries")
+	}
+	h.exhausted()
+	h.recovered()
+	if h.degraded() {
+		t.Fatal("nil health should never report degraded")
+	}
+}

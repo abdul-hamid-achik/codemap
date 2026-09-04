@@ -25,6 +25,18 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **Multi-hour LSP stall on large monorepos** — `typescript-language-server` stops returning
+  symbols part-way through a big index (empty `documentSymbol`, instantly, with no error). The
+  per-file parse-wait retry then burned its whole ~10s backoff ladder on every remaining file
+  at ~0% CPU, so a ~3.8k-file TS/Vue repo spent 11+ hours doing nothing and looked exactly like
+  a hang. A parse-wait breaker now gives up after 3 consecutive files exhaust the budget
+  without recovering a symbol — shared across every language on one connection, so TS/JS/Vue
+  trip together — capping the waste at ~30s. The run is reported `degraded` with a new
+  `lsp_stopped_responding` tooling issue instead of claiming a complete graph.
+- **No progress on a non-interactive `codemap index`** — under `--json`, a pipe, or CI nothing
+  was printed until the run finished, so "slow" and "hung" were indistinguishable. A throttled
+  heartbeat (phase, file N of M) now goes to **stderr** when stderr is a terminal; stdout stays
+  byte-identical, so agents parsing `--json` are unaffected.
 - **Stale profile claim for `codemap_explore`** — docs/README said it was full-profile-only;
   it is part of the taught workflow and registered in every profile (agent/core stay at 26
   tools; `codemap_task_context` joins `codemap_map`/`codemap_traverse`/`codemap_refactor_plan`
