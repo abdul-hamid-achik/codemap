@@ -11,9 +11,9 @@ graph to its siblings and fetches meaning, runtime, and secrets back, over each 
 ## codemap ⇄ vecgrep
 
 codemap composes with [vecgrep](https://github.com/abdul-hamid-achik/vecgrep), a sibling local-first
-semantic code-search tool. They share an embedding space (Ollama `nomic-embed-text`) and address symbols
-by `(relative_path, start_line)`, so each can use the other as an **optional accelerator that degrades to
-its own local capability** — never a hard dependency.
+semantic code-search tool. Their vector stores and embedding profiles are independent.
+The integration exchanges source selectors (`file`, `start_line`, `fqn`, `kind`) and
+versioned CLI results; it does not require a shared embedding model.
 
 **The boundary:** codemap owns *structure* (the resolved call/type/test graph + a durable, symbol-pinned
 annotation layer); vecgrep owns *meaning* (chunk-level semantic search) and a *cross-project agent-memory*
@@ -21,8 +21,18 @@ store. They talk over each other's CLI (`--json`), one hop deep — neither call
 
 ## Enabling it
 
-Nothing to configure in the common case: if the `vecgrep` binary is on your `$PATH`, codemap uses it
-automatically. To turn it off or point at a specific binary:
+To make Vecgrep the semantic owner, add this to your Codemap configuration:
+
+```yaml
+semantic:
+  backend: vecgrep
+vecgrep:
+  enabled: true
+```
+
+Codemap indexes structure and delegates semantic retrieval to Vecgrep. Without
+this setting, the default `fallback` backend prefers local embeddings and tries
+Vecgrep when local vectors are absent. To point at a specific binary:
 
 ```yaml
 vecgrep:
@@ -32,6 +42,27 @@ vecgrep:
 
 or `CODEMAP_VECGREP_ENABLED=false` / `CODEMAP_VECGREP_BIN=…`. Every integrated call degrades gracefully
 when vecgrep is absent, disabled, or hasn't indexed the project.
+
+### OpenAI embeddings in Vecgrep
+
+Configure the complete profile together in Vecgrep's global defaults:
+
+```bash
+vecgrep config set --global embedding.provider openai
+vecgrep config set --global embedding.model text-embedding-3-small
+vecgrep config set --global embedding.dimensions 1536
+vecgrep config show
+```
+
+The process running Vecgrep needs `OPENAI_API_KEY` or `VECGREP_OPENAI_API_KEY`.
+Project configuration takes priority over global defaults: remove local
+provider/model/dimensions overrides if they still select Nomic. Rebuild existing
+indexes with `vecgrep index --full` after changing the embedding profile and
+restart existing MCP processes so they load the new configuration. OpenAI receives
+the source chunks sent for embedding.
+
+Vecgrep's cross-project memory uses a separate Ollama-backed store. Selecting
+OpenAI for code indexing does not migrate memory or change its provider.
 
 ## What flows where
 
