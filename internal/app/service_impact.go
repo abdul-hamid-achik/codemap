@@ -276,7 +276,7 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 	// it(() => …) callback filtered at index time, #196), OR there's no call graph at
 	// all (TS/JS/Python without --precise) — scan test files for a reference to the
 	// symbol so a covered symbol isn't reported untested. Conservative + bounded.
-	allowHeuristic := true
+	allowHeuristic := rep.CallGraph != CallGraphNone
 	if exact != nil {
 		// A text scan for the bare name cannot distinguish two same-named
 		// definitions. Keep an exact-selector result exact rather than attaching
@@ -318,6 +318,11 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 	}
 	// Same derivation codemap_review applies to covering_tests, so impact — the
 	// more common pre-edit path — is just as runnable as the post-edit review.
+	if rep.CallGraph == CallGraphNone && len(locs) > 0 {
+		rep.Untested = false
+		rep.Tests = []ImpactNode{}
+		rep.Resolution = declarativeGuidance
+	}
 	rep.TestCommands = testCommands(rep.Tests)
 
 	// Surface any annotations pinned to this symbol — by the query name or by a

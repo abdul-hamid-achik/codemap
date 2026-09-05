@@ -22,8 +22,8 @@ export default defineConfig({
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:image', content: 'https://codemap.tools/og-image.png' }],
     ['meta', { name: 'twitter:image:alt', content: 'codemap returning cited structural impact for a code symbol' }],
-    ['meta', { name: 'theme-color', media: '(prefers-color-scheme: light)', content: '#ffffff' }],
-    ['meta', { name: 'theme-color', media: '(prefers-color-scheme: dark)', content: '#1b1b1f' }],
+    ['meta', { name: 'theme-color', media: '(prefers-color-scheme: light)', content: '#faf9f5' }],
+    ['meta', { name: 'theme-color', media: '(prefers-color-scheme: dark)', content: '#141c19' }],
   ],
 
   sitemap: { hostname: 'https://codemap.tools' },
@@ -58,7 +58,7 @@ export default defineConfig({
       { text: 'For Agents', link: '/agents' },
       { text: 'CLI', link: '/cli' },
       { text: 'MCP', link: '/mcp' },
-      { text: 'CI', link: '/ci' },
+      { text: 'Languages', link: '/languages' },
     ],
     sidebar: [
       {
@@ -67,6 +67,7 @@ export default defineConfig({
           { text: 'Overview', link: '/' },
           { text: 'Quick Start', link: '/quick-start' },
           { text: 'Language support', link: '/languages' },
+          { text: 'Data, config & docs', link: '/data-and-docs' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Branches & caching', link: '/branches' },
         ],

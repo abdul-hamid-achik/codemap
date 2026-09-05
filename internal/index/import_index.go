@@ -194,7 +194,7 @@ func resolveImportFile(language, fromRel, spec string, idx *importIndex) string 
 		return resolveRubyImport(fromRel, spec, idx)
 	case "lua":
 		return resolveLuaImport(spec, idx)
-	case "css", "scss", "sass", "less":
+	case "css", "scss", "sass", "less", "html":
 		return resolveCSSImport(fromRel, spec, idx)
 	case "gdscript":
 		return resolveGDScriptImport(fromRel, spec, idx)

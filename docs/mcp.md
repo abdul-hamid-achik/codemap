@@ -12,6 +12,8 @@ see [the agent loop](/agents#the-agent-loop).
 Tool text payloads use compact JSON to avoid spending context tokens on indentation; the
 structured result fields are identical to CLI `--json` reports.
 
+For SQL/sqlc, YAML, Markdown, and HTML/CSS, start with [Data, configuration, and documentation](/data-and-docs). Use `dependencies` for inbound evidence and `traverse` for typed relationships. These formats do not gain function calls from `--precise`. The same guide is available through `codemap docs formats` and `codemap_docs` with `topic: "formats"`. MCP `traverse` requires the `full` profile.
+
 ## Register it
 
 Install codemap (`brew install abdul-hamid-achik/tap/codemap`, or `go install

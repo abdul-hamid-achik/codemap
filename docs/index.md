@@ -2,7 +2,7 @@
 layout: home
 title: codemap
 titleTemplate: false
-description: Local-first code intelligence for coding agents—exact structure, impact, and tests over MCP and CLI.
+description: Explore code, SQL, configuration, and documentation through a local graph. Source locations and explicit confidence over CLI and MCP.
 ---
 
 <LandingPage />

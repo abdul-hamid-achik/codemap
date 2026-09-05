@@ -22,6 +22,7 @@ var defaultTraversalEdgeTypes = []string{
 	EdgeOverrides,
 	EdgeDependsOn,
 	EdgeTests,
+	EdgeStyles, EdgeReads, EdgeWrites, EdgeDocuments,
 }
 
 // TraversalOptions bounds a cycle-safe heterogeneous graph walk. Defines is

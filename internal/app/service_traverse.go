@@ -19,6 +19,7 @@ var supportedTraverseEdges = map[string]bool{
 	graph.EdgeCalls: true, graph.EdgeReferences: true, graph.EdgeImports: true,
 	graph.EdgeImplements: true, graph.EdgeOverrides: true, graph.EdgeDependsOn: true,
 	graph.EdgeTests: true, graph.EdgeDefines: true,
+	graph.EdgeStyles: true, graph.EdgeReads: true, graph.EdgeWrites: true, graph.EdgeDocuments: true,
 }
 
 type TraverseOptions struct {
@@ -147,6 +148,9 @@ func (svc *Service) TraverseBySelector(cwd string, selector SymbolSelector, opts
 	if containsString(opts.EdgeTypes, graph.EdgeCalls) {
 		resolvedFiles, _ := resolved.graph.CallGraphResolvedFiles(resolved.project.ID)
 		rep.CallGraph = callGraphEnum(resolvedFiles, []graph.Node{resolved.node})
+		if declarativeLanguage(resolved.node.Language) {
+			rep.Resolution = declarativeGuidance
+		}
 		if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, []graph.Node{resolved.node}); unavailable {
 			rep.Resolution = fmt.Sprintf("call relations are unresolved for %s without precise indexing; non-call domains remain independently available", lang) + svc.coverageHintResolved(resolved.graph, resolved.project.ID, resolvedFiles)
 		}
@@ -165,6 +169,7 @@ func normalizeTraverseOptions(opts TraverseOptions) (TraverseOptions, error) {
 		opts.EdgeTypes = []string{
 			graph.EdgeCalls, graph.EdgeReferences, graph.EdgeImports,
 			graph.EdgeImplements, graph.EdgeOverrides, graph.EdgeDependsOn, graph.EdgeTests,
+			graph.EdgeStyles, graph.EdgeReads, graph.EdgeWrites, graph.EdgeDocuments,
 		}
 	}
 	seen := map[string]bool{}

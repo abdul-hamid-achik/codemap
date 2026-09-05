@@ -52,7 +52,7 @@ must never silently merge same-named definitions.`,
 	}
 	cmd.Flags().String("at", "", "select the exact starting definition: <file>:<line> (required)")
 	cmd.Flags().String("direction", graph.TraversalBoth, "walk outgoing, incoming, or both relations")
-	cmd.Flags().StringSlice("edge-types", nil, "relation types to follow (comma-separated; defaults to calls,references,imports,implements,overrides,depends_on,tests)")
+	cmd.Flags().StringSlice("edge-types", nil, "relation types to follow (comma-separated; defaults to calls,references,imports,implements,overrides,depends_on,tests,styles,reads,writes,documents)")
 	cmd.Flags().Int("depth", app.DefaultTraverseDepth,
 		fmt.Sprintf("maximum traversal depth (1-%d)", app.MaxTraverseDepth))
 	cmd.Flags().Int("limit", app.DefaultTraverseLimit,

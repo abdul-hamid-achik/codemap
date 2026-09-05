@@ -146,6 +146,13 @@ const (
 // definitions degrade to "name". Empty coverage is intentionally conservative
 // for legacy indexes.
 func callGraphEnum(resolvedFiles map[string]bool, nodes []graph.Node) string {
+	applicable := make([]graph.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if !declarativeLanguage(n.Language) {
+			applicable = append(applicable, n)
+		}
+	}
+	nodes = applicable
 	if len(nodes) == 0 {
 		return CallGraphNone
 	}
@@ -164,6 +171,12 @@ func callGraphEnum(resolvedFiles map[string]bool, nodes []graph.Node) string {
 	}
 	return CallGraphName
 }
+
+func declarativeLanguage(language string) bool {
+	return language == "sql" || language == "yaml" || language == "markdown"
+}
+
+const declarativeGuidance = "this definition has structural relationships, not a call graph; use dependencies or traverse with reads,writes,depends_on,documents; --precise does not add calls for SQL, YAML, or Markdown"
 
 // callGraphStatus loads persisted coverage and classifies the queried
 // definitions. A read failure degrades conservatively to legacy/no coverage.

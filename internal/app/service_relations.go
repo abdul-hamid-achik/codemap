@@ -193,6 +193,9 @@ func (svc *Service) relation(cwd, symbol string, query func(*graph.Store, int64,
 	// below (P8: one call_graph_coverage scan per query, not three).
 	resolved, _ := g.CallGraphResolvedFiles(p.ID)
 	rep.CallGraph = callGraphEnum(resolved, defs)
+	if rep.CallGraph == CallGraphNone && len(defs) > 0 {
+		rep.Resolution = declarativeGuidance
+	}
 	if derr == nil && len(defs) > 1 {
 		rep.Candidates = candidatesFromNodes(defs)
 		if rep.CallGraph == CallGraphResolved {

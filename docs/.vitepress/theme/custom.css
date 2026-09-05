@@ -1,24 +1,53 @@
-/* Shared docs theme. The landing page extends this palette in landing.css. */
-
+/* Shared palette and reading rhythm for the site and its documentation. */
 :root {
   --vp-font-family-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --vp-c-brand-1: #0a6577;
-  --vp-c-brand-2: #095a6a;
-  --vp-c-brand-3: #084f5d;
-  --vp-c-brand-soft: rgb(102 217 239 / 14%);
+  --vp-c-bg: #faf9f5;
+  --vp-c-bg-alt: #f1f0ea;
+  --vp-c-bg-soft: #f0efe8;
+  --vp-code-block-bg: #fff;
+  --vp-c-text-1: #222e29;
+  --vp-c-text-2: #56615a;
+  --vp-c-text-3: #68736c;
+  --vp-c-divider: #d8dcd4;
+  --vp-c-brand-1: #17634e;
+  --vp-c-brand-2: #124d3d;
+  --vp-c-brand-3: #17634e;
+  --vp-c-brand-soft: rgb(23 99 78 / 8%);
+  --cm-button-text: #fff;
+  --cm-shadow: #293e2c36;
 }
-
 .dark {
-  --vp-c-brand-1: #66d9ef;
-  --vp-c-brand-2: #4fc4d9;
-  --vp-c-brand-3: #3aafc4;
-  --vp-c-brand-soft: rgb(102 217 239 / 16%);
+  --vp-c-bg: #141c19;
+  --vp-c-bg-alt: #101713;
+  --vp-c-bg-soft: #1b2520;
+  --vp-code-block-bg: #101713;
+  --vp-c-text-1: #e6ebe4;
+  --vp-c-text-2: #b1bdb3;
+  --vp-c-text-3: #9eada2;
+  --vp-c-divider: #35463b;
+  --vp-c-brand-1: #9dd2b0;
+  --vp-c-brand-2: #b1e0c1;
+  --vp-c-brand-3: #2b6850;
+  --vp-c-brand-soft: rgb(157 210 176 / 8%);
+  --cm-button-text: #15251a;
+  --cm-shadow: #080e0bb0;
 }
+.vp-doc h1, .vp-doc h2, .vp-doc h3, .VPNavBarTitle .title { font-family: 'Space Grotesk', var(--vp-font-family-base); letter-spacing: -.03em; text-wrap: balance; }
+.vp-doc h1 { font-weight: 500; font-size: 38px; line-height: 1.2; }
+.vp-doc h2 { padding-top: 28px; margin-top: 48px; font-weight: 500; }
+.vp-doc p, .vp-doc li { line-height: 1.85; }
+.vp-doc > div > p:first-of-type { font-size: 18px; color: var(--vp-c-text-2); line-height: 1.8; }
+.vp-doc a { text-underline-offset: 4px; }
+.vp-doc table { font-size: 13px; }
+.vp-doc th { background: var(--vp-c-bg-soft); font-weight: 600; }
+.vp-doc :not(pre) > code { border-radius: 3px; font-size: .83em; }
+.vp-doc div[class*='language-'] { border: 1px solid var(--vp-c-divider); border-radius: 7px; }
+.VPSidebarItem.level-0 { padding-bottom: 15px; }
+.VPSidebarItem.is-active > .item .link > .text { font-weight: 600; }
+.VPDocAsideOutline .content { border-left-color: var(--vp-c-divider); }
+.VPNavBar .content-body { backdrop-filter: blur(12px); }
+:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 3px; }
+@media (max-width: 640px) { .vp-doc h1 { font-size: 30px; } .vp-doc > div > p:first-of-type { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 
-.vp-doc h1,
-.vp-doc h2,
-.vp-doc h3,
-.VPNavBarTitle .title {
-  font-family: 'Space Grotesk', var(--vp-font-family-base);
-  letter-spacing: -0.02em;
-}
+.vp-doc div[class*='language-'] > span.lang { color: var(--vp-c-text-2); }

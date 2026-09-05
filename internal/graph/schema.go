@@ -31,6 +31,11 @@ const (
 	KindTest     = "test"
 	KindModule   = "module"
 	KindSelector = "selector"
+	KindTable    = "table"
+	KindView     = "view"
+	KindQuery    = "query"
+	KindKey      = "key"
+	KindSection  = "section"
 )
 
 // Edge types.
@@ -46,7 +51,10 @@ const (
 	// EdgeStyles: a JSX className / HTML class attribute → the CSS selector node
 	// defining that class or id. Name-resolved (candidate weight), never part of
 	// the call graph.
-	EdgeStyles = "styles"
+	EdgeStyles    = "styles"
+	EdgeReads     = "reads"
+	EdgeWrites    = "writes"
+	EdgeDocuments = "documents"
 )
 
 // Edge weights by extraction confidence.

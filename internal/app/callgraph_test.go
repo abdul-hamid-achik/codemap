@@ -28,6 +28,8 @@ func TestCallGraphEnum(t *testing.T) {
 		{[]string{"go"}, []bool{true}, CallGraphResolved},
 		{[]string{"typescript"}, []bool{true}, CallGraphResolved},
 		{nil, nil, CallGraphNone},
+		{[]string{"sql", "yaml", "markdown"}, []bool{false, false, false}, CallGraphNone},
+		{[]string{"sql", "go"}, []bool{false, true}, CallGraphResolved},
 		{[]string{"go"}, []bool{false}, CallGraphName},
 		{[]string{"typescript"}, []bool{false}, CallGraphUnresolved},
 		{[]string{"python"}, []bool{false}, CallGraphUnresolved},

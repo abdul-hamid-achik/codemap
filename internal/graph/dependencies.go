@@ -40,9 +40,9 @@ func (s *Store) InboundFileDependencies(projectID int64, targetFile string) ([]F
 		JOIN nodes tgt ON tgt.id = e.target_id
 		WHERE src.project_id = ? AND tgt.project_id = ?
 		  AND tgt.file_path = ? AND src.file_path != tgt.file_path
-		  AND e.edge_type IN (?, ?, ?, ?)
+		  AND e.edge_type IN (?, ?, ?, ?, ?, ?, ?, ?)
 		ORDER BY src.file_path, e.edge_type, src.start_line, tgt.start_line`,
-		projectID, projectID, targetFile, EdgeCalls, EdgeReferences, EdgeImports, EdgeStyles)
+		projectID, projectID, targetFile, EdgeCalls, EdgeReferences, EdgeImports, EdgeStyles, EdgeReads, EdgeWrites, EdgeDocuments, EdgeDependsOn)
 	if err != nil {
 		return nil, err
 	}

@@ -18,6 +18,11 @@ const (
 	KindVariable = "variable" // top-level var/const that isn't callable
 	KindTest     = "test"
 	KindSelector = "selector" // CSS class/id selector (.btn, #hero)
+	KindTable    = "table"
+	KindView     = "view"
+	KindQuery    = "query"
+	KindKey      = "key"
+	KindSection  = "section"
 )
 
 // Reference kinds (string values shared with internal/graph edge types).
@@ -28,7 +33,10 @@ const (
 	// to the CSS selector node that defines the styling. Kept distinct from
 	// RefReferences so call-graph consumers (impact, orphans, callers) stay
 	// unpolluted by styling relationships.
-	RefStyles = "styles"
+	RefStyles    = "styles"
+	RefReads     = "reads"
+	RefWrites    = "writes"
+	RefDocuments = "documents"
 )
 
 // Symbol is a code entity discovered in a file.
@@ -56,6 +64,11 @@ type Reference struct {
 	// packages. False for bare-identifier calls (Foo()), which — in Go — always
 	// resolve within the same package, so the indexer can resolve them precisely.
 	Qualified bool
+	// ToFQN is an explicit project-local target (including file paths). It
+	// never falls back to name matching. ToKinds restricts name candidates so
+	// SQL tables cannot accidentally resolve to same-named Go functions.
+	ToFQN   string
+	ToKinds []string
 }
 
 // FileResult is everything extracted from one file.

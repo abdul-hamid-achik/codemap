@@ -9,6 +9,8 @@ piping `--json`. New here? Start with [Quick Start](/quick-start); wiring an age
 of a terminal? See [codemap for agents](/agents) and the [MCP server](/mcp). Every query
 command below accepts `--json` for machine-readable output.
 
+For SQL/sqlc, YAML, Markdown, and HTML/CSS, start with [Data, configuration, and documentation](/data-and-docs). Use `dependencies` for inbound evidence and `traverse` for typed relationships. These formats do not gain function calls from `--precise`. The same guide is available through `codemap docs formats` and `codemap_docs` with `topic: "formats"`. MCP `traverse` requires the `full` profile.
+
 ## Global options
 
 These persistent options can be placed before or after a subcommand:

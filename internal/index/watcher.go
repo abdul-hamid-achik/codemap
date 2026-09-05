@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -82,7 +81,7 @@ func (w *Watcher) rel(path string) string {
 }
 
 func (w *Watcher) skipDir(path string) bool {
-	return w.cfg.Excluded(w.rel(path)) || strings.HasPrefix(filepath.Base(path), ".")
+	return w.cfg.Excluded(w.rel(path)) || skipHiddenDirectory(filepath.Base(path))
 }
 
 // Run drives the watch loop until ctx is cancelled or the watcher is closed,

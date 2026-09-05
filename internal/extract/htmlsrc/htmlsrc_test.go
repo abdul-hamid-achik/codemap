@@ -70,3 +70,20 @@ func TestExtractHTMLClassRefs(t *testing.T) {
 		t.Errorf("refs = %v, want exactly [.btn .card-title #hero]", res.References)
 	}
 }
+
+func TestHTMLAssetsAndEmbeddedStyles(t *testing.T) {
+	src := []byte("<link rel=stylesheet href='../app.css'>\n<script src='/main.js'>const example = '<div class=ghost>';</script>\n<style>\n.card {color: red}\n</style>\n<div class=card></div>\n")
+	r, err := New().ExtractFile("site/index.html", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Symbols) != 1 || r.Symbols[0].StartLine != 4 || r.Symbols[0].Name != ".card" {
+		t.Fatalf("symbols=%+v", r.Symbols)
+	}
+	if len(r.Imports) != 2 || r.Imports[1] != "../main.js" {
+		t.Fatalf("imports=%v", r.Imports)
+	}
+	if len(r.References) != 1 || r.References[0].To != ".card" {
+		t.Fatalf("script contents leaked: %+v", r.References)
+	}
+}

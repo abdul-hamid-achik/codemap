@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
@@ -125,7 +124,7 @@ func (ix *Indexer) stalenessFromSnapshot(root string, fileHashes map[string]stri
 			rel = path
 		}
 		if d.IsDir() {
-			if path != root && (ix.excluded(rel) || strings.HasPrefix(name, ".")) {
+			if path != root && (ix.excluded(rel) || skipHiddenDirectory(name)) {
 				return filepath.SkipDir
 			}
 			return nil

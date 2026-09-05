@@ -10,26 +10,67 @@ import "strings"
 type docTopic struct{ name, body string }
 
 var docTopics = []docTopic{
-	{"overview", `codemap is local-first code intelligence: a structural code graph (who calls
-what, types, tests, imports) plus semantic retrieval (local veclite or sibling
-vecgrep). It precomputes structure once, then answers narrow questions in a few
-calls instead of many file reads — for both people (CLI + the studio TUI) and
-agents (a stdio MCP server).
+	{"overview", `codemap maps code, data, configuration, and documentation in a local structural
+graph. Use the CLI for terminal workflows or 'codemap serve' for stdio MCP.
+Both call the same services. Stored-graph queries work offline; embeddings are optional.
 
-Indexes Go (stdlib go/parser, full call graph), TypeScript + JavaScript (one
-typescript-language-server, across the .ts<->.js boundary; plus built-in
-name-based JSX component-usage, import, and Next.js framework-wiring edges),
-Python (pyright-langserver), Ruby and Lua (built-in pure-Go backends, no server
-needed), and Vue script blocks: symbols + structure always, plus a precise call
-graph under 'index --precise' so callers/impact/hotspots/path work for the LSP
-languages. CSS/SCSS/Sass/Less and HTML index selector/class nodes plus 'styles'
-edges (which markup uses which class), so frontend styling is queryable too.
-Other languages are recognized and reported as skipped (more in
-progress); --no-lsp disables the LSP backend. Semantic search is language-agnostic.
+Start: codemap init; codemap index --no-embed; codemap docs workflow.
+Go, Ruby, Lua, GDScript, SQL, YAML, Markdown, HTML and stylesheets have built-in
+backends. TypeScript/JavaScript/Vue use typescript-language-server; Python uses
+pyright-langserver. --precise resolves Go/TS/JS/Python calls where supported.
 
-Data lives under XDG paths (or ~/.codemap): the graph DB, optional local veclite
-store, and the project registry. semantic.backend=vecgrep leaves structural
-authority in codemap and delegates retrieval through a versioned one-hop CLI.`},
+Use context/impact for functions, dependencies/traverse for non-call relations,
+and source with a durable selector for one exact definition. SQL reads/writes,
+YAML dependencies and Markdown links never become function calls. Check
+freshness and per-domain confidence before interpreting an empty result.
+Read 'codemap docs formats' for data/config/docs support and its limits.
+
+Data lives under XDG paths (or ~/.codemap). semantic.backend=vecgrep delegates
+retrieval to Vecgrep while codemap owns structure. Otherwise local veclite and
+an Ollama-compatible embedding endpoint provide optional semantic retrieval.`},
+
+	{"formats", `Index SQL, YAML, Markdown, HTML, and stylesheets with codemap index --no-embed.
+No language server is needed. Run index after upgrading to discover these files.
+
+SQL: table/view definitions, sqlc named queries and anonymous statements. reads
+and writes edges are lexical candidates, scoped to table/view kinds. Comments,
+strings and dollar bodies do not become queries. CTE aliases are not tables.
+A version-2 sqlc.yaml/yml scopes depends_on links from generated Go methods to
+unique named SQL queries. Generated sqlc query files contribute structure,
+without duplicate Codemap embeddings. This does not evaluate migrations, live
+schemas, dynamic SQL, column lineage, ORM builders, or a complete SQL grammar.
+
+YAML: key paths and source ranges; explicit depends_on edges for Task deps,
+Compose depends_on, and GitHub Actions needs. .github is indexed and watched;
+other hidden directories stay excluded. Keys use JSON Pointer escaping in FQNs.
+Aliases and templates are not evaluated; runtime consumers are not inferred.
+Values are source content: normal source/export/embedding and exclude rules apply.
+
+Markdown: sections, local links to indexed files/headings, and a document section
+when headings are absent. documents edges follow actual links, not bare mentions.
+Code fences stay documentation. External URLs are never fetched. MDX and custom
+site routing/anchor rules are not evaluated.
+
+HTML/CSS: class/id-to-selector styles edges, local stylesheet/script imports,
+and embedded <style> selectors with original source lines. CSS Modules, CSS-in-JS,
+cascade/specificity and dynamic templates remain outside coverage.
+
+CLI examples:
+  codemap symbols queries/get.sql --json
+  codemap dependencies schema.sql --json
+  codemap traverse --at queries/get.sql:1 --edge-types reads,writes --json
+  codemap dependencies queries/get.sql --json  # includes Markdown links
+
+MCP: codemap_symbols and codemap_dependencies use the same reports. Use
+codemap_source with selector:{file,start_line,fqn,kind} to read a definition.
+In the full profile, codemap_traverse follows reads,writes,depends_on,documents,
+styles,imports and other selected edge types. Lean profiles retain dependencies
+and source; use the CLI or full profile for traversal.
+
+SQL/YAML/Markdown have call_graph:none. --precise cannot add calls to them.
+Use dependencies/typed traversal, not empty callers as proof of no consumers.
+Reindex after changes; unresolved destinations are reconsidered on later index runs.
+The existing export-symbols feed carries these definitions to Vecgrep.`},
 
 	{"workflow", `Index once, then query. The typical agent loop for understanding or fixing code:
 
@@ -140,7 +181,6 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      paginated structural-export v1 feed for vecgrep structural_chunks
   agent setup <harness> | list | playbook   wire codemap (MCP server + playbook) into an AI coding harness
   serve [--profile agent|core|full]  run MCP: exact taught / compatible lean / expert surface
-  studio                             the interactive TUI
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
 callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, secret_impact,
@@ -187,7 +227,7 @@ the write reports action:"created|updated|unchanged". Omitting it keeps append-o
 behavior. Annotations on a symbol surface INLINE in EVERY query result
 — codemap_impact, codemap_callers/callees (by-name and precise:true), codemap_references, codemap_source,
 and codemap_semantic/codemap_find — matched by name or resolved FQN, so once pinned
-the knowledge shows up wherever you look at the symbol (and on every studio tab).
+the knowledge shows up wherever you look at the symbol through the CLI and MCP.
 Typical use: codemap_impact a symbol, then codemap_annotate it with the DB rows /
 repro findings that explain it, so the next step has the full picture in place.`},
 

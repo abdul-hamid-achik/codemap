@@ -130,7 +130,11 @@ func resolveProfile(cfg *config.Config) string {
 }
 
 const instructions = `codemap is a local code knowledge graph: code structure (calls, types,
-tests) plus semantic retrieval owned by local veclite or the sibling vecgrep CLI. Index a project once with codemap_index,
+tests), SQL queries, YAML keys, Markdown links, and styles. Read codemap_docs
+with topic:"formats" for the non-call workflow and limits. SQL reads/writes,
+YAML depends_on, and Markdown documents edges are available through dependencies
+and full-profile traverse; --precise does not give these formats a call graph.
+Optional semantic retrieval owned by local veclite or the sibling vecgrep CLI. Index a project once with codemap_index,
 then query it — until you do, query tools return {"indexed": false} with a hint to index first.
 Every tool takes an optional "path" (project dir; defaults to cwd) and returns JSON.
 
@@ -381,7 +385,7 @@ type traverseInput struct {
 	Selector  app.SymbolSelector `json:"selector" jsonschema:"required exact starting definition projected from file/start_line/fqn/kind; bare symbol-name unions are deliberately unsupported"`
 	Path      string             `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Direction string             `json:"direction,omitempty" jsonschema:"relation direction: outgoing, incoming, or both (default both)"`
-	EdgeTypes []string           `json:"edge_types,omitempty" jsonschema:"relation types to follow; defaults to calls,references,imports,implements,overrides,depends_on,tests"`
+	EdgeTypes []string           `json:"edge_types,omitempty" jsonschema:"relation types to follow; defaults to calls,references,imports,implements,overrides,depends_on,tests,styles,reads,writes,documents"`
 	Depth     int                `json:"depth,omitempty" jsonschema:"maximum traversal depth (default 2, max 10)"`
 	Limit     int                `json:"limit,omitempty" jsonschema:"maximum reached nodes (default 100, max 500)"`
 }

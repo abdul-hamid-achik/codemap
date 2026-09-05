@@ -286,6 +286,13 @@ task install         # go install ./cmd/codemap
   `--precise` and records per-file coverage. **LSP uses Content-Length framing — correct for
   LSP, and it must NOT leak into the MCP transport (which is newline-delimited).**
 
+### Declarative formats
+- `extract/sqlsrc` indexes SQL tables, views, and named/anonymous queries. `reads`/`writes` are lexical candidates restricted to table/view targets. `index/format_relations.go` maps configured sqlc generated Go methods to SQL queries with `depends_on`.
+- `extract/yamlsrc` indexes escaped key paths and explicit Task/Compose/GitHub Actions dependencies. It does not expand aliases or evaluate templates. `.github` is included by the shared index/watcher/freshness walk rule; other hidden directories remain excluded.
+- `extract/mdsrc` uses CommonMark headings and local links (`documents`), preserving section source. Fenced examples never become executable symbols. HTML tokenization adds local asset imports and embedded CSS selectors.
+- SQL, YAML, and Markdown report `call_graph: none`; consumers use `dependencies` and typed `traverse` instead. Source selectors and structural export include the new `table`, `view`, `query`, `key`, and `section` kinds.
+- Public usage and limitations live in `docs/data-and-docs.md`; CLI/MCP expose the same guide via the `formats` docs topic.
+
 ### Storage
 - Graph: `modernc.org/sqlite` (pure Go), WAL mode, transaction-batched writes,
   `synchronous=NORMAL`, `SetMaxOpenConns(1)`. Tables: `nodes`, `edges`,

@@ -34,8 +34,6 @@ func TestRecognitionOnlyLanguagesStayT0(t *testing.T) {
 		"scripts/build.sh":  "shell",
 		"infra/main.hcl":    "hcl",
 		"infra/main.tf":     "terraform",
-		"db/query.sql":      "sql",
-		"config/app.yaml":   "yaml",
 	}
 	wantUnsupported := make(map[string]int)
 	for path, lang := range files {

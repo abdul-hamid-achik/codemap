@@ -10,7 +10,7 @@ capabilities, and the JSON contracts keep that distinction visible.
 
 ## Current release
 
-| Language | Symbols and definitions | Call graph | Requirement / limit |
+| Language | Symbols and definitions | Relationships | Requirement / limit |
 |---|---|---|---|
 | **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + a buildable module for the precise pass. One-off `callers --precise` / `callees --precise` uses `gopls`. |
 | **TypeScript + JavaScript** | `documentSymbol` through one shared `typescript-language-server` process, including TSX/JSX and cross-language projects | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, and Next.js framework wiring; plain function calls need `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | `node` + `typescript-language-server`. The name-based scan rides on LSP symbol extraction, so it also needs the server. |
@@ -19,8 +19,11 @@ capabilities, and the JSON contracts keep that distinction visible.
 | **Lua** | Built in with a pure-Go scanner: `function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe | Name-based calls plus `require` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **GDScript** | Built in with a pure-Go scanner: `class_name`, inner classes, functions, signals, enums, variables, and constants; comment-safe | Name-based calls plus `preload`/`load` imports; no precise pass yet | None — works offline like Go's name-based path. Godot Engine `.gd` files. |
 | **Vue SFC** | `<script>` and `<script setup>` blocks are routed to the TypeScript/JavaScript server; source lines map back to the `.vue` file | Not available yet for calls; Vue emits symbols, `defines` edges, and import edges | `node` + `typescript-language-server`. Template and style blocks are not indexed. |
-| **CSS / SCSS / Sass / Less** | Built in with a pure-Go scanner: one selector node per distinct class/id token per file, SCSS/Less nesting flattened via `&`-substitution, transparent at-rule frames (`@media`/`@supports`/`@layer`), interpolation-safe | `styles` edges from `class=`/`id=` in HTML and `className` in TSX/JSX (string literals, `cn()`/`clsx()` expressions, template statics) resolve to selector nodes; `@import`/`@use`/`@forward` become import edges (Sass partials and index files resolved) | None — pure Go, works offline. CSS-in-JS, CSS Modules member access, cascade/specificity, and `<style>` blocks are out of scope for v1. |
-| **HTML** | Built in with a pure-Go scanner: `class=`/`id=` attribute references (template placeholders skipped); no symbols are emitted | `styles` reference edges into CSS selector nodes | None — pure Go, works offline. |
+| **CSS / SCSS / Sass / Less** | Built in with a pure-Go scanner: one selector node per distinct class/id token per file, SCSS/Less nesting flattened via `&`-substitution, transparent at-rule frames (`@media`/`@supports`/`@layer`), interpolation-safe | `styles` edges from `class=`/`id=` in HTML and `className` in TSX/JSX (string literals, `cn()`/`clsx()` expressions, template statics) resolve to selector nodes; `@import`/`@use`/`@forward` become import edges (Sass partials and index files resolved) | None — pure Go, works offline. CSS-in-JS, CSS Modules member access, and cascade/specificity remain outside coverage. |
+| **HTML** | Static class/id references and selectors in embedded `<style>` blocks | `styles` references plus local stylesheet/script import edges | Offline. Template expressions, external URLs, and script bodies are not analyzed as HTML. |
+| **SQL / sqlc** | Tables, views, named queries, and anonymous statements | Candidate `reads`/`writes` edges; configured sqlc Go methods link to queries with `depends_on` | Offline lexical extraction. No dynamic SQL, live schema, or column lineage. |
+| **YAML** | Mapping keys with escaped, stable key paths | Explicit Task, Compose, and GitHub Actions dependencies | Offline. Aliases and templates are not evaluated. |
+| **Markdown** | Headings and sections; one document node for heading-free files | Local `documents` links into indexed files and Markdown headings | Offline CommonMark. Fenced examples stay documentation; no MDX execution or external fetching. |
 
 Install the optional language servers you need:
 
@@ -147,8 +150,12 @@ for T3. Do not maintain language-specific forks of the graph/query layer.
 
 ### Wave 4 — containers and long tail
 
-HTML/CSS/Sass shipped in v0.49.0 as pure-Go backends (selector nodes + `styles`
-edges from markup and `className`). Svelte, Astro, Razor, shell, Terraform/HCL, SQL and YAML usually need
+HTML/CSS/Sass, SQL/sqlc, YAML, and Markdown have offline structural backends.
+See [Data, configuration, and documentation](/data-and-docs) for examples and
+limits. SQL, YAML, and Markdown report `call_graph: none`; use their typed
+dependencies instead.
+
+Svelte, Astro, Razor, shell, and Terraform/HCL usually need
 container-aware extraction or parser structure more than compiler call graphs.
 Ship useful T1/T2 support with honest `unavailable` call coverage rather than
 manufacturing name-based calls.
@@ -169,7 +176,7 @@ Before changing public docs from T0, a language needs:
 - per-file coverage/provenance assertions, including successful leaf files with
   zero edges;
 - bounded-time and cancellation tests for every external request;
-- `doctor`, CLI JSON, MCP and studio status that agree on availability;
+- `doctor`, CLI JSON and MCP status that agree on availability;
 - an accuracy corpus and regression threshold before T4.
 
 Semantic retrieval remains language-agnostic: once a definition has safe source

@@ -37,7 +37,7 @@ instead of dozens of file reads.
   (name-based by default for Go, exact via `go/types` with `--precise`) and **defines** edges
   (file → symbol). Test coverage is derived by walking the call graph to test nodes. The graph is
   stored in pure-Go SQLite and remains queryable offline. **Go**, **Ruby**, **Lua**, **GDScript**, and **CSS/HTML** use
-  built-in pure-Go backends (symbols + name-based calls/imports, no server needed).
+  built-in pure-Go backends with language-specific relationships and no server needed.
   With the listed language server installed, **TypeScript + JavaScript** and **Python** provide
   symbols + structure and a **precise call graph** under `--precise`; one
   `typescript-language-server` resolves calls across the `.ts`↔`.js` boundary. Base (non-precise)
@@ -49,6 +49,7 @@ instead of dozens of file reads.
   `<script>`/`<script setup>` blocks through that TS/JS server and currently provide symbols +
   `defines` edges only, with source lines mapped back to the original `.vue` file. Semantic search
   is language-agnostic.
+- **Data and documentation** — SQL tables, views, and queries expose candidate read/write dependencies; sqlc maps generated Go methods to named queries. YAML exposes key paths and explicit task/service/job dependencies. Markdown exposes sections and local links. HTML adds local asset links and embedded styles. These relationships stay separate from calls. See [the format guide](docs/data-and-docs.md).
 - **Optional semantic search** — with the local/fallback backend and embeddings enabled, node
   source is embedded through the configured Ollama-compatible endpoint (`nomic-embed-text`,
   768-dim by default) into [veclite](https://github.com/abdul-hamid-achik/veclite), then searched
@@ -69,7 +70,7 @@ instead of dozens of file reads.
   indexed, and any query targets one project (resolved from cwd, or `--path`).
 - **Annotations** — pin notes and external data (DB rows from mongosh/postgres, vidtrace/vecgrep
   findings, …) to a symbol or a call path; they persist across reindex. A knowledge layer over the
-  graph for agent harnesses (`annotate` / `annotations`, also on MCP) and people (`a` in Studio).
+  graph for agent harnesses (`annotate` / `annotations`, also on MCP) and people.
 - **Precise call resolution** — the fast name-based graph over-matches same-named methods
   (`x.Close()` links to *every* `Close`). `codemap index --precise` attempts to resolve each call to
   the one it actually invokes and records successful precise coverage per file. A query is reported
@@ -116,7 +117,7 @@ brew install abdul-hamid-achik/tap/codemap
 - **[gopls](https://pkg.go.dev/golang.org/x/tools/gopls)** — optional, for one-off `callers`/`callees --precise` Go results
 - Optional: **[Task](https://taskfile.dev)** for the dev workflow
 
-**Supported language paths** — Go, Ruby, Lua, and CSS/SCSS/Sass/Less/HTML work with built-in pure-Go backends. TypeScript,
+**Supported language paths** — Go, Ruby, Lua, GDScript, SQL, YAML, Markdown, and CSS/SCSS/Sass/Less/HTML work with built-in pure-Go backends. TypeScript,
 JavaScript, Python, and Vue require the language server listed below on `PATH`; without it, codemap
 recognizes and reports those files but skips their structural extraction. Semantic retrieval is
 language-agnostic once symbols are indexed. A precise call graph
@@ -131,14 +132,17 @@ language-agnostic once symbols are indexed. A precise call graph
 | **Lua** | built-in pure-Go scanner (`function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe) | `.lua` | name-based (calls + `require` imports) |
 | **Vue SFC** | `typescript-language-server` via `vuesrc` — `<script>`/`<script setup>` block content is extracted and routed to the TS/JS delegate; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
 | **CSS / SCSS / Sass / Less** | built-in pure-Go scanner — selector nodes per class/id token, SCSS/Less nesting flattened, at-rule- and interpolation-safe; `className`/`class=` references from TSX/JSX and HTML resolve to selectors as `styles` edges | `.css` `.scss` `.sass` `.less` | `styles` + import edges (no call graph — not applicable) |
-| **HTML** | built-in pure-Go scanner — `class=`/`id=` references into CSS selector nodes (template placeholders skipped) | `.html` | `styles` reference edges |
+| **HTML** | HTML tokenizer — static class/id references, embedded style selectors, and local asset links | `.html` | `styles` + import edges |
+| **SQL / sqlc** | Offline declarations and query references; configured sqlc Go mapping | `.sql` | `reads`, `writes`, `depends_on`; no calls |
+| **YAML** | Key paths and explicit Task/Compose/workflow dependencies | `.yaml` `.yml` | `depends_on`; no calls |
+| **Markdown** | CommonMark sections and local links | `.md` `.markdown` | `documents`; no calls |
 
 > Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is delegated to the same `typescript-language-server` connection that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns the server itself to serve the script blocks.
 
 The language servers auto-enable when installed — run [`codemap doctor`](docs/cli.md) to see which are
 detected, or `--no-lsp` to skip. The next waves are tracked honestly at **T0 recognized**:
 Rust; Java/Kotlin/Scala; C/C++/CUDA; C#/VB; PHP; Dart; Swift; Elixir;
-Svelte/Astro/Razor; shell; HCL/Terraform; SQL; YAML; HTML/CSS. T0 means the file is detected
+Svelte/Astro/Razor; shell; HCL/Terraform. T0 means the file is detected
 and reported with a planned/missing backend, but produces no graph nodes yet. Public support
 advances per relation domain (symbols, references/imports, resolved calls) only after its
 fixture and accuracy gates pass; optional SCIP import is the project-level path for several waves.

@@ -88,6 +88,8 @@ func TestLanguageForPathIsCaseInsensitive(t *testing.T) {
 		"WEB/APP.SVELTE":  "svelte",
 		"WEB/VIEW.CSHTML": "razor",
 		"CONFIG/APP.YAML": "yaml",
+		"README.md":       "markdown",
+		"guide.markdown":  "markdown",
 	}
 	for path, want := range cases {
 		if got := LanguageForPath(path); got != want {
@@ -97,7 +99,7 @@ func TestLanguageForPathIsCaseInsensitive(t *testing.T) {
 }
 
 func TestLanguageForPathUnknown(t *testing.T) {
-	for _, path := range []string{"README.md", "data.json", "Cargo.toml", "noext", ".gitignore"} {
+	for _, path := range []string{"data.json", "Cargo.toml", "noext", ".gitignore"} {
 		if got := LanguageForPath(path); got != "" {
 			t.Errorf("LanguageForPath(%q) = %q, want unknown", path, got)
 		}

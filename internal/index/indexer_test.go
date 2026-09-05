@@ -84,7 +84,7 @@ func setupProject(t *testing.T) string {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.go", fileA)
 	writeFile(t, dir, "b.go", fileB)
-	writeFile(t, dir, "README.md", "# not indexed")
+	writeFile(t, dir, "NOTES.txt", "not indexed")
 	writeFile(t, dir, "node_modules/dep.go", "package dep\nfunc Z() {}\n")
 	return dir
 }
@@ -113,7 +113,7 @@ func TestIndexProject(t *testing.T) {
 	}
 
 	if res.FilesScanned != 2 {
-		t.Errorf("FilesScanned = %d, want 2 (md ignored, node_modules excluded)", res.FilesScanned)
+		t.Errorf("FilesScanned = %d, want 2 (txt ignored, node_modules excluded)", res.FilesScanned)
 	}
 	if res.FilesIndexed != 2 {
 		t.Errorf("FilesIndexed = %d, want 2", res.FilesIndexed)

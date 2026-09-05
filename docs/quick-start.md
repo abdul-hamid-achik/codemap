@@ -1,100 +1,96 @@
 ---
-description: Install codemap, index a repository, and ask your first structural and semantic code questions.
+description: Install codemap, build an offline structural index, and inspect your first dependencies.
 ---
 
-# Quick Start
+# Quick start
 
-Three minutes, one repo, real answers. This page is for anyone trying codemap for the
-first time — human or agent. Each step below shows the command and what it actually prints.
+Build a map of one repository, inspect a definition, and follow its relationships.
+Start with offline structure; add semantic retrieval when you need search by intent.
 
 ## 1. Install
 
 ```bash
 brew install abdul-hamid-achik/tap/codemap
-# or build from source:
+# Or build from source:
 go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 ```
 
-**Optional but recommended:** [Ollama](https://ollama.com) with `ollama pull nomic-embed-text`
-enables semantic search — structure-only indexing works fine without it.
+Go, Ruby, Lua, GDScript, SQL, YAML, Markdown, HTML, and stylesheets have built-in
+backends. TypeScript, JavaScript, and Vue need `typescript-language-server`;
+Python needs `pyright-langserver`. Run `codemap doctor` and consult the
+[language matrix](/languages) for exact capabilities and missing tools.
 
-> **Go, Ruby, and Lua** work with built-in pure-Go backends. To index **TypeScript,
-> JavaScript, or Vue**, install `typescript-language-server` (TS/JS then get name-based
-> import, JSX component-usage, and Next.js framework-wiring edges out of the box);
-> **Python** needs `pyright-langserver`. `--precise`
-> resolves plain calls exactly for Go/TypeScript/JavaScript/Python; Vue currently provides
-> symbols, `defines`, and import edges only. See [Language support](/languages) for install
-> commands and limits. Semantic search is available when embeddings are enabled.
-
-## 2. Index a project
+## 2. Index one repository
 
 ```bash
 cd ~/projects/myapp
-codemap init     # register the project
-codemap index    # extract the graph + attempt embeddings (incremental — safe to rerun)
+codemap init
+codemap index --no-embed
+codemap status --json
 ```
 
-Here's that same command run on codemap's own repo, for scale — add `--precise` for
-exact Go edges and for any TypeScript/JavaScript/Python call graph:
+Indexing reports the files processed, graph size, skipped languages, and errors.
+The counts depend on your repository. Run `index` again after changes; unchanged
+files are skipped and dependencies are reconciled against the current graph.
 
-```
-Indexed "codemap" (/Users/you/projects/codemap)
-  files: 631 scanned, 613 indexed, 18 up-to-date
-  graph: 8744 nodes, 164077 edges (embeddings: true)
-  time: 1m47s (extract 6.6s, embed 1m32s)
-  tip: Go call edges are name-based; add --precise to resolve them exactly
-```
-
-## 3. Ask it something
-
-One call replaces the usual grep-and-read chase — definition, callers, callees, and
-covering tests together:
+For exact calls in Go, TypeScript, JavaScript, or Python:
 
 ```bash
-$ codemap context DeriveProjectName
-Context: DeriveProjectName (codemap)
-  defined internal/config/project.go:50-56  (function)
-      func DeriveProjectName(dir string) string
-      DeriveProjectName returns a stable, human-readable project name for dir.
-  callers (11): app.Service.resolveProject, app.Service.Init, … (+9)
-  blast radius: 503 (depth ≤ 3)
+codemap index --no-embed --precise
 ```
 
-Trace how two symbols connect:
+Check reported coverage. A failed or unavailable precise pass does not make the
+whole graph exact. SQL, YAML, and Markdown expose other relationship types;
+`--precise` does not add function calls to them.
+
+## 3. Inspect a definition
+
+Start with a file you recognize:
 
 ```bash
-$ codemap path runInit DeriveProjectName
-runInit → Init → DeriveProjectName
-  runInit                        cmd/codemap/init_status.go:64
-  Init                           internal/app/service_init.go:92
-  DeriveProjectName              internal/config/project.go:50
-  call graph: name
+codemap symbols path/to/file.go --json
 ```
 
-Search by meaning instead of name:
+Replace the path with a file in your repository. Pick a returned definition and
+use its file and line in a follow-up:
 
 ```bash
-$ codemap semantic "embedding profile guard"
-fusion: natural_language
-  0.033  internal/embed/provider.go:16 Profile() EmbeddingProfile
-  0.029  internal/app/branchswitch.go:240 func profileCompatible(snap, current string) bool
-  0.028  internal/embed/provider.go:12 type Provider interface {
-  …
+codemap context --at path/to/file.go:42 --json
 ```
 
-Add `--json` to any query for machine-readable output; symbol results carry `file`,
-`start_line`, `fqn`, and `kind` — project those into `selector` to pin follow-up queries to
-that exact definition (see [MCP exact source selectors](/mcp#exact-source-selectors)).
-`codemap status` warns when files have changed since the last index, so you know to
-reindex before trusting a query.
+The context includes source, callers, callees, references, covering tests, and
+call impact where those domains are available. JSON results expose confidence
+and a durable selector: `file`, `start_line`, `fqn`, and `kind`.
 
-## Where to go next
+For data and documentation, use the [format-specific walkthrough](/data-and-docs):
 
-- **Wiring up an AI coding agent?** Skip to `codemap agent setup <harness>` — it registers
-  the MCP server and drops the playbook that teaches your agent when to reach for these
-  tools, in one command. See [codemap for agents](/agents#one-command-setup).
-- **Exploring by hand?** Use the [CLI](/cli) with `--json` when scripting — see [Surfaces](/studio).
-- **Wiring up CI?** The [GitHub Action](/ci) posts impact + risk on every PR and can fail
-  the build on untested or high-risk changes.
+```bash
+codemap symbols README.md --json
+codemap dependencies schema.sql --json
+codemap docs formats
+```
 
-Full command reference: [CLI](/cli) · [MCP](/mcp).
+Replace `schema.sql` with an indexed file. `dependencies` reports inbound
+evidence; `traverse` follows selected edge types. Missing evidence in a partial
+graph does not prove a file is safe to delete.
+
+## 4. Add semantic retrieval
+
+If Vecgrep already owns semantic retrieval in your environment, configure
+`semantic.backend: vecgrep` and use its resolved embedding provider. Vecgrep can
+use OpenAI when configured; its global defaults and project overrides determine
+the model. See [ecosystem setup](/ecosystem).
+
+For Codemap's own local embeddings, start Ollama and pull `nomic-embed-text`, then
+run `codemap index` with embeddings enabled. This path is optional. See
+[configuration](/configuration) for endpoints, models, and remote-source handling.
+
+```bash
+codemap semantic "where are sessions persisted?" --json
+```
+
+## Connect your agent
+
+`codemap agent setup <harness>` registers the MCP server and installs the agent
+playbook. See [agent setup](/agents#one-command-setup), [CLI reference](/cli),
+and [MCP reference](/mcp). For diff checks in CI, use the [GitHub Action](/ci).

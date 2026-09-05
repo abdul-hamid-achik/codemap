@@ -189,7 +189,7 @@ func (svc *Service) Dependencies(cwd, file string) (*FileDependenciesReport, err
 	case rep.Stale && rep.EvidenceTotal > 0:
 		rep.Note = "dependency evidence comes from a stale index snapshot and is candidate-only until reindexing confirms it"
 	case rep.CandidateFileScopedTotal > 0:
-		rep.Note = "some inbound file relationships are name-based candidates, not confirmed dependencies — reindex with --precise before treating them as exact"
+		rep.Note = "some inbound file relationships are name-based candidates, not confirmed dependencies — inspect their source; --precise can resolve supported code calls but not SQL or stylesheet candidates"
 	case !rep.Coverage.Complete:
 		rep.Note = "dependency coverage is incomplete — positive evidence is actionable, but missing evidence does not prove this file is independent"
 	}
@@ -425,6 +425,12 @@ func dependencyCoverage(callGraph string, nodes []graph.Node) FileDependencyCove
 		languages[node.Language] = true
 	}
 	domains := []DependencyDomainCoverage{callDependencyCoverage(callGraph)}
+	for _, entry := range [][2]string{{"reads", "sql"}, {"writes", "sql"}, {"depends_on", "yaml"}, {"documents", "markdown"}} {
+		domain, language := entry[0], entry[1]
+		if languages[language] {
+			domains = append(domains, DependencyDomainCoverage{Domain: domain, Status: DependencyCoveragePartial, Scope: "indexed_project", Note: "explicit local structure is indexed; dynamic SQL, templates, external links, and runtime configuration remain outside coverage"})
+		}
+	}
 	if anyLanguage(languages, referencePersistingLanguages) {
 		domains = append(domains,
 			DependencyDomainCoverage{
