@@ -78,8 +78,14 @@ OpenAI for code indexing does not migrate memory or change its provider.
 
 **codemap feeds *structure* to vecgrep** (implemented on the vecgrep side): `vecgrep_related_files` uses
 codemap's real call/test graph instead of import-text heuristics; `vecgrep` re-ranks its semantic hits by
-codemap's structural hub score; it pins search relevance back as codemap annotations (`source: vecgrep`);
-and `vecgrep_status` reports the codemap graph alongside its own index.
+codemap's structural component — hub fan-in dominant, plus a minority learning-from-use term from the
+`query_frequency` counters that `hotspots --json` exposes (how many past searches surfaced each symbol,
+tracked per symbol name so they survive reindex); it pins search relevance back as codemap annotations
+(`source: vecgrep`); and `vecgrep_status` reports the codemap graph alongside its own index, including the
+per-file freshness delta (`changed_files`/`new_files`/`deleted_files`) from
+`codemap structural-manifest --json`. vecgrep can also shell `codemap inconsistencies --json` to learn
+where the structural knowledge contradicts itself (dangling annotations, name edges on precise-resolved
+files, coverage without nodes).
 
 ## project_key — leak-free memory scoping
 
