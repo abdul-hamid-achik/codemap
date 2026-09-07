@@ -17,10 +17,22 @@ import (
 // the files already recorded in index_state and recognizes new ones by extension
 // — so it's cheap enough to report from `status` and lets an agent know its
 // answers may be behind the code before it trusts them.
+//
+// The manifest-facing strict variant additionally collects the drifted
+// project-relative paths, so a consumer can decide WHAT to re-ingest instead
+// of re-reading a whole export on any drift.
 type Staleness struct {
 	Changed int `json:"changed"`
 	New     int `json:"new"`
 	Deleted int `json:"deleted"`
+
+	// ChangedFiles, NewFiles, and DeletedFiles carry the project-relative
+	// paths behind the counters. They are populated only by
+	// StalenessFromSnapshotStrict (the manifest preflight), not by ordinary
+	// status — status runs on every query and must stay allocation-light.
+	ChangedFiles []string `json:"changed_files,omitempty"`
+	NewFiles     []string `json:"new_files,omitempty"`
+	DeletedFiles []string `json:"deleted_files,omitempty"`
 }
 
 // Any reports whether the index is behind the working tree in any way.
@@ -71,6 +83,9 @@ func (ix *Indexer) stalenessFromSnapshot(root string, fileHashes map[string]stri
 		if rerr != nil {
 			if os.IsNotExist(rerr) {
 				st.Deleted++
+				if strict {
+					st.DeletedFiles = append(st.DeletedFiles, contractRel)
+				}
 				continue
 			}
 			if strict {
@@ -88,6 +103,9 @@ func (ix *Indexer) stalenessFromSnapshot(root string, fileHashes map[string]stri
 		if rerr != nil {
 			if os.IsNotExist(rerr) {
 				st.Deleted++
+				if strict {
+					st.DeletedFiles = append(st.DeletedFiles, contractRel)
+				}
 				continue
 			}
 			if strict {
@@ -97,6 +115,9 @@ func (ix *Indexer) stalenessFromSnapshot(root string, fileHashes map[string]stri
 		}
 		if prev != "" && currentHash != prev {
 			st.Changed++
+			if strict {
+				st.ChangedFiles = append(st.ChangedFiles, contractRel)
+			}
 		}
 	}
 	// New: a recognized source file of an already-indexed language that isn't in
@@ -139,6 +160,9 @@ func (ix *Indexer) stalenessFromSnapshot(root string, fileHashes map[string]stri
 
 		if !inIndex[graph.CanonicalStructuralPath(rel)] {
 			st.New++
+			if strict {
+				st.NewFiles = append(st.NewFiles, graph.CanonicalStructuralPath(rel))
+			}
 		}
 		return nil
 	})

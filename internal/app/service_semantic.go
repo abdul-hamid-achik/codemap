@@ -64,6 +64,23 @@ type SemanticReport struct {
 	Hits    []SemanticHit `json:"hits"`
 }
 
+// recordQueryUsage is the learning-from-use write: every successful search
+// bumps a per-symbol fan-in counter (one per query per symbol), keyed by symbol
+// name so it survives reindex and joins hotspots' query_frequency. Best-effort
+// — a usage counter must never fail a query.
+func (svc *Service) recordQueryUsage(pid int64, hits []SemanticHit) {
+	if len(hits) == 0 {
+		return
+	}
+	if g, err := svc.s.Graph(); err == nil {
+		targets := make([]string, len(hits))
+		for i, h := range hits {
+			targets[i] = h.Symbol
+		}
+		_ = g.RecordQueryHits(pid, targets)
+	}
+}
+
 // fusionWeights resolves the vector/text weight pair for query given the
 // resolved semantic.fusion config, and the profile name to surface in the
 // report.
@@ -126,6 +143,7 @@ func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK in
 			rep.Note = "vecgrep completed the semantic query with no matches"
 		}
 		rep.Hits = hits
+		svc.recordQueryUsage(pid, hits)
 		return rep, nil
 	}
 
@@ -212,6 +230,7 @@ func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK in
 	if g, gerr := svc.s.Graph(); gerr == nil {
 		enrichHitAnnotations(g, pid, rep.Hits)
 	}
+	svc.recordQueryUsage(pid, rep.Hits)
 	return rep, nil
 }
 
@@ -247,6 +266,7 @@ func (svc *Service) FindSymbols(cwd, query string, limit int) (*SemanticReport, 
 		rep.Hits = append(rep.Hits, hit)
 	}
 	enrichHitAnnotations(g, pid, rep.Hits)
+	svc.recordQueryUsage(pid, rep.Hits)
 	return rep, nil
 }
 

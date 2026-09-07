@@ -193,3 +193,46 @@ func (svc *Service) RemoveAnnotation(cwd string, id int64) (bool, error) {
 	g, _ := svc.s.Graph()
 	return g.DeleteAnnotation(pid, id)
 }
+
+// RetargetAnnotation repoints an existing annotation at a new target — the
+// actionable alternative to pruning a dangling note after a rename. kind/target
+// follow the annotation's own grammar: node annotations take the new symbol
+// name, path annotations take the new "from -> to" pair. matched reports whether
+// the new target currently resolves to indexed symbols.
+func (svc *Service) RetargetAnnotation(cwd string, id int64, kind, target string) (matched bool, err error) {
+	if kind != graph.AnnotationNode && kind != graph.AnnotationPath {
+		return false, fmt.Errorf("unknown annotation kind %q", kind)
+	}
+	if strings.TrimSpace(target) == "" {
+		return false, fmt.Errorf("retarget target is required")
+	}
+	pid, _, found, err := svc.project(cwd)
+	if err != nil || !found {
+		return false, err
+	}
+	g, _ := svc.s.Graph()
+	a, ok, err := g.AnnotationByID(pid, id)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("no annotation #%d in this project", id)
+	}
+	if a.Kind != kind {
+		return false, fmt.Errorf("annotation #%d is a %s annotation; retarget it with the %s form", id, a.Kind, a.Kind)
+	}
+	if _, err := g.RetargetAnnotation(pid, id, kind, target); err != nil {
+		return false, err
+	}
+	matched, _ = g.NodeExistsByName(pid, target)
+	if kind == graph.AnnotationPath {
+		from, to, ok := strings.Cut(target, " -> ")
+		if !ok {
+			return false, fmt.Errorf("path target must be \"from -> to\"")
+		}
+		f, _ := g.NodeExistsByName(pid, from)
+		t, _ := g.NodeExistsByName(pid, to)
+		matched = f && t
+	}
+	return matched, nil
+}

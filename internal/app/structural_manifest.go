@@ -17,12 +17,20 @@ const StructuralManifestSchemaVersion = 1
 // StructuralManifestFreshness reports working-tree drift without including
 // any source body. Checked is explicit so a future additive diagnostic can
 // represent an unavailable check without pretending that zero means fresh.
+// The file lists are the delta behind the counters: a consumer (vecgrep) can
+// decide what to re-ingest instead of re-reading the whole export whenever
+// the fingerprint moves.
 type StructuralManifestFreshness struct {
 	Checked bool `json:"checked"`
 	Fresh   bool `json:"fresh"`
 	Changed int  `json:"changed"`
 	New     int  `json:"new"`
 	Deleted int  `json:"deleted"`
+	// ChangedFiles, NewFiles, and DeletedFiles list the project-relative
+	// drifted paths (additive in v1, omitted when empty).
+	ChangedFiles []string `json:"changed_files,omitempty"`
+	NewFiles     []string `json:"new_files,omitempty"`
+	DeletedFiles []string `json:"deleted_files,omitempty"`
 }
 
 // StructuralManifestReport is the single-response identity preflight for the
@@ -106,10 +114,13 @@ func (svc *Service) structuralManifest(cwd string, afterSnapshot func() error) (
 
 func manifestFreshness(stale index.Staleness) StructuralManifestFreshness {
 	return StructuralManifestFreshness{
-		Checked: true,
-		Fresh:   !stale.Any(),
-		Changed: stale.Changed,
-		New:     stale.New,
-		Deleted: stale.Deleted,
+		Checked:      true,
+		Fresh:        !stale.Any(),
+		Changed:      stale.Changed,
+		New:          stale.New,
+		Deleted:      stale.Deleted,
+		ChangedFiles: stale.ChangedFiles,
+		NewFiles:     stale.NewFiles,
+		DeletedFiles: stale.DeletedFiles,
 	}
 }

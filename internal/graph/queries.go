@@ -246,6 +246,160 @@ func (s *Store) scanAnnotations(query string, args ...any) ([]Annotation, error)
 	return out, rows.Err()
 }
 
+// AnnotationByID returns one annotation by id (project-scoped), with found=false
+// when no such row exists.
+func (s *Store) AnnotationByID(projectID, id int64) (Annotation, bool, error) {
+	var a Annotation
+	err := s.db.QueryRow(
+		`SELECT id, kind, target, source, COALESCE(external_id, ''), note, data, created_at
+		 FROM annotations WHERE project_id=? AND id=?`, projectID, id).
+		Scan(&a.ID, &a.Kind, &a.Target, &a.Source, &a.ExternalID, &a.Note, &a.Data, &a.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Annotation{}, false, nil
+	}
+	if err != nil {
+		return Annotation{}, false, err
+	}
+	return a, true, nil
+}
+
+// RetargetAnnotation repoints an annotation at a new target of the same kind —
+// the "refine the obsolete" step for the one knowledge layer that survives
+// reindex. Kind is re-asserted by the caller (node→symbol name, path→"from -> to"),
+// so a node note can never be silently turned into a path annotation or vice versa.
+// Reports whether a row changed.
+func (s *Store) RetargetAnnotation(projectID, id int64, kind, target string) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE annotations SET kind=?, target=? WHERE project_id=? AND id=?`,
+		kind, target, projectID, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// RecordQueryHits bumps the query-frequency counter of each DISTINCT target in
+// one call (a query mentioning a symbol twice still counts one fan-in), stamped
+// with the same timestamp. Keyed by symbol name — reindex-durable, and the same
+// grain hotspots join on. Best-effort callers may ignore the error: a lost
+// counter only costs ranking signal.
+func (s *Store) RecordQueryHits(projectID int64, targets []string) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(targets))
+	now := now()
+	tx, err := s.BeginTx(context.Background())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, t := range targets {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		if _, err := tx.Exec(`
+			INSERT INTO query_hits (project_id, target, hits, last_hit_at) VALUES (?, ?, 1, ?)
+			ON CONFLICT(project_id, target) DO UPDATE SET hits = hits + 1, last_hit_at = excluded.last_hit_at`,
+			projectID, t, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// QueryHitCounts returns the per-target query-frequency counters for a project.
+func (s *Store) QueryHitCounts(projectID int64) (map[string]int64, error) {
+	rows, err := s.db.Query(
+		`SELECT target, hits FROM query_hits WHERE project_id=?`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]int64)
+	for rows.Next() {
+		var target string
+		var hits int64
+		if err := rows.Scan(&target, &hits); err != nil {
+			return nil, err
+		}
+		out[target] = hits
+	}
+	return out, rows.Err()
+}
+
+// NameEdgeFile is a file that claims precise call resolution while still
+// emitting name-based candidate call edges — the compiled map disagreeing with
+// itself about its own confidence.
+type NameEdgeFile struct {
+	FilePath string `json:"file"`
+	Language string `json:"language"`
+	Resolver string `json:"resolver"`
+	NameEdge int    `json:"name_call_edges"`
+}
+
+// NameCallEdgesOnResolvedFiles finds files with a call_graph_coverage row whose
+// outgoing `calls` edges are still provenance='name'. A clean precise pass
+// supersedes a covered file's name edges, so a survivor means the coverage row
+// and the edge set contradict each other (partial failure, out-of-band write,
+// or a supersede that silently missed).
+func (s *Store) NameCallEdgesOnResolvedFiles(projectID int64) ([]NameEdgeFile, error) {
+	rows, err := s.db.Query(`
+		SELECT n.file_path, n.language, c.resolver, COUNT(*) AS name_edges
+		FROM edges e
+		JOIN nodes n ON e.source_id = n.id
+		JOIN call_graph_coverage c ON c.project_id = n.project_id AND c.file_path = n.file_path
+		WHERE n.project_id = ? AND e.edge_type = ? AND e.provenance = ?
+		GROUP BY n.file_path, n.language, c.resolver
+		ORDER BY n.file_path`, projectID, EdgeCalls, ProvName)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []NameEdgeFile
+	for rows.Next() {
+		var f NameEdgeFile
+		if err := rows.Scan(&f.FilePath, &f.Language, &f.Resolver, &f.NameEdge); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// CoverageWithoutNode is a call_graph_coverage row for a file that no longer has
+// any indexed nodes — confidence recorded for knowledge that no longer exists.
+type CoverageWithoutNode struct {
+	FilePath string `json:"file"`
+	Resolver string `json:"resolver"`
+}
+
+// CoverageWithoutNodes finds coverage rows whose file has zero indexed nodes
+// (not even the file node), i.e. stale confidence for wiped or deleted files.
+func (s *Store) CoverageWithoutNodes(projectID int64) ([]CoverageWithoutNode, error) {
+	rows, err := s.db.Query(`
+		SELECT c.file_path, c.resolver
+		FROM call_graph_coverage c
+		WHERE c.project_id = ? AND NOT EXISTS (
+			SELECT 1 FROM nodes n WHERE n.project_id = c.project_id AND n.file_path = c.file_path)
+		ORDER BY c.file_path`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CoverageWithoutNode
+	for rows.Next() {
+		var f CoverageWithoutNode
+		if err := rows.Scan(&f.FilePath, &f.Resolver); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // SymInfo holds the displayable text for a symbol, resolved by FQN.
 type SymInfo struct {
 	Signature string

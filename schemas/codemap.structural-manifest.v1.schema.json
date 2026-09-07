@@ -30,7 +30,22 @@
         "fresh": { "type": "boolean" },
         "changed": { "type": "integer", "minimum": 0 },
         "new": { "type": "integer", "minimum": 0 },
-        "deleted": { "type": "integer", "minimum": 0 }
+        "deleted": { "type": "integer", "minimum": 0 },
+        "changed_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Project-relative paths of indexed files whose content changed. Additive in v1; omitted when empty."
+        },
+        "new_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Project-relative recognized source files not indexed yet. Additive in v1; omitted when empty."
+        },
+        "deleted_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Project-relative indexed files no longer on disk. Additive in v1; omitted when empty."
+        }
       },
       "additionalProperties": true
     }

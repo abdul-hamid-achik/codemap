@@ -12,9 +12,9 @@ import (
 
 var (
 	annotateCmd = &cobra.Command{
-		Use:   "annotate <symbol> | <from> <to>",
-		Short: "Attach a note and/or external data (e.g. DB rows) to a symbol or a call path",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:   "annotate <symbol> | <from> <to> | --retarget <id> <symbol> | --retarget <id> <from> <to>",
+		Short: "Attach a note and/or external data (e.g. DB rows) to a symbol or a call path; --retarget repoints an existing annotation after a rename",
+		Args:  cobra.RangeArgs(0, 2),
 		RunE:  runAnnotate,
 	}
 	annotationsCmd = &cobra.Command{
@@ -37,10 +37,43 @@ func runAnnotate(cmd *cobra.Command, args []string) error {
 	externalID = strings.TrimSpace(externalID)
 	note, _ := cmd.Flags().GetString("note")
 	data, _ := cmd.Flags().GetString("data")
+	svc := app.NewService(sess)
+
+	// --retarget <id> <new-symbol> | <id> <from> <to>: repoint an existing
+	// annotation at a new target of the same kind — the actionable alternative
+	// to --rm on a dangling note after a rename.
+	if retargetID, _ := cmd.Flags().GetInt64("retarget"); retargetID > 0 {
+		if note != "" || data != "" {
+			return fmt.Errorf("--retarget moves the annotation as-is; --note/--data would silently rewrite it (use --rm + annotate for that)")
+		}
+		if len(args) == 0 {
+			return fmt.Errorf("retarget needs the new target: <symbol> (node) or <from> <to> (path)")
+		}
+		kind, target := "node", args[0]
+		if len(args) == 2 {
+			kind, target = "path", args[0]+" -> "+args[1]
+		}
+		if len(args) > 2 {
+			return fmt.Errorf("retarget takes <symbol> or <from> <to>")
+		}
+		matched, err := svc.RetargetAnnotation(cwd, retargetID, kind, target)
+		if err != nil {
+			return err
+		}
+		if jsonOut(cmd) {
+			out := map[string]any{"id": retargetID, "kind": kind, "target": target, "matched": matched, "action": "retargeted"}
+			return printJSON(out)
+		}
+		fmt.Printf("retargeted #%d to %s %s\n", retargetID, kind, target)
+		if !matched {
+			fmt.Println("⚠ new target does not match an indexed symbol yet — it will surface once one does")
+		}
+		return nil
+	}
+
 	if note == "" && data == "" {
 		return fmt.Errorf("nothing to attach: pass --note and/or --data")
 	}
-	svc := app.NewService(sess)
 	var (
 		id     int64
 		match  bool

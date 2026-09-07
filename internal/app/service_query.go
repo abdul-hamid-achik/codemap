@@ -19,6 +19,11 @@ type HotspotRef struct {
 	StartLine  int    `json:"start_line"`
 	InDegree   int    `json:"in_degree"`
 	SharedName int    `json:"shared_name,omitempty"` // defs sharing this name (>1 ⇒ in-degree inflated)
+	// QueryFrequency counts how many past searches surfaced this symbol —
+	// the learning-from-use signal (additive in v1, omitted when 0). A
+	// consumer can tie-break equal-confidence hubs by how often they were
+	// actually queried.
+	QueryFrequency int64 `json:"query_frequency,omitempty"`
 }
 
 // HotspotsReport is returned by Hotspots.
@@ -307,6 +312,7 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 		ids[i] = h.Node.ID
 	}
 	nameInflated, _ := g.HasNameInEdges(ids)
+	queryHits, _ := g.QueryHitCounts(pid)
 	for _, h := range hs {
 		ref := HotspotRef{
 			Symbol: h.Node.Symbol, FQN: h.Node.FQN, Kind: h.Node.Kind,
@@ -315,6 +321,7 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 		if n := shared[h.Node.Symbol]; n > 1 && nameInflated[h.Node.ID] {
 			ref.SharedName = n
 		}
+		ref.QueryFrequency = queryHits[h.Node.Symbol]
 		rep.Hotspots = append(rep.Hotspots, ref)
 	}
 	return rep, nil

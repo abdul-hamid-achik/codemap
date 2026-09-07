@@ -174,8 +174,11 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   coverage [--prefix P] [--lang L] [--uncovered] [--files] [--top N]
                                      per-file precise call-graph coverage: rollups by
                                      language/directory + bounded per-file detail
-  annotate <sym> | <from> <to>       pin a note/data; --external-id makes automated retries idempotent
+  annotate <sym> | <from> <to>       pin a note/data; --external-id makes automated retries idempotent;
+                                     --retarget <id> <sym>|<from> <to> repoints a note after a rename
   annotations [sym] | [from] [to]    list annotations (--rm <id> to remove)
+  inconsistencies --json             where compiled knowledge contradicts itself: dangling annotations,
+                                     name edges on precise-resolved files, coverage without nodes
   structural-manifest               source-free identity/freshness preflight for export-symbols
   export-symbols [--offset N --limit N --max-content-bytes N]
                                      paginated structural-export v1 feed for vecgrep structural_chunks

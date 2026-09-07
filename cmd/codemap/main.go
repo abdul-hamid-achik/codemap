@@ -203,6 +203,7 @@ func init() {
 	annotateCmd.Flags().String("external-id", "", "caller-owned idempotency key, unique within project + source (retries update the same annotation)")
 	annotateCmd.Flags().String("note", "", "free-form note text")
 	annotateCmd.Flags().String("data", "", "opaque data payload (e.g. JSON from a DB query)")
+	annotateCmd.Flags().Int64("retarget", 0, "repoint this annotation id at a new target instead of attaching: annotate --retarget 42 <symbol> | --retarget 42 <from> <to>")
 	annotationsCmd.Flags().Int64("rm", 0, "remove the annotation with this id")
 	branchSwitchCmd.Flags().String("from", "", "branch being left (default: the last active branch)")
 	branchSwitchCmd.Flags().String("to", "", "branch to switch to (default: the current git branch)")
@@ -221,7 +222,7 @@ func init() {
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd,
 		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, taskContextCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
-		annotateCmd, annotationsCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
+		annotateCmd, annotationsCmd, inconsistenciesCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured
 	// {ok,error,code,hint} envelope to stdout with a stable machine code, and

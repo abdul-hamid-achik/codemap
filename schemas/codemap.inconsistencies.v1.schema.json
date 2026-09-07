@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:codemap:inconsistencies:v1",
+  "title": "codemap inconsistencies report v1",
+  "description": "The JSON report emitted by codemap inconsistencies --json: where the compiled knowledge disagrees with itself or the working tree. An empty report is evidence of internal coherence, not correctness. Hard-failure envelopes are outside this schema.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project",
+    "dangling_annotations",
+    "name_call_edges_on_resolved_files",
+    "coverage_without_nodes",
+    "stale"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "project": { "type": "string", "minLength": 1 },
+    "dangling_annotations": {
+      "type": "array",
+      "description": "Annotations whose target no longer matches an indexed symbol. Repair: annotate --retarget <id> <new-target> or annotations --rm <id>.",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "target", "source"],
+        "properties": {
+          "id": { "type": "integer" },
+          "kind": { "type": "string", "enum": ["node", "path"] },
+          "target": { "type": "string" },
+          "source": { "type": "string" },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "name_call_edges_on_resolved_files": {
+      "type": "array",
+      "description": "Precise-resolved files that still emit name-based candidate call edges — the coverage row and the edge set contradict each other. Repair: re-run the precise pass.",
+      "items": {
+        "type": "object",
+        "required": ["file", "language", "resolver", "name_call_edges"],
+        "properties": {
+          "file": { "type": "string" },
+          "language": { "type": "string" },
+          "resolver": { "type": "string" },
+          "name_call_edges": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "coverage_without_nodes": {
+      "type": "array",
+      "description": "Call-graph coverage recorded for files that no longer have indexed nodes. Repair: reindex.",
+      "items": {
+        "type": "object",
+        "required": ["file", "resolver"],
+        "properties": {
+          "file": { "type": "string" },
+          "resolver": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "stale": {
+      "type": "boolean",
+      "description": "True when the index has drifted from the working tree; every other claim in the report is provisional until reindexing."
+    },
+    "note": { "type": "string" }
+  },
+  "additionalProperties": true
+}

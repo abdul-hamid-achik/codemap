@@ -3,8 +3,9 @@ package graph
 // schemaVersion is bumped whenever schemaSQL changes in a way that requires a
 // migration. The current version is stored in SQLite's PRAGMA user_version.
 // v2 adds annotations, v3 edge provenance, v4 composite query indexes, v5
-// per-file precise call-graph coverage, and v6 idempotent annotation keys.
-const schemaVersion = 6
+// per-file precise call-graph coverage, v6 idempotent annotation keys, and v7
+// per-symbol query-frequency counters.
+const schemaVersion = 7
 
 // Edge provenance: how an edge's target was resolved. Name-based fan-out (the
 // fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
@@ -164,4 +165,18 @@ CREATE TABLE IF NOT EXISTS annotations (
 
 CREATE INDEX IF NOT EXISTS idx_annotations_target  ON annotations(project_id, kind, target);
 CREATE INDEX IF NOT EXISTS idx_annotations_project ON annotations(project_id);
+
+-- Learning from use: how many times each symbol name surfaced as a search hit.
+-- Keyed by symbol NAME (not node id) for the same reason annotations are: node
+-- rows are wiped on reindex, and the consumer that joins these counts (hotspots)
+-- is name-keyed too. The indexer never reads or clears this table: it is a
+-- usage signal, not derived structure, so it survives reindex.
+CREATE TABLE IF NOT EXISTS query_hits (
+    project_id  INTEGER NOT NULL,
+    target      TEXT NOT NULL,
+    hits        INTEGER NOT NULL DEFAULT 0,
+    last_hit_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, target),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
 `
