@@ -354,8 +354,14 @@ task install         # go install ./cmd/codemap
 index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start`/`status`/`stop`, `agent setup`/`list`/`playbook` (register codemap with an AI coding harness — CLI-only, no MCP tool), `docs`, `serve` — query commands accept `--json`.
   `structural-manifest` and `export-symbols` are also CLI-only: the former is a lightweight
   `codemap.structural-manifest.v1` identity/freshness preflight that streams indexed metadata
-  without source bodies; the latter is the deterministic paginated `codemap.structural-export.v1`
-  feed for vecgrep `structural_chunks` (`auto|off|required`). Neither shares a database/package.
+  without source bodies and carries the additive `reindex_delta` attestation (per-run from/to
+  fingerprint + changed/new/deleted files, cleared when no honest file-level delta exists); the
+  latter is the deterministic paginated `codemap.structural-export.v1`
+  feed for vecgrep `structural_chunks` (`auto|off|required`), with `--files`/`--files-from`
+  switching the response to `codemap.structural-export.v2` — ordinals/totals scoped to the
+  requested slice, `files_filter`+`files_filter_fingerprint` echoed, `index_fingerprint` still
+  identifying the full index — so a peer that certified the delta's `from_fingerprint` can
+  re-ingest only the delta. Neither shares a database/package.
 - **Accuracy model** (be honest with users): the graph is name-based by default — intra-package
   calls resolve precisely (Go), but cross-package method calls (`x.Foo()`) link to every same-named
   method (no type info). codemap flags this (`callers`/`impact` note ambiguous names; `hotspots`

@@ -304,3 +304,165 @@ func TestInconsistencies(t *testing.T) {
 		t.Errorf("dangling after retarget = %+v, want none", rep.Dangling)
 	}
 }
+
+// TestReindexDeltaAttestation pins the selective re-ingestion anchor: a run
+// that moves files attests from_fingerprint -> to_fingerprint with the exact
+// changed/new/deleted lists; a no-op run clears the attestation; the very
+// first index of a project attests nothing (no peer could have certified an
+// empty index).
+func TestReindexDeltaAttestation(t *testing.T) {
+	proj, svc, _ := indexFixture(t)
+
+	// First run already happened in the fixture; no peer certified anything
+	// before it, so there must be no attestation.
+	rep, err := svc.StructuralManifest(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.ReindexDelta != nil {
+		t.Fatalf("fresh project must not attest a delta: %+v", rep.ReindexDelta)
+	}
+
+	// No-op run: fingerprint unchanged, attestation stays absent.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if rep, _ = svc.StructuralManifest(proj); rep.ReindexDelta != nil {
+		t.Fatalf("no-op run must not attest a delta: %+v", rep.ReindexDelta)
+	}
+
+	// Move all three directions, reindex, and read the attestation.
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\n// Run runs.\nfunc Run() { Helper() }\n\n// Helper helps.\nfunc Helper() {}\n\n// Added later.\nfunc Added() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "new.go"),
+		[]byte("package app\n\n// Fresh arrives.\nfunc Fresh() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(proj, "util.go")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err = svc.StructuralManifest(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := rep.ReindexDelta
+	if d == nil {
+		t.Fatal("expected a reindex delta after a drifting run")
+	}
+	if d.FromFingerprint == "" || d.FromFingerprint == d.ToFingerprint {
+		t.Fatalf("delta fingerprints invalid: %q -> %q", d.FromFingerprint, d.ToFingerprint)
+	}
+	if !hasPath(d.ChangedFiles, "main.go") || len(d.ChangedFiles) != 1 {
+		t.Errorf("changed = %v, want [main.go]", d.ChangedFiles)
+	}
+	if !hasPath(d.NewFiles, "new.go") || len(d.NewFiles) != 1 {
+		t.Errorf("new = %v, want [new.go]", d.NewFiles)
+	}
+	if !hasPath(d.DeletedFiles, "util.go") || len(d.DeletedFiles) != 1 {
+		t.Errorf("deleted = %v, want [util.go]", d.DeletedFiles)
+	}
+
+	// A subsequent no-op run supersedes the attestation: the old
+	// from_fingerprint no longer matches any export codemap would serve.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if rep, _ = svc.StructuralManifest(proj); rep.ReindexDelta != nil {
+		t.Fatalf("stale attestation must be cleared after a no-op run: %+v", rep.ReindexDelta)
+	}
+}
+
+// TestStructuralExportFilesFilter pins the v2 filtered-export contract: the
+// filter scopes schema version, ordinals, and totals to the requested slice,
+// echoes the canonical filter with a stable fingerprint, and keeps
+// index_fingerprint identifying the FULL index.
+func TestStructuralExportFilesFilter(t *testing.T) {
+	proj, svc, _ := indexFixture(t)
+
+	full, err := svc.StructuralExport(proj, StructuralExportOptions{Limit: MaxStructuralExportLimit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.SchemaVersion != StructuralExportSchemaVersion {
+		t.Fatalf("unfiltered export = v%d, want v%d", full.SchemaVersion, StructuralExportSchemaVersion)
+	}
+
+	filtered, err := svc.StructuralExport(proj, StructuralExportOptions{
+		Limit:       MaxStructuralExportLimit,
+		FilesFilter: []string{"main.go", "./main.go", "util.go", "  "},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filtered.SchemaVersion != StructuralExportFilteredSchemaVersion {
+		t.Fatalf("filtered export = v%d, want v%d", filtered.SchemaVersion, StructuralExportFilteredSchemaVersion)
+	}
+	if got := filtered.FilesFilter; len(got) != 2 || got[0] != "main.go" || got[1] != "util.go" {
+		t.Fatalf("files_filter = %v, want canonicalized sorted [main.go util.go]", got)
+	}
+	if filtered.FilesFilterFingerprint == "" {
+		t.Fatal("filtered export must carry a filter fingerprint")
+	}
+	if filtered.IndexFingerprint != full.IndexFingerprint {
+		t.Fatalf("filtered fingerprint must identify the full index: %q != %q",
+			filtered.IndexFingerprint, full.IndexFingerprint)
+	}
+	// This filter covers every fixture file, so totals match; a narrow filter
+	// must scope strictly below the full export.
+	narrow, err := svc.StructuralExport(proj, StructuralExportOptions{
+		Limit:       MaxStructuralExportLimit,
+		FilesFilter: []string{"main.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filtered.TotalRecords != full.TotalRecords {
+		t.Errorf("total-covering filter total = %d, want %d", filtered.TotalRecords, full.TotalRecords)
+	}
+	if !(narrow.TotalRecords < full.TotalRecords) {
+		t.Errorf("narrow filtered total %d must be smaller than full total %d", narrow.TotalRecords, full.TotalRecords)
+	}
+	for i, r := range filtered.Records {
+		if r.Ordinal != i+1 {
+			t.Errorf("filtered ordinal %d at position %d, want %d", r.Ordinal, i, i+1)
+		}
+		if r.File != "main.go" && r.File != "util.go" {
+			t.Errorf("filtered export leaked record from %q", r.File)
+		}
+	}
+
+	// A filter matching nothing is a valid, complete, empty v2 response.
+	empty, err := svc.StructuralExport(proj, StructuralExportOptions{
+		FilesFilter: []string{"nope/missing.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.SchemaVersion != StructuralExportFilteredSchemaVersion || !empty.Complete || len(empty.Records) != 0 {
+		t.Errorf("empty filter response = v%d complete=%t records=%d", empty.SchemaVersion, empty.Complete, len(empty.Records))
+	}
+
+	// Pagination over the filtered set: ordinals continue across pages.
+	page1, err := svc.StructuralExport(proj, StructuralExportOptions{Limit: 1, FilesFilter: []string{"main.go", "util.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page1.Complete || page1.NextOffset != 1 {
+		t.Fatalf("page1 complete=%t next=%d", page1.Complete, page1.NextOffset)
+	}
+	page2, err := svc.StructuralExport(proj, StructuralExportOptions{Offset: 1, Limit: MaxStructuralExportLimit, FilesFilter: []string{"main.go", "util.go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page2.Records[0].Ordinal != 2 {
+		t.Errorf("page2 first ordinal = %d, want 2", page2.Records[0].Ordinal)
+	}
+	if page2.FilesFilterFingerprint != page1.FilesFilterFingerprint {
+		t.Error("filter fingerprint must be stable across pages")
+	}
+}

@@ -48,6 +48,12 @@ type StructuralManifestReport struct {
 	TotalRecords        int                         `json:"total_records"`
 	Complete            bool                        `json:"complete"`
 	Freshness           StructuralManifestFreshness `json:"freshness"`
+	// ReindexDelta, when present, attests the file-level drift of the most
+	// recent index run between two structural fingerprints. A peer whose
+	// ingestion receipt certifies FromFingerprint may re-ingest exactly the
+	// delta files (filtered export) instead of the whole stream. Absent when
+	// the last run cannot honestly attest a file-level delta (additive in v1).
+	ReindexDelta *graph.ReindexDelta `json:"reindex_delta,omitempty"`
 }
 
 // StructuralManifest returns a lightweight, versioned preflight for sibling
@@ -109,6 +115,9 @@ func (svc *Service) structuralManifest(cwd string, afterSnapshot func() error) (
 	}
 	rep.Freshness = manifestFreshness(stale)
 	rep.Complete = true
+	if rep.ReindexDelta, err = g.ReindexDelta(pid); err != nil {
+		return nil, fmt.Errorf("structural manifest reindex delta: %w", err)
+	}
 	return rep, nil
 }
 

@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -374,6 +375,87 @@ func (s *Store) NameCallEdgesOnResolvedFiles(projectID int64) ([]NameEdgeFile, e
 type CoverageWithoutNode struct {
 	FilePath string `json:"file"`
 	Resolver string `json:"resolver"`
+}
+
+// ReindexDelta is the attested file-level drift of one completed index run:
+// every indexed file whose content changed, every newly indexed file, and every
+// indexed file that left the index. FromFingerprint/ToFingerprint anchor the
+// run to the structural exports on either side of it: a peer that certified
+// FromFingerprint may re-ingest exactly these files instead of the whole
+// export, because records for every other file are identical on both sides.
+type ReindexDelta struct {
+	FromFingerprint string   `json:"from_fingerprint"`
+	ToFingerprint   string   `json:"to_fingerprint"`
+	ChangedFiles    []string `json:"changed_files"`
+	NewFiles        []string `json:"new_files"`
+	DeletedFiles    []string `json:"deleted_files"`
+	CreatedAt       string   `json:"created_at"`
+}
+
+func encodeFilePaths(paths []string) string {
+	b, err := json.Marshal(paths)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+func decodeFilePaths(s string) []string {
+	var out []string
+	if err := json.Unmarshal([]byte(s), &out); err != nil || out == nil {
+		return []string{}
+	}
+	return out
+}
+
+// UpsertReindexDelta records the current run's attestation, replacing any
+// previous one (a newer run invalidates the from_fingerprint a peer certified).
+func (s *Store) UpsertReindexDelta(projectID int64, d ReindexDelta) error {
+	_, err := s.db.Exec(`
+		INSERT INTO structural_reindex_delta
+			(project_id, from_fingerprint, to_fingerprint, changed_files, new_files, deleted_files, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(project_id) DO UPDATE SET
+			from_fingerprint = excluded.from_fingerprint,
+			to_fingerprint = excluded.to_fingerprint,
+			changed_files = excluded.changed_files,
+			new_files = excluded.new_files,
+			deleted_files = excluded.deleted_files,
+			created_at = excluded.created_at`,
+		projectID, d.FromFingerprint, d.ToFingerprint,
+		encodeFilePaths(d.ChangedFiles), encodeFilePaths(d.NewFiles), encodeFilePaths(d.DeletedFiles),
+		now())
+	return err
+}
+
+// ClearReindexDelta removes the attestation. Called when a run cannot honestly
+// attest a file-level delta (no previous index, fingerprint moved without a
+// file-level cause), so a peer can never match a stale anchor.
+func (s *Store) ClearReindexDelta(projectID int64) error {
+	_, err := s.db.Exec("DELETE FROM structural_reindex_delta WHERE project_id=?", projectID)
+	return err
+}
+
+// ReindexDelta returns the most recent attestation, or nil when none exists.
+func (s *Store) ReindexDelta(projectID int64) (*ReindexDelta, error) {
+	var (
+		d                              ReindexDelta
+		changed, newFiles, deletedFile string
+	)
+	err := s.db.QueryRow(`
+		SELECT from_fingerprint, to_fingerprint, changed_files, new_files, deleted_files, created_at
+		FROM structural_reindex_delta WHERE project_id=?`, projectID).
+		Scan(&d.FromFingerprint, &d.ToFingerprint, &changed, &newFiles, &deletedFile, &d.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	d.ChangedFiles = decodeFilePaths(changed)
+	d.NewFiles = decodeFilePaths(newFiles)
+	d.DeletedFiles = decodeFilePaths(deletedFile)
+	return &d, nil
 }
 
 // CoverageWithoutNodes finds coverage rows whose file has zero indexed nodes

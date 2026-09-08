@@ -7,6 +7,7 @@ import (
 	"hash"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,8 +19,13 @@ import (
 
 // StructuralExportSchemaVersion is the major version of the portable symbol
 // record contract. Additive optional fields are compatible within v1; removing
-// or changing a required field needs a new version.
+// or changing a required field needs a new version. Unfiltered exports stay
+// v1 (with a stable fingerprint seed); a FilesFilter response is v2, because
+// filtering re-scopes ordinals and total_records to the requested slice.
 const StructuralExportSchemaVersion = 1
+
+// StructuralExportFilteredSchemaVersion marks the v2 filtered-export contract.
+const StructuralExportFilteredSchemaVersion = 2
 
 // Structural export is paginated so a peer process never has to accept an
 // unbounded JSON response. Content is independently capped per record.
@@ -40,6 +46,13 @@ type StructuralExportOptions struct {
 	Offset          int
 	Limit           int
 	MaxContentBytes int
+	// FilesFilter restricts the export to records whose canonical file path
+	// is in the set. Non-empty switches the response to
+	// codemap.structural-export.v2: ordinals and total_records are re-scoped
+	// to the filtered deterministic order, the report echoes the filter with
+	// its fingerprint, and IndexFingerprint keeps identifying the FULL
+	// underlying index so a consumer can still pin the source index.
+	FilesFilter []string
 }
 
 // StructuralSymbolRecord is a portable, database-independent description of
@@ -94,6 +107,11 @@ type StructuralExportReport struct {
 	Complete         bool                     `json:"complete"`
 	NextOffset       int                      `json:"next_offset,omitempty"`
 	Records          []StructuralSymbolRecord `json:"records"`
+	// FilesFilter and FilesFilterFingerprint are present only on v2 filtered
+	// exports: the canonical, sorted file set the consumer asked for, and the
+	// SHA-256 over it, so the slice can be verified page after page.
+	FilesFilter            []string `json:"files_filter,omitempty"`
+	FilesFilterFingerprint string   `json:"files_filter_fingerprint,omitempty"`
 }
 
 // StructuralExport returns one stable page of indexed symbol definitions for
@@ -121,14 +139,30 @@ func (svc *Service) structuralExport(cwd string, opts StructuralExportOptions, a
 	if err != nil {
 		return nil, err
 	}
+	// A file filter promotes the response to codemap.structural-export.v2:
+	// same record shape, but ordinals and totals are scoped to the slice.
+	filter := normalizeStructuralFilesFilter(opts.FilesFilter)
+	var filterSet map[string]bool
+	schemaVersion := StructuralExportSchemaVersion
+	if len(filter) > 0 {
+		schemaVersion = StructuralExportFilteredSchemaVersion
+		filterSet = make(map[string]bool, len(filter))
+		for _, f := range filter {
+			filterSet[f] = true
+		}
+	}
 	rep := &StructuralExportReport{
-		SchemaVersion:   StructuralExportSchemaVersion,
+		SchemaVersion:   schemaVersion,
 		Project:         project,
 		ProjectKey:      git.RepoHash(cwd),
 		Offset:          opts.Offset,
 		Limit:           opts.Limit,
 		MaxContentBytes: opts.MaxContentBytes,
 		Records:         []StructuralSymbolRecord{},
+	}
+	if len(filter) > 0 {
+		rep.FilesFilter = filter
+		rep.FilesFilterFingerprint = structuralFilesFilterFingerprint(filter)
 	}
 	if !found {
 		rep.Complete = true
@@ -157,14 +191,20 @@ func (svc *Service) structuralExport(cwd string, opts StructuralExportOptions, a
 	nodes := snapshot.Nodes
 	symbols := make([]graph.Node, 0, len(nodes))
 	for _, n := range nodes {
-		if n.Kind != graph.KindFile {
-			symbols = append(symbols, n)
+		if n.Kind == graph.KindFile {
+			continue
 		}
+		if filterSet != nil && !filterSet[graph.CanonicalStructuralPath(n.FilePath)] {
+			continue
+		}
+		symbols = append(symbols, n)
 	}
 	sort.Slice(symbols, func(i, j int) bool {
 		return structuralNodeLess(symbols[i], symbols[j])
 	})
-	rep.IndexFingerprint = structuralIndexFingerprint(rep.ProjectKey, symbols)
+	// IndexFingerprint always covers the FULL index, filter or not, so a
+	// consumer can pin the filtered slice to the same source index across pages.
+	rep.IndexFingerprint = structuralIndexFingerprint(rep.ProjectKey, snapshotSymbolsForFingerprint(nodes))
 
 	rep.TotalRecords = len(symbols)
 	start := opts.Offset
@@ -249,6 +289,57 @@ func structuralIndexFingerprint(projectKey string, symbols []graph.Node) string 
 	h := newStructuralIndexFingerprint(projectKey)
 	for _, n := range symbols {
 		writeStructuralFingerprintNode(h, n)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// snapshotSymbolsForFingerprint returns every non-file node of a snapshot in
+// deterministic structural order — the exact population the export
+// fingerprint covers, independent of any v2 file filter.
+func snapshotSymbolsForFingerprint(nodes []graph.Node) []graph.Node {
+	out := make([]graph.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Kind != graph.KindFile {
+			out = append(out, n)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return structuralNodeLess(out[i], out[j]) })
+	return out
+}
+
+// normalizeStructuralFilesFilter canonicalizes, dedupes, and sorts the
+// requested file set. Blank entries are dropped; a set that is empty after
+// normalization means "no filter" (v1 semantics).
+func normalizeStructuralFilesFilter(files []string) []string {
+	seen := make(map[string]bool, len(files))
+	filter := make([]string, 0, len(files))
+	for _, f := range files {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		canonical := graph.CanonicalStructuralPath(f)
+		if c := path.Clean(canonical); c != "." {
+			canonical = c
+		}
+		if seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		filter = append(filter, canonical)
+	}
+	sort.Strings(filter)
+	return filter
+}
+
+// structuralFilesFilterFingerprint is the SHA-256 over the canonical sorted
+// filter, so a consumer can verify page after page that it is reading the
+// slice it asked for.
+func structuralFilesFilterFingerprint(filter []string) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "codemap-structural-export-filter-v%d\x00", StructuralExportFilteredSchemaVersion)
+	for _, f := range filter {
+		_, _ = fmt.Fprintf(h, "%s\x00", f)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

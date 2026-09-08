@@ -3,9 +3,9 @@ package graph
 // schemaVersion is bumped whenever schemaSQL changes in a way that requires a
 // migration. The current version is stored in SQLite's PRAGMA user_version.
 // v2 adds annotations, v3 edge provenance, v4 composite query indexes, v5
-// per-file precise call-graph coverage, v6 idempotent annotation keys, and v7
-// per-symbol query-frequency counters.
-const schemaVersion = 7
+// per-file precise call-graph coverage, v6 idempotent annotation keys, v7
+// per-symbol query-frequency counters, and v8 the attested reindex delta.
+const schemaVersion = 8
 
 // Edge provenance: how an edge's target was resolved. Name-based fan-out (the
 // fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
@@ -177,6 +177,23 @@ CREATE TABLE IF NOT EXISTS query_hits (
     hits        INTEGER NOT NULL DEFAULT 0,
     last_hit_at TEXT NOT NULL,
     PRIMARY KEY (project_id, target),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+-- Attested reindex delta: the file-level drift of the most recent index run,
+-- anchored by the structural fingerprints before and after it. A peer that
+-- certified the from_fingerprint may re-ingest only these files through the
+-- filtered export; everything else is byte-identical between the two exports.
+-- One row per project: a newer run always supersedes (or clears) the previous
+-- attestation, because it invalidates the peer's from_fingerprint anyway.
+CREATE TABLE IF NOT EXISTS structural_reindex_delta (
+    project_id       INTEGER PRIMARY KEY,
+    from_fingerprint TEXT NOT NULL,
+    to_fingerprint   TEXT NOT NULL,
+    changed_files    TEXT NOT NULL,
+    new_files        TEXT NOT NULL,
+    deleted_files    TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 `

@@ -167,6 +167,14 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	}
 	name = project.Name // canonical vector/search scope after basename collision
 
+	// Capture the pre-run structural fingerprint: after a successful run,
+	// recordReindexDelta anchors the run's file-level drift to the exports on
+	// either side of it, so a certified peer can re-ingest only the delta.
+	beforeRun, err := captureStructuralFingerprintState(g, pid, git.RepoHash(project.Path))
+	if err != nil {
+		return nil, err
+	}
+
 	rep := &IndexReport{Project: name, Root: root}
 	var vec *vector.Store
 	emb := svc.s.Embedder()
@@ -252,6 +260,17 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.PreciseMs = res.PreciseMs
 	rep.TotalMs = res.TotalMs
 	attachTooling(rep, res)
+
+	// Attest the run's file-level drift (best-effort: a failed attestation
+	// record only costs the peer a full re-ingest, never correctness).
+	if afterRun, aErr := captureStructuralFingerprintState(g, pid, git.RepoHash(project.Path)); aErr == nil {
+		if dErr := recordReindexDelta(g, pid, beforeRun, afterRun); dErr != nil {
+			if rep.Warning != "" {
+				rep.Warning += "; "
+			}
+			rep.Warning += "reindex delta attestation failed: " + dErr.Error()
+		}
+	}
 	if adv := indexAdvisory(res); adv != "" {
 		if rep.Warning != "" {
 			rep.Warning += "; " + adv
