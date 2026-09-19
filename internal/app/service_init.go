@@ -64,10 +64,24 @@ type IndexReport struct {
 	// Phase timing (wall-clock milliseconds). Extract covers the parse + graph
 	// write pass; Embed covers Ollama + vector inserts; Precise covers the opt-in
 	// go/types + LSP callHierarchy passes; Total is end-to-end. Zero when N/A.
+	// Imports/Edges/Formats/Analyze decompose the previously-unattributed gap
+	// between Extract and Total: the deferred import-edge pass, name-based edge
+	// resolution, declarative (sql/yaml/md) reconciliation, and the post-index
+	// ANALYZE. Zero when the phase did not run (a no-op incremental runs none).
 	ExtractMs int `json:"extract_ms,omitempty"`
 	EmbedMs   int `json:"embed_ms,omitempty"`
 	PreciseMs int `json:"precise_ms,omitempty"`
 	TotalMs   int `json:"total_ms,omitempty"`
+	ImportsMs int `json:"imports_ms,omitempty"`
+	EdgesMs   int `json:"edges_ms,omitempty"`
+	FormatsMs int `json:"formats_ms,omitempty"`
+	AnalyzeMs int `json:"analyze_ms,omitempty"`
+	// ScanMs the tree walks + change detection + prune; LspMs the
+	// language-server handshake (zero when no server was needed); NodeIndexMs
+	// the project-wide node-index build (zero when the run had no edge work).
+	ScanMs      int `json:"scan_ms,omitempty"`
+	LspMs       int `json:"lsp_ms,omitempty"`
+	NodeIndexMs int `json:"node_index_ms,omitempty"`
 }
 
 // ToolingReport is the agent-facing view of external binaries needed for this
@@ -259,6 +273,13 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.EmbedMs = res.EmbedMs
 	rep.PreciseMs = res.PreciseMs
 	rep.TotalMs = res.TotalMs
+	rep.ImportsMs = res.ImportsMs
+	rep.EdgesMs = res.EdgesMs
+	rep.FormatsMs = res.FormatsMs
+	rep.AnalyzeMs = res.AnalyzeMs
+	rep.ScanMs = res.ScanMs
+	rep.LspMs = res.LspMs
+	rep.NodeIndexMs = res.NodeIndexMs
 	attachTooling(rep, res)
 
 	// Attest the run's file-level drift (best-effort: a failed attestation

@@ -138,6 +138,22 @@ type Result struct {
 	EmbedMs   int `json:"embed_ms,omitempty"`
 	PreciseMs int `json:"precise_ms,omitempty"`
 	TotalMs   int `json:"total_ms,omitempty"`
+	// Sub-phase timing (wall-clock milliseconds), additive to the fields above:
+	// ImportsMs the deferred file→file import pass, EdgesMs name-based reference
+	// resolution, FormatsMs declarative reconciliation (sql/yaml/md, including
+	// dangling-ref healing), AnalyzeMs the post-index ANALYZE. Zero when the
+	// phase did not run (a no-op incremental runs none of them).
+	ImportsMs int `json:"imports_ms,omitempty"`
+	EdgesMs   int `json:"edges_ms,omitempty"`
+	FormatsMs int `json:"formats_ms,omitempty"`
+	AnalyzeMs int `json:"analyze_ms,omitempty"`
+	// Further decomposition of the fixed per-run cost: ScanMs the tree walks +
+	// change detection (stat/hash pre-pass) + prune; LspMs the language-server
+	// probe/spawn/handshake (zero when no server was needed); NodeIndexMs the
+	// project-wide node-index build (zero when the run had no edge work).
+	ScanMs      int `json:"scan_ms,omitempty"`
+	LspMs       int `json:"lsp_ms,omitempty"`
+	NodeIndexMs int `json:"node_index_ms,omitempty"`
 	// EmbedNote, when set, explains why semantic vectors were not written (e.g.
 	// Ollama unreachable). The structural index still succeeded; only semantic
 	// search is unavailable until a reindex with the embedder reachable.
@@ -206,7 +222,82 @@ type Indexer struct {
 // any DefaultServers spec directly — a vuesrc.Extractor delegates their
 // <script>/<script setup> block content to the TypeScript/JavaScript extractor
 // this loop registers.
-func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[string]int, res *Result) bool {
+// lspWorkPending reports whether any file of the given languages needs the
+// language server this run: a new or content-changed source file, a
+// --force-extra match, a --precise pass over already-indexed files, or a full
+// reindex. A steady-state incremental whose edits touched none of the server's
+// languages skips the spawn entirely — the server handshake alone (seconds on
+// tsserver) dominated no-op and one-file runs on LSP-language repos.
+//
+// Files whose stat drifted but whose hash is unchanged are NOT pending; their
+// cached stat is not refreshed on this path, so they re-hash on later runs
+// until next re-extracted — bounded, and never a correctness issue.
+func (ix *Indexer) lspWorkPending(root string, projectID int64, langs []string, opts Options) bool {
+	if opts.Reindex {
+		return true
+	}
+	langSet := make(map[string]bool, len(langs))
+	for _, l := range langs {
+		langSet[l] = true
+	}
+	state, err := ix.graph.ProjectIndexState(projectID)
+	if err != nil {
+		return true // can't prove no work — be safe, spawn
+	}
+	indexed := make(map[string]graph.IndexEntry, len(state))
+	indexedLangFiles := 0
+	for _, e := range state {
+		indexed[e.FilePath] = e
+		if langSet[extract.LanguageForPath(e.FilePath)] {
+			indexedLangFiles++
+		}
+	}
+	if opts.Precise && indexedLangFiles > 0 {
+		return true // the precise pass talks to the server even with no drift
+	}
+	pending := false
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		name := d.Name()
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			rel = path
+		}
+		if d.IsDir() {
+			if path != root && (ix.excluded(rel) || skipHiddenDirectory(name)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if ix.excluded(rel) {
+			return nil
+		}
+		if !langSet[extract.LanguageForPath(path)] {
+			return nil
+		}
+		if matchExclude(opts.ForcePaths, rel) {
+			pending = true
+			return nil
+		}
+		e, ok := indexed[rel]
+		if !ok {
+			pending = true // a file of this language the index has never seen
+			return nil
+		}
+		if fi, statErr := d.Info(); statErr == nil && statMatches(fi, e) {
+			return nil
+		}
+		if h, hashErr := hashFile(path); hashErr == nil && h != e.FileHash {
+			pending = true
+		}
+		return nil
+	})
+	return pending
+}
+
+func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[string]int, res *Result, projectID int64, opts Options) bool {
 	registered := false
 	for _, spec := range lspsrc.DefaultServers {
 		// Which of this server's languages does the project actually contain?
@@ -222,6 +313,16 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 		langs := make([]string, len(want))
 		for i, lb := range want {
 			langs[i] = lb.Lang
+		}
+		// Skip the spawn when this run has no work for the server's languages:
+		// nothing changed, nothing new, no forced paths, no precise pass. The
+		// languages are also dropped from the "unsupported" report — those
+		// files are indexed; a server is only missing when work exists.
+		if !ix.lspWorkPending(root, projectID, langs, opts) {
+			for _, lb := range want {
+				delete(present, lb.Lang)
+			}
+			continue
 		}
 		// Probe under the project root so asdf/mise shims evaluate .tool-versions
 		// (LookPath alone treats a dead shim as success). A dead shim with a
@@ -251,7 +352,7 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 		}
 		registered = true
 	}
-	if present["vue"] > 0 && ix.registerVue(ctx, root, res) {
+	if present["vue"] > 0 && ix.registerVue(ctx, root, res, projectID, opts) {
 		registered = true
 	}
 	return registered
@@ -270,7 +371,7 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 // an already-running process). Never fatal: a missing/failed server is
 // recorded in res.MissingServers["vue"] and .vue files stay in Unsupported,
 // same as any other missing-server language.
-func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result) bool {
+func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result, projectID int64, opts Options) bool {
 	ts := ix.extractors["typescript"]
 	js := ix.extractors["javascript"]
 
@@ -278,6 +379,16 @@ func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result) bo
 		spec := tsServerSpec()
 		if spec.Cmd == "" {
 			noteServerIssue(res, tooling.ClassifyNotFound("typescript-language-server", root, []string{"vue"}))
+			return false
+		}
+		// Same spawn gate as registerLSP: a Vue-only project with no Vue/TS/JS
+		// drift this run doesn't need the server. (When ts/js were already
+		// registered, binding vuesrc to the live connection below is free.)
+		gateLangs := []string{"vue"}
+		for _, lb := range spec.Langs {
+			gateLangs = append(gateLangs, lb.Lang)
+		}
+		if !ix.lspWorkPending(root, projectID, gateLangs, opts) {
 			return false
 		}
 		langs := []string{"vue"}
@@ -368,35 +479,53 @@ func tsServerSpec() lspsrc.ServerSpec {
 // incremental reindex leaves ghost symbols that show up in find/callers/search. It
 // checks each indexed file with os.Stat (not the walk result), so a file that's
 // still on disk but currently unsupported (server uninstalled, or --no-lsp) is
-// kept, never wiped; only genuinely-gone files are pruned.
-func (ix *Indexer) pruneDeleted(projectID int64, projectName, root string, res *Result) error {
+// kept, never wiped; only genuinely-gone files are pruned. The pruned paths are
+// returned so the caller can scope its passes (a deleted file flips the run to
+// the full import/declarative passes). Declarative references that targeted the
+// deleted nodes are recorded as unresolved first, so files linking to a deleted
+// table/heading keep a healing trail for when the target returns.
+func (ix *Indexer) pruneDeleted(ctx context.Context, projectID int64, projectName, root string, res *Result) ([]string, error) {
 	indexed, err := ix.graph.IndexedFiles(projectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var pruned []string
+	var dangling []graph.UnresolvedRef
 	for _, rel := range indexed {
 		if _, statErr := os.Stat(filepath.Join(root, rel)); statErr == nil {
 			continue // still on disk — keep it (even if its extractor is unavailable now)
 		} else if !os.IsNotExist(statErr) {
 			continue // other stat error — be conservative, don't delete
 		}
+		inbound, err := ix.graph.DanglingDeclarativeInbound(projectID, rel)
+		if err != nil {
+			return nil, err
+		}
+		dangling = append(dangling, inbound...)
 		if err := ix.graph.DeleteNodesInFile(projectID, rel); err != nil {
-			return err
+			return nil, err
 		}
 		if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
-			return err
+			return nil, err
 		}
 		if err := ix.graph.ClearCallGraphResolved(projectID, rel); err != nil {
-			return err
+			return nil, err
+		}
+		if err := ix.graph.DeleteUnresolvedRefsByFile(projectID, rel); err != nil {
+			return nil, err
 		}
 		if ix.vectors != nil {
 			if _, err := ix.vectors.DeleteByFile(projectName, rel); err != nil {
-				return err
+				return nil, err
 			}
 		}
+		pruned = append(pruned, rel)
 		res.FilesDeleted++
 	}
-	return nil
+	if err := ix.graph.RecordUnresolvedRefs(ctx, projectID, dangling); err != nil {
+		return nil, err
+	}
+	return pruned, nil
 }
 
 func noteMissingServer(res *Result, lang, cmd string) {
@@ -575,7 +704,10 @@ func usesLanguageServer(ft fileTask) bool {
 // backends pass the configured extract-concurrency; language-server files
 // pass 1. onErrUnchanged records a per-file extract failure as up-to-date
 // (LSP: last-good graph stays) instead of skipped (cheap parse errors).
-func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int, onErrUnchanged bool, projectID int64, projectName string, opts Options, res *Result, pending *[]extract.Reference, embedAcc *[]embedItem, mu *sync.Mutex, fileDone *int64, total int) error {
+// touched, when non-nil, collects the paths whose node generation was actually
+// replaced (changed=true) — the scoping set for the deferred import and
+// declarative passes.
+func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int, onErrUnchanged bool, projectID int64, projectName string, opts Options, res *Result, pending *[]extract.Reference, embedAcc *[]embedItem, touched *[]string, mu *sync.Mutex, fileDone *int64, total int) error {
 	if len(files) == 0 {
 		return nil
 	}
@@ -621,6 +753,9 @@ func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int
 			if changed {
 				*pending = append(*pending, refs...)
 				*embedAcc = append(*embedAcc, toEmbed...)
+				if touched != nil {
+					*touched = append(*touched, ft.rel)
+				}
 			}
 			mu.Unlock()
 			return nil
@@ -630,30 +765,70 @@ func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int
 }
 
 // changedFilePaths returns the files whose current content differs from the
-// last successfully indexed hash. It runs before any node replacement so the
-// caller graph can still be inspected for inbound sources that also need to be
-// refreshed.
-func (ix *Indexer) changedFilePaths(projectID int64, files []fileTask) ([]string, error) {
+// last successfully indexed hash, split into modified (previously indexed) and
+// added (no stored hash). It runs before any node replacement so the caller
+// graph can still be inspected for inbound sources that also need to be
+// refreshed. The added/modified split drives pass scoping: a modified-only
+// delta leaves the project's name-resolution surface unchanged, so the import
+// and declarative passes can rewrite just the touched files plus their direct
+// dependents; added/deleted files change what names exist and take the full
+// passes.
+//
+// A file whose cached (mtime, size) still matches its recorded stat is treated
+// as unchanged without reading or hashing it — the incremental pre-pass costs
+// one readdir+stat sweep instead of a full read of every source byte on every
+// run. On a stat mismatch (or an unknown stat) the content hash remains the
+// authority, so a pure `touch` self-heals back to unchanged.
+func (ix *Indexer) changedFilePaths(projectID int64, files []fileTask) (modified, added []string, err error) {
 	state, err := ix.graph.ProjectIndexState(projectID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	indexed := make(map[string]string, len(state))
+	indexed := make(map[string]graph.IndexEntry, len(state))
 	for _, entry := range state {
-		indexed[entry.FilePath] = entry.FileHash
+		indexed[entry.FilePath] = entry
 	}
 
-	changed := make([]string, 0)
 	for _, ft := range files {
+		entry, seen := indexed[ft.rel]
+		if seen {
+			if fi, statErr := os.Stat(ft.abs); statErr == nil && statMatches(fi, entry) {
+				continue // stat cache hit — content unchanged
+			}
+		}
 		currentHash, err := hashFile(ft.abs)
 		if err != nil {
 			continue // indexFile will surface the read error in the normal pass
 		}
-		if indexed[ft.rel] != currentHash {
-			changed = append(changed, ft.rel)
+		if seen && entry.FileHash == currentHash {
+			continue // touched but byte-identical
+		}
+		if seen {
+			modified = append(modified, ft.rel)
+		} else {
+			added = append(added, ft.rel)
 		}
 	}
-	return changed, nil
+	return modified, added, nil
+}
+
+// statMatches reports whether a file's current stat equals the recorded
+// incremental stat (unknown stat never matches).
+func statMatches(fi os.FileInfo, e graph.IndexEntry) bool {
+	return e.MtimeSec != -1 &&
+		e.SizeBytes == fi.Size() &&
+		e.MtimeSec == fi.ModTime().Unix() &&
+		e.MtimeNsec == int64(fi.ModTime().Nanosecond())
+}
+
+// fileStat captures a file's (mtime, size) for the index_state stat cache;
+// (-1, -1, -1) when the stat fails (the row then always falls back to hashing).
+func fileStat(abs string) (mtimeSec, mtimeNsec, size int64) {
+	fi, err := os.Stat(abs)
+	if err != nil {
+		return -1, -1, -1
+	}
+	return fi.ModTime().Unix(), int64(fi.ModTime().Nanosecond()), fi.Size()
 }
 
 // readFileUnderLimit reads at most maxBytes+1 bytes. The extra byte lets the
@@ -820,6 +995,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 
 	indexStart := time.Now()
 	var extractStart, embedStart, preciseStart time.Time
+	scanStart := time.Now()
 
 	reportPhase(opts, "scanning project tree…", 0, 0)
 	files, unsupported, err := ix.walk(root)
@@ -828,15 +1004,19 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 	// Auto-register language-server-backed extractors for recognized languages that
 	// are actually present (so a Go-only repo never spawns a server), then re-walk
-	// to route their files to the new extractor. Skipped entirely under --no-lsp.
+	// to route their files to the new extractor. Skipped entirely under --no-lsp,
+	// and now also skipped when the run has no work for a server's languages
+	// (lspWorkPending) — no drift, no new files, no forced paths, no precise.
 	if !opts.NoLSP {
+		lspStart := time.Now()
 		reportPhase(opts, "starting language servers…", 0, 0)
-		if ix.registerLSP(ctx, root, unsupported, res) {
+		if ix.registerLSP(ctx, root, unsupported, res, projectID, opts) {
 			reportPhase(opts, "rescanning with language servers…", 0, 0)
 			if files, unsupported, err = ix.walk(root); err != nil {
 				return nil, err
 			}
 		}
+		res.LspMs = int(time.Since(lspStart).Milliseconds())
 	}
 	res.FilesScanned = len(files)
 	if len(unsupported) > 0 {
@@ -868,15 +1048,24 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		}
 	}
 
-	// Before replacing any changed file nodes, remember which unchanged files
-	// point into them. Replacing a target cascades those inbound edges; forcing
-	// their source files through extraction lets the final resolution pass rebuild
-	// the edges against the replacement nodes.
+	// Pass scoping: a modified-only delta leaves the project's name-resolution
+	// surface unchanged, so the deferred import and declarative passes below can
+	// rewrite only the touched files plus their direct dependents. Added or
+	// deleted files change which names/targets exist, so those runs keep the
+	// full passes (checkout-scale events; steady-state saves are modified-only).
+	var added []string
+	deleted := []string{}
+	fullPasses := opts.Reindex
 	if !opts.Reindex {
-		changed, err := ix.changedFilePaths(projectID, files)
+		// Before replacing any changed file nodes, remember which unchanged files
+		// point into them. Replacing a target cascades those inbound edges; forcing
+		// their source files through extraction lets the final resolution pass
+		// rebuild the edges against the replacement nodes.
+		changed, deltaAdded, err := ix.changedFilePaths(projectID, files)
 		if err != nil {
 			return nil, err
 		}
+		added = deltaAdded
 		_, inbound, err := ix.expandWithInboundSources(projectID, changed)
 		if err != nil {
 			return nil, err
@@ -898,10 +1087,14 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// (deleted/renamed), so they don't leave ghost symbols. A full --reindex already
 	// wiped everything above.
 	if !opts.Reindex {
-		if err := ix.pruneDeleted(projectID, projectName, root, res); err != nil {
+		pruned, err := ix.pruneDeleted(ctx, projectID, projectName, root, res)
+		if err != nil {
 			return nil, err
 		}
+		deleted = pruned
 	}
+	fullPasses = fullPasses || len(added) > 0 || len(deleted) > 0
+	res.ScanMs = int(time.Since(scanStart).Milliseconds())
 
 	// Pass 1: extract + store nodes for changed files, collecting the references
 	// for edge resolution and the nodes to embed (embedded together in Pass 4, not
@@ -913,9 +1106,10 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// documentSymbol on a single stdio connection deadlocks tsserver/pyright.
 	var pending []extract.Reference
 	var embedAcc []embedItem
-	var mu sync.Mutex   // guards res, embedAcc, pending across parallel workers
-	total := len(files) // == res.FilesScanned; the bar's denominator
-	var fileDone int64  // atomic counter for OnFile progress reporting
+	var touched []string // files whose node generation was replaced this run
+	var mu sync.Mutex    // guards res, embedAcc, pending, touched across parallel workers
+	total := len(files)  // == res.FilesScanned; the bar's denominator
+	var fileDone int64   // atomic counter for OnFile progress reporting
 	// P2-04 (O30): build the project-wide import index once after the
 	// LSP re-walk and before the cheap/LSP split, so every indexFile call
 	// shares the same goFiles / relFiles maps. Pure data — no DB access, no
@@ -944,14 +1138,14 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 	// Cheap files first: parallel, finish quickly and leave a usable graph
 	// even if a later LSP pass is slow on a large monorepo.
-	if err := ix.extractFiles(ctx, cheapFiles, concurrency, false, projectID, projectName, opts, res, &pending, &embedAcc, &mu, &fileDone, total); err != nil {
+	if err := ix.extractFiles(ctx, cheapFiles, concurrency, false, projectID, projectName, opts, res, &pending, &embedAcc, &touched, &mu, &fileDone, total); err != nil {
 		return res, err
 	}
 
 	// Language-server files: ONE in-flight extract at a time. Documents are
 	// closed after DidOpen (see lspsrc.ExtractFile) so open buffers do not
 	// accumulate.
-	if err := ix.extractFiles(ctx, lspFiles, 1, true, projectID, projectName, opts, res, &pending, &embedAcc, &mu, &fileDone, total); err != nil {
+	if err := ix.extractFiles(ctx, lspFiles, 1, true, projectID, projectName, opts, res, &pending, &embedAcc, &touched, &mu, &fileDone, total); err != nil {
 		return res, err
 	}
 	res.ExtractMs = int(time.Since(extractStart).Milliseconds())
@@ -972,31 +1166,78 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// the file node it points to gets removed. The final pass runs
 	// after all workers join, so every file node is settled.
 	// Specifiers come from cheap scanners, never a second LSP ExtractFile.
-	reportPhase(opts, "resolving imports…", 0, len(files))
-	if err := ix.writeImportEdgesForFiles(ctx, projectID, files, impIdx); err != nil {
-		return res, err
+	//
+	// Scoping: a modified-only delta rewrites only the files whose nodes were
+	// replaced (touched — their outgoing import edges were cascade-deleted) plus
+	// the unchanged importers whose edges pointed at those replaced files (also
+	// cascade-deleted). Every other file's import edges are still valid, so they
+	// are neither re-read nor rewritten. Added/deleted files or --reindex keep
+	// the full pass: the resolution surface itself changed.
+	importScope := files
+	if !fullPasses {
+		inboundImporters, err := ix.graph.ImportSourcesTargeting(projectID, touched)
+		if err != nil {
+			return res, err
+		}
+		scope := make(map[string]bool, len(touched)+len(inboundImporters))
+		for _, rel := range touched {
+			scope[rel] = true
+		}
+		for _, rel := range inboundImporters {
+			scope[rel] = true
+		}
+		importScope = make([]fileTask, 0, len(scope))
+		for _, ft := range files {
+			if scope[ft.rel] {
+				importScope = append(importScope, ft)
+			}
+		}
 	}
+	importsStart := time.Now()
+	reportPhase(opts, "resolving imports…", 0, len(importScope))
+	if len(importScope) > 0 {
+		if err := ix.writeImportEdgesForFiles(ctx, projectID, importScope, impIdx); err != nil {
+			return res, err
+		}
+	}
+	res.ImportsMs = int(time.Since(importsStart).Milliseconds())
 
 	// Build the shared project-wide node index once and reuse it across all
 	// edge-resolution passes (resolveEdges, resolvePreciseEdges,
 	// resolveLSPCallEdges). On a --precise index all three run, and previously each
 	// called ProjectNodes independently — 3 full table scans + 3 map builds. Now we
 	// load once and pass the same index to all three.
-	reportPhase(opts, "building symbol index…", 0, 0)
-	ni, err := ix.buildNodeIndex(projectID)
-	if err != nil {
-		return res, err
+	// The project-wide node index is only needed when something will read it:
+	// pending code references, the declarative pass (full or scoped to touched
+	// files), or the precise pass. A no-op incremental skips the full-node
+	// table scan entirely — on a 100k+-node graph that scan was seconds of
+	// fixed cost per run that proved nothing changed.
+	var ni *nodeIndex
+	if len(pending) > 0 || fullPasses || len(touched) > 0 || opts.Precise {
+		niStart := time.Now()
+		reportPhase(opts, "building symbol index…", 0, 0)
+		ni, err = ix.buildNodeIndex(projectID)
+		if err != nil {
+			return res, err
+		}
+		res.NodeIndexMs = int(time.Since(niStart).Milliseconds())
 	}
 
 	// Pass 2: resolve references into edges against the project-wide symbol map.
+	// (ni stays nil exactly when pending is empty — resolveEdgesWith returns
+	// before touching it.)
+	edgesStart := time.Now()
 	reportPhase(opts, "resolving call edges…", 0, len(pending))
 	if _, err := ix.resolveEdgesWith(ctx, projectID, pending, ni); err != nil {
 		return res, err
 	}
+	res.EdgesMs = int(time.Since(edgesStart).Milliseconds())
 
-	if err := ix.resolveFormatRelations(ctx, projectID, root, ni); err != nil {
+	formatsStart := time.Now()
+	if err := ix.resolveFormatRelations(ctx, projectID, root, ni, fullPasses, touched); err != nil {
 		return res, err
 	}
+	res.FormatsMs = int(time.Since(formatsStart).Milliseconds())
 
 	// Pass 3 (opt-in): exact call edges.
 	if opts.Precise {
@@ -1025,7 +1266,9 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 
 	// Report authoritative project totals (correct under incremental runs too).
-	st, err := ix.graph.Stats(projectID)
+	// StatsCounts skips the per-language/per-kind GROUP BYs the index report
+	// never shows — on a multi-million-edge graph those cost seconds per run.
+	st, err := ix.graph.StatsCounts(projectID)
 	if err != nil {
 		return res, err
 	}
@@ -1033,8 +1276,22 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	res.Edges = st.Edges
 	// P1-13 (O114): refresh query-planner stats after an index so
 	// subsequent Callers/Callees/Impact queries benefit from the
-	// new index statistics (340× speedup on a 100k-node graph).
-	_ = ix.graph.OptimizeStats()
+	// new index statistics (340× speedup on a 100k-node graph). Gated on an
+	// actual graph change: a no-op incremental wrote nothing, so ANALYZE would
+	// rescan a multi-million-edge table to conclude nothing moved — a fixed
+	// cost that dominated no-op runs on declarative-heavy repos. A full
+	// ANALYZE also costs tens of seconds on those tables, so it is reserved
+	// for whole-graph builds (--reindex, first index); scoped incrementals
+	// take the cheap PRAGMA optimize refresh instead.
+	if len(touched) > 0 || res.FilesDeleted > 0 {
+		analyzeStart := time.Now()
+		if opts.Reindex || (len(files) > 0 && len(added) == len(files)) {
+			_ = ix.graph.OptimizeStats()
+		} else {
+			_ = ix.graph.OptimizeStatsLight()
+		}
+		res.AnalyzeMs = int(time.Since(analyzeStart).Milliseconds())
+	}
 	res.TotalMs = int(time.Since(indexStart).Milliseconds())
 	if res.TotalMs == 0 {
 		res.TotalMs = 1 // sub-millisecond; show "<1ms" not nothing
@@ -1140,6 +1397,8 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	}
 	impIdx := incrementalImportIndex(root, append(indexedFiles, rels...))
 
+	var prunedFiles []string
+	var prunedDangling []graph.UnresolvedRef
 	for _, rel := range rels {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -1148,6 +1407,11 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 		fi, statErr := os.Stat(abs)
 		if statErr != nil {
 			if os.IsNotExist(statErr) { // gone on disk → prune (mirror pruneDeleted)
+				inbound, err := ix.graph.DanglingDeclarativeInbound(projectID, rel)
+				if err != nil {
+					return res, err
+				}
+				prunedDangling = append(prunedDangling, inbound...)
 				if err := ix.graph.DeleteNodesInFile(projectID, rel); err != nil {
 					return res, err
 				}
@@ -1157,12 +1421,16 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 				if err := ix.graph.ClearCallGraphResolved(projectID, rel); err != nil {
 					return res, err
 				}
+				if err := ix.graph.DeleteUnresolvedRefsByFile(projectID, rel); err != nil {
+					return res, err
+				}
 				if ix.vectors != nil {
 					if _, err := ix.vectors.DeleteByFile(projectName, rel); err != nil {
 						return res, err
 					}
 				}
 				touchedFiles = append(touchedFiles, rel)
+				prunedFiles = append(prunedFiles, rel)
 				res.FilesDeleted++
 			}
 			continue // a non-NotExist stat error: be conservative, skip
@@ -1190,23 +1458,37 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 		}
 		importFiles = append(importFiles, ft)
 	}
+	if err := ix.graph.RecordUnresolvedRefs(ctx, projectID, prunedDangling); err != nil {
+		return res, err
+	}
+	// The watcher path is modified-only by construction: added files arrive as
+	// plain changed events, and a prune (deleted file) flips this to the full
+	// declarative pass so every file that could reference the deleted names is
+	// re-checked.
+	fullPasses := len(prunedFiles) > 0
 	// Import edges need the same deferred treatment as IndexProject: write them
 	// only after every changed target file node is settled.
+	importsStart := time.Now()
 	if err := ix.writeImportEdgesForFiles(ctx, projectID, importFiles, impIdx); err != nil {
 		return res, err
 	}
+	res.ImportsMs = int(time.Since(importsStart).Milliseconds())
 	// Refresh the incrementally-maintained node index for the files whose nodes
 	// changed, instead of reloading every node from the DB (P7). The first call
 	// builds the cache fully; later calls drop+re-add only the touched files.
 	if err := ix.refreshCachedNodeIndex(projectID, touchedFiles); err != nil {
 		return res, err
 	}
+	edgesStart := time.Now()
 	if _, err := ix.resolveEdgesWith(ctx, projectID, pending, ix.cachedNI); err != nil {
 		return res, err
 	}
-	if err := ix.resolveFormatRelations(ctx, projectID, root, ix.cachedNI); err != nil {
+	res.EdgesMs = int(time.Since(edgesStart).Milliseconds())
+	formatsStart := time.Now()
+	if err := ix.resolveFormatRelations(ctx, projectID, root, ix.cachedNI, fullPasses, touchedFiles); err != nil {
 		return res, err
 	}
+	res.FormatsMs = int(time.Since(formatsStart).Milliseconds())
 	ni := ix.cachedNI
 	if opts.Precise && preciseRelevant {
 		start := time.Now()
@@ -1223,8 +1505,15 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			return res, err
 		}
 	}
-	// P1-13 (O114): refresh query-planner stats after incremental too.
-	_ = ix.graph.OptimizeStats()
+	// P1-13 (O114): refresh query-planner stats after incremental too — gated on
+	// an actual graph change, same as IndexProject. The watcher path is always
+	// scoped, so it always takes the cheap PRAGMA optimize refresh; a full
+	// ANALYZE belongs to whole-graph builds.
+	if len(touchedFiles) > 0 {
+		analyzeStart := time.Now()
+		_ = ix.graph.OptimizeStatsLight()
+		res.AnalyzeMs = int(time.Since(analyzeStart).Milliseconds())
+	}
 	return res, nil
 }
 
@@ -1357,6 +1646,20 @@ func segPrefixMatch(parts, segs []string) bool {
 }
 
 func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName string, ft fileTask, opts Options, res *Result) (bool, []extract.Reference, []embedItem, error) {
+	// Stat-cache short-circuit: under the same conditions as the content-hash
+	// check below, a file whose recorded (mtime, size) still matches never gets
+	// read at all. This is what keeps a no-op incremental O(readdir) instead of
+	// O(every source byte).
+	if !opts.Reindex && !matchExclude(opts.ForcePaths, ft.rel) {
+		if fi, statErr := os.Stat(ft.abs); statErr == nil {
+			ms, mn, sz, serr := ix.graph.FileStat(projectID, ft.rel)
+			if serr == nil && statMatches(fi, graph.IndexEntry{MtimeSec: ms, MtimeNsec: mn, SizeBytes: sz}) {
+				res.FilesUnchanged++
+				return false, nil, nil, nil
+			}
+		}
+	}
+	mtimeSec, mtimeNsec, sizeBytes := fileStat(ft.abs)
 	content, oversized, err := readFileUnderLimit(ft.abs, ix.cfg.MaxFileBytes)
 	if err != nil {
 		return false, nil, nil, err
@@ -1388,7 +1691,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		}
 		// Track the hash so staleness doesn't report it as perpetually "new";
 		// a content change re-picks it up.
-		return false, nil, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
+		return false, nil, nil, ix.graph.SetFileHashStat(projectID, ft.rel, hash, mtimeSec, mtimeNsec, sizeBytes)
 	}
 	sqlcGenerated := ft.lang == "go" && bytes.Contains(content[:min(len(content), 2048)], []byte("Code generated by sqlc. DO NOT EDIT.")) && bytes.Contains(content, []byte("-- name:"))
 	if isGenerated(content) && !sqlcGenerated && ft.lang != "markdown" && ft.lang != "sql" && ft.lang != "yaml" {
@@ -1405,7 +1708,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		res.FilesSkipped++
 		res.Generated = append(res.Generated, ft.rel)
 		// Record the hash like oversized, so staleness doesn't flag it as "new".
-		return false, nil, nil, ix.graph.SetFileHash(projectID, ft.rel, hash)
+		return false, nil, nil, ix.graph.SetFileHashStat(projectID, ft.rel, hash, mtimeSec, mtimeNsec, sizeBytes)
 	}
 
 	if !opts.Reindex && !matchExclude(opts.ForcePaths, ft.rel) {
@@ -1418,7 +1721,9 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 			// Pre-fix this read as failure ("112 skipped") on a clean
 			// incremental index where nothing changed.
 			res.FilesUnchanged++
-			return false, nil, nil, nil
+			// The stat cache missed (mtime moved but bytes didn't — a touch):
+			// refresh it so the next run short-circuits again.
+			return false, nil, nil, ix.graph.SetFileHashStat(projectID, ft.rel, hash, mtimeSec, mtimeNsec, sizeBytes)
 		}
 	}
 
@@ -1504,7 +1809,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	// removed. The final pass runs after all workers join, so every
 	// file node is settled and the edge survives.
 
-	if err := graph.SetFileHashTx(tx, projectID, ft.rel, hash); err != nil {
+	if err := graph.SetFileHashStatTx(tx, projectID, ft.rel, hash, mtimeSec, mtimeNsec, sizeBytes); err != nil {
 		return false, nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1769,7 +2074,7 @@ func (ix *Indexer) resolveEdgesWith(ctx context.Context, projectID int64, refs [
 	}
 	defer func() { _ = tx.Rollback() }() // safe: Commit renders this a no-op
 
-	count, err := resolveEdgesTx(tx, refs, ni)
+	count, err := resolveEdgesTx(tx, refs, ni, nil)
 	if err != nil {
 		return count, err
 	}
@@ -1780,7 +2085,9 @@ func (ix *Indexer) resolveEdgesWith(ctx context.Context, projectID int64, refs [
 }
 
 // resolveEdgesTx also lets declarative reconciliation replace its edges atomically.
-func resolveEdgesTx(tx *sql.Tx, refs []extract.Reference, ni *nodeIndex) (int, error) {
+// unresolved, when non-nil, collects declarative references that matched no node
+// (see isDeclarativeRefKind) so the caller can persist them for later healing.
+func resolveEdgesTx(tx *sql.Tx, refs []extract.Reference, ni *nodeIndex, unresolved *[]graph.UnresolvedRef) (int, error) {
 	count := 0
 	byID := make(map[int64]graph.Node, len(ni.nodes))
 	relationAliases := map[string][]int64{}
@@ -1797,6 +2104,7 @@ func resolveEdgesTx(tx *sql.Tx, refs []extract.Reference, ni *nodeIndex) (int, e
 		if !ok {
 			continue
 		}
+		written := 0
 		candidates := ni.symTo[ref.To]
 		prov := graph.ProvName
 		if ref.ToFQN != "" {
@@ -1855,9 +2163,40 @@ func resolveEdgesTx(tx *sql.Tx, refs []extract.Reference, ni *nodeIndex) (int, e
 				return count, err
 			}
 			count++
+			written++
+		}
+		// Declarative refs that matched nothing are recorded (when the caller
+		// tracks them) so a later run can re-check exactly this file once one of
+		// the missing names appears. The recorded name is the ref's strongest
+		// key: the FQN/path for documents links (mdsrc emits only ToFQN), the
+		// bare name for SQL tables. Code refs are NOT tracked: unresolved calls
+		// are the normal case (stdlib, external packages).
+		if written == 0 && unresolved != nil && isDeclarativeRefKind(ref.Kind) {
+			name := ref.To
+			if ref.ToFQN != "" {
+				name = ref.ToFQN
+			}
+			if name != "" {
+				*unresolved = append(*unresolved, graph.UnresolvedRef{
+					FilePath: byID[from].FilePath,
+					ToName:   name,
+					Kind:     ref.Kind,
+				})
+			}
 		}
 	}
 	return count, nil
+}
+
+// isDeclarativeRefKind reports whether a reference kind belongs to the
+// declarative reconciliation pass (sql/yaml/markdown relations), the only kinds
+// whose unresolved targets are persisted for later healing.
+func isDeclarativeRefKind(kind string) bool {
+	switch kind {
+	case graph.EdgeReads, graph.EdgeWrites, graph.EdgeDocuments, graph.EdgeDependsOn:
+		return true
+	}
+	return false
 }
 
 // precisePos keys a node by its declaration position for the precise callee join.
@@ -2368,7 +2707,10 @@ func (ix *Indexer) RegisterLSPForProject(ctx context.Context, root string) (map[
 	if !ix.detectPresentLanguagesForLSP(root, res) {
 		return res.MissingServers, nil
 	}
-	ix.registerLSP(ctx, root, res.Unsupported, res)
+	// The daemon path always spawns: its servers must be up for FUTURE watcher
+	// events, so the incremental drift gate does not apply here (Reindex in the
+	// gate's sense of "cannot skip").
+	ix.registerLSP(ctx, root, res.Unsupported, res, 0, Options{Reindex: true})
 	return res.MissingServers, nil
 }
 

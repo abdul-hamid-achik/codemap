@@ -1493,12 +1493,19 @@ func (s *Store) ProjectEdges(projectID int64) ([]Edge, error) {
 type IndexEntry struct {
 	FilePath string `json:"file_path"`
 	FileHash string `json:"file_hash"`
+	// Stat cache from the index run that recorded the hash: a file whose
+	// (mtime, size) still matches is skipped without reading it. -1 = unknown
+	// (legacy row, restored snapshot) → the caller falls back to hashing.
+	MtimeSec  int64 `json:"mtime_sec"`
+	MtimeNsec int64 `json:"mtime_nsec"`
+	SizeBytes int64 `json:"size_bytes"`
 }
 
 // ProjectIndexState returns every (file_path, file_hash) recorded for the project,
 // ordered by path — the incremental-reindex hashes, for serialization.
 func (s *Store) ProjectIndexState(projectID int64) ([]IndexEntry, error) {
-	rows, err := s.db.Query("SELECT file_path, file_hash FROM index_state WHERE project_id=? ORDER BY file_path", projectID)
+	rows, err := s.db.Query(`SELECT file_path, file_hash, mtime_sec, mtime_nsec, size_bytes
+		FROM index_state WHERE project_id=? ORDER BY file_path`, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -1506,7 +1513,7 @@ func (s *Store) ProjectIndexState(projectID int64) ([]IndexEntry, error) {
 	var out []IndexEntry
 	for rows.Next() {
 		var e IndexEntry
-		if err := rows.Scan(&e.FilePath, &e.FileHash); err != nil {
+		if err := rows.Scan(&e.FilePath, &e.FileHash, &e.MtimeSec, &e.MtimeNsec, &e.SizeBytes); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

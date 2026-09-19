@@ -4,8 +4,9 @@ package graph
 // migration. The current version is stored in SQLite's PRAGMA user_version.
 // v2 adds annotations, v3 edge provenance, v4 composite query indexes, v5
 // per-file precise call-graph coverage, v6 idempotent annotation keys, v7
-// per-symbol query-frequency counters, and v8 the attested reindex delta.
-const schemaVersion = 8
+// per-symbol query-frequency counters, v8 the attested reindex delta, and
+// v9 unresolved declarative references (scoped incremental reconciliation).
+const schemaVersion = 9
 
 // Edge provenance: how an edge's target was resolved. Name-based fan-out (the
 // fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
@@ -128,6 +129,12 @@ CREATE TABLE IF NOT EXISTS index_state (
     file_path   TEXT NOT NULL,
     file_hash   TEXT NOT NULL,
     indexed_at  TEXT NOT NULL,
+    -- stat cache for the incremental pre-pass: a file whose (mtime, size) still
+    -- matches the indexed values is treated as unchanged WITHOUT reading or
+    -- hashing it. -1 = unknown (restored snapshot, legacy row) → always re-hash.
+    mtime_sec   INTEGER NOT NULL DEFAULT -1,
+    mtime_nsec  INTEGER NOT NULL DEFAULT -1,
+    size_bytes  INTEGER NOT NULL DEFAULT -1,
     PRIMARY KEY (project_id, file_path),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -196,4 +203,22 @@ CREATE TABLE IF NOT EXISTS structural_reindex_delta (
     created_at       TEXT NOT NULL,
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+
+-- Declarative references (reads/writes/documents/depends_on) that resolved to
+-- no node at the last index. The incremental reconciliation pass re-checks a
+-- file when its own source changes OR when one of its dangling target names
+-- appears among the changed files' symbols — so an unchanged SQL file gains its
+-- reads edge the moment the missing table is defined, without reparsing every
+-- declarative file on every run. Keyed by name, not node id, for the same
+-- reindex-survival reason as annotations.
+CREATE TABLE IF NOT EXISTS unresolved_refs (
+    project_id INTEGER NOT NULL,
+    file_path  TEXT NOT NULL,
+    to_name    TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    PRIMARY KEY (project_id, file_path, to_name, kind),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_unresolved_refs_name ON unresolved_refs(project_id, to_name);
 `

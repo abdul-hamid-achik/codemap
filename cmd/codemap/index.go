@@ -250,7 +250,13 @@ func printIndexReport(cmd *cobra.Command, rep *app.IndexReport, precise bool) {
 	fmt.Printf("  graph: %d nodes, %d edges (embeddings: %v)\n", rep.Nodes, rep.Edges, rep.Embedded)
 	if rep.TotalMs > 0 {
 		fmt.Printf("  time: %s", formatDuration(rep.TotalMs))
-		parts := make([]string, 0, 3)
+		parts := make([]string, 0, 10)
+		if rep.ScanMs > 0 {
+			parts = append(parts, "scan "+formatDuration(rep.ScanMs))
+		}
+		if rep.LspMs > 0 {
+			parts = append(parts, "lsp "+formatDuration(rep.LspMs))
+		}
 		if rep.ExtractMs > 0 {
 			parts = append(parts, "extract "+formatDuration(rep.ExtractMs))
 		}
@@ -259,6 +265,21 @@ func printIndexReport(cmd *cobra.Command, rep *app.IndexReport, precise bool) {
 		}
 		if rep.EmbedMs > 0 {
 			parts = append(parts, "embed "+formatDuration(rep.EmbedMs))
+		}
+		if rep.ImportsMs > 0 {
+			parts = append(parts, "imports "+formatDuration(rep.ImportsMs))
+		}
+		if rep.EdgesMs > 0 {
+			parts = append(parts, "edges "+formatDuration(rep.EdgesMs))
+		}
+		if rep.FormatsMs > 0 {
+			parts = append(parts, "formats "+formatDuration(rep.FormatsMs))
+		}
+		if rep.NodeIndexMs > 0 {
+			parts = append(parts, "node-index "+formatDuration(rep.NodeIndexMs))
+		}
+		if rep.AnalyzeMs > 0 {
+			parts = append(parts, "analyze "+formatDuration(rep.AnalyzeMs))
 		}
 		if len(parts) > 0 {
 			fmt.Printf(" (%s)", strings.Join(parts, ", "))

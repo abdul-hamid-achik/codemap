@@ -139,8 +139,20 @@ func (s *Store) DB() *sql.DB { return s.db }
 // statistics. Call after a full or large incremental index so subsequent
 // queries benefit from the new stats. P1-13 (O114): without ANALYZE,
 // Callers/Callees do a full edge-table scan (340x slower on 100k nodes).
+// Reserve it for full builds: on a multi-million-edge declarative graph a
+// complete ANALYZE costs tens of seconds, which would dominate every save.
 func (s *Store) OptimizeStats() error {
 	_, err := s.db.Exec("ANALYZE")
+	return err
+}
+
+// OptimizeStatsLight refreshes only the query-planner statistics that have
+// gone most stale, via PRAGMA optimize — the incremental sibling of
+// OptimizeStats. It is designed by SQLite for exactly this cadence
+// ("run periodically during long-running sessions") and costs milliseconds
+// where a full ANALYZE rescans every b-tree.
+func (s *Store) OptimizeStatsLight() error {
+	_, err := s.db.Exec("PRAGMA optimize")
 	return err
 }
 
@@ -197,6 +209,20 @@ func (s *Store) migrate() error {
 			ON annotations(project_id, source, external_id)
 			WHERE external_id IS NOT NULL AND external_id <> ''`); err != nil {
 			return fmt.Errorf("create annotation external-id index: %w", err)
+		}
+	}
+	// v8 -> v9: the index_state stat cache (mtime/size shortcut for the
+	// incremental pre-pass) rides with the unresolved_refs table. schemaSQL
+	// covers fresh databases; upgraded tables need the columns by ALTER.
+	if v < 9 {
+		for _, col := range [][2]string{
+			{"mtime_sec", "INTEGER NOT NULL DEFAULT -1"},
+			{"mtime_nsec", "INTEGER NOT NULL DEFAULT -1"},
+			{"size_bytes", "INTEGER NOT NULL DEFAULT -1"},
+		} {
+			if err := s.addColumnIfMissing("index_state", col[0], col[1]); err != nil {
+				return err
+			}
 		}
 	}
 	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
@@ -274,9 +300,10 @@ func (s *Store) prepareStatements() error {
 		return fmt.Errorf("prepare addEdge: %w", err)
 	}
 	s.stmtSetFileHash, err = s.db.Prepare(`
-		INSERT INTO index_state(project_id, file_path, file_hash, indexed_at)
-		VALUES(?,?,?,?)
-		ON CONFLICT(project_id, file_path) DO UPDATE SET file_hash=excluded.file_hash, indexed_at=excluded.indexed_at`)
+		INSERT INTO index_state(project_id, file_path, file_hash, indexed_at, mtime_sec, mtime_nsec, size_bytes)
+		VALUES(?,?,?,?,?,?,?)
+		ON CONFLICT(project_id, file_path) DO UPDATE SET file_hash=excluded.file_hash, indexed_at=excluded.indexed_at,
+			mtime_sec=excluded.mtime_sec, mtime_nsec=excluded.mtime_nsec, size_bytes=excluded.size_bytes`)
 	if err != nil {
 		return fmt.Errorf("prepare setFileHash: %w", err)
 	}
@@ -695,13 +722,23 @@ func DeleteCallEdgesBySourceTx(tx *sql.Tx, sourceIDs []int64, provenance string)
 
 // ---- index state ----
 
-// SetFileHash records the indexed hash for a file (incremental reindex).
+// SetFileHash records the indexed hash for a file (incremental reindex) without
+// a stat cache — the next run re-hashes the file. Prefer SetFileHashStat on the
+// indexer's hot paths.
 func (s *Store) SetFileHash(projectID int64, file, hash string) error {
-	_, err := s.stmtSetFileHash.Exec(projectID, file, hash, now())
+	_, err := s.stmtSetFileHash.Exec(projectID, file, hash, now(), -1, -1, -1)
 	return err
 }
 
-// SetFileHashTx records the indexed hash for a file within a transaction.
+// SetFileHashStat records the indexed hash plus the file's (mtime, size) so the
+// next incremental pre-pass can skip the file with a stat alone.
+func (s *Store) SetFileHashStat(projectID int64, file, hash string, mtimeSec, mtimeNsec, size int64) error {
+	_, err := s.stmtSetFileHash.Exec(projectID, file, hash, now(), mtimeSec, mtimeNsec, size)
+	return err
+}
+
+// SetFileHashTx records the indexed hash for a file within a transaction,
+// without a stat cache (snapshot restore and other replay paths).
 func SetFileHashTx(tx *sql.Tx, projectID int64, file, hash string) error {
 	_, err := tx.Exec(`
 		INSERT INTO index_state(project_id, file_path, file_hash, indexed_at)
@@ -709,6 +746,34 @@ func SetFileHashTx(tx *sql.Tx, projectID int64, file, hash string) error {
 		ON CONFLICT(project_id, file_path) DO UPDATE SET file_hash=excluded.file_hash, indexed_at=excluded.indexed_at`,
 		projectID, file, hash, now())
 	return err
+}
+
+// SetFileHashStatTx is the transaction-scoped sibling of SetFileHashStat — the
+// indexer's per-file commit records hash + stat atomically with the nodes.
+func SetFileHashStatTx(tx *sql.Tx, projectID int64, file, hash string, mtimeSec, mtimeNsec, size int64) error {
+	_, err := tx.Exec(`
+		INSERT INTO index_state(project_id, file_path, file_hash, indexed_at, mtime_sec, mtime_nsec, size_bytes)
+		VALUES(?,?,?,?,?,?,?)
+		ON CONFLICT(project_id, file_path) DO UPDATE SET file_hash=excluded.file_hash, indexed_at=excluded.indexed_at,
+			mtime_sec=excluded.mtime_sec, mtime_nsec=excluded.mtime_nsec, size_bytes=excluded.size_bytes`,
+		projectID, file, hash, now(), mtimeSec, mtimeNsec, size)
+	return err
+}
+
+// FileStat returns the cached (mtime, size) recorded with a file's hash, or
+// (-1, -1, -1, nil) when no row exists. A -1 component means unknown stat →
+// the caller falls back to content hashing.
+func (s *Store) FileStat(projectID int64, file string) (mtimeSec, mtimeNsec, size int64, err error) {
+	err = s.db.QueryRow(
+		"SELECT mtime_sec, mtime_nsec, size_bytes FROM index_state WHERE project_id=? AND file_path=?",
+		projectID, file).Scan(&mtimeSec, &mtimeNsec, &size)
+	if errors.Is(err, sql.ErrNoRows) {
+		return -1, -1, -1, nil
+	}
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return mtimeSec, mtimeNsec, size, nil
 }
 
 // FileHash returns the previously indexed hash for a file, or "" if unknown.
@@ -897,6 +962,9 @@ func (s *Store) WipeProject(projectID int64) error {
 	if _, err := tx.Exec("DELETE FROM call_graph_coverage WHERE project_id=?", projectID); err != nil {
 		return err
 	}
+	if _, err := tx.Exec("DELETE FROM unresolved_refs WHERE project_id=?", projectID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -965,6 +1033,23 @@ func (s *Store) Stats(projectID int64) (Stats, error) {
 		return st, err
 	}
 	if err := s.countBy("kind", where, args, st.Kinds); err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
+// StatsCounts is the index-run subset of Stats: the authoritative node and
+// edge totals only. The full Stats also computes per-language and per-kind
+// GROUP BYs over the whole node table (and its callers display them) — the
+// indexer discards those, and on a multi-million-edge graph they cost several
+// seconds of every incremental run for nothing.
+func (s *Store) StatsCounts(projectID int64) (Stats, error) {
+	st := Stats{}
+	where, args := projectFilter(projectID)
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM nodes"+where, args...).Scan(&st.Nodes); err != nil {
+		return st, err
+	}
+	if err := s.countEdges(projectID, &st); err != nil {
 		return st, err
 	}
 	return st, nil
