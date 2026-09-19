@@ -147,7 +147,7 @@ func (ix *Indexer) resolveFormatRelations(ctx context.Context, projectID int64, 
 			}
 		}
 	}
-	if _, err = resolveEdgesTx(tx, refs, ni, &unresolved); err != nil {
+	if _, err = resolveEdgesTx(tx, projectID, refs, ni, &unresolved); err != nil {
 		return err
 	}
 	rowsByFile := map[string][]graph.UnresolvedRef{}

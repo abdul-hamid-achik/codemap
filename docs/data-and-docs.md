@@ -107,7 +107,7 @@ The dependency report includes the section in `README.md` that links to the quer
 
 HTML indexing connects static `class`/`id` attributes to stylesheet selector definitions. It also extracts local stylesheet/script imports and CSS selectors inside `<style>` blocks, preserving the original HTML line numbers. The tokenizer ignores markup-looking strings inside script bodies and comments.
 
-CSS, SCSS, Sass, and Less retain selector and stylesheet-import support. Cross-file selector matches are candidates: class names can repeat in unrelated stylesheets. CSS Modules member access, CSS-in-JS, cascade/specificity, dynamic classes, and framework templates are outside this backend's coverage.
+CSS, SCSS, Sass, and Less retain selector and stylesheet-import support. A class reference resolves first against the file's own embedded styles and the stylesheets it imports; only when the class has no local definition does it fall back to project-wide name matching (global-stylesheet semantics), and those cross-file matches are candidates: class names can repeat in unrelated stylesheets. CSS Modules member access, CSS-in-JS, cascade/specificity, dynamic classes, and framework templates are outside this backend's coverage.
 
 ## Choose the right query
 

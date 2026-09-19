@@ -111,3 +111,24 @@ func TestBoundExploreContextRecomputesReferenceTruncationAndDropsMemories(t *tes
 		t.Fatalf("explore should not carry transient memories: %+v", rep.Memories)
 	}
 }
+
+func TestPreferCodeHitsKeepsBackendRankWithinTiers(t *testing.T) {
+	hits := []SemanticHit{
+		{Symbol: "Index one repository", Kind: "section"},
+		{Symbol: "indexProject", Kind: "function"},
+		{Symbol: "steps.0.snapshot", Kind: "key"},
+		{Symbol: "Indexer.Close", Kind: "method"},
+	}
+	got := preferCodeHits(hits)
+	want := []string{"indexProject", "Indexer.Close", "Index one repository", "steps.0.snapshot"}
+	for i, w := range want {
+		if got[i].Symbol != w {
+			t.Fatalf("preferCodeHits[%d] = %q, want %q (code tier first, backend rank preserved)", i, got[i].Symbol, w)
+		}
+	}
+	// All-declarative results pass through unchanged.
+	docs := []SemanticHit{{Symbol: "a", Kind: "section"}, {Symbol: "b", Kind: "key"}}
+	if out := preferCodeHits(docs); len(out) != 2 || out[0].Symbol != "a" || out[1].Symbol != "b" {
+		t.Fatalf("all-declarative hits reordered: %+v", out)
+	}
+}

@@ -2074,7 +2074,7 @@ func (ix *Indexer) resolveEdgesWith(ctx context.Context, projectID int64, refs [
 	}
 	defer func() { _ = tx.Rollback() }() // safe: Commit renders this a no-op
 
-	count, err := resolveEdgesTx(tx, refs, ni, nil)
+	count, err := resolveEdgesTx(tx, projectID, refs, ni, nil)
 	if err != nil {
 		return count, err
 	}
@@ -2087,7 +2087,7 @@ func (ix *Indexer) resolveEdgesWith(ctx context.Context, projectID int64, refs [
 // resolveEdgesTx also lets declarative reconciliation replace its edges atomically.
 // unresolved, when non-nil, collects declarative references that matched no node
 // (see isDeclarativeRefKind) so the caller can persist them for later healing.
-func resolveEdgesTx(tx *sql.Tx, refs []extract.Reference, ni *nodeIndex, unresolved *[]graph.UnresolvedRef) (int, error) {
+func resolveEdgesTx(tx *sql.Tx, projectID int64, refs []extract.Reference, ni *nodeIndex, unresolved *[]graph.UnresolvedRef) (int, error) {
 	count := 0
 	byID := make(map[int64]graph.Node, len(ni.nodes))
 	relationAliases := map[string][]int64{}
@@ -2099,6 +2099,7 @@ func resolveEdgesTx(tx *sql.Tx, refs []extract.Reference, ni *nodeIndex, unresol
 			}
 		}
 	}
+	styles := &stylesScope{tx: tx, projectID: projectID, memo: map[string]map[string]bool{}}
 	for _, ref := range refs {
 		from, ok := ni.fqnTo[ref.From]
 		if !ok {
@@ -2123,6 +2124,30 @@ func resolveEdgesTx(tx *sql.Tx, refs []extract.Reference, ni *nodeIndex, unresol
 				}
 			}
 			prov = graph.ProvPrecise
+		}
+		if ref.Kind == extract.RefStyles {
+			// A class/id reference prefers the selectors its own file actually
+			// styles with — its embedded <style> nodes and the stylesheets it
+			// imports. Matching every same-named selector in the project turned
+			// N generated artifacts sharing one style block into N² fan-out
+			// edges (a real repo carried 7M style edges, 98% of its graph, from
+			// 608 duplicated HTML reports). The project-wide name match remains
+			// as a FALLBACK for files with no local definition of the class —
+			// global-stylesheet semantics (a layout imports the CSS, children
+			// use the classes), bounded linear instead of quadratic.
+			allowed, err := styles.files(byID[from].FilePath)
+			if err != nil {
+				return count, err
+			}
+			scoped := make([]int64, 0, len(candidates))
+			for _, id := range candidates {
+				if n := byID[id]; n.Kind == graph.KindSelector && allowed[n.FilePath] {
+					scoped = append(scoped, id)
+				}
+			}
+			if len(scoped) > 0 {
+				candidates = scoped
+			}
 		}
 		if len(ref.ToKinds) > 0 {
 			candidates = append(append([]int64{}, candidates...), relationAliases[ref.To]...)
@@ -2197,6 +2222,46 @@ func isDeclarativeRefKind(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// stylesScope memoizes, per referencing file, the set of files whose selector
+// nodes a styles reference from that file may target: the file itself (embedded
+// <style>) plus every file its imports edges point at (linked/imported
+// stylesheets). The imports pass runs before edge resolution, so the edges are
+// settled by the time a scope is first queried.
+type stylesScope struct {
+	tx        *sql.Tx
+	projectID int64
+	memo      map[string]map[string]bool
+}
+
+func (s *stylesScope) files(file string) (map[string]bool, error) {
+	if set, ok := s.memo[file]; ok {
+		return set, nil
+	}
+	set := map[string]bool{file: true}
+	rows, err := s.tx.Query(`
+		SELECT DISTINCT n2.file_path FROM edges
+		JOIN nodes n1 ON edges.source_id = n1.id
+		JOIN nodes n2 ON edges.target_id = n2.id
+		WHERE n1.project_id = ? AND n1.file_path = ? AND edges.edge_type = 'imports'
+	`, s.projectID, file)
+	if err != nil {
+		return nil, fmt.Errorf("styles scope: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var f string
+		if err := rows.Scan(&f); err != nil {
+			return nil, err
+		}
+		set[f] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.memo[file] = set
+	return set, nil
 }
 
 // precisePos keys a node by its declaration position for the precise callee join.

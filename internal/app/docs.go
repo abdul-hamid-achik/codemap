@@ -52,8 +52,11 @@ Code fences stay documentation. External URLs are never fetched. MDX and custom
 site routing/anchor rules are not evaluated.
 
 HTML/CSS: class/id-to-selector styles edges, local stylesheet/script imports,
-and embedded <style> selectors with original source lines. CSS Modules, CSS-in-JS,
-cascade/specificity and dynamic templates remain outside coverage.
+and embedded <style> selectors with original source lines. A class resolves to
+its own file's styles first (embedded <style> and imported stylesheets), falling
+back to project-wide candidate matches only when the class has no local
+definition. CSS Modules, CSS-in-JS, cascade/specificity and dynamic templates
+remain outside coverage.
 
 CLI examples:
   codemap symbols queries/get.sql --json

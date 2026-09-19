@@ -81,14 +81,25 @@ func (svc *Service) Explore(ctx context.Context, cwd, query string, opts Explore
 		return rep, nil
 	}
 
-	// Ask for a small surplus because a file-chunk backend can return several
-	// hits inside the same definition. The public seeds remain deduplicated and
-	// capped to the requested number of exact definitions.
-	searchTop := opts.Seeds * 3
+	// Ask for a surplus because a file-chunk backend can return several hits
+	// inside the same definition AND routinely ranks declarative chunks (docs
+	// sections and YAML keys repeat a task's exact words) above the code — the
+	// code-first reorder below needs the code hits in the surplus to promote
+	// them. The public seeds remain deduplicated and capped to the requested
+	// number of exact definitions.
+	searchTop := opts.Seeds * 6
 	search, err := svc.Search(ctx, cwd, query, searchTop)
 	if err != nil {
 		return nil, err
 	}
+	// Code-first seeds: docs sections and YAML keys repeat a task's exact
+	// words, so a code-intent query ("make indexing faster") routinely ranked
+	// them above the implementation. Orientation wants exact code definitions,
+	// so code-kind hits from the surplus fill the seeds first; declarative hits
+	// fill only the remainder (and queries whose hits are all docs are
+	// unchanged). This ordering feeds task-context too, which joins explore's
+	// seeds.
+	search.Hits = preferCodeHits(search.Hits)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -154,6 +165,39 @@ func exploreSeedKey(seed ExploreSeed) string {
 		return s.File + "\x00" + strconv.Itoa(s.StartLine) + "\x00" + s.FQN + "\x00" + s.Kind
 	}
 	return seed.File + "\x00" + strconv.Itoa(seed.StartLine) + "\x00" + strconv.Itoa(seed.EndLine) + "\x00" + seed.Symbol
+}
+
+// preferCodeHits stably reorders search hits so code-symbol kinds come before
+// declarative ones (sections, keys, tables, selectors), preserving the backend's
+// rank within each tier. All-declarative or all-code results pass through
+// unchanged.
+func preferCodeHits(hits []SemanticHit) []SemanticHit {
+	if len(hits) < 2 {
+		return hits
+	}
+	code := make([]SemanticHit, 0, len(hits))
+	other := make([]SemanticHit, 0, len(hits))
+	for _, h := range hits {
+		if isCodeHitKind(h.Kind) {
+			code = append(code, h)
+		} else {
+			other = append(other, h)
+		}
+	}
+	if len(code) == 0 || len(other) == 0 {
+		return hits
+	}
+	return append(code, other...)
+}
+
+// isCodeHitKind reports whether a hit kind is an exact code definition that
+// joins to a real structural neighborhood (callers/callees/tests).
+func isCodeHitKind(kind string) bool {
+	switch kind {
+	case "function", "method", "type", "class", "test", "variable":
+		return true
+	}
+	return false
 }
 
 func normalizeExploreOptions(opts ExploreOptions) (ExploreOptions, error) {

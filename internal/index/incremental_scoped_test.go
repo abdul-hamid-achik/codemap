@@ -292,3 +292,67 @@ func TestLSPWorkPendingGate(t *testing.T) {
 		t.Fatal("gate closed despite a new TS file")
 	}
 }
+
+func TestStylesScopedToOwnStylesheets(t *testing.T) {
+	root := t.TempDir()
+	// Two artifacts that each embed the SAME style block — the shape of
+	// generated test reports, whose global name-matching used to produce N²
+	// cross-file style edges.
+	shared := "<style>\n.btn { color: red }\n.card { color: blue }\n</style>\n"
+	writeFile(t, root, "one.html", shared+"<div class=\"btn card\"></div>\n")
+	writeFile(t, root, "two.html", shared+"<div class=\"btn card\"></div>\n")
+	// A consumer with no local definitions keeps the global fallback (layout
+	// imports the stylesheet, children use the classes).
+	writeFile(t, root, "three.html", "<div class=\"btn\"></div>\n")
+	g, _ := newStores(t)
+	pid, err := g.UpsertProject("styles-scope", root, "html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "styles-scope", root, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := g.ProjectNodes(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[int64]graph.Node{}
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	edges, err := g.ProjectEdges(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	styleTargets := func(fromFile string) []string {
+		var out []string
+		for _, n := range nodes {
+			if n.Kind != graph.KindFile || n.FilePath != fromFile {
+				continue
+			}
+			for _, e := range edges {
+				if e.SourceID == n.ID && e.EdgeType == graph.EdgeStyles {
+					out = append(out, byID[e.TargetID].FilePath)
+				}
+			}
+		}
+		return out
+	}
+	// one.html's classes resolve to ITS OWN embedded selectors only — not to
+	// two.html's identically-named ones.
+	one := styleTargets("one.html")
+	if len(one) != 2 {
+		t.Fatalf("one.html style targets = %v, want exactly its own 2 selectors (no cross-file fan-out)", one)
+	}
+	for _, f := range one {
+		if f != "one.html" {
+			t.Fatalf("one.html style target %q — cross-file fan-out must not happen for locally-defined classes", f)
+		}
+	}
+	// three.html has no local .btn: the global fallback keeps the edge.
+	three := styleTargets("three.html")
+	if len(three) == 0 {
+		t.Fatal("three.html lost its style edge — the no-local-definition fallback is gone")
+	}
+}
