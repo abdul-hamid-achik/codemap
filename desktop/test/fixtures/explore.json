@@ -1,0 +1,241 @@
+{
+ "schema_version": 1,
+ "query": "review changed files",
+ "project": "codemap",
+ "indexed": true,
+ "search_mode": "vecgrep",
+ "note": "semantic results delegated to vecgrep (configured semantic owner)",
+ "seeds": [
+  {
+   "symbol": "TestReviewCallGraph",
+   "fqn": "app.TestReviewCallGraph",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 1439,
+   "end_line": 1471,
+   "score": 0.5435075,
+   "signature": "func TestReviewCallGraph(t *testing.T)",
+   "doc": "TestReviewCallGraph pins feature 2 on review: a Go (name-based) diff reports\ncall_graph=\"name\"; a clean tree (no changes) omits it.",
+   "selector": {
+    "file": "internal/app/review_test.go",
+    "start_line": 1439,
+    "fqn": "app.TestReviewCallGraph",
+    "kind": "test"
+   }
+  },
+  {
+   "symbol": "Review",
+   "fqn": "app.Service.Review",
+   "kind": "method",
+   "file": "internal/app/review.go",
+   "start_line": 123,
+   "end_line": 301,
+   "score": 0.5167971,
+   "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+   "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer.",
+   "selector": {
+    "file": "internal/app/review.go",
+    "start_line": 123,
+    "fqn": "app.Service.Review",
+    "kind": "method"
+   }
+  }
+ ],
+ "contexts": [
+  {
+   "symbol": "TestReviewCallGraph",
+   "selector": {
+    "file": "internal/app/review_test.go",
+    "start_line": 1439,
+    "fqn": "app.TestReviewCallGraph",
+    "kind": "test"
+   },
+   "project": "codemap",
+   "found": true,
+   "definitions": [
+    {
+     "symbol": "TestReviewCallGraph",
+     "fqn": "app.TestReviewCallGraph",
+     "kind": "test",
+     "file": "internal/app/review_test.go",
+     "start_line": 1439,
+     "end_line": 1471,
+     "signature": "func TestReviewCallGraph(t *testing.T)",
+     "doc": "TestReviewCallGraph pins feature 2 on review: a Go (name-based) diff reports\ncall_graph=\"name\"; a clean tree (no changes) omits it.",
+     "source": "",
+     "source_omitted": true
+    }
+   ],
+   "callers": [],
+   "callees": [
+    {
+     "symbol": "Review",
+     "fqn": "app.Service.Review",
+     "kind": "method",
+     "file": "internal/app/review.go",
+     "start_line": 123,
+     "end_line": 301,
+     "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+     "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer."
+    },
+    {
+     "symbol": "reviewRepo",
+     "fqn": "app.reviewRepo",
+     "kind": "function",
+     "file": "internal/app/review_test.go",
+     "start_line": 39,
+     "end_line": 76,
+     "signature": "func reviewRepo(t *testing.T) (*Service, string)",
+     "doc": "reviewRepo builds a git repo with a tiny call graph (Other→Run, TestRun→Run),\ncommits it, and indexes it (structure only). Returns the service and the\nEvalSymlinks-resolved root so git's toplevel and the indexed path agree on macOS."
+    }
+   ],
+   "references": [],
+   "tests": [
+    {
+     "symbol": "review_test.go",
+     "fqn": "internal/app/review_test.go",
+     "kind": "test",
+     "file": "internal/app/review_test.go",
+     "start_line": 1,
+     "depth": 0,
+     "heuristic": true
+    }
+   ],
+   "test_commands": [
+    "go test ./internal/app -run '^(review_test\\.go)$'"
+   ],
+   "callers_total": 0,
+   "callees_total": 2,
+   "references_total": 0,
+   "tests_total": 1,
+   "references_coverage": "partial",
+   "references_stale": true,
+   "references_confidence": "none",
+   "references_resolution": "value-reference coverage is partial: Go callback/registration patterns are indexed as enclosing symbol or file scopes, not exact expression lines; an empty result does not prove no wiring",
+   "blast_radius": 0,
+   "blast_depth": 2,
+   "note": "1 covering test(s) found heuristically (test files referencing \"TestReviewCallGraph\") — not confirmed via the call graph; run 'codemap index --precise' to confirm",
+   "call_graph": "name"
+  },
+  {
+   "symbol": "Review",
+   "selector": {
+    "file": "internal/app/review.go",
+    "start_line": 123,
+    "fqn": "app.Service.Review",
+    "kind": "method"
+   },
+   "project": "codemap",
+   "found": true,
+   "definitions": [
+    {
+     "symbol": "Review",
+     "fqn": "app.Service.Review",
+     "kind": "method",
+     "file": "internal/app/review.go",
+     "start_line": 123,
+     "end_line": 301,
+     "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+     "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer.",
+     "source": "",
+     "source_omitted": true
+    }
+   ],
+   "callers": [
+    {
+     "symbol": "runReview",
+     "fqn": "main.runReview",
+     "kind": "function",
+     "file": "cmd/codemap/query.go",
+     "start_line": 690,
+     "end_line": 800,
+     "signature": "func runReview(cmd *cobra.Command, args []string) error",
+     "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a\n--since range, or --staged index) touches, their union blast radius, the tests\nthat cover them, and the changed symbols that are untested or load-bearing. The\nhuman view is a scannable summary; --json carries the full bundle for an agent."
+    },
+    {
+     "symbol": "TestReviewWorking",
+     "fqn": "app.TestReviewWorking",
+     "kind": "test",
+     "file": "internal/app/review_test.go",
+     "start_line": 94,
+     "end_line": 152,
+     "signature": "func TestReviewWorking(t *testing.T)"
+    }
+   ],
+   "callees": [
+    {
+     "symbol": "resolveProject",
+     "fqn": "app.Service.resolveProject",
+     "kind": "method",
+     "file": "internal/app/service_core.go",
+     "start_line": 296,
+     "end_line": 322,
+     "signature": "func (svc *Service) resolveProject(cwd string) (root, name string, err error)",
+     "doc": "resolveProject finds the registered project whose path is cwd or an ancestor\nof cwd (closest wins). If none is registered it defaults to (cwd, basename)."
+    },
+    {
+     "symbol": "Staleness",
+     "fqn": "index.Staleness",
+     "kind": "type",
+     "file": "internal/index/staleness.go",
+     "start_line": 20,
+     "end_line": 24,
+     "signature": "type Staleness struct {",
+     "doc": "Staleness summarizes how the working tree has drifted from the index since the\nlast run: files whose content changed, recognized source files of an\nalready-indexed language that aren't indexed yet (new), and indexed files no\nlonger on disk (deleted). It is computed WITHOUT language servers — it hashes\nthe files already recorded in index_state and recognizes new ones by extension\n— so it's cheap enough to report from `status` and lets an agent know its\nanswers may be behind the code before it trusts them."
+    }
+   ],
+   "references": [],
+   "tests": [
+    {
+     "symbol": "TestReviewWorking",
+     "fqn": "app.TestReviewWorking",
+     "kind": "test",
+     "file": "internal/app/review_test.go",
+     "start_line": 94,
+     "depth": 1,
+     "signature": "func TestReviewWorking(t *testing.T)"
+    },
+    {
+     "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+     "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+     "kind": "test",
+     "file": "internal/app/review_test.go",
+     "start_line": 154,
+     "depth": 1,
+     "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+    }
+   ],
+   "test_commands": [
+    "go test ./internal/app"
+   ],
+   "callers_total": 32,
+   "callees_total": 23,
+   "references_total": 0,
+   "tests_total": 30,
+   "references_coverage": "partial",
+   "references_stale": true,
+   "references_confidence": "none",
+   "references_resolution": "value-reference coverage is partial: Go callback/registration patterns are indexed as enclosing symbol or file scopes, not exact expression lines; an empty result does not prove no wiring",
+   "blast_radius": 32,
+   "blast_depth": 2,
+   "note": "showing top 25 of 32 callers, ranked by fan-in (hubs first) — call codemap_callers for the complete list",
+   "call_graph": "name",
+   "next": [
+    {
+     "tool": "codemap_risk",
+     "args": {
+      "depth": 2,
+      "path": "/Users/abdulachik/projects/codemap",
+      "selector": {
+       "file": "internal/app/review.go",
+       "start_line": 123,
+       "fqn": "app.Service.Review",
+       "kind": "method"
+      }
+     },
+     "why": "this symbol is broadly depended on or appears untested; score change risk before editing"
+    }
+   ]
+  }
+ ]
+}

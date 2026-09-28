@@ -1,0 +1,50 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "mode": "working",
+ "depth": 3,
+ "is_repo": true,
+ "indexed": true,
+ "changed_files": [],
+ "changed_symbols": [],
+ "analysis_complete": false,
+ "total_symbols": 0,
+ "analyzed_symbols": 0,
+ "truncated_symbols": 0,
+ "blast_radius": [],
+ "covering_tests": [],
+ "untested_symbols": [],
+ "stale": true,
+ "staleness": {
+  "changed": 23,
+  "new": 6,
+  "deleted": 0
+ },
+ "risk": {
+  "level": "unknown",
+  "score": 0,
+  "factors": []
+ },
+ "next": [
+  {
+   "tool": "codemap_index",
+   "args": {
+    "path": "/Users/abdulachik/projects/codemap"
+   },
+   "why": "the index is stale; refresh it before trusting diff-scoped impact"
+  }
+ ],
+ "gate": {
+  "risk_level": "unknown",
+  "analysis_complete": false,
+  "would_fail_on": {
+   "incomplete_analysis": true,
+   "untested": false,
+   "risk_at_or_above": {
+    "low": false,
+    "medium": false,
+    "high": false
+   }
+  }
+ }
+}

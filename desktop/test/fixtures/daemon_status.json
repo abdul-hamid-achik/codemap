@@ -1,0 +1,4 @@
+{
+ "error": "dial unix /Users/abdulachik/.local/share/codemap/daemon.sock: connect: no such file or directory",
+ "running": false
+}

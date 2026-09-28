@@ -1,0 +1,9 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "dangling_annotations": [],
+ "name_call_edges_on_resolved_files": [],
+ "coverage_without_nodes": [],
+ "stale": true,
+ "note": "index has drifted from the working tree — repair inconsistencies after re-running 'codemap index'"
+}

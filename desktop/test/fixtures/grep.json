@@ -1,0 +1,56 @@
+{
+ "project": "codemap",
+ "pattern": "TODO",
+ "regex": false,
+ "ignore_case": false,
+ "hits": [
+  {
+   "file": "AGENTS.md",
+   "line": 186,
+   "matched_line": "  **Do not** create scratch / handoff / TODO / design `.md` files anywhere in the repo.",
+   "symbol": "Documentation Discipline (read this)",
+   "fqn": "AGENTS.md#section/documentation-discipline-read-this",
+   "kind": "section",
+   "resolution": "enclosing",
+   "selector": {
+    "file": "AGENTS.md",
+    "start_line": 176,
+    "fqn": "AGENTS.md#section/documentation-discipline-read-this",
+    "kind": "section"
+   }
+  },
+  {
+   "file": "cmd/codemap/query.go",
+   "line": 189,
+   "matched_line": "\t\tExample: `  codemap grep \"TODO(security)\"",
+   "symbol": "grepCmd",
+   "fqn": "main.grepCmd",
+   "kind": "variable",
+   "resolution": "enclosing",
+   "selector": {
+    "file": "cmd/codemap/query.go",
+    "start_line": 174,
+    "fqn": "main.grepCmd",
+    "kind": "variable"
+   }
+  },
+  {
+   "file": "internal/app/review_test.go",
+   "line": 560,
+   "matched_line": "\tmustWrite(t, proj, \"c.go\", \"package app\\n\\n// TODO cleanup\\n\")",
+   "symbol": "TestReviewDeletionInFileWithoutIndexedSymbolsStaysPartial",
+   "fqn": "app.TestReviewDeletionInFileWithoutIndexedSymbolsStaysPartial",
+   "kind": "test",
+   "resolution": "enclosing",
+   "selector": {
+    "file": "internal/app/review_test.go",
+    "start_line": 554,
+    "fqn": "app.TestReviewDeletionInFileWithoutIndexedSymbolsStaysPartial",
+    "kind": "test"
+   }
+  }
+ ],
+ "total": 3,
+ "files_scanned": 359,
+ "stale": true
+}

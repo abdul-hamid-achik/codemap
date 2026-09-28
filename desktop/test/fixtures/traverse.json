@@ -1,0 +1,124 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "indexed": true,
+ "found": true,
+ "start": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "direction": "both",
+ "edge_types": [
+  "calls",
+  "depends_on",
+  "documents"
+ ],
+ "depth_limit": 1,
+ "node_limit": 8,
+ "hops": [
+  {
+   "symbol": {
+    "symbol": "runReview",
+    "fqn": "main.runReview",
+    "kind": "function",
+    "file": "cmd/codemap/query.go",
+    "start_line": 690,
+    "end_line": 800,
+    "signature": "func runReview(cmd *cobra.Command, args []string) error",
+    "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a\n--since range, or --staged index) touches, their union blast radius, the tests\nthat cover them, and the changed symbols that are untested or load-bearing. The\nhuman view is a scannable summary; --json carries the full bundle for an agent."
+   },
+   "selector": {
+    "file": "cmd/codemap/query.go",
+    "start_line": 690,
+    "fqn": "main.runReview",
+    "kind": "function"
+   },
+   "parent_selector": {
+    "file": "internal/app/review.go",
+    "start_line": 123,
+    "fqn": "app.Service.Review",
+    "kind": "method"
+   },
+   "depth": 1,
+   "direction": "incoming",
+   "edge_type": "calls",
+   "weight": 0.7,
+   "provenance": "name",
+   "confidence": "candidate",
+   "confidence_reason": "the relation is name-based or heuristic and may fan out"
+  },
+  {
+   "symbol": {
+    "symbol": "ComputeGate",
+    "fqn": "app.ReviewReport.ComputeGate",
+    "kind": "method",
+    "file": "internal/app/gate.go",
+    "start_line": 73,
+    "end_line": 90,
+    "signature": "func (rep *ReviewReport) ComputeGate() *ReviewGate",
+    "doc": "ComputeGate derives the CI-gate signal from a finalized review report."
+   },
+   "selector": {
+    "file": "internal/app/gate.go",
+    "start_line": 73,
+    "fqn": "app.ReviewReport.ComputeGate",
+    "kind": "method"
+   },
+   "parent_selector": {
+    "file": "internal/app/review.go",
+    "start_line": 123,
+    "fqn": "app.Service.Review",
+    "kind": "method"
+   },
+   "depth": 1,
+   "direction": "outgoing",
+   "edge_type": "calls",
+   "weight": 0.7,
+   "provenance": "name",
+   "confidence": "candidate",
+   "confidence_reason": "the relation is name-based or heuristic and may fan out"
+  },
+  {
+   "symbol": {
+    "symbol": "ComputeGate",
+    "fqn": "app.RiskReport.ComputeGate",
+    "kind": "method",
+    "file": "internal/app/gate.go",
+    "start_line": 114,
+    "end_line": 119,
+    "signature": "func (r *RiskReport) ComputeGate() *RiskGate",
+    "doc": "ComputeGate derives the --fail-on-risk signal from a risk report."
+   },
+   "selector": {
+    "file": "internal/app/gate.go",
+    "start_line": 114,
+    "fqn": "app.RiskReport.ComputeGate",
+    "kind": "method"
+   },
+   "parent_selector": {
+    "file": "internal/app/review.go",
+    "start_line": 123,
+    "fqn": "app.Service.Review",
+    "kind": "method"
+   },
+   "depth": 1,
+   "direction": "outgoing",
+   "edge_type": "calls",
+   "weight": 0.7,
+   "provenance": "name",
+   "confidence": "candidate",
+   "confidence_reason": "the relation is name-based or heuristic and may fan out"
+  }
+ ],
+ "truncated": true,
+ "call_graph": "name",
+ "domains": [
+  {
+   "edge_type": "calls",
+   "confirmed": 0,
+   "candidate": 8
+  }
+ ]
+}

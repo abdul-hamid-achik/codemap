@@ -1,0 +1,29 @@
+{
+ "repo_hash": "3745ad472230",
+ "entries": [
+  {
+   "stash_id": "codemap_4761c9c946cb_20260716_054544.887294000_816863e5b11dbe3594ec90f4",
+   "tree_hash": "4761c9c946cbf8e421d71b6189657fe42963d97d",
+   "embedding_profile": "ollama/nomic-embed-text 768d cosine",
+   "node_count": 3228,
+   "vector_count": 2998,
+   "saved_at": "2026-07-16T05:45:45Z"
+  },
+  {
+   "stash_id": "codemap_86d3d22417ea_20260712_003152",
+   "tree_hash": "86d3d22417ea60cbf1a1f6e1adaf3a848f53daba",
+   "embedding_profile": "ollama/nomic-embed-text 768d cosine",
+   "node_count": 2268,
+   "vector_count": 2107,
+   "saved_at": "2026-07-12T06:31:52Z"
+  },
+  {
+   "stash_id": "codemap_cce43808feb9_20260712_010724",
+   "tree_hash": "cce43808feb9d47c2f836ac64448c6d3ac6043bc",
+   "embedding_profile": "ollama/nomic-embed-text 768d cosine",
+   "node_count": 2380,
+   "vector_count": 2212,
+   "saved_at": "2026-07-12T07:07:24Z"
+  }
+ ]
+}

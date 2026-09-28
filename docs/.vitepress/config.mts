@@ -77,6 +77,7 @@ export default defineConfig({
         items: [
           { text: 'CLI', link: '/cli' },
           { text: 'MCP server', link: '/mcp' },
+          { text: 'Desktop app', link: '/desktop' },
         ],
       },
       {

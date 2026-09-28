@@ -1,0 +1,300 @@
+{
+ "schema_version": 1,
+ "task": "improve review",
+ "mode": "understand",
+ "project": "codemap",
+ "indexed": true,
+ "freshness": {
+  "checked": true,
+  "stale": true,
+  "staleness": {
+   "changed": 23,
+   "new": 6,
+   "deleted": 0
+  }
+ },
+ "explore": {
+  "schema_version": 1,
+  "query": "improve review",
+  "project": "codemap",
+  "indexed": true,
+  "search_mode": "vecgrep",
+  "note": "semantic results delegated to vecgrep (configured semantic owner)",
+  "seeds": [
+   {
+    "symbol": "reviewCmd",
+    "fqn": "main.reviewCmd",
+    "kind": "variable",
+    "file": "cmd/codemap/query.go",
+    "start_line": 59,
+    "end_line": 68,
+    "score": 0.6322774,
+    "signature": "var reviewCmd",
+    "selector": {
+     "file": "cmd/codemap/query.go",
+     "start_line": 59,
+     "fqn": "main.reviewCmd",
+     "kind": "variable"
+    }
+   },
+   {
+    "symbol": "TestReviewCallGraph",
+    "fqn": "app.TestReviewCallGraph",
+    "kind": "test",
+    "file": "internal/app/review_test.go",
+    "start_line": 1439,
+    "end_line": 1471,
+    "score": 0.51431996,
+    "signature": "func TestReviewCallGraph(t *testing.T)",
+    "doc": "TestReviewCallGraph pins feature 2 on review: a Go (name-based) diff reports\ncall_graph=\"name\"; a clean tree (no changes) omits it.",
+    "selector": {
+     "file": "internal/app/review_test.go",
+     "start_line": 1439,
+     "fqn": "app.TestReviewCallGraph",
+     "kind": "test"
+    }
+   },
+   {
+    "symbol": "TestReviewRiskGateExitCode",
+    "fqn": "main.TestReviewRiskGateExitCode",
+    "kind": "test",
+    "file": "cmd/codemap/cli_integration_test.go",
+    "start_line": 877,
+    "end_line": 1079,
+    "score": 0.5095007,
+    "signature": "func TestReviewRiskGateExitCode(t *testing.T)",
+    "doc": "TestReviewRiskGateExitCode drives the real executable (like TestCLIContracts)\nto pin the I10 gate contract: --fail-on-risk/--fail-on-untested print the\nnormal, unchanged output and only change the process exit code (dedicated\nexitGateFailed = 6), never synthesizing a {\"ok\":false,...} failure envelope.\nIt also pins the completeness split: stale/partial indexed reviews fail\nclosed, while an unindexed repo or a non-git directory exits 0 so missing\nsetup does not block every commit.",
+    "selector": {
+     "file": "cmd/codemap/cli_integration_test.go",
+     "start_line": 877,
+     "fqn": "main.TestReviewRiskGateExitCode",
+     "kind": "test"
+    }
+   }
+  ],
+  "contexts": [
+   {
+    "symbol": "reviewCmd",
+    "selector": {
+     "file": "cmd/codemap/query.go",
+     "start_line": 59,
+     "fqn": "main.reviewCmd",
+     "kind": "variable"
+    },
+    "project": "codemap",
+    "found": true,
+    "definitions": [
+     {
+      "symbol": "reviewCmd",
+      "fqn": "main.reviewCmd",
+      "kind": "variable",
+      "file": "cmd/codemap/query.go",
+      "start_line": 59,
+      "end_line": 68,
+      "signature": "var reviewCmd",
+      "source": "",
+      "source_omitted": true
+     }
+    ],
+    "callers": [],
+    "callees": [],
+    "references": [
+     {
+      "source": {
+       "symbol": "init",
+       "fqn": "main.init",
+       "kind": "function",
+       "file": "cmd/codemap/main.go",
+       "start_line": 135,
+       "end_line": 232,
+       "signature": "func init()"
+      },
+      "confidence": "candidate",
+      "confidence_reason": "stale_snapshot"
+     }
+    ],
+    "tests": [],
+    "callers_total": 0,
+    "callees_total": 0,
+    "references_total": 1,
+    "tests_total": 0,
+    "references_coverage": "partial",
+    "references_stale": true,
+    "references_confidence": "candidate",
+    "references_resolution": "value-reference coverage is partial: Go callback/registration patterns are indexed as enclosing symbol or file scopes, not exact expression lines; an empty result does not prove no wiring",
+    "blast_radius": 0,
+    "blast_depth": 2,
+    "call_graph": "name"
+   },
+   {
+    "symbol": "TestReviewCallGraph",
+    "selector": {
+     "file": "internal/app/review_test.go",
+     "start_line": 1439,
+     "fqn": "app.TestReviewCallGraph",
+     "kind": "test"
+    },
+    "project": "codemap",
+    "found": true,
+    "definitions": [
+     {
+      "symbol": "TestReviewCallGraph",
+      "fqn": "app.TestReviewCallGraph",
+      "kind": "test",
+      "file": "internal/app/review_test.go",
+      "start_line": 1439,
+      "end_line": 1471,
+      "signature": "func TestReviewCallGraph(t *testing.T)",
+      "doc": "TestReviewCallGraph pins feature 2 on review: a Go (name-based) diff reports\ncall_graph=\"name\"; a clean tree (no changes) omits it.",
+      "source": "",
+      "source_omitted": true
+     }
+    ],
+    "callers": [],
+    "callees": [
+     {
+      "symbol": "Review",
+      "fqn": "app.Service.Review",
+      "kind": "method",
+      "file": "internal/app/review.go",
+      "start_line": 123,
+      "end_line": 301,
+      "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+      "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer."
+     },
+     {
+      "symbol": "reviewRepo",
+      "fqn": "app.reviewRepo",
+      "kind": "function",
+      "file": "internal/app/review_test.go",
+      "start_line": 39,
+      "end_line": 76,
+      "signature": "func reviewRepo(t *testing.T) (*Service, string)",
+      "doc": "reviewRepo builds a git repo with a tiny call graph (Other→Run, TestRun→Run),\ncommits it, and indexes it (structure only). Returns the service and the\nEvalSymlinks-resolved root so git's toplevel and the indexed path agree on macOS."
+     }
+    ],
+    "references": [],
+    "tests": [
+     {
+      "symbol": "review_test.go",
+      "fqn": "internal/app/review_test.go",
+      "kind": "test",
+      "file": "internal/app/review_test.go",
+      "start_line": 1,
+      "depth": 0,
+      "heuristic": true
+     }
+    ],
+    "test_commands": [
+     "go test ./internal/app -run '^(review_test\\.go)$'"
+    ],
+    "callers_total": 0,
+    "callees_total": 2,
+    "references_total": 0,
+    "tests_total": 1,
+    "references_coverage": "partial",
+    "references_stale": true,
+    "references_confidence": "none",
+    "references_resolution": "value-reference coverage is partial: Go callback/registration patterns are indexed as enclosing symbol or file scopes, not exact expression lines; an empty result does not prove no wiring",
+    "blast_radius": 0,
+    "blast_depth": 2,
+    "note": "1 covering test(s) found heuristically (test files referencing \"TestReviewCallGraph\") — not confirmed via the call graph; run 'codemap index --precise' to confirm",
+    "call_graph": "name"
+   },
+   {
+    "symbol": "TestReviewRiskGateExitCode",
+    "selector": {
+     "file": "cmd/codemap/cli_integration_test.go",
+     "start_line": 877,
+     "fqn": "main.TestReviewRiskGateExitCode",
+     "kind": "test"
+    },
+    "project": "codemap",
+    "found": true,
+    "definitions": [
+     {
+      "symbol": "TestReviewRiskGateExitCode",
+      "fqn": "main.TestReviewRiskGateExitCode",
+      "kind": "test",
+      "file": "cmd/codemap/cli_integration_test.go",
+      "start_line": 877,
+      "end_line": 1079,
+      "signature": "func TestReviewRiskGateExitCode(t *testing.T)",
+      "doc": "TestReviewRiskGateExitCode drives the real executable (like TestCLIContracts)\nto pin the I10 gate contract: --fail-on-risk/--fail-on-untested print the\nnormal, unchanged output and only change the process exit code (dedicated\nexitGateFailed = 6), never synthesizing a {\"ok\":false,...} failure envelope.\nIt also pins the completeness split: stale/partial indexed reviews fail\nclosed, while an unindexed repo or a non-git directory exits 0 so missing\nsetup does not block every commit.",
+      "source": "",
+      "source_omitted": true
+     }
+    ],
+    "callers": [],
+    "callees": [
+     {
+      "symbol": "String",
+      "fqn": "embed.EmbeddingProfile.String",
+      "kind": "method",
+      "file": "internal/embed/provider.go",
+      "start_line": 39,
+      "end_line": 41,
+      "signature": "func (p EmbeddingProfile) String() string",
+      "doc": "String renders the profile as \"provider/model dimsd distance\"."
+     },
+     {
+      "symbol": "String",
+      "fqn": "lsp.cappedBuffer.String",
+      "kind": "method",
+      "file": "internal/lsp/stderr.go",
+      "start_line": 40,
+      "end_line": 44,
+      "signature": "func (c *cappedBuffer) String() string",
+      "doc": "String returns the buffered content (thread-safe copy)."
+     },
+     {
+      "symbol": "String",
+      "fqn": "tui.tab.String",
+      "kind": "method",
+      "file": "internal/tui/model.go",
+      "start_line": 33,
+      "end_line": 47,
+      "signature": "func (t tab) String() string"
+     }
+    ],
+    "references": [],
+    "tests": [
+     {
+      "symbol": "cli_integration_test.go",
+      "fqn": "cmd/codemap/cli_integration_test.go",
+      "kind": "test",
+      "file": "cmd/codemap/cli_integration_test.go",
+      "start_line": 1,
+      "depth": 0,
+      "heuristic": true
+     }
+    ],
+    "test_commands": [
+     "go test ./cmd/codemap -run '^(cli_integration_test\\.go)$'"
+    ],
+    "callers_total": 0,
+    "callees_total": 17,
+    "references_total": 0,
+    "tests_total": 1,
+    "references_coverage": "partial",
+    "references_stale": true,
+    "references_confidence": "none",
+    "references_resolution": "value-reference coverage is partial: Go callback/registration patterns are indexed as enclosing symbol or file scopes, not exact expression lines; an empty result does not prove no wiring",
+    "blast_radius": 0,
+    "blast_depth": 2,
+    "note": "1 covering test(s) found heuristically (test files referencing \"TestReviewRiskGateExitCode\") — not confirmed via the call graph; run 'codemap index --precise' to confirm",
+    "call_graph": "name"
+   }
+  ]
+ },
+ "call_graph": "name",
+ "next": [
+  {
+   "tool": "codemap_index",
+   "args": {
+    "path": "/Users/abdulachik/projects/codemap"
+   },
+   "why": "the index has drifted from the working tree; reindex before trusting snapshot-based results"
+  }
+ ]
+}

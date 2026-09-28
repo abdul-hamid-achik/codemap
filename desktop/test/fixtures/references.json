@@ -1,0 +1,29 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "found": true,
+ "definitions": [
+  {
+   "file": "internal/app/review.go",
+   "start_line": 123,
+   "fqn": "app.Service.Review",
+   "kind": "method"
+  }
+ ],
+ "definitions_total": 1,
+ "references": [],
+ "references_total": 0,
+ "stale": true,
+ "confidence": "none",
+ "coverage": "partial",
+ "call_graph": "name",
+ "resolution": "value-reference coverage is partial: Go callback/registration patterns are indexed as enclosing symbol or file scopes, not exact expression lines; an empty result does not prove no wiring",
+ "note": "no indexed value-reference sites found — absence is not proof that this symbol has no callback or registration wiring; index is stale — stored reference sites are candidates and missing sites may be newer than the snapshot"
+}

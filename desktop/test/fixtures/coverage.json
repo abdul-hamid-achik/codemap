@@ -1,0 +1,54 @@
+{
+ "project": "codemap",
+ "total_files": 359,
+ "covered_files": 0,
+ "stale_files": 23,
+ "by_language": {
+  "gdscript": {
+   "files": 2,
+   "covered": 0,
+   "stale": 0
+  },
+  "go": {
+   "files": 273,
+   "covered": 0,
+   "stale": 19
+  },
+  "javascript": {
+   "files": 1,
+   "covered": 0,
+   "stale": 0
+  },
+  "markdown": {
+   "files": 20,
+   "covered": 0,
+   "stale": 4
+  },
+  "yaml": {
+   "files": 63,
+   "covered": 0,
+   "stale": 0
+  }
+ },
+ "by_directory": [
+  {
+   "dir": "internal/app",
+   "files": 84,
+   "covered": 0,
+   "stale": 9
+  },
+  {
+   "dir": "specs",
+   "files": 48,
+   "covered": 0,
+   "stale": 0
+  },
+  {
+   "dir": "cmd/codemap",
+   "files": 33,
+   "covered": 0,
+   "stale": 4
+  }
+ ],
+ "by_directory_truncated": true
+}

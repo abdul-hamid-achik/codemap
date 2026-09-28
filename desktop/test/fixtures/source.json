@@ -1,0 +1,23 @@
+{
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "project": "codemap",
+ "matches": [
+  {
+   "symbol": "Review",
+   "fqn": "app.Service.Review",
+   "kind": "method",
+   "file": "internal/app/review.go",
+   "start_line": 123,
+   "end_line": 301,
+   "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+   "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer.",
+   "source": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error) {\n\t// Attach the computed CI-gate signal on every return path so MCP/CLI\n\t// consumers can reproduce the --fail-on-risk/--fail-on-untested logic from\n\t// the report alone (D9).\n\tdefer func() {\n\t\tif rep != nil {\n\t\t\trep.Gate = rep.ComputeGate()\n\t\t}\n\t}()\n\tif opts.Depth <= 0 {\n\t\topts.Depth = 3\n\t}\n\tmode := opts.Mode\n\tif mode == \"\" {\n\t\tmode = \"working\"\n\t}\n\tswitch mode {\n\tcase \"working\", \"staged\":\n\tcase \"since\":\n\t\tif opts.Since == \"\" {\n\t\t\treturn nil, fmt.Errorf(\"review mode %q requires a non-empty since ref\", mode)…"
+  }
+ ]
+}

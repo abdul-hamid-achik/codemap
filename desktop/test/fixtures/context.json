@@ -1,0 +1,147 @@
+{
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "project": "codemap",
+ "found": true,
+ "definitions": [
+  {
+   "symbol": "Review",
+   "fqn": "app.Service.Review",
+   "kind": "method",
+   "file": "internal/app/review.go",
+   "start_line": 123,
+   "end_line": 301,
+   "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+   "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer.",
+   "source": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error) {\n\t// Attach the computed CI-gate signal on every return path so MCP/CLI\n\t// consumers can reproduce the --fail-on-risk/--fail-on-untested logic from\n\t// the report alone (D9).\n\tdefer func() {\n\t\tif rep != nil {\n\t\t\trep.Gate = rep.ComputeGate()\n\t\t}\n\t}()\n\tif opts.Depth <= 0 {\n\t\topts.Depth = 3\n\t}\n\tmode := opts.Mode\n\tif mode == \"\" {\n\t\tmode = \"working\"\n\t}\n\tswitch mode {\n\tcase \"working\", \"staged\":\n\tcase \"since\":\n\t\tif opts.Since == \"\" {\n\t\t\treturn nil, fmt.Errorf(\"review mode %q requires a non-empty since ref\", mode)…"
+  }
+ ],
+ "callers": [
+  {
+   "symbol": "runReview",
+   "fqn": "main.runReview",
+   "kind": "function",
+   "file": "cmd/codemap/query.go",
+   "start_line": 690,
+   "end_line": 800,
+   "signature": "func runReview(cmd *cobra.Command, args []string) error",
+   "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a\n--since range, or --staged index) touches, their union blast radius, the tests\nthat cover them, and the changed symbols that are untested or load-bearing. The\nhuman view is a scannable summary; --json carries the full bundle for an agent."
+  },
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "end_line": 152,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "end_line": 192,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  }
+ ],
+ "callees": [
+  {
+   "symbol": "resolveProject",
+   "fqn": "app.Service.resolveProject",
+   "kind": "method",
+   "file": "internal/app/service_core.go",
+   "start_line": 296,
+   "end_line": 322,
+   "signature": "func (svc *Service) resolveProject(cwd string) (root, name string, err error)",
+   "doc": "resolveProject finds the registered project whose path is cwd or an ancestor\nof cwd (closest wins). If none is registered it defaults to (cwd, basename)."
+  },
+  {
+   "symbol": "Staleness",
+   "fqn": "index.Staleness",
+   "kind": "type",
+   "file": "internal/index/staleness.go",
+   "start_line": 20,
+   "end_line": 24,
+   "signature": "type Staleness struct {",
+   "doc": "Staleness summarizes how the working tree has drifted from the index since the\nlast run: files whose content changed, recognized source files of an\nalready-indexed language that aren't indexed yet (new), and indexed files no\nlonger on disk (deleted). It is computed WITHOUT language servers — it hashes\nthe files already recorded in index_state and recognizes new ones by extension\n— so it's cheap enough to report from `status` and lets an agent know its\nanswers may be behind the code before it trusts them."
+  },
+  {
+   "symbol": "Staleness",
+   "fqn": "index.Indexer.Staleness",
+   "kind": "method",
+   "file": "internal/index/staleness.go",
+   "start_line": 33,
+   "end_line": 43,
+   "signature": "func (ix *Indexer) Staleness(projectID int64, root string, indexedLangs map[string]bool) (Staleness, error)",
+   "doc": "Staleness compares the project's index_state to the working tree at root.\nindexedLangs restricts \"new\" detection to languages already present in the\nindex, so a recognized-but-unindexed language can't show false drift. It needs\nno registered extractors (unlike walk), so it never spawns a language server."
+  }
+ ],
+ "references": [],
+ "tests": [
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "depth": 1,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "depth": 1,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileReportsMissingAfterReindex",
+   "fqn": "app.TestReviewDeletedFileReportsMissingAfterReindex",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 194,
+   "depth": 1,
+   "signature": "func TestReviewDeletedFileReportsMissingAfterReindex(t *testing.T)"
+  }
+ ],
+ "test_commands": [
+  "go test ./internal/app"
+ ],
+ "callers_total": 32,
+ "callees_total": 23,
+ "references_total": 0,
+ "tests_total": 30,
+ "references_coverage": "partial",
+ "references_stale": true,
+ "references_confidence": "none",
+ "references_resolution": "value-reference coverage is partial: Go callback/registration patterns are indexed as enclosing symbol or file scopes, not exact expression lines; an empty result does not prove no wiring",
+ "blast_radius": 32,
+ "blast_depth": 3,
+ "note": "showing top 25 of 32 callers, ranked by fan-in (hubs first) — call codemap_callers for the complete list",
+ "call_graph": "name",
+ "next": [
+  {
+   "tool": "codemap_risk",
+   "args": {
+    "depth": 3,
+    "path": "/Users/abdulachik/projects/codemap",
+    "selector": {
+     "file": "internal/app/review.go",
+     "start_line": 123,
+     "fqn": "app.Service.Review",
+     "kind": "method"
+    }
+   },
+   "why": "this symbol is broadly depended on or appears untested; score change risk before editing"
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "data_dir": "/Users/abdulachik/.local/share/codemap",
+ "project_root": "/Users/abdulachik/projects/codemap",
+ "checks": [
+  {
+   "name": "data directory",
+   "ok": true,
+   "detail": "/Users/abdulachik/.local/share/codemap"
+  },
+  {
+   "name": "go toolchain",
+   "ok": true,
+   "detail": "/Users/abdulachik/.asdf/shims/go"
+  },
+  {
+   "name": "gopls",
+   "ok": true,
+   "detail": "/Users/abdulachik/go/bin/gopls"
+  }
+ ]
+}

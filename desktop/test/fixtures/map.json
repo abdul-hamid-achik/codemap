@@ -1,0 +1,215 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "indexed": true,
+ "strategy": "source_path",
+ "subsystems": [
+  {
+   "name": "internal/app",
+   "files": 84,
+   "symbols": 1010,
+   "internal_edges": 2956,
+   "inbound_edges": 1439,
+   "outbound_edges": 3760,
+   "languages": {
+    "go": 1094
+   },
+   "kinds": {
+    "file": 84,
+    "function": 261,
+    "method": 164,
+    "test": 326,
+    "type": 132,
+    "variable": 127
+   }
+  },
+  {
+   "name": "internal/index",
+   "files": 27,
+   "symbols": 291,
+   "internal_edges": 790,
+   "inbound_edges": 1819,
+   "outbound_edges": 1367,
+   "languages": {
+    "go": 318
+   },
+   "kinds": {
+    "file": 27,
+    "function": 68,
+    "method": 69,
+    "test": 117,
+    "type": 25,
+    "variable": 12
+   }
+  },
+  {
+   "name": "internal/extract",
+   "files": 35,
+   "symbols": 483,
+   "internal_edges": 1479,
+   "inbound_edges": 1533,
+   "outbound_edges": 1403,
+   "languages": {
+    "gdscript": 26,
+    "go": 492
+   },
+   "kinds": {
+    "class": 2,
+    "file": 35,
+    "function": 145,
+    "method": 70,
+    "test": 125,
+    "type": 37,
+    "variable": 104
+   }
+  }
+ ],
+ "subsystems_total": 24,
+ "bridges": [
+  {
+   "from": "internal/extract",
+   "to": "internal/index",
+   "edge_type": "calls",
+   "count": 669,
+   "provenance": {
+    "name": 669
+   },
+   "source_files": [
+    "internal/extract/csssrc/csssrc_test.go",
+    "internal/extract/csssrc/flatten.go",
+    "internal/extract/gdsrc/gdsrc_fixture_test.go"
+   ],
+   "source_files_total": 19,
+   "source_files_truncated": true,
+   "target_files": [
+    "internal/index/import_specs_test.go",
+    "internal/index/imports_edges_test.go",
+    "internal/index/indexer.go"
+   ],
+   "target_files_total": 11,
+   "target_files_truncated": true
+  },
+  {
+   "from": "internal/app",
+   "to": "internal/index",
+   "edge_type": "calls",
+   "count": 471,
+   "provenance": {
+    "name": 471
+   },
+   "source_files": [
+    "internal/app/agentsetup_test.go",
+    "internal/app/app_test.go",
+    "internal/app/branchswitch.go"
+   ],
+   "source_files_total": 59,
+   "source_files_truncated": true,
+   "target_files": [
+    "internal/index/embedphase_test.go",
+    "internal/index/indexer.go",
+    "internal/index/indexer_test.go"
+   ],
+   "target_files_total": 5
+  },
+  {
+   "from": "internal/app",
+   "to": "internal/lsp",
+   "edge_type": "calls",
+   "count": 463,
+   "provenance": {
+    "name": 463
+   },
+   "source_files": [
+    "internal/app/agentsetup_test.go",
+    "internal/app/app_test.go",
+    "internal/app/branchswitch.go"
+   ],
+   "source_files_total": 55,
+   "source_files_truncated": true,
+   "target_files": [
+    "internal/lsp/client.go",
+    "internal/lsp/jsonrpc.go",
+    "internal/lsp/stderr.go"
+   ],
+   "target_files_total": 4
+  }
+ ],
+ "bridges_total": 424,
+ "hubs": [
+  {
+   "symbol": "Close",
+   "fqn": "app.preciseLSPClient.Close",
+   "kind": "method",
+   "file": "internal/app/service_relations.go",
+   "start_line": 461,
+   "in_degree": 359,
+   "shared_name": 9
+  },
+  {
+   "symbol": "Close",
+   "fqn": "lspsrc.Extractor.Close",
+   "kind": "method",
+   "file": "internal/extract/lspsrc/lspsrc.go",
+   "start_line": 464,
+   "in_degree": 359,
+   "shared_name": 9
+  },
+  {
+   "symbol": "Close",
+   "fqn": "lsp.conn.Close",
+   "kind": "method",
+   "file": "internal/lsp/jsonrpc.go",
+   "start_line": 246,
+   "in_degree": 359,
+   "shared_name": 9
+  }
+ ],
+ "hubs_total": 1534,
+ "entrypoints": [
+  {
+   "rank": 1,
+   "symbol": "main",
+   "fqn": "main.main",
+   "kind": "function",
+   "file": "bench/main.go",
+   "start_line": 33,
+   "score": 1.55,
+   "in_degree": 0,
+   "entrypoint": true,
+   "reason": "program entrypoint — main()"
+  },
+  {
+   "rank": 2,
+   "symbol": "main",
+   "fqn": "main.main",
+   "kind": "function",
+   "file": "bench/tasks/truth/gen/main.go",
+   "start_line": 84,
+   "score": 1.55,
+   "in_degree": 0,
+   "entrypoint": true,
+   "reason": "program entrypoint — main()"
+  },
+  {
+   "rank": 3,
+   "symbol": "main",
+   "fqn": "main.main",
+   "kind": "function",
+   "file": "cmd/codemap/main.go",
+   "start_line": 76,
+   "score": 1.55,
+   "in_degree": 0,
+   "entrypoint": true,
+   "reason": "program entrypoint — main()"
+  }
+ ],
+ "entrypoints_total": 695,
+ "call_graph": "unresolved",
+ "resolution": "call graph not available for javascript without precise indexing — hotspot rankings are incomplete; run 'codemap index --precise'",
+ "stale": true,
+ "truncated": true,
+ "subsystems_truncated": true,
+ "bridges_truncated": true,
+ "hubs_truncated": true,
+ "entrypoints_truncated": true
+}

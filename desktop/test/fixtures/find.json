@@ -1,0 +1,60 @@
+{
+ "query": "Review",
+ "project": "codemap",
+ "mode": "name",
+ "hits": [
+  {
+   "symbol": "Review",
+   "fqn": "app.Service.Review",
+   "kind": "method",
+   "file": "internal/app/review.go",
+   "start_line": 123,
+   "end_line": 301,
+   "score": 0,
+   "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+   "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer.",
+   "selector": {
+    "file": "internal/app/review.go",
+    "start_line": 123,
+    "fqn": "app.Service.Review",
+    "kind": "method"
+   },
+   "matched_in": "symbol"
+  },
+  {
+   "symbol": "reviewCmd",
+   "fqn": "main.reviewCmd",
+   "kind": "variable",
+   "file": "cmd/codemap/query.go",
+   "start_line": 59,
+   "end_line": 68,
+   "score": 0,
+   "signature": "var reviewCmd",
+   "selector": {
+    "file": "cmd/codemap/query.go",
+    "start_line": 59,
+    "fqn": "main.reviewCmd",
+    "kind": "variable"
+   },
+   "matched_in": "symbol"
+  },
+  {
+   "symbol": "reviewGit",
+   "fqn": "app.reviewGit",
+   "kind": "function",
+   "file": "internal/app/review_test.go",
+   "start_line": 28,
+   "end_line": 34,
+   "score": 0,
+   "signature": "func reviewGit(t *testing.T, dir string, args ...string)",
+   "doc": "reviewGit runs a git command in dir, failing the test on error.",
+   "selector": {
+    "file": "internal/app/review_test.go",
+    "start_line": 28,
+    "fqn": "app.reviewGit",
+    "kind": "function"
+   },
+   "matched_in": "symbol"
+  }
+ ]
+}

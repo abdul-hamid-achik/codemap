@@ -1,0 +1,20 @@
+[
+ {
+  "name": "claude-code",
+  "present": true,
+  "config_path": "claude plugin (marketplace: abdul-hamid-achik/codemap)",
+  "registered": false
+ },
+ {
+  "name": "cursor",
+  "present": false,
+  "config_path": "/Users/abdulachik/projects/codemap/.cursor/mcp.json",
+  "registered": false
+ },
+ {
+  "name": "codex",
+  "present": true,
+  "config_path": "/Users/abdulachik/.codex/config.toml",
+  "registered": false
+ }
+]

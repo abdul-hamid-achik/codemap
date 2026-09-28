@@ -1,0 +1,173 @@
+{
+ "project": "codemap",
+ "file": "internal/app/review.go",
+ "indexed": true,
+ "found": true,
+ "stale": true,
+ "call_graph": "unresolved",
+ "evidence_total": 53,
+ "confirmed_total": 0,
+ "candidate_total": 53,
+ "samples_total": 16,
+ "samples_truncated": 37,
+ "file_scoped_evidence_total": 53,
+ "confirmed_file_scoped_total": 0,
+ "candidate_file_scoped_total": 53,
+ "package_scoped_evidence_total": 0,
+ "dependents_total": 8,
+ "dependents": [
+  {
+   "file": "cmd/codemap/query.go",
+   "evidence_total": 1,
+   "confirmed_total": 0,
+   "candidate_total": 1,
+   "file_scoped_total": 1,
+   "package_scoped_total": 0,
+   "kinds": [
+    {
+     "kind": "calls",
+     "total": 1,
+     "confirmed_total": 0,
+     "candidate_total": 1,
+     "file_scoped_total": 1,
+     "package_scoped_total": 0,
+     "samples": [
+      {
+       "source": {
+        "file": "cmd/codemap/query.go",
+        "symbol": "runReview",
+        "fqn": "main.runReview",
+        "kind": "function",
+        "language": "go",
+        "start_line": 690
+       },
+       "target": {
+        "file": "internal/app/review.go",
+        "symbol": "Review",
+        "fqn": "app.Service.Review",
+        "kind": "method",
+        "language": "go",
+        "start_line": 123
+       },
+       "target_scope": "file",
+       "provenance": "name",
+       "weight": 0.7,
+       "confidence": "candidate",
+       "confidence_reason": "stale_snapshot"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "file": "internal/app/dependencies.go",
+   "evidence_total": 1,
+   "confirmed_total": 0,
+   "candidate_total": 1,
+   "file_scoped_total": 1,
+   "package_scoped_total": 0,
+   "kinds": [
+    {
+     "kind": "calls",
+     "total": 1,
+     "confirmed_total": 0,
+     "candidate_total": 1,
+     "file_scoped_total": 1,
+     "package_scoped_total": 0,
+     "samples": [
+      {
+       "source": {
+        "file": "internal/app/dependencies.go",
+        "symbol": "groupDependencyEdges",
+        "fqn": "app.FileDependenciesReport.groupDependencyEdges",
+        "kind": "method",
+        "language": "go",
+        "start_line": 216
+       },
+       "target": {
+        "file": "internal/app/review.go",
+        "symbol": "symKey",
+        "fqn": "app.symKey",
+        "kind": "function",
+        "language": "go",
+        "start_line": 583
+       },
+       "target_scope": "file",
+       "provenance": "name",
+       "weight": 1,
+       "confidence": "candidate",
+       "confidence_reason": "stale_snapshot"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "file": "internal/app/file_impact.go",
+   "evidence_total": 1,
+   "confirmed_total": 0,
+   "candidate_total": 1,
+   "file_scoped_total": 1,
+   "package_scoped_total": 0,
+   "kinds": [
+    {
+     "kind": "calls",
+     "total": 1,
+     "confirmed_total": 0,
+     "candidate_total": 1,
+     "file_scoped_total": 1,
+     "package_scoped_total": 0,
+     "samples": [
+      {
+       "source": {
+        "file": "internal/app/file_impact.go",
+        "symbol": "FileImpact",
+        "fqn": "app.Service.FileImpact",
+        "kind": "method",
+        "language": "go",
+        "start_line": 48
+       },
+       "target": {
+        "file": "internal/app/review.go",
+        "symbol": "symKey",
+        "fqn": "app.symKey",
+        "kind": "function",
+        "language": "go",
+        "start_line": 583
+       },
+       "target_scope": "file",
+       "provenance": "name",
+       "weight": 1,
+       "confidence": "candidate",
+       "confidence_reason": "stale_snapshot"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "coverage": {
+  "complete": false,
+  "domains": [
+   {
+    "domain": "calls",
+    "status": "unavailable",
+    "scope": "indexed_project",
+    "note": "at least one callable file has no usable call graph; reindex with --precise"
+   },
+   {
+    "domain": "depends_on",
+    "status": "partial",
+    "scope": "indexed_project",
+    "note": "explicit local structure is indexed; dynamic SQL, templates, external links, and runtime configuration remain outside coverage"
+   },
+   {
+    "domain": "documents",
+    "status": "partial",
+    "scope": "indexed_project",
+    "note": "explicit local structure is indexed; dynamic SQL, templates, external links, and runtime configuration remain outside coverage"
+   }
+  ]
+ },
+ "note": "dependency evidence comes from a stale index snapshot and is candidate-only until reindexing confirms it; missing evidence still does not prove this file is independent because dependency coverage is incomplete"
+}

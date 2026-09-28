@@ -1,0 +1,22 @@
+{
+ "project": "codemap",
+ "file": "internal/app/review.go",
+ "indexed": true,
+ "related": [
+  {
+   "relative_path": "cmd/codemap/cli_integration_test.go",
+   "reason": "test",
+   "confidence": 1
+  },
+  {
+   "relative_path": "cmd/codemap/gate_test.go",
+   "reason": "test",
+   "confidence": 1
+  },
+  {
+   "relative_path": "cmd/codemap/main_test.go",
+   "reason": "test",
+   "confidence": 1
+  }
+ ]
+}

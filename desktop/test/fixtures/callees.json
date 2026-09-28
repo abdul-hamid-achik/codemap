@@ -1,0 +1,44 @@
+{
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "project": "codemap",
+ "found": true,
+ "results": [
+  {
+   "symbol": "resolveProject",
+   "fqn": "app.Service.resolveProject",
+   "kind": "method",
+   "file": "internal/app/service_core.go",
+   "start_line": 296,
+   "end_line": 322,
+   "signature": "func (svc *Service) resolveProject(cwd string) (root, name string, err error)",
+   "doc": "resolveProject finds the registered project whose path is cwd or an ancestor\nof cwd (closest wins). If none is registered it defaults to (cwd, basename)."
+  },
+  {
+   "symbol": "Staleness",
+   "fqn": "index.Staleness",
+   "kind": "type",
+   "file": "internal/index/staleness.go",
+   "start_line": 20,
+   "end_line": 24,
+   "signature": "type Staleness struct {",
+   "doc": "Staleness summarizes how the working tree has drifted from the index since the\nlast run: files whose content changed, recognized source files of an\nalready-indexed language that aren't indexed yet (new), and indexed files no\nlonger on disk (deleted). It is computed WITHOUT language servers — it hashes\nthe files already recorded in index_state and recognizes new ones by extension\n— so it's cheap enough to report from `status` and lets an agent know its\nanswers may be behind the code before it trusts them."
+  },
+  {
+   "symbol": "Staleness",
+   "fqn": "index.Indexer.Staleness",
+   "kind": "method",
+   "file": "internal/index/staleness.go",
+   "start_line": 33,
+   "end_line": 43,
+   "signature": "func (ix *Indexer) Staleness(projectID int64, root string, indexedLangs map[string]bool) (Staleness, error)",
+   "doc": "Staleness compares the project's index_state to the working tree at root.\nindexedLangs restricts \"new\" detection to languages already present in the\nindex, so a recognized-but-unindexed language can't show false drift. It needs\nno registered extractors (unlike walk), so it never spawns a language server."
+  }
+ ],
+ "call_graph": "name"
+}

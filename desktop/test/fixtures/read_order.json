@@ -1,0 +1,42 @@
+{
+ "project": "codemap",
+ "indexed": true,
+ "entries": [
+  {
+   "rank": 1,
+   "symbol": "main",
+   "fqn": "main.main",
+   "kind": "function",
+   "file": "bench/main.go",
+   "start_line": 33,
+   "score": 1.55,
+   "in_degree": 0,
+   "entrypoint": true,
+   "reason": "program entrypoint — main()"
+  },
+  {
+   "rank": 2,
+   "symbol": "main",
+   "fqn": "main.main",
+   "kind": "function",
+   "file": "bench/tasks/truth/gen/main.go",
+   "start_line": 84,
+   "score": 1.55,
+   "in_degree": 0,
+   "entrypoint": true,
+   "reason": "program entrypoint — main()"
+  },
+  {
+   "rank": 3,
+   "symbol": "main",
+   "fqn": "main.main",
+   "kind": "function",
+   "file": "cmd/codemap/main.go",
+   "start_line": 76,
+   "score": 1.55,
+   "in_degree": 0,
+   "entrypoint": true,
+   "reason": "program entrypoint — main()"
+  }
+ ]
+}

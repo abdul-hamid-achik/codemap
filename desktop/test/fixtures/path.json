@@ -1,0 +1,22 @@
+{
+ "from": "app.Service.Review",
+ "to": "app.reviewGit",
+ "from_selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "to_selector": {
+  "file": "internal/app/review_test.go",
+  "start_line": 28,
+  "fqn": "app.reviewGit",
+  "kind": "function"
+ },
+ "project": "codemap",
+ "found": false,
+ "call_graph": "unresolved",
+ "resolution": "call graph not available for javascript without precise indexing — whether this path exists is unresolved",
+ "path": [],
+ "stale": true
+}

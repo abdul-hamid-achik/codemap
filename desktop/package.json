@@ -1,0 +1,41 @@
+{
+  "name": "codemap-studio",
+  "productName": "Codemap Studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop workbench for codemap: every feature of the structural + semantic code graph, reviewable and runnable from one interface.",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --devtools",
+    "icons": "electron scripts/make-icons.mjs",
+    "test": "node --test --test-concurrency=1 --test-timeout=600000 \"test/*.test.mjs\"",
+    "test:unit": "node --test test/features.test.mjs test/render.test.mjs test/views.test.mjs test/graph.test.mjs",
+    "test:live": "node --test --test-timeout=600000 test/integration.test.mjs test/cli.test.mjs",
+    "smoke": "node test/smoke.mjs",
+    "dist": "npx --yes electron-builder --mac --dir"
+  },
+  "build": {
+    "appId": "tools.codemap.studio",
+    "productName": "Codemap Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": ["electron/**/*", "renderer/**/*", "package.json"],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Development"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.4.5"
+  }
+}

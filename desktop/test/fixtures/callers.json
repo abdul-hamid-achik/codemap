@@ -1,0 +1,42 @@
+{
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "project": "codemap",
+ "found": true,
+ "results": [
+  {
+   "symbol": "runReview",
+   "fqn": "main.runReview",
+   "kind": "function",
+   "file": "cmd/codemap/query.go",
+   "start_line": 690,
+   "end_line": 800,
+   "signature": "func runReview(cmd *cobra.Command, args []string) error",
+   "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a\n--since range, or --staged index) touches, their union blast radius, the tests\nthat cover them, and the changed symbols that are untested or load-bearing. The\nhuman view is a scannable summary; --json carries the full bundle for an agent."
+  },
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "end_line": 152,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "end_line": 192,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  }
+ ],
+ "call_graph": "name"
+}

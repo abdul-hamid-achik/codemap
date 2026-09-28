@@ -1,0 +1,28 @@
+{
+ "projects": [
+  {
+   "name": "blankcode",
+   "path": "/Users/abdulachik/projects/blankcode",
+   "language": "typescript",
+   "nodes": 3818,
+   "edges": 4354,
+   "files": 496
+  },
+  {
+   "name": "blueprint",
+   "path": "/Users/abdulachik/projects/blueprint",
+   "language": "go",
+   "nodes": 2855,
+   "edges": 9781,
+   "files": 146
+  },
+  {
+   "name": "bob",
+   "path": "/Users/abdulachik/projects/bob",
+   "language": "go",
+   "nodes": 3144,
+   "edges": 8959,
+   "files": 188
+  }
+ ]
+}

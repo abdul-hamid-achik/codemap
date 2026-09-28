@@ -1,0 +1,289 @@
+/* Codemap Studio — design tokens. Dark is the default; light is a real theme,
+   not an inversion, so both are tuned by hand. */
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('../assets/fonts/space-grotesk-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('../assets/fonts/space-grotesk-latin-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('../assets/fonts/space-grotesk-latin-700-normal.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('../assets/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('../assets/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('../assets/fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-ui: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 22px;
+  --sp-6: 30px;
+  --sp-7: 44px;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-19: 19px;
+  --fs-24: 24px;
+  --fs-32: 32px;
+
+  --titlebar-h: 52px;
+  --statusbar-h: 26px;
+  --sidebar-w: 244px;
+  --inspector-w: 460px;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur: 160ms;
+}
+
+html[data-theme='dark'] {
+  --bg: #0a0c0f;
+  --bg-grad: radial-gradient(1200px 620px at 78% -12%, rgba(102, 217, 239, 0.09), transparent 62%),
+    radial-gradient(900px 520px at 4% 108%, rgba(180, 142, 240, 0.07), transparent 60%);
+  --surface: #10141a;
+  --surface-2: #151b23;
+  --surface-3: #1b232d;
+  --surface-hover: #1d2530;
+  --border: #1e2732;
+  --border-soft: #171e27;
+  --border-strong: #2b3644;
+
+  --text: #dde5ef;
+  --text-2: #a4b1c2;
+  --text-3: #6f7d8f;
+  --text-dim: #55616f;
+
+  --accent: #66d9ef;
+  --accent-ink: #04222a;
+  --accent-soft: rgba(102, 217, 239, 0.13);
+  --accent-line: rgba(102, 217, 239, 0.34);
+
+  --ok: #5fd39a;
+  --ok-soft: rgba(95, 211, 154, 0.13);
+  --warn: #f0b264;
+  --warn-soft: rgba(240, 178, 100, 0.13);
+  --danger: #f2708a;
+  --danger-soft: rgba(242, 112, 138, 0.13);
+  --info: #b48ef0;
+  --info-soft: rgba(180, 142, 240, 0.14);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 8px 26px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 26px 70px rgba(0, 0, 0, 0.62);
+
+  --sel: rgba(102, 217, 239, 0.24);
+
+  --code-bg: #0c1015;
+  --code-line: #161d26;
+
+  /* syntax */
+  --syn-key: #f2708a;
+  --syn-str: #9fdca8;
+  --syn-num: #f0b264;
+  --syn-com: #55636f;
+  --syn-fn: #66d9ef;
+  --syn-type: #b48ef0;
+  --syn-var: #dde5ef;
+  --syn-op: #8fa2b6;
+}
+
+html[data-theme='light'] {
+  --bg: #f6f7f9;
+  --bg-grad: radial-gradient(1100px 600px at 82% -14%, rgba(9, 132, 158, 0.09), transparent 60%),
+    radial-gradient(820px 500px at 0% 110%, rgba(126, 87, 194, 0.07), transparent 58%);
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --surface-3: #e9edf2;
+  --surface-hover: #eef1f6;
+  --border: #dfe4ea;
+  --border-soft: #e8ecf1;
+  --border-strong: #c6cdd7;
+
+  --text: #161b22;
+  --text-2: #4a5666;
+  --text-3: #6d7889;
+  --text-dim: #949dab;
+
+  --accent: #0a7f96;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(10, 127, 150, 0.1);
+  --accent-line: rgba(10, 127, 150, 0.3);
+
+  --ok: #12805a;
+  --ok-soft: rgba(18, 128, 90, 0.11);
+  --warn: #9a6410;
+  --warn-soft: rgba(154, 100, 16, 0.12);
+  --danger: #b02a4b;
+  --danger-soft: rgba(176, 42, 75, 0.1);
+  --info: #6a3fc0;
+  --info-soft: rgba(106, 63, 192, 0.1);
+
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.07);
+  --shadow-2: 0 8px 24px rgba(16, 24, 40, 0.1);
+  --shadow-3: 0 24px 60px rgba(16, 24, 40, 0.16);
+
+  --sel: rgba(10, 127, 150, 0.18);
+
+  --code-bg: #fbfcfd;
+  --code-line: #f1f4f8;
+
+  --syn-key: #b02a4b;
+  --syn-str: #12805a;
+  --syn-num: #9a6410;
+  --syn-com: #94a0ae;
+  --syn-fn: #0a7f96;
+  --syn-type: #6a3fc0;
+  --syn-var: #161b22;
+  --syn-op: #5c6878;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Author display rules must never resurrect an element the app hid. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--sel);
+}
+
+code,
+pre,
+kbd,
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'liga' 0, 'calt' 1;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+  border-radius: var(--r-xs);
+}
+
+/* scrollbars */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+  background-clip: content-box;
+  border: 3px solid transparent;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.boot {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: var(--sp-3);
+  justify-items: center;
+  background: var(--bg);
+  background-image: var(--bg-grad);
+  z-index: 999;
+}
+.boot-mark {
+  font-family: var(--font-mono);
+  font-size: var(--fs-24);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.boot-note {
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  animation: pulse 1.4s var(--ease) infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,36 @@
+{
+ "project": "codemap",
+ "orphans": [
+  {
+   "symbol": "<unknown>",
+   "fqn": "<unknown>",
+   "kind": "function",
+   "file": "integrations/github-action/scripts/post-comment.js",
+   "start_line": 20,
+   "end_line": 67,
+   "signature": "<unknown>"
+  },
+  {
+   "symbol": "exports",
+   "fqn": "<unknown>.exports",
+   "kind": "function",
+   "file": "integrations/github-action/scripts/post-comment.js",
+   "start_line": 20,
+   "end_line": 67,
+   "signature": "exports"
+  },
+  {
+   "symbol": "_ready",
+   "fqn": "Player._ready",
+   "kind": "method",
+   "file": "internal/extract/gdsrc/testdata/player.gd",
+   "start_line": 37,
+   "end_line": 42,
+   "signature": "func _ready():",
+   "doc": "Called when the node enters the scene tree"
+  }
+ ],
+ "call_graph": "unresolved",
+ "resolution": "call graph not available for javascript without precise indexing — orphan candidates are incomplete",
+ "note": "orphan list is unreliable — run 'codemap index --precise' to resolve the call graph, then re-check"
+}

@@ -1,0 +1,242 @@
+{
+ "project": "codemap",
+ "file": "internal/app/review.go",
+ "depth": 3,
+ "indexed": true,
+ "found": true,
+ "symbols": 16,
+ "dependent_files": [
+  "cmd/codemap/query.go",
+  "internal/app/dependencies.go",
+  "internal/app/file_impact.go"
+ ],
+ "blast_radius_count": 98,
+ "covering_tests": [
+  {
+   "symbol": "review_test.go",
+   "fqn": "internal/app/review_test.go",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 1,
+   "depth": 0,
+   "heuristic": true
+  },
+  {
+   "symbol": "main_test.go",
+   "fqn": "cmd/codemap/main_test.go",
+   "kind": "test",
+   "file": "cmd/codemap/main_test.go",
+   "start_line": 1,
+   "depth": 0,
+   "heuristic": true
+  },
+  {
+   "symbol": "cli_integration_test.go",
+   "fqn": "cmd/codemap/cli_integration_test.go",
+   "kind": "test",
+   "file": "cmd/codemap/cli_integration_test.go",
+   "start_line": 1,
+   "depth": 0,
+   "heuristic": true
+  }
+ ],
+ "untested_symbols": [],
+ "dependency_evidence": {
+  "project": "codemap",
+  "file": "internal/app/review.go",
+  "indexed": true,
+  "found": true,
+  "stale": true,
+  "call_graph": "unresolved",
+  "evidence_total": 53,
+  "confirmed_total": 0,
+  "candidate_total": 53,
+  "samples_total": 16,
+  "samples_truncated": 37,
+  "file_scoped_evidence_total": 53,
+  "confirmed_file_scoped_total": 0,
+  "candidate_file_scoped_total": 53,
+  "package_scoped_evidence_total": 0,
+  "dependents_total": 8,
+  "dependents": [
+   {
+    "file": "cmd/codemap/query.go",
+    "evidence_total": 1,
+    "confirmed_total": 0,
+    "candidate_total": 1,
+    "file_scoped_total": 1,
+    "package_scoped_total": 0,
+    "kinds": [
+     {
+      "kind": "calls",
+      "total": 1,
+      "confirmed_total": 0,
+      "candidate_total": 1,
+      "file_scoped_total": 1,
+      "package_scoped_total": 0,
+      "samples": [
+       {
+        "source": {
+         "file": "cmd/codemap/query.go",
+         "symbol": "runReview",
+         "fqn": "main.runReview",
+         "kind": "function",
+         "language": "go",
+         "start_line": 690
+        },
+        "target": {
+         "file": "internal/app/review.go",
+         "symbol": "Review",
+         "fqn": "app.Service.Review",
+         "kind": "method",
+         "language": "go",
+         "start_line": 123
+        },
+        "target_scope": "file",
+        "provenance": "name",
+        "weight": 0.7,
+        "confidence": "candidate",
+        "confidence_reason": "stale_snapshot"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "file": "internal/app/dependencies.go",
+    "evidence_total": 1,
+    "confirmed_total": 0,
+    "candidate_total": 1,
+    "file_scoped_total": 1,
+    "package_scoped_total": 0,
+    "kinds": [
+     {
+      "kind": "calls",
+      "total": 1,
+      "confirmed_total": 0,
+      "candidate_total": 1,
+      "file_scoped_total": 1,
+      "package_scoped_total": 0,
+      "samples": [
+       {
+        "source": {
+         "file": "internal/app/dependencies.go",
+         "symbol": "groupDependencyEdges",
+         "fqn": "app.FileDependenciesReport.groupDependencyEdges",
+         "kind": "method",
+         "language": "go",
+         "start_line": 216
+        },
+        "target": {
+         "file": "internal/app/review.go",
+         "symbol": "symKey",
+         "fqn": "app.symKey",
+         "kind": "function",
+         "language": "go",
+         "start_line": 583
+        },
+        "target_scope": "file",
+        "provenance": "name",
+        "weight": 1,
+        "confidence": "candidate",
+        "confidence_reason": "stale_snapshot"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "file": "internal/app/file_impact.go",
+    "evidence_total": 1,
+    "confirmed_total": 0,
+    "candidate_total": 1,
+    "file_scoped_total": 1,
+    "package_scoped_total": 0,
+    "kinds": [
+     {
+      "kind": "calls",
+      "total": 1,
+      "confirmed_total": 0,
+      "candidate_total": 1,
+      "file_scoped_total": 1,
+      "package_scoped_total": 0,
+      "samples": [
+       {
+        "source": {
+         "file": "internal/app/file_impact.go",
+         "symbol": "FileImpact",
+         "fqn": "app.Service.FileImpact",
+         "kind": "method",
+         "language": "go",
+         "start_line": 48
+        },
+        "target": {
+         "file": "internal/app/review.go",
+         "symbol": "symKey",
+         "fqn": "app.symKey",
+         "kind": "function",
+         "language": "go",
+         "start_line": 583
+        },
+        "target_scope": "file",
+        "provenance": "name",
+        "weight": 1,
+        "confidence": "candidate",
+        "confidence_reason": "stale_snapshot"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "coverage": {
+   "complete": false,
+   "domains": [
+    {
+     "domain": "calls",
+     "status": "unavailable",
+     "scope": "indexed_project",
+     "note": "at least one callable file has no usable call graph; reindex with --precise"
+    },
+    {
+     "domain": "depends_on",
+     "status": "partial",
+     "scope": "indexed_project",
+     "note": "explicit local structure is indexed; dynamic SQL, templates, external links, and runtime configuration remain outside coverage"
+    },
+    {
+     "domain": "documents",
+     "status": "partial",
+     "scope": "indexed_project",
+     "note": "explicit local structure is indexed; dynamic SQL, templates, external links, and runtime configuration remain outside coverage"
+    }
+   ]
+  },
+  "note": "dependency evidence comes from a stale index snapshot and is candidate-only until reindexing confirms it; missing evidence still does not prove this file is independent because dependency coverage is incomplete"
+ },
+ "call_graph": "unresolved",
+ "delete_verdict": "unknown",
+ "safe_to_delete": false,
+ "breaking_change": false,
+ "stale": true,
+ "resolution": "call dependency evidence is unavailable for at least one callable file — reindex with --precise before treating missing callers as absent",
+ "note": "delete verdict is unknown — 53 inbound relationship(s) come from a stale index snapshot and must be refreshed before they can be confirmed; incomplete domains: calls=unavailable, depends_on=partial, documents=partial, references=partial, imports=partial, runtime_wiring=unavailable, external_consumers=unavailable; breaking_change is unavailable without a resolved call graph — reindex with --precise",
+ "next": [
+  {
+   "tool": "codemap_index",
+   "args": {
+    "path": "/Users/abdulachik/projects/codemap",
+    "precise": true
+   },
+   "why": "resolve candidate dependency evidence before assessing file-level change risk"
+  },
+  {
+   "tool": "codemap_related_files",
+   "args": {
+    "file": "internal/app/review.go",
+    "path": "/Users/abdulachik/projects/codemap"
+   },
+   "why": "inspect broader co-change evidence before deleting a file whose dependency completeness is unknown"
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+{
+ "schema_version": 1,
+ "export_schema_version": 1,
+ "project": "codemap",
+ "project_key": "3745ad472230",
+ "index_fingerprint": "506f5a0a426240757434cb76031ba93997f442278cc2dcaa05200bef947e509f",
+ "total_records": 6481,
+ "complete": true,
+ "freshness": {
+  "checked": true,
+  "fresh": false,
+  "changed": 23,
+  "new": 6,
+  "deleted": 0,
+  "changed_files": [
+   "cmd/codemap/main.go",
+   "cmd/codemap/index.go",
+   "internal/app/service_annotations.go"
+  ],
+  "new_files": [
+   "cmd/codemap/inconsistencies.go",
+   "internal/app/compiled_knowledge_test.go",
+   "internal/app/reindex_delta.go"
+  ]
+ }
+}

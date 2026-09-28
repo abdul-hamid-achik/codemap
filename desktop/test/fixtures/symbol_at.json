@@ -1,0 +1,6 @@
+{
+ "ok": false,
+ "error": "no symbol at internal/app/review.go:120",
+ "code": "not_found",
+ "hint": "check the file path and line number"
+}

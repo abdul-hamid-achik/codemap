@@ -1,0 +1,36 @@
+{
+ "project": "codemap",
+ "file": "internal/app/review.go",
+ "symbols": [
+  {
+   "symbol": "reviewMaxSymbols",
+   "fqn": "app.reviewMaxSymbols",
+   "kind": "variable",
+   "file": "internal/app/review.go",
+   "start_line": 18,
+   "end_line": 18,
+   "signature": "const reviewMaxSymbols",
+   "doc": "Review tuning. These bound work on a pathological changeset and decide when a\nchanged symbol is \"load-bearing\" enough to flag as a hotspot."
+  },
+  {
+   "symbol": "reviewMaxPartialErrors",
+   "fqn": "app.reviewMaxPartialErrors",
+   "kind": "variable",
+   "file": "internal/app/review.go",
+   "start_line": 19,
+   "end_line": 19,
+   "signature": "const reviewMaxPartialErrors",
+   "doc": "Review tuning. These bound work on a pathological changeset and decide when a\nchanged symbol is \"load-bearing\" enough to flag as a hotspot."
+  },
+  {
+   "symbol": "reviewHotspotMinCallers",
+   "fqn": "app.reviewHotspotMinCallers",
+   "kind": "variable",
+   "file": "internal/app/review.go",
+   "start_line": 20,
+   "end_line": 20,
+   "signature": "const reviewHotspotMinCallers",
+   "doc": "Review tuning. These bound work on a pathological changeset and decide when a\nchanged symbol is \"load-bearing\" enough to flag as a hotspot."
+  }
+ ]
+}

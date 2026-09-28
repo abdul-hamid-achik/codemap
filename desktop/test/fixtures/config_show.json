@@ -1,0 +1,54 @@
+{
+ "Embedding": {
+  "Provider": "ollama",
+  "Model": "nomic-embed-text",
+  "OllamaURL": "http://localhost:11434",
+  "Dimensions": 768,
+  "Distance": "cosine",
+  "APIKey": ""
+ },
+ "Index": {
+  "MaxFileBytes": 1048576,
+  "Exclude": [
+   ".git",
+   "node_modules",
+   "vendor"
+  ],
+  "ExcludeExtra": [
+   "bench/fixtures/"
+  ],
+  "EmbedBatchSize": 64,
+  "EmbedConcurrency": 4,
+  "ExtractConcurrency": 4,
+  "EmbedMaxChars": 0
+ },
+ "Daemon": {
+  "DebounceMS": 500,
+  "IdleTimeoutMin": 0,
+  "Precise": false,
+  "EmbedRPS": 0,
+  "EmbedMaxInFlight": 2,
+  "EmbedCacheSize": 4096
+ },
+ "Vecgrep": {
+  "Enabled": true,
+  "Bin": ""
+ },
+ "Semantic": {
+  "Backend": "vecgrep",
+  "Fusion": "auto",
+  "FusionWeights": {
+   "Identifier": {
+    "Vector": 0.5,
+    "Text": 1.5
+   },
+   "NaturalLanguage": {
+    "Vector": 1.5,
+    "Text": 0.5
+   }
+  }
+ },
+ "MCP": {
+  "Profile": "full"
+ }
+}

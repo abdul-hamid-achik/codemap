@@ -1,0 +1,35 @@
+{
+ "project": "codemap",
+ "hotspots": [
+  {
+   "symbol": "Close",
+   "fqn": "app.preciseLSPClient.Close",
+   "kind": "method",
+   "file": "internal/app/service_relations.go",
+   "start_line": 461,
+   "in_degree": 359,
+   "shared_name": 9
+  },
+  {
+   "symbol": "Close",
+   "fqn": "lspsrc.Extractor.Close",
+   "kind": "method",
+   "file": "internal/extract/lspsrc/lspsrc.go",
+   "start_line": 464,
+   "in_degree": 359,
+   "shared_name": 9
+  },
+  {
+   "symbol": "Close",
+   "fqn": "lsp.conn.Close",
+   "kind": "method",
+   "file": "internal/lsp/jsonrpc.go",
+   "start_line": 246,
+   "in_degree": 359,
+   "shared_name": 9
+  }
+ ],
+ "call_graph": "unresolved",
+ "resolution": "call graph not available for javascript without precise indexing — hotspot rankings are incomplete; run 'codemap index --precise'",
+ "note": "hotspot ranking is unreliable while some callable files are unresolved"
+}

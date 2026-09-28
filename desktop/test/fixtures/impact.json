@@ -1,0 +1,127 @@
+{
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "project": "codemap",
+ "found": true,
+ "locations": [
+  {
+   "symbol": "Review",
+   "fqn": "app.Service.Review",
+   "kind": "method",
+   "file": "internal/app/review.go",
+   "start_line": 123,
+   "end_line": 301,
+   "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+   "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer."
+  }
+ ],
+ "direct_callers": [
+  {
+   "symbol": "runReview",
+   "fqn": "main.runReview",
+   "kind": "function",
+   "file": "cmd/codemap/query.go",
+   "start_line": 690,
+   "end_line": 800,
+   "signature": "func runReview(cmd *cobra.Command, args []string) error",
+   "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a\n--since range, or --staged index) touches, their union blast radius, the tests\nthat cover them, and the changed symbols that are untested or load-bearing. The\nhuman view is a scannable summary; --json carries the full bundle for an agent."
+  },
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "end_line": 152,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "end_line": 192,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  }
+ ],
+ "blast_radius": [
+  {
+   "symbol": "runReview",
+   "fqn": "main.runReview",
+   "kind": "function",
+   "file": "cmd/codemap/query.go",
+   "start_line": 690,
+   "depth": 1,
+   "signature": "func runReview(cmd *cobra.Command, args []string) error",
+   "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a\n--since range, or --staged index) touches, their union blast radius, the tests\nthat cover them, and the changed symbols that are untested or load-bearing. The\nhuman view is a scannable summary; --json carries the full bundle for an agent."
+  },
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "depth": 1,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "depth": 1,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  }
+ ],
+ "tests": [
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "depth": 1,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "depth": 1,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileReportsMissingAfterReindex",
+   "fqn": "app.TestReviewDeletedFileReportsMissingAfterReindex",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 194,
+   "depth": 1,
+   "signature": "func TestReviewDeletedFileReportsMissingAfterReindex(t *testing.T)"
+  }
+ ],
+ "untested": false,
+ "call_graph": "name",
+ "test_commands": [
+  "go test ./internal/app"
+ ],
+ "next": [
+  {
+   "tool": "codemap_review",
+   "args": {
+    "depth": 3,
+    "path": "/Users/abdulachik/projects/codemap"
+   },
+   "why": "the blast radius is large; run diff-scoped review after editing to select regressions"
+  }
+ ]
+}

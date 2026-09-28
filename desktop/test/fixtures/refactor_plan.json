@@ -1,0 +1,115 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "found": true,
+ "call_graph": "name",
+ "definitions": [
+  {
+   "symbol": "Review",
+   "fqn": "app.Service.Review",
+   "kind": "method",
+   "file": "internal/app/review.go",
+   "start_line": 123,
+   "end_line": 301,
+   "signature": "func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err error)",
+   "doc": "Review computes diff-scoped impact + test selection for the working tree. It\nreuses the existing primitives end to end: git for the diff, Symbols for\nhunk→symbol resolution, and Impact for each changed symbol's blast radius and\ncovering tests. Never errors on a non-repo or unindexed project — it degrades to\na plain changed-file list with a Note so an agent always gets an actionable answer.",
+   "source": "",
+   "source_omitted": true
+  }
+ ],
+ "call_sites": [
+  {
+   "symbol": "runReview",
+   "fqn": "main.runReview",
+   "kind": "function",
+   "file": "cmd/codemap/query.go",
+   "start_line": 690,
+   "end_line": 800,
+   "signature": "func runReview(cmd *cobra.Command, args []string) error",
+   "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a\n--since range, or --staged index) touches, their union blast radius, the tests\nthat cover them, and the changed symbols that are untested or load-bearing. The\nhuman view is a scannable summary; --json carries the full bundle for an agent."
+  },
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "end_line": 152,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "end_line": 192,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  }
+ ],
+ "call_sites_total": 32,
+ "value_references": [],
+ "value_references_total": 0,
+ "move_sites": [
+  "cmd/codemap/query.go",
+  "internal/app/dependencies.go",
+  "internal/app/file_impact.go"
+ ],
+ "covering_tests": [
+  {
+   "symbol": "TestReviewWorking",
+   "fqn": "app.TestReviewWorking",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 94,
+   "depth": 1,
+   "signature": "func TestReviewWorking(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileUsesLastIndexedSymbols",
+   "fqn": "app.TestReviewDeletedFileUsesLastIndexedSymbols",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 154,
+   "depth": 1,
+   "signature": "func TestReviewDeletedFileUsesLastIndexedSymbols(t *testing.T)"
+  },
+  {
+   "symbol": "TestReviewDeletedFileReportsMissingAfterReindex",
+   "fqn": "app.TestReviewDeletedFileReportsMissingAfterReindex",
+   "kind": "test",
+   "file": "internal/app/review_test.go",
+   "start_line": 194,
+   "depth": 1,
+   "signature": "func TestReviewDeletedFileReportsMissingAfterReindex(t *testing.T)"
+  }
+ ],
+ "tests_total": 30,
+ "blast_radius": 32,
+ "note": "showing top 25 of 32 callers, ranked by fan-in (hubs first) — call codemap_callers for the complete list",
+ "next": [
+  {
+   "tool": "codemap_context",
+   "args": {
+    "path": "/Users/abdulachik/projects/codemap",
+    "symbol": "Review"
+   },
+   "why": "drill into the definition and its callers before renaming"
+  },
+  {
+   "tool": "codemap_dependencies",
+   "args": {
+    "file": "internal/app/review.go",
+    "path": "/Users/abdulachik/projects/codemap"
+   },
+   "why": "inspect the dependent files whose imports a move would update"
+  }
+ ]
+}

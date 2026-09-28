@@ -1,0 +1,35 @@
+{
+ "project": "codemap",
+ "root": "/Users/abdulachik/projects/codemap",
+ "embedded": false,
+ "warning": "local embeddings disabled: semantic.backend=vecgrep delegates retrieval to vecgrep; skipped 10 shell — recognized at T0 only (structural backend planned, not shipped); codemap currently indexes Go, TypeScript, JavaScript, Python, Ruby, Lua, Vue script blocks, CSS/SCSS/Sass/Less, and HTML",
+ "files_scanned": 364,
+ "files_indexed": 270,
+ "files_skipped": 0,
+ "files_unchanged": 94,
+ "unsupported": {
+  "shell": 10
+ },
+ "nodes": 6920,
+ "edges": 27521,
+ "languages": {
+  "gdscript": 2,
+  "go": 279,
+  "markdown": 20,
+  "yaml": 63
+ },
+ "extract_ms": 1712,
+ "total_ms": 6055,
+ "imports_ms": 41,
+ "edges_ms": 265,
+ "formats_ms": 24,
+ "analyze_ms": 4,
+ "scan_ms": 183,
+ "lsp_ms": 10,
+ "node_index_ms": 16,
+ "cache": {
+  "action": "saved",
+  "stash_id": "codemap_afea2c2d3ea8_20260928_121609.327871000_e5fbebcb8ee169afe0294586",
+  "tree_hash": "afea2c2d3ea84ca4aadf967f5880505fe25978d6"
+ }
+}

@@ -1,0 +1,35 @@
+{
+ "symbol": "Review",
+ "selector": {
+  "file": "internal/app/review.go",
+  "start_line": 123,
+  "fqn": "app.Service.Review",
+  "kind": "method"
+ },
+ "project": "codemap",
+ "found": true,
+ "score": 0.65,
+ "level": "medium",
+ "callers": 32,
+ "covering_tests_count": 30,
+ "factors": [
+  {
+   "factor": "high_fan_in",
+   "severity": 0.5,
+   "detail": "32 direct callers — broadly depended on"
+  },
+  {
+   "factor": "cross_package",
+   "severity": 0.3,
+   "detail": "called from 3 packages — a change ripples across the codebase"
+  }
+ ],
+ "gate": {
+  "level": "medium",
+  "would_fail_on": {
+   "low": true,
+   "medium": true,
+   "high": false
+  }
+ }
+}

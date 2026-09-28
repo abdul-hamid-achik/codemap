@@ -1,0 +1,44 @@
+{
+ "project": "codemap",
+ "root": "/Users/abdulachik/projects/codemap",
+ "registered": true,
+ "path": "/Users/abdulachik/projects/codemap",
+ "nodes": 6840,
+ "edges": 26942,
+ "files": 359,
+ "vectors": 0,
+ "vectors_known": false,
+ "semantic_backend": "vecgrep",
+ "precise_edges": 34,
+ "precise": {
+  "go": false,
+  "javascript": false
+ },
+ "languages": {
+  "gdscript": 26,
+  "go": 3786,
+  "javascript": 5,
+  "markdown": 185,
+  "yaml": 2838
+ },
+ "kinds": {
+  "class": 2,
+  "file": 359,
+  "function": 977,
+  "key": 2775,
+  "method": 679,
+  "section": 165,
+  "test": 988,
+  "type": 394,
+  "variable": 501
+ },
+ "stale": {
+  "changed": 23,
+  "new": 6,
+  "deleted": 0
+ },
+ "siblings": [
+  "vecgrep"
+ ],
+ "project_key": "3745ad472230"
+}
