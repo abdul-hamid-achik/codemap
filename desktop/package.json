@@ -1,7 +1,7 @@
 {
   "name": "codemap-studio",
   "productName": "Codemap Studio",
-  "version": "0.1.0",
+  "version": "0.69.0",
   "private": true,
   "description": "Desktop workbench for codemap: every feature of the structural + semantic code graph, reviewable and runnable from one interface.",
   "type": "module",
@@ -14,28 +14,73 @@
     "test:unit": "node --test test/features.test.mjs test/render.test.mjs test/views.test.mjs test/graph.test.mjs",
     "test:live": "node --test --test-timeout=600000 test/integration.test.mjs test/cli.test.mjs",
     "smoke": "node test/smoke.mjs",
-    "dist": "npx --yes electron-builder --mac --dir"
+    "dist": "node scripts/stage-binary.mjs && electron-builder --dir",
+    "dist:mac": "node scripts/stage-binary.mjs --os mac --arch arm64,x64 && electron-builder --mac --arm64 --x64 -c.mac.identity=-",
+    "dist:linux": "node scripts/stage-binary.mjs --os linux --arch x64 && electron-builder --linux --x64",
+    "dist:win": "node scripts/stage-binary.mjs --os win --arch x64 && electron-builder --win --x64"
   },
   "build": {
     "appId": "tools.codemap.studio",
     "productName": "Codemap Studio",
+    "artifactName": "Codemap-Studio-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
-    "files": ["electron/**/*", "renderer/**/*", "package.json"],
+    "files": [
+      "electron/**/*",
+      "renderer/**/*",
+      "build/icon.png",
+      "build/icon.ico",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-bin/${os}-${arch}",
+        "to": "bin",
+        "filter": [
+          "codemap",
+          "codemap.exe"
+        ]
+      }
+    ],
+    "publish": null,
     "mac": {
       "icon": "build/icon.icns",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "Codemap Studio ${version}"
     },
     "win": {
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     },
     "linux": {
       "icon": "build/icon.png",
-      "category": "Development"
+      "category": "Development",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ]
     }
   },
   "devDependencies": {
-    "electron": "^44.4.5"
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
   }
 }

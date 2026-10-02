@@ -72,6 +72,13 @@ releases page is the authoritative history.
   path, a zoomable Atlas treemap with a detail panel, a Features catalog grouped by surface, and a
   Flow view (outline, left-to-right diagram, source preview, "Copy as brief"). Docs:
   `docs/desktop.md`.
+- **Codemap Studio installers on every release** — the Release workflow now packages the desktop
+  app for macOS (arm64 and x64 `.dmg`/`.zip`), Linux (`.AppImage`/`.tar.gz`) and Windows (NSIS
+  `.exe`), each with the `codemap` CLI of the same tag bundled under `Resources/bin`, and attaches
+  them to the GitHub release. The app prefers an installed `codemap` unless it is older than the
+  bundled one. macOS builds are ad-hoc signed by default and become Developer ID signed and
+  notarized once `CSC_LINK`/`CSC_KEY_PASSWORD` and the `APPLE_*` secrets exist. Local builds:
+  `npm run dist:mac|dist:linux|dist:win` in `desktop/`.
 
 ### Changed
 

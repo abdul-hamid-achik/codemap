@@ -50,3 +50,7 @@ node_modules/
 # results/transcripts are runtime artifacts (only *.summary.json is committed by hand).
 /bench/fixtures/repo/
 /bench/results/
+
+# Codemap Studio packaging output (desktop/scripts/stage-binary.mjs + electron-builder)
+/desktop/dist-bin/
+/desktop/release/

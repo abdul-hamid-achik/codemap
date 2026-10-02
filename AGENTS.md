@@ -532,6 +532,10 @@ Verify with `npm test` (DOM-stubbed renderer over trimmed real fixtures), `npm r
 (every read-only feature against the real binary) and `npm run smoke` (headless walk + screenshots;
 `SMOKE_ONLY=learn` walks just the Learn views). `npm run icons` re-renders `build/icon.*` from
 `docs/public/mark.svg`; the public screenshots in `docs/public/desktop/` come from a smoke run.
+Packaging: `scripts/stage-binary.mjs` cross-compiles the bundled `codemap` into `dist-bin/<os>-<arch>/`
+(electron-builder `extraResources` → `Resources/bin`); `npm run dist:mac|dist:linux|dist:win` builds
+installers into `desktop/release/`, and the Release workflow's `desktop` job does the same per OS on
+every `v*` tag (signing/notarization switch on when the `CSC_*`/`APPLE_*` secrets exist).
 
 ## Code Style
 

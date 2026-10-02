@@ -19,16 +19,42 @@ your project and renders the structured report, so the CLI stays the single
 source of truth — including its exit-code taxonomy and its
 `{ok:false,error,code,hint}` failure envelope.
 
-## Run it
+## Install
 
-You need a `codemap` binary (see [installation](/quick-start)), Node.js, and a
-checkout of the repository:
+Every [release](https://github.com/abdul-hamid-achik/codemap/releases) since
+v0.69.0 attaches Codemap Studio next to the CLI archives:
+
+| Platform | File |
+| --- | --- |
+| macOS (Apple silicon) | `Codemap-Studio-<version>-mac-arm64.dmg` |
+| macOS (Intel) | `Codemap-Studio-<version>-mac-x64.dmg` |
+| Linux (x64) | `Codemap-Studio-<version>-linux-<arch>.AppImage` (or `.tar.gz`) |
+| Windows | `Codemap-Studio-<version>-win-x64.exe` |
+
+The app ships with the `codemap` CLI of the same release, so it works before you
+install anything else. If you already have `codemap` on your `PATH`, the app uses
+yours — that binary built your existing indexes — unless it is older than the
+bundled one. Settings and `$CODEMAP_BIN` still override both.
+
+The macOS build is not notarized yet, so macOS asks once: right-click the app
+→ **Open** (or System Settings → Privacy & Security → **Open Anyway**). The
+Windows installer is unsigned, so SmartScreen may ask you to confirm.
+
+### From source
+
+You need Go, Node.js, and a checkout of the repository:
 
 ```bash
 cd desktop
 npm install
-npm start          # launch the app
+npm start          # launch the app against <repo>/bin/codemap or your PATH
+npm run dist:mac   # build .dmg/.zip for arm64 and x64 into desktop/release/
 ```
+
+`npm run dist:linux` and `npm run dist:win` build the other platforms; each
+first compiles the matching `codemap` into the package.
+
+## Run it
 
 Open a project with the project chip in the title bar. If it is not indexed
 yet, the app offers to run `codemap index` for you. An indexed project opens on
@@ -139,8 +165,10 @@ report.
 
 - **Binary resolution.** A GUI app does not inherit your shell PATH, so the app
   resolves a login-shell PATH once at startup and hands it to every child.
-  Lookup order: Settings → `$CODEMAP_BIN` → `<repo>/bin/codemap` →
-  `<repo>/codemap` → login-shell `command -v`.
+  Lookup order: Settings → `$CODEMAP_BIN` → (from a checkout) `<repo>/bin/codemap` →
+  `<repo>/codemap` → login-shell `command -v` → the `codemap` bundled in the
+  installed app. A PATH binary older than the bundled one yields to it, since
+  the app calls commands an older CLI lacks.
 - **One door.** `codemap:run` spawns the binary with your project as cwd,
   appends `--json`, streams long runs (`index`, `daemon start`) line by line,
   and maps exit codes 0–6 onto the UI.

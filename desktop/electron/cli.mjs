@@ -90,6 +90,10 @@ export function candidateBinaries(appRoot, explicit) {
   const list = []
   if (explicit) list.push(explicit)
   if (process.env.CODEMAP_BIN) list.push(process.env.CODEMAP_BIN)
+  // Packaged, appRoot is <resources>/app.asar: "<appRoot>/../bin" would be the
+  // bundled binary, which must go through the installed-vs-bundled choice in
+  // resolveBinary instead of winning outright.
+  if (/\.asar$/.test(appRoot)) return list.filter((c, i) => c && list.indexOf(c) === i)
   for (const n of names) {
     // dev checkout: <repo>/bin/codemap and <repo>/codemap
     list.push(path.join(appRoot, '..', 'bin', n))
@@ -103,16 +107,75 @@ export function candidateBinaries(appRoot, explicit) {
   return out
 }
 
-export async function resolveBinary({ appRoot, explicit, env }) {
+// The packaged app ships its own codemap under <resources>/bin (staged by
+// scripts/stage-binary.mjs). In a dev checkout process.resourcesPath points at
+// Electron's own resources, where no codemap exists, so this stays null.
+export function bundledBinary(resourcesPath = process.resourcesPath) {
+  if (!resourcesPath) return null
+  const p = path.join(resourcesPath, 'bin', process.platform === 'win32' ? 'codemap.exe' : 'codemap')
+  return existsSync(p) ? p : null
+}
+
+// "codemap version v0.69.0 (052dd52) …" → [0, 69, 0]; null for dev builds
+// ("codemap dev") and anything unparsable.
+export function parseVersion(text) {
+  const m = /\bv?(\d+)\.(\d+)\.(\d+)\b/.exec(String(text || ''))
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+export function compareVersions(a, b) {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i]
+  }
+  return 0
+}
+
+function binaryVersion(binary, env) {
+  return new Promise((resolve) => {
+    let out = ''
+    let child
+    try {
+      child = spawn(binary, ['--version'], { env, stdio: ['ignore', 'pipe', 'ignore'] })
+    } catch {
+      resolve(null)
+      return
+    }
+    const timer = setTimeout(() => child.kill('SIGKILL'), 5000)
+    child.stdout.on('data', (d) => {
+      out += d
+    })
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      resolve(parseVersion(out))
+    })
+  })
+}
+
+// Choosing between the user's installed codemap and the bundled one. The
+// installed binary built the user's existing indexes, so it wins unless it is
+// provably older than the bundled one (an older CLI lacks commands the app
+// calls, e.g. atlas/features/flow). A dev build ("codemap dev") is trusted.
+export function preferInstalled(installedVersion, bundledVersion) {
+  if (!installedVersion || !bundledVersion) return true
+  return compareVersions(installedVersion, bundledVersion) >= 0
+}
+
+export async function resolveBinary({ appRoot, explicit, env, resourcesPath }) {
   const candidates = candidateBinaries(appRoot, explicit)
   for (const c of candidates) {
     const abs = path.isAbsolute(c) ? c : path.resolve(appRoot, c)
     if (existsSync(abs)) return { binary: abs, source: 'path' }
   }
+  const bundled = bundledBinary(resourcesPath)
   // Fall back to a PATH lookup through the login shell environment.
   const finder = process.platform === 'win32' ? 'where' : 'command -v'
+  let found = ''
   try {
-    const found = await new Promise((resolve) => {
+    found = await new Promise((resolve) => {
       const child = spawn(process.env.SHELL || '/bin/sh', ['-lc', `${finder} codemap`], { env, stdio: ['ignore', 'pipe', 'ignore'] })
       let out = ''
       child.stdout.on('data', (d) => {
@@ -121,10 +184,16 @@ export async function resolveBinary({ appRoot, explicit, env }) {
       child.on('error', () => resolve(''))
       child.on('close', () => resolve(out.trim().split('\n')[0] || ''))
     })
-    if (found && existsSync(found)) return { binary: found, source: 'shell' }
   } catch {
     /* fall through */
   }
+  if (found && existsSync(found)) {
+    if (!bundled) return { binary: found, source: 'shell' }
+    const [installed, shipped] = await Promise.all([binaryVersion(found, env), binaryVersion(bundled, env)])
+    if (preferInstalled(installed, shipped)) return { binary: found, source: 'shell' }
+    return { binary: bundled, source: 'bundled', shadowed: found }
+  }
+  if (bundled) return { binary: bundled, source: 'bundled' }
   return { binary: null, source: 'none', tried: candidates }
 }
 
