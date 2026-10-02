@@ -289,6 +289,21 @@ export function installDOM() {
       active: async () => [],
     },
   }
+  const store = new Map()
+  const localStorage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => void store.set(k, String(v)),
+    removeItem: (k) => void store.delete(k),
+    clear: () => store.clear(),
+  }
+  win.localStorage = localStorage
+  win.addEventListener = () => {}
+  win.removeEventListener = () => {}
+  try {
+    Object.defineProperty(globalThis, 'localStorage', { value: localStorage, configurable: true, writable: true })
+  } catch {
+    /* keep the platform storage */
+  }
   globalThis.window = win
   globalThis.document = document
   globalThis.Node = Node

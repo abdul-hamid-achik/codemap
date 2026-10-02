@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
@@ -51,6 +52,11 @@ type importIndex struct {
 	// being dropped as external.
 	jsPackages map[string]string
 	jsPkgEntry map[string]string
+
+	// defaultExports caches file → default-export identifier ("" when anonymous
+	// or absent) for default-import call binding; filled lazily and shared by
+	// the extraction workers.
+	defaultExports sync.Map
 }
 
 func newImportIndex(root string, files []fileTask) *importIndex {
@@ -89,11 +95,11 @@ func newImportIndex(root string, files []fileTask) *importIndex {
 		// bare-dir form (vendored snippet, short import).
 		if idx.goModulePath != "" {
 			modKey := idx.goModulePath + "/" + dir
-			if _, ok := idx.goFiles[modKey]; !ok {
+			if old, ok := idx.goFiles[modKey]; !ok || betterGoCanonical(rel, old) {
 				idx.goFiles[modKey] = rel
 			}
 		}
-		if _, ok := idx.goFiles[dir]; !ok {
+		if old, ok := idx.goFiles[dir]; !ok || betterGoCanonical(rel, old) {
 			idx.goFiles[dir] = rel
 		}
 	}
@@ -125,6 +131,19 @@ func newImportIndex(root string, files []fileTask) *importIndex {
 		}
 	}
 	return idx
+}
+
+// betterGoCanonical reports whether file a should replace b as the package's
+// single representative file for a (package-scoped) Go import edge. The choice is
+// deterministic and independent of walk order: a non-test file always beats a
+// _test.go file (an import targets the package, never its tests), then the
+// lexicographically smallest path wins.
+func betterGoCanonical(a, b string) bool {
+	aTest, bTest := graph.IsTestFilePath(a), graph.IsTestFilePath(b)
+	if aTest != bTest {
+		return !aTest
+	}
+	return a < b
 }
 
 // parentDir returns the slash-form parent of a root-relative directory, with

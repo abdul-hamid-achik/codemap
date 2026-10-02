@@ -58,6 +58,7 @@ export default defineConfig({
       { text: 'For Agents', link: '/agents' },
       { text: 'CLI', link: '/cli' },
       { text: 'MCP', link: '/mcp' },
+      { text: 'Desktop', link: '/desktop' },
       { text: 'Languages', link: '/languages' },
     ],
     sidebar: [
@@ -66,6 +67,7 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/' },
           { text: 'Quick Start', link: '/quick-start' },
+          { text: 'Learn a codebase', link: '/learn' },
           { text: 'Language support', link: '/languages' },
           { text: 'Data, config & docs', link: '/data-and-docs' },
           { text: 'Configuration', link: '/configuration' },

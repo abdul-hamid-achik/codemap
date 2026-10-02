@@ -24,8 +24,9 @@ Trust the honesty signals on every result: stale (reindex first), call_graph
 (resolved/name/unresolved/none), resolution, and the *_total caps. When a name is
 ambiguous the response already carries candidates:[…] and accepts a selector, so
 pick one definition from those instead of a second lookup. Prefer
-codemap_index --precise for exact call edges — it is also the only call graph for
-TypeScript, JavaScript and Python.
+codemap_index --precise for exact call edges — it is the only complete call graph for
+TypeScript and JavaScript (the default index has same-file and imported-binding
+candidates only) and the only call graph for Python.
 
 ## The workflow
 
@@ -33,6 +34,8 @@ Index once, then query. The typical agent loop for understanding or fixing code:
 
   1. codemap index             # build the graph (+ embeddings if Ollama is up)
   2. where to start            # codemap_read_order  (entrypoints + hubs ranked — orient on a new repo)
+                               # codemap_features  (what the software can DO: CLI commands, routes, MCP tools,
+                               #   pages, programs — each with its handler selector and footprint)
   3. find the entry point      # codemap_semantic "<intent>" OR codemap_find <name>
                                # OR codemap_grep "<exact text>" (string literal, error message, route, env-var)
                                # codemap_explore "<intent>" (fuzzy goal → bounded context neighborhoods, source-light)
@@ -46,7 +49,8 @@ Index once, then query. The typical agent loop for understanding or fixing code:
                                # codemap_file_context <file>  (ONE call: symbol outline + file impact + related files)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
                                # codemap_related_files <file>  (the other files structurally tied to this one)
-  7. trace flow                # codemap_path <from> <to>  (shortest call chain)
+  7. trace flow                # codemap_flow <handler>  (how a feature works: call tree in call order, with docs)
+                               # codemap_path <from> <to>  (shortest call chain)
   8. AFTER you edit            # codemap_review  (your diff → changed symbols, blast radius, the TESTS TO RUN)
   9. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
 
@@ -101,11 +105,12 @@ pass; for the LSP languages (TypeScript, JavaScript, Python) it drives the langu
 server's callHierarchy. Successful precise coverage is recorded per file; a query is
 "resolved" only when every matched definition file completed the pass. Partial failures
 remain honestly "name" or "unresolved" rather than upgrading the whole project. (TS/JS have
-name-based candidate edges for JSX component usage, imports, and framework wiring at the
-base level — but plain function calls still come only from --precise, so impact/callers/callees
-on a non-JSX TS/JS/Python symbol return a "resolution" note saying the call graph is
-unavailable, NOT a confidently-empty result or untested:true; the callers/tests are
-unresolved, not absent. Ruby and Lua carry name-based call edges from their built-in
+name-based candidate edges at the base level — JSX component usage, imports, framework
+wiring, and plain calls to same-file definitions and imported bindings (arbitrary
+obj.method() calls are not linked) — so the graph is partial until --precise, and
+impact/callers/callees on an uncovered TS/JS/Python symbol return a "resolution" note and
+call_graph:"unresolved", NOT a confidently-empty result or untested:true; missing
+callers/tests are unresolved, not absent. Python has no base-level call edges. Ruby and Lua carry name-based call edges from their built-in
 backends and classify as "name".) Every impact/callers/callees/review/
 context/hotspots/orphans/path report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
 so a consumer can switch on confidence (resolved→high, name→medium, unresolved/none→low) instead of

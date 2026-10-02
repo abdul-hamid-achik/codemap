@@ -10,6 +10,26 @@ import { badge, callout, card, emptyState, spinner, toast, fmt } from '../compon
 import { renderReport } from '../report.mjs'
 import { state } from '../state.mjs'
 
+// Subsystems that hold specs, docs, CI config, benchmarks or fixtures rather
+// than product code: hidden by default so the real architecture is legible.
+const NON_SOURCE = new Set(['specs', 'spec', 'docs', 'doc', '.github', '.gitlab', '.circleci', '.vscode', 'bench', 'benchmarks', 'benchmark', 'examples', 'example', 'test', 'tests', 'testdata', 'fixtures', 'e2e', 'scripts', 'schemas', 'assets', 'build', 'dist', 'node_modules', 'vendor'])
+
+export function isNonSourceSubsystem(name) {
+  return String(name || '')
+    .split('/')
+    .some((part) => NON_SOURCE.has(part.toLowerCase()))
+}
+
+const MIN_EDGE_CHOICES = [['auto', 'heaviest ~40 bridges'], ['1', 'all bridges'], ['5', '≥ 5 edges'], ['10', '≥ 10 edges'], ['25', '≥ 25 edges'], ['50', '≥ 50 edges'], ['100', '≥ 100 edges'], ['250', '≥ 250 edges']]
+
+// "auto" keeps roughly the 40 heaviest bridges: enough to show the shape, few
+// enough that the picture is not a hairball.
+export function autoMinEdges(bridges, keep = 40) {
+  const counts = (bridges || []).map((b) => Number(b.count) || 0).sort((a, b) => b - a)
+  if (counts.length <= keep) return 1
+  return Math.max(1, counts[keep - 1])
+}
+
 export function mapView(ctx) {
   const host = h('div.view')
   const out = h('div.stack')
@@ -21,6 +41,8 @@ export function mapView(ctx) {
   let canvas = null
   let limits = { subsystems: 40, bridges: 120, hubs: 20, entrypoints: 12 }
   let last = null
+  let minEdges = 'auto'
+  let showNonSource = false
 
   function ensureCanvas() {
     if (!canvas) {
@@ -55,7 +77,10 @@ export function mapView(ctx) {
   }
 
   function toGraph(json) {
-    const nodes = (json.subsystems || []).map((s, i) => ({
+    const all = json.subsystems || []
+    const kept = all.filter((s) => showNonSource || !isNonSourceSubsystem(s.name))
+    const hiddenSubsystems = all.length - kept.length
+    const nodes = kept.map((s, i) => ({
       id: s.name,
       label: s.name.split('/').slice(-2).join('/') || s.name,
       fqn: s.name,
@@ -63,21 +88,34 @@ export function mapView(ctx) {
       file: s.name,
       line: 0,
       role: i === 0 ? 'focus' : 'related',
-      in_degree: s.inbound_edges || 0,
+      // node size follows how much code the subsystem holds
+      in_degree: s.symbols || 0,
       raw: s,
     }))
     const ids = new Set(nodes.map((n) => n.id))
-    const edges = (json.bridges || [])
-      .filter((b) => ids.has(b.from) && ids.has(b.to) && b.from !== b.to)
-      .map((b) => ({ source: b.from, target: b.to, type: b.edge_type || 'calls', confidence: b.provenance === 'precise' ? 'confirmed' : 'candidate', weight: b.count }))
-    return { nodes, edges, title: json.project || 'architecture', subtitle: `${nodes.length} subsystems · ${edges.length} bridges · strategy ${json.strategy || '?'}` }
+    const between = (json.bridges || []).filter((b) => ids.has(b.from) && ids.has(b.to) && b.from !== b.to)
+    const threshold = minEdges === 'auto' ? autoMinEdges(between) : Number(minEdges) || 1
+    const shown = between.filter((b) => (Number(b.count) || 0) >= threshold)
+    const edges = shown.map((b) => ({ source: b.from, target: b.to, type: b.edge_type || 'calls', confidence: b.provenance === 'precise' ? 'confirmed' : 'candidate', weight: b.count }))
+    return {
+      nodes,
+      edges,
+      hiddenSubsystems,
+      hiddenBridges: between.length - shown.length,
+      threshold,
+      title: json.project || 'architecture',
+      subtitle: `${nodes.length} subsystems · ${edges.length} bridges${between.length - shown.length ? ` (${between.length - shown.length} below ${threshold} edges hidden)` : ''} · strategy ${json.strategy || '?'}`,
+    }
   }
 
-  async function load() {
-    busy.hidden = false
+  async function load(refetch = true) {
     const args = ['map', '--top-subsystems', String(limits.subsystems), '--top-bridges', String(limits.bridges), '--top-hubs', String(limits.hubs), '--top-entrypoints', String(limits.entrypoints)]
-    const res = await runArgs(args, { featureId: 'map' })
-    busy.hidden = true
+    let res = last
+    if (refetch || !last) {
+      busy.hidden = false
+      res = await runArgs(args, { featureId: 'map' })
+      busy.hidden = true
+    }
     last = res
     const nodes = []
     nodes.push(
@@ -88,9 +126,11 @@ export function mapView(ctx) {
           h('div.cmdline', [h('span.dim', '$'), h('code', `codemap ${args.join(' ')} --json`)]),
         ]),
         h('div.vh-actions', [
-          h('select', { style: 'width:auto', onchange: (e) => { limits.subsystems = Number(e.target.value); load() } }, [20, 40, 80, 150, 300].map((n) => h('option', { value: String(n), selected: limits.subsystems === n }, `${n} subsystems`))),
-          h('select', { style: 'width:auto', onchange: (e) => { limits.bridges = Number(e.target.value); load() } }, [60, 120, 300, 600, 1000].map((n) => h('option', { value: String(n), selected: limits.bridges === n }, `${n} bridges`))),
-          h('button.btn.primary', { type: 'button', onclick: load }, '↻ Refresh'),
+          h('select', { style: 'width:auto', onchange: (e) => { limits.subsystems = Number(e.target.value); load(true) } }, [20, 40, 80, 150, 300].map((n) => h('option', { value: String(n), selected: limits.subsystems === n }, `${n} subsystems`))),
+          h('select', { style: 'width:auto', onchange: (e) => { limits.bridges = Number(e.target.value); load(true) } }, [60, 120, 300, 600, 1000].map((n) => h('option', { value: String(n), selected: limits.bridges === n }, `${n} bridges`))),
+          h('select', { style: 'width:auto', title: 'hide bridges lighter than this', 'aria-label': 'minimum edges per bridge', onchange: (e) => { minEdges = e.target.value; load(false) } }, MIN_EDGE_CHOICES.map(([v, t]) => h('option', { value: v, selected: minEdges === v }, t))),
+          h('label.check', { title: 'specs, docs, CI config, benchmarks and fixtures' }, [h('input', { type: 'checkbox', checked: showNonSource, onchange: (e) => { showNonSource = e.target.checked; load(false) } }), h('span', 'show non-source')]),
+          h('button.btn.primary', { type: 'button', onclick: () => load(true) }, '↻ Refresh'),
           h('button.btn', { type: 'button', onclick: () => ctx.go('graph') }, '⇄ Graph explorer'),
         ]),
       ]),
@@ -116,17 +156,18 @@ export function mapView(ctx) {
       c.setData(g)
       c.fit()
       c.reheat(0.4)
-      mount(hud, [h('div.gh', g.title), h('div.gh', g.subtitle), h('div.gh', 'click a subsystem · double-click drills into its coverage')])
+      mount(hud, [h('div.gh', g.title), h('div.gh', g.subtitle), g.hiddenSubsystems ? h('div.gh', `${g.hiddenSubsystems} non-source subsystem(s) hidden — tick “show non-source” to include them`) : null, h('div.gh', 'node size = symbols · click a subsystem · double-click drills into its coverage')])
     } else {
+      canvas?.setData({ nodes: [], edges: [] })
       mount(hud, [h('div.gh', 'not enough subsystems to draw')])
     }
   }
 
   mount(host, out)
-  load()
+  load(true)
   return {
     node: host,
     destroy: () => canvas?.destroy(),
-    reload: load,
+    reload: () => load(true),
   }
 }

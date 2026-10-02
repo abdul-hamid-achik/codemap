@@ -2516,8 +2516,11 @@ func TestCallersSoftMissKeepsHonestNote(t *testing.T) {
 	if rep.CallGraph == CallGraphResolved {
 		t.Errorf("call_graph = %q, want anything but resolved on a soft miss", rep.CallGraph)
 	}
-	if len(rep.Results) != 0 {
-		t.Errorf("a soft miss must not fabricate results, got %+v", rep.Results)
+	// The only thing a soft miss may keep is the INDEXED name-based candidate
+	// (run → foo, a same-file call tsscan saw at index time) — never anything the
+	// failed on-demand pass would have invented.
+	if len(rep.Results) != 1 || rep.Results[0].Symbol != "run" {
+		t.Errorf("a soft miss must keep only the indexed candidate (run), got %+v", rep.Results)
 	}
 }
 

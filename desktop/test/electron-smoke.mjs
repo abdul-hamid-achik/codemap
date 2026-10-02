@@ -123,13 +123,165 @@ app.whenReady().then(async () => {
 
   await shoot(win, '01-boot')
 
+
+  // ---- Learn: the project lands on Overview, and every Learn view draws ------
+  const only = process.env.SMOKE_ONLY || ''
+  const learnSection = async () => {
+    const landed = await evalIn(win, () => ({ view: window.__studio.state.view, hero: !!document.querySelector('.ov-hero'), active: document.querySelector('.nav-item.active')?.dataset?.nav || '' }))
+    results.landing = landed
+    if (landed.view !== 'overview' || !landed.hero) errors.push(`indexed project did not land on Overview: ${JSON.stringify(landed)}`)
+    log('learn: overview')
+    await wait(3500)
+    const ov = await evalIn(win, () => ({
+      steps: document.querySelectorAll('.lp-step').length,
+      dirs: document.querySelectorAll('.od-row').length,
+      cards: document.querySelectorAll('.lp-step .fcard').length,
+      concepts: document.querySelectorAll('.kc-row').length,
+      errorBoxes: document.querySelectorAll('.view-root .error-box').length,
+      summary: (document.querySelector('.ov-summary')?.textContent || '').slice(0, 80),
+    }))
+    results.overview = ov
+    if (ov.steps !== 6) errors.push(`overview rendered ${ov.steps} steps`)
+    if (ov.dirs < 3) errors.push(`overview big-picture listed ${ov.dirs} directories`)
+    if (ov.cards < 3) errors.push(`overview feature cards: ${ov.cards}`)
+    if (ov.concepts < 2) errors.push(`overview core concepts: ${ov.concepts}`)
+    if (ov.errorBoxes) errors.push(`overview shows ${ov.errorBoxes} error box(es)`)
+    await shoot(win, 'learn-01-overview')
+    // tick a step, then scroll to show the path
+    await evalIn(win, () => { document.querySelectorAll('.lp-check')[0].click(); document.querySelector('.view-root').scrollTop = 520 })
+    await wait(500)
+    await shoot(win, 'learn-02-overview-path')
+
+    log('learn: atlas')
+    await evalIn(win, () => window.__studio.route('atlas', { fresh: true }))
+    await wait(3200)
+    const at = await evalIn(win, () => {
+      const tiles = [...document.querySelectorAll('.at-tile')]
+      return { tiles: tiles.length, groups: document.querySelectorAll('.at-tile.group').length, labelled: tiles.filter((t) => t.querySelector('.at-name')).length, legend: (document.querySelector('.at-legend')?.textContent || '').slice(0, 60), detail: (document.querySelector('.at-detail .dp-name')?.textContent || ''), crumbs: document.querySelector('.at-crumbs')?.textContent || '' }
+    })
+    results.atlas = at
+    if (at.tiles < 8) errors.push(`atlas drew ${at.tiles} tiles`)
+    if (at.groups < 2) errors.push(`atlas drew ${at.groups} framed groups`)
+    await shoot(win, 'learn-03-atlas-root')
+
+    for (const mode of ['role', 'coupling', 'tests']) {
+      await evalIn(win, (m) => { [...document.querySelectorAll('.seg-btn')].find((b) => b.textContent === m)?.click() }, mode)
+      await wait(500)
+      await shoot(win, `learn-04-atlas-color-${mode}`)
+    }
+    await evalIn(win, () => { [...document.querySelectorAll('.seg-btn')].find((b) => b.textContent === 'language')?.click() })
+
+    await evalIn(win, () => window.__studio.instances.get('view:atlas').zoomTo('internal'))
+    await wait(2500)
+    const zoomed = await evalIn(win, () => ({ crumbs: document.querySelector('.at-crumbs')?.textContent || '', tiles: document.querySelectorAll('.at-tile').length, detail: document.querySelector('.at-detail .dp-name')?.textContent || '', keys: document.querySelectorAll('.at-detail .ds-row').length }))
+    results.atlasZoom = zoomed
+    if (!zoomed.crumbs.includes('internal')) errors.push(`atlas did not zoom into internal: ${JSON.stringify(zoomed)}`)
+    if (zoomed.tiles < 8) errors.push(`zoomed atlas drew ${zoomed.tiles} tiles`)
+    await shoot(win, 'learn-05-atlas-internal')
+
+    // select a package through the same path a shift-click takes
+    await evalIn(win, () => { const t = [...document.querySelectorAll('.at-tile')].find((x) => x.dataset.path === 'internal/app'); t?.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })) })
+    await wait(600)
+    await shoot(win, 'learn-06-atlas-selected')
+
+    // "Browse files" from the detail panel filters the source tree
+    await evalIn(win, () => window.__studio.ctx.go('source', { filter: 'internal/app', fresh: true }))
+    await wait(2200)
+    const browse = await evalIn(win, () => ({ rows: document.querySelectorAll('.ft-row').length, off: [...document.querySelectorAll('.ft-row')].filter((r) => !(r.textContent || '').includes('internal/app')).length }))
+    results.browse = browse
+    if (browse.rows < 5 || browse.off) errors.push(`source filter from Atlas did not narrow the tree: ${JSON.stringify(browse)}`)
+
+    // the command palette finds the Learn views
+    for (const q of ['atlas', 'overview', 'flow']) {
+      await evalIn(win, (x) => window.__studio.openPalette(x), q)
+      await wait(500)
+      const hit = await evalIn(win, () => [...document.querySelectorAll('.palette-row')].some((r) => r.querySelector('.p-kind')?.textContent === 'view'))
+      if (!hit) errors.push(`palette found no view for "${q}"`)
+      if (q === 'atlas') await shoot(win, 'learn-palette')
+      await evalIn(win, () => { document.getElementById('palette').hidden = true })
+    }
+
+    log('learn: features')
+    await evalIn(win, () => window.__studio.route('features', { fresh: true }))
+    await wait(3000)
+    const fe = await evalIn(win, () => ({ cards: document.querySelectorAll('.fcard').length, tabs: [...document.querySelectorAll('.tabs .tab')].map((t) => t.textContent), nested: document.querySelectorAll('.fcard.nested').length, errors: document.querySelectorAll('.view-root .error-box').length }))
+    results.features_view = fe
+    if (fe.cards < 20) errors.push(`features view listed ${fe.cards} cards`)
+    if (fe.errors) errors.push('features view shows an error box')
+    await shoot(win, 'learn-07-features')
+
+    log('learn: flow from the first feature')
+    const flowed = await evalIn(win, async () => {
+      const mod = await import('./js/learn.mjs')
+      const res = await mod.loadFeatures()
+      const list = (res.json?.features || []).filter((f) => f.kind === 'cli_command' && f.handler && f.footprint?.symbols > 20)
+      const f = list.find((x) => /review/.test(x.label)) || list[0]
+      const t = mod.featureFlowTarget(f)
+      window.__studio.route('flow', { fresh: true, ...t, label: mod.featureLabel(f), description: f.description, feature: f })
+      return mod.featureLabel(f)
+    })
+    results.flowFeature = flowed
+    await wait(3500)
+    const fl = await evalIn(win, () => ({ rows: document.querySelectorAll('.fo-row').length, chips: document.querySelectorAll('.route-chip').length, preview: document.querySelectorAll('.fp-code .code-line').length, name: document.querySelector('.fh-name')?.textContent || '', errors: document.querySelectorAll('.view-root .error-box').length }))
+    results.flow = fl
+    if (fl.rows < 10) errors.push(`flow outline has ${fl.rows} rows`)
+    if (fl.chips < 2) errors.push(`flow route strip has ${fl.chips} chips`)
+    if (fl.preview < 3) errors.push(`flow code preview has ${fl.preview} lines`)
+    await shoot(win, 'learn-08-flow-outline')
+    // the panes are the point of the page: scroll them into full view for the rest
+    await evalIn(win, () => { const r = document.querySelector('.view-root'); r.scrollTop += document.querySelector('.fp-toolbar').getBoundingClientRect().top - r.getBoundingClientRect().top - 12 })
+    await wait(300)
+    await shoot(win, 'learn-08b-flow-panes')
+    // keyboard: walk down a few steps, then collapse and reopen
+    await evalIn(win, () => { const t = document.querySelector('.fo-tree'); t.focus(); for (const k of ['ArrowDown', 'ArrowDown', 'ArrowDown']) t.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })) })
+    await wait(1500)
+    await shoot(win, 'learn-09-flow-selected')
+    await evalIn(win, () => window.__studio.instances.get('view:flow').setMode('diagram'))
+    await wait(1200)
+    const dg = await evalIn(win, () => ({ nodes: document.querySelectorAll('.fd-node').length, edges: document.querySelectorAll('.fd-edge').length }))
+    results.diagram = dg
+    if (dg.nodes < 10 || dg.edges < 9) errors.push(`flow diagram drew ${dg.nodes} nodes / ${dg.edges} edges`)
+    await shoot(win, 'learn-10-flow-diagram')
+
+    // both themes for the two visual centrepieces
+    await evalIn(win, () => window.__studio.ctx.applyTheme('light'))
+    await wait(600)
+    await shoot(win, 'learn-11-flow-diagram-light')
+    await evalIn(win, () => window.__studio.instances.get('view:flow').setMode('outline'))
+    await wait(400)
+    await shoot(win, 'learn-12-flow-outline-light')
+    await evalIn(win, () => window.__studio.route('atlas', {}))
+    await wait(900)
+    await shoot(win, 'learn-13-atlas-light')
+    await evalIn(win, () => window.__studio.route('overview', { fresh: true }))
+    await wait(3500)
+    await shoot(win, 'learn-14-overview-light')
+    await evalIn(win, () => window.__studio.ctx.applyTheme('dark'))
+    await wait(300)
+  }
+  try {
+    await learnSection()
+  } catch (err) {
+    errors.push(`learn section failed: ${err?.message || err}`)
+  }
+  if (only === 'learn') {
+    results.errors = errors
+    results.logs = logs.filter((l) => l.level >= 2).slice(0, 40)
+    results.ok = errors.length === 0
+    writeFileSync(path.join(outDir, 'results.json'), JSON.stringify(results, null, 2))
+    process.stdout.write(`SMOKE_RESULT ${JSON.stringify({ ok: results.ok, errorCount: errors.length, errors: errors.slice(0, 20), shots: results.shots.length })}\n`)
+    await wait(300)
+    app.exit(results.ok ? 0 : 1)
+    return
+  }
+
   // ---- walk every app view ----------------------------------------------
-  const views = ['dashboard', 'catalog', 'search', 'source', 'graph', 'map', 'review', 'mcp', 'raw', 'history', 'settings']
+  const views = ['overview', 'atlas', 'features', 'flow', 'dashboard', 'catalog', 'search', 'source', 'graph', 'map', 'review', 'mcp', 'raw', 'history', 'settings']
   for (const v of views) {
     log(`view ${v}`)
     try {
       await evalIn(win, (name) => window.__studio.route(name, { fresh: true }), v)
-      await wait(v === 'dashboard' || v === 'map' || v === 'review' ? 4200 : 1600)
+      await wait(v === 'review' ? 9000 : v === 'dashboard' || v === 'map' ? 4200 : v === 'overview' || v === 'atlas' || v === 'features' ? 3000 : 1600)
       const info = await evalIn(win, () => {
         const root = document.querySelector('.view-root')
         return { nodes: root ? root.querySelectorAll('*').length : 0, text: (root?.textContent || '').slice(0, 120) }

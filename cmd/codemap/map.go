@@ -60,6 +60,14 @@ func runMap(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// fmtEffective renders an effective in-degree: an integer when whole, else one decimal.
+func fmtEffective(v float64) string {
+	if v == float64(int(v)) {
+		return fmt.Sprintf("%d", int(v))
+	}
+	return fmt.Sprintf("%.1f", v)
+}
+
 func renderArchitectureMap(rep *app.ArchitectureMapReport) {
 	callGraph := rep.CallGraph
 	if callGraph == "" {
@@ -115,7 +123,7 @@ func renderArchitectureMap(rep *app.ArchitectureMapReport) {
 		fmt.Println("  none")
 	} else {
 		for _, hub := range rep.Hubs {
-			fmt.Printf("  %5d  %-36s %s:%d\n", hub.InDegree, truncStr(disp(hub.FQN, hub.Symbol), 36), hub.File, hub.StartLine)
+			fmt.Printf("  %5s  %-36s %s:%d\n", fmtEffective(hub.EffectiveInDegree), truncStr(disp(hub.FQN, hub.Symbol), 36), hub.File, hub.StartLine)
 		}
 	}
 	if rep.Truncated {

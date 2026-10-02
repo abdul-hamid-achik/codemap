@@ -89,8 +89,24 @@ run `codemap index` with embeddings enabled. This path is optional. See
 codemap semantic "where are sessions persisted?" --json
 ```
 
+## Learn an unfamiliar codebase
+
+Once the index exists, three commands give you the big picture before you open a file:
+
+```bash
+codemap atlas                 # the repo as a described directory tree
+codemap features              # what it can do: commands, routes, MCP tools
+codemap flow <handler>        # how one feature works, as an ordered call tree
+```
+
+The [Learn a codebase](/learn) walkthrough covers the full loop for people and agents.
+
 ## Connect your agent
 
 `codemap agent setup <harness>` registers the MCP server and installs the agent
 playbook. See [agent setup](/agents#one-command-setup), [CLI reference](/cli),
 and [MCP reference](/mcp). For diff checks in CI, use the [GitHub Action](/ci).
+
+## Prefer a GUI?
+
+[Codemap Studio](/desktop) is a desktop app that runs the same CLI commands behind a graph explorer, review desk, and architecture map.

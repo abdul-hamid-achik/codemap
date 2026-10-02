@@ -111,7 +111,8 @@ func TestIndexTypeScriptCallEdges(t *testing.T) {
 	if !found {
 		t.Errorf("callers of callee should include caller (precise TS edge), got %+v", callers)
 	}
-	// Without --precise, TS has no call edges (callHierarchy is the only source).
+	// Without --precise, TS has only name-based CANDIDATE edges (tsscan: calls to
+	// an imported binding resolved through the import) — never precise ones.
 	g2, _ := newStores(t)
 	pid2, _ := g2.UpsertProject("ts", dir, "typescript")
 	ix2 := New(g2, nil, nil, config.DefaultConfig().Index)
@@ -119,8 +120,12 @@ func TestIndexTypeScriptCallEdges(t *testing.T) {
 	if _, err := ix2.IndexProject(context.Background(), pid2, "ts", dir, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := g2.Callers(pid2, "callee"); len(c) != 0 {
-		t.Errorf("name-based TS index should have no call edges, got %+v", c)
+	c2, _ := g2.Callers(pid2, "callee")
+	if len(c2) != 1 || c2[0].Symbol != "caller" {
+		t.Errorf("name-based TS index should have exactly the caller→callee candidate, got %+v", c2)
+	}
+	if prov := callEdgeProvenance(t, g2, pid2, nodeIDBySymbol(t, g2, pid2, "caller"), nodeIDBySymbol(t, g2, pid2, "callee")); prov != graph.ProvName {
+		t.Errorf("non-precise TS call edge provenance = %q, want %q", prov, graph.ProvName)
 	}
 }
 

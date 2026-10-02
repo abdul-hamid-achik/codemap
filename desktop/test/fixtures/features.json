@@ -1,0 +1,396 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "indexed": true,
+ "features": [
+  {
+   "id": "program:bench",
+   "kind": "program",
+   "surface": "Program",
+   "label": "bench",
+   "invocation": "bench",
+   "description": "The codemap agent benchmark harness.",
+   "description_source": "docstring",
+   "framework": "go",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "bench/main.go",
+    "line": 33
+   },
+   "handler": {
+    "symbol": "main",
+    "fqn": "main.main",
+    "kind": "function",
+    "file": "bench/main.go",
+    "start_line": 33,
+    "selector": {
+     "file": "bench/main.go",
+     "start_line": 33,
+     "fqn": "main.main",
+     "kind": "function"
+    }
+   },
+   "footprint": {
+    "symbols": 1,
+    "files": 1,
+    "depth": 3,
+    "truncated": false,
+    "subsystems": [
+     {
+      "name": "bench",
+      "symbols": 1
+     }
+    ],
+    "tests": 0,
+    "ambiguous_edges": 0
+   }
+  },
+  {
+   "id": "program:codemap",
+   "kind": "program",
+   "surface": "Program",
+   "label": "codemap",
+   "invocation": "codemap",
+   "description": "Local-first code intelligence: graph + vectors for agents and people",
+   "description_source": "registration",
+   "framework": "go",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "cmd/codemap/main.go",
+    "line": 76
+   },
+   "handler": {
+    "symbol": "main",
+    "fqn": "main.main",
+    "kind": "function",
+    "file": "cmd/codemap/main.go",
+    "start_line": 76,
+    "selector": {
+     "file": "cmd/codemap/main.go",
+     "start_line": 76,
+     "fqn": "main.main",
+     "kind": "function"
+    }
+   },
+   "footprint": {
+    "symbols": 12,
+    "files": 3,
+    "depth": 3,
+    "truncated": false,
+    "subsystems": [
+     {
+      "name": "cmd/codemap",
+      "symbols": 10
+     },
+     {
+      "name": "internal/app",
+      "symbols": 2
+     }
+    ],
+    "tests": 4,
+    "ambiguous_edges": 27
+   }
+  },
+  {
+   "id": "cli_command:agent",
+   "kind": "cli_command",
+   "surface": "CLI",
+   "label": "agent",
+   "invocation": "codemap agent",
+   "description": "Register codemap with an AI coding harness (Claude Code, Cursor, Codex, Gemini, Cline/Roo, Zed, VS Code, OpenCode, aider)",
+   "description_source": "registration",
+   "framework": "cobra",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "cmd/codemap/agent.go",
+    "line": 21
+   },
+   "handler": null
+  },
+  {
+   "id": "cli_command:agent list",
+   "kind": "cli_command",
+   "surface": "CLI",
+   "label": "agent list",
+   "invocation": "codemap agent list",
+   "description": "List known harnesses, whether each is detected here, and if codemap is registered",
+   "description_source": "registration",
+   "framework": "cobra",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "cmd/codemap/agent.go",
+    "line": 25
+   },
+   "handler": {
+    "symbol": "runAgentList",
+    "fqn": "main.runAgentList",
+    "kind": "function",
+    "file": "cmd/codemap/agent.go",
+    "start_line": 53,
+    "selector": {
+     "file": "cmd/codemap/agent.go",
+     "start_line": 53,
+     "fqn": "main.runAgentList",
+     "kind": "function"
+    }
+   },
+   "parent": "cli_command:agent",
+   "footprint": {
+    "symbols": 7,
+    "files": 4,
+    "depth": 3,
+    "truncated": false,
+    "subsystems": [
+     {
+      "name": "cmd/codemap",
+      "symbols": 5
+     },
+     {
+      "name": "internal/app",
+      "symbols": 1
+     },
+     {
+      "name": "internal/config",
+      "symbols": 1
+     }
+    ],
+    "tests": 2,
+    "ambiguous_edges": 0
+   }
+  },
+  {
+   "id": "cli_command:annotate",
+   "kind": "cli_command",
+   "surface": "CLI",
+   "label": "annotate",
+   "invocation": "codemap annotate",
+   "description": "Attach a note and/or external data (e.g. DB rows) to a symbol or a call path; --retarget repoints an existing annotation after a rename",
+   "description_source": "registration",
+   "framework": "cobra",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "cmd/codemap/annotate.go",
+    "line": 14
+   },
+   "handler": {
+    "symbol": "runAnnotate",
+    "fqn": "main.runAnnotate",
+    "kind": "function",
+    "file": "cmd/codemap/annotate.go",
+    "start_line": 28,
+    "selector": {
+     "file": "cmd/codemap/annotate.go",
+     "start_line": 28,
+     "fqn": "main.runAnnotate",
+     "kind": "function"
+    }
+   },
+   "footprint": {
+    "symbols": 25,
+    "files": 11,
+    "depth": 3,
+    "truncated": false,
+    "subsystems": [
+     {
+      "name": "internal/app",
+      "symbols": 9
+     },
+     {
+      "name": "cmd/codemap",
+      "symbols": 7
+     },
+     {
+      "name": "internal/graph",
+      "symbols": 6
+     },
+     {
+      "name": "internal/config",
+      "symbols": 2
+     },
+     {
+      "name": "internal/version",
+      "symbols": 1
+     }
+    ],
+    "tests": 3,
+    "ambiguous_edges": 23
+   }
+  },
+  {
+   "id": "cli_command:cache",
+   "kind": "cli_command",
+   "surface": "CLI",
+   "label": "cache",
+   "invocation": "codemap cache",
+   "description": "Manage fcheap-cached index snapshots",
+   "description_source": "registration",
+   "framework": "cobra",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "cmd/codemap/cache.go",
+    "line": 14
+   },
+   "handler": null
+  },
+  {
+   "id": "cli_command:cache save",
+   "kind": "cli_command",
+   "surface": "CLI",
+   "label": "cache save",
+   "invocation": "codemap cache save",
+   "description": "Stash the current index into the fcheap cache",
+   "description_source": "registration",
+   "framework": "cobra",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "cmd/codemap/cache.go",
+    "line": 24
+   },
+   "handler": null,
+   "parent": "cli_command:cache"
+  },
+  {
+   "id": "rpc_tool:codemap_annotate",
+   "kind": "rpc_tool",
+   "surface": "RPC/MCP",
+   "label": "codemap_annotate",
+   "description": "Pin a note and/or external data (e.g. DB rows from mongosh/postgres, or a finding) to a symbol (pass 'symbol') or a call path (pass 'from'+'to'). 'data' is stor",
+   "description_source": "registration",
+   "framework": "mcp-go-sdk",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "internal/mcp/server.go",
+    "line": 855
+   },
+   "handler": {
+    "symbol": "handleAnnotate",
+    "fqn": "mcp.Server.handleAnnotate",
+    "kind": "method",
+    "file": "internal/mcp/server.go",
+    "start_line": 1477,
+    "selector": {
+     "file": "internal/mcp/server.go",
+     "start_line": 1477,
+     "fqn": "mcp.Server.handleAnnotate",
+     "kind": "method"
+    }
+   },
+   "footprint": {
+    "symbols": 24,
+    "files": 9,
+    "depth": 3,
+    "truncated": false,
+    "subsystems": [
+     {
+      "name": "internal/app",
+      "symbols": 10
+     },
+     {
+      "name": "internal/graph",
+      "symbols": 6
+     },
+     {
+      "name": "internal/mcp",
+      "symbols": 6
+     },
+     {
+      "name": "internal/config",
+      "symbols": 1
+     },
+     {
+      "name": "internal/version",
+      "symbols": 1
+     }
+    ],
+    "tests": 3,
+    "ambiguous_edges": 14
+   }
+  },
+  {
+   "id": "rpc_tool:codemap_flow",
+   "kind": "rpc_tool",
+   "surface": "RPC/MCP",
+   "label": "codemap_flow",
+   "description": "Explain a feature end to end: from ONE entry symbol (a handler, command RunE, any function; give symbol or selector) return a bounded CALL TREE in the order the",
+   "description_source": "registration",
+   "framework": "mcp-go-sdk",
+   "detector": "go_ast",
+   "confidence": "confirmed",
+   "registration": {
+    "file": "internal/mcp/server.go",
+    "line": 723
+   },
+   "handler": {
+    "symbol": "handleFlow",
+    "fqn": "mcp.Server.handleFlow",
+    "kind": "method",
+    "file": "internal/mcp/server.go",
+    "start_line": 1247,
+    "selector": {
+     "file": "internal/mcp/server.go",
+     "start_line": 1247,
+     "fqn": "mcp.Server.handleFlow",
+     "kind": "method"
+    }
+   },
+   "footprint": {
+    "symbols": 59,
+    "files": 13,
+    "depth": 3,
+    "truncated": false,
+    "subsystems": [
+     {
+      "name": "internal/app",
+      "symbols": 37
+     },
+     {
+      "name": "internal/graph",
+      "symbols": 12
+     },
+     {
+      "name": "internal/mcp",
+      "symbols": 7
+     },
+     {
+      "name": "internal/config",
+      "symbols": 2
+     },
+     {
+      "name": "internal/index",
+      "symbols": 1
+     }
+    ],
+    "tests": 12,
+    "ambiguous_edges": 46
+   }
+  }
+ ],
+ "features_total": 117,
+ "truncated": false,
+ "by_kind": {
+  "cli_command": 66,
+  "program": 3,
+  "rpc_tool": 48
+ },
+ "frameworks": [
+  "cobra",
+  "go",
+  "mcp-go-sdk"
+ ],
+ "footprint_depth": 3,
+ "call_graph": "name",
+ "resolution": "name-based call graph: footprints follow name-matched calls; same-name callees that cannot be disambiguated by directory or subsystem are skipped (see ambiguous_edges)",
+ "stale": false,
+ "notes": [
+  "feature detection not implemented for gdscript (2 files)"
+ ],
+ "partial_errors": []
+}

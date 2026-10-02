@@ -276,6 +276,34 @@ func TestMCPServer(t *testing.T) {
 		t.Fatalf("architecture map transport contract is incomplete or leaked ids: %s", mapText)
 	}
 
+	// codemap_flow is the full-profile call-tree explainer: one entry symbol (or
+	// selector, never both) in, an ordered bounded tree out.
+	flowRes, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "codemap_flow",
+		Arguments: map[string]any{"path": proj, "symbol": "Run", "depth": 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flowText := textOf(flowRes)
+	if flowRes.IsError || !strings.Contains(flowText, `"schema_version":1`) ||
+		!strings.Contains(flowText, `"root":{`) || !strings.Contains(flowText, `"symbol":"Helper"`) ||
+		!strings.Contains(flowText, `"steps_total":2`) || !strings.Contains(flowText, `"call_graph"`) {
+		t.Fatalf("flow transport contract is incomplete: %s", flowText)
+	}
+	for name, args := range map[string]map[string]any{
+		"neither": {"path": proj},
+		"both":    {"path": proj, "symbol": "Run", "selector": map[string]any{"file": "main.go", "start_line": 3}},
+	} {
+		bad, callErr := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: "codemap_flow", Arguments: args})
+		if callErr != nil {
+			t.Fatal(callErr)
+		}
+		if !bad.IsError {
+			t.Errorf("codemap_flow with %s symbol/selector must be an invalid_input error: %s", name, textOf(bad))
+		}
+	}
+
 	// codemap_explore and codemap_traverse are full-profile, bounded composition
 	// tools. Explore promotes intent hits to exact source-light contexts;
 	// traverse requires one durable selector and never accepts a name union.
@@ -446,6 +474,19 @@ func TestMCPServer(t *testing.T) {
 		t.Fatalf("context did not embed reference wiring honesty: %s", textOf(ctxRefs))
 	}
 
+	// An unknown symbol carries the same not_found code and hint the CLI prints
+	// (additive fields; the report stays a non-error found:false result).
+	ctxMissing, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "codemap_context", Arguments: map[string]any{"path": proj, "symbol": "NoSuchSymbolAnywhere"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if txt := textOf(ctxMissing); ctxMissing.IsError || !strings.Contains(txt, `"found":false`) ||
+		!strings.Contains(txt, `"code":"not_found"`) || !strings.Contains(txt, `"hint":"run: codemap find`) {
+		t.Fatalf("unknown-symbol context must carry code and hint: %s", txt)
+	}
+
 	// codemap_dependencies is the thin MCP twin of Service.Dependencies. The
 	// cross-file Other→Helper call must survive the transport with grouped
 	// evidence and explicit completeness instead of a raw edge/id dump.
@@ -600,6 +641,8 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 		{"codemap_semantic", map[string]any{"path": proj, "query": "run"}},
 		{"codemap_hotspots", map[string]any{"path": proj}},
 		{"codemap_map", map[string]any{"path": proj}},
+		{"codemap_atlas", map[string]any{"path": proj}},
+		{"codemap_features", map[string]any{"path": proj}},
 		{"codemap_explore", map[string]any{"path": proj, "query": "run"}},
 		{"codemap_traverse", map[string]any{"path": proj, "selector": map[string]any{"file": "main.go", "start_line": 3}}},
 	} {
@@ -686,6 +729,8 @@ func TestMCPHandlerWiring(t *testing.T) {
 		{"codemap_related_files", map[string]any{"path": proj, "file": "main.go"}, ""},
 		{"codemap_context_batch", map[string]any{"path": proj, "symbols": []string{"Run", "Helper"}}, ""},
 		{"codemap_read_order", map[string]any{"path": proj}, ""},
+		{"codemap_atlas", map[string]any{"path": proj, "depth": 2, "files": true}, "\"schema_version\":1"},
+		{"codemap_features", map[string]any{"path": proj, "kind": "program,rpc_tool", "depth": 2, "top": 10}, `"features":[`},
 		{"codemap_orphans", map[string]any{"path": proj}, ""},
 		{"codemap_hotspots", map[string]any{"path": proj}, ""},
 		{"codemap_projects", map[string]any{}, ""},
@@ -1499,12 +1544,12 @@ func listToolNames(t *testing.T, srv *Server) map[string]bool {
 }
 
 // fullToolNames is the exhaustive, hand-maintained list of every tool
-// codemap ships under ProfileFull (45; AGENTS.md's "Current set (45)" line
+// codemap ships under ProfileFull (48; AGENTS.md's "Current set (48)" line
 // must be updated alongside this list if it ever changes).
 var fullToolNames = []string{
 	"codemap_init", "codemap_index", "codemap_status", "codemap_semantic",
 	"codemap_callers", "codemap_callees", "codemap_references", "codemap_impact",
-	"codemap_review", "codemap_read_order", "codemap_map", "codemap_explore", "codemap_traverse", "codemap_task_context", "codemap_related_files", "codemap_dependencies",
+	"codemap_review", "codemap_read_order", "codemap_map", "codemap_atlas", "codemap_features", "codemap_flow", "codemap_explore", "codemap_traverse", "codemap_task_context", "codemap_related_files", "codemap_dependencies",
 	"codemap_file_impact", "codemap_file_context", "codemap_refactor_plan", "codemap_risk", "codemap_symbol_at", "codemap_secret_impact",
 	"codemap_required_keys", "codemap_hotspots", "codemap_orphans", "codemap_coverage",
 	"codemap_path", "codemap_symbols", "codemap_find", "codemap_grep", "codemap_source",
@@ -1570,7 +1615,7 @@ func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
 }
 
 // TestMCPToolsByProfile pins the exact registered-tool set for all profiles:
-// ProfileFull remains all 45 tools, ProfileCore remains its shipped 26-tool
+// ProfileFull remains all 48 tools, ProfileCore remains its shipped 28-tool
 // inventory, and ProfileAgent is the separately versioned taught workflow.
 func TestMCPToolsByProfile(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
@@ -1655,8 +1700,8 @@ func TestCoreProfileCoversTaughtTools(t *testing.T) {
 // and include no untaught admin or expert surface.
 func TestAgentProfileExactlyMatchesTaughtWorkflow(t *testing.T) {
 	taught := taughtToolSet(t)
-	if len(taught) != 26 {
-		t.Fatalf("taught workflow tool count = %d, want 26; review the agent profile and its schema benchmark", len(taught))
+	if len(taught) != 28 {
+		t.Fatalf("taught workflow tool count = %d, want 28; review the agent profile and its schema benchmark", len(taught))
 	}
 	got := map[string]bool{}
 	for name := range agentTools {
@@ -1668,7 +1713,7 @@ func TestAgentProfileExactlyMatchesTaughtWorkflow(t *testing.T) {
 	}
 	assertExactToolSet(t, got, want)
 
-	for _, excluded := range []string{"codemap_init", "codemap_annotate", "codemap_map", "codemap_traverse"} {
+	for _, excluded := range []string{"codemap_init", "codemap_annotate", "codemap_map", "codemap_traverse", "codemap_atlas"} {
 		if agentTools[excluded] {
 			t.Errorf("agent profile unexpectedly includes untaught tool %s", excluded)
 		}

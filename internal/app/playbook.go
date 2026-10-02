@@ -42,8 +42,9 @@ Trust the honesty signals on every result: stale (reindex first), call_graph
 (resolved/name/unresolved/none), resolution, and the *_total caps. When a name is
 ambiguous the response already carries candidates:[…] and accepts a selector, so
 pick one definition from those instead of a second lookup. Prefer
-codemap_index --precise for exact call edges — it is also the only call graph for
-TypeScript, JavaScript and Python.`
+codemap_index --precise for exact call edges — it is the only complete call graph for
+TypeScript and JavaScript (the default index has same-file and imported-binding
+candidates only) and the only call graph for Python.`
 
 // PlaybookFormat selects a harness-native rendering of the canonical playbook.
 type PlaybookFormat string

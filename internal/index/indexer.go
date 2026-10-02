@@ -1734,6 +1734,9 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		// the failure instead of silently treating stale nodes as fresh.
 		return false, nil, nil, err
 	}
+	// TS/JS call candidates that name an imported binding resolve through the
+	// project's import resolver here, while this file's import context is at hand.
+	fr.References = ix.bindImportRefs(ft, fr.References)
 
 	// Extraction succeeded: clear vectors for the prior node generation before
 	// atomically replacing its graph nodes below. Delaying this until after parse
@@ -2100,7 +2103,19 @@ func resolveEdgesTx(tx *sql.Tx, projectID int64, refs []extract.Reference, ni *n
 		}
 	}
 	styles := &stylesScope{tx: tx, projectID: projectID, memo: map[string]map[string]bool{}}
+	var scope fileScopeIndex // built lazily: only file-scoped (TS/JS call) refs need it
 	for _, ref := range refs {
+		if ref.FromFile != "" || ref.ToFile != "" {
+			if scope == nil {
+				scope = buildFileScopeIndex(ni)
+			}
+			n, err := resolveScopedRef(tx, ref, ni, byID, scope)
+			count += n
+			if err != nil {
+				return count, err
+			}
+			continue
+		}
 		from, ok := ni.fqnTo[ref.From]
 		if !ok {
 			continue
@@ -2502,6 +2517,20 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 				joinFailures, strings.Join(joinSamples, "; ")))
 			failedFiles++
 			continue
+		}
+		// A complete, non-empty callHierarchy answer supersedes the file's
+		// name-based call candidates (tsscan: same-file / imported-binding calls,
+		// JSX usage) — the same per-file supersede the go/types pass applies. An
+		// EMPTY answer never erases them: the server cannot see every call shape
+		// (JSX in a project with no tsconfig, unresolved path aliases), and
+		// "zero calls, resolved" would be confidently wrong where the honest
+		// answer is "candidates".
+		if len(pending) > 0 {
+			if dErr := deleteNameCallsInFileTx(tx, projectID, file); dErr != nil {
+				res.PreciseNote = "LSP precise supersede (delete name) failed: " + dErr.Error()
+				res.PreciseUpgraded += upgraded
+				return dErr
+			}
 		}
 		// Stage before writing so one missing internal join cannot leave a
 		// partially rebuilt exact graph for a file whose coverage is unresolved.

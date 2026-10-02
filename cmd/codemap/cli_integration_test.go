@@ -434,6 +434,39 @@ func TestCLIContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("features inventory has stable json, readable text and bounded flags", func(t *testing.T) {
+		res := runCLI(t, bin, runner, env, "features", "-C", project, "--depth", "2", "--json")
+		if res.exit != 0 || res.stderr != "" {
+			t.Fatalf("features --json exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var rep struct {
+			SchemaVersion int              `json:"schema_version"`
+			Indexed       bool             `json:"indexed"`
+			Features      []map[string]any `json:"features"`
+			ByKind        map[string]int   `json:"by_kind"`
+			Frameworks    []string         `json:"frameworks"`
+			Notes         []string         `json:"notes"`
+			PartialErrors []string         `json:"partial_errors"`
+			CallGraph     string           `json:"call_graph"`
+			Depth         int              `json:"footprint_depth"`
+		}
+		mustJSON(t, res.stdout, &rep)
+		if rep.SchemaVersion != 1 || !rep.Indexed || rep.Features == nil || rep.ByKind == nil || rep.Frameworks == nil ||
+			rep.Notes == nil || rep.PartialErrors == nil || rep.CallGraph == "" || rep.Depth != 2 {
+			t.Fatalf("unexpected features contract: %s", res.stdout)
+		}
+
+		res = runCLI(t, bin, runner, env, "features", "-C", project, "--kind", "program,cli_command", "--no-footprint")
+		if res.exit != 0 || res.stderr != "" || !strings.Contains(res.stdout, "Features of") {
+			t.Fatalf("features text exit=%d stderr=%q stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+
+		res = runCLI(t, bin, runner, env, "features", "-C", project, "--kind", "bogus", "--json")
+		assertCLIEnvelope(t, res, exitOperational, "operational")
+		res = runCLI(t, bin, runner, env, "features", "-C", project, "--top", "5000", "--json")
+		assertCLIEnvelope(t, res, exitOperational, "operational")
+	})
+
 	t.Run("precise is canonical and lsp stays hidden", func(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "callers", "--help")
 		if res.exit != 0 {

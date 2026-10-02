@@ -314,7 +314,8 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 		} else {
 			hint = svc.coverageHintResolved(g, p.ID, resolved)
 		}
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — direct callers, blast radius, and covering tests are unresolved (not absent); run 'codemap index --precise' to resolve them", lang) + hint
+		head, state := callGraphGap(lang)
+		rep.Resolution = fmt.Sprintf("%s — direct callers, blast radius, and covering tests are %s; run 'codemap index --precise' to resolve them", head, state) + hint
 	}
 	// Same derivation codemap_review applies to covering_tests, so impact — the
 	// more common pre-edit path — is just as runnable as the post-edit review.
@@ -471,24 +472,9 @@ func joinNote(existing, add string) string {
 	return existing + "; " + add
 }
 
-// isTestFilePath reports whether a project-relative path looks like a test file by
-// the common conventions across codemap's languages (Go _test.go; JS/TS
-// .test/.spec; Python test_*.py / *_test.py).
-func isTestFilePath(p string) bool {
-	base := strings.ToLower(filepath.Base(p))
-	if strings.HasSuffix(base, "_test.go") || strings.HasSuffix(base, "_test.py") {
-		return true
-	}
-	if strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py") {
-		return true
-	}
-	for _, ext := range []string{"ts", "tsx", "js", "jsx", "mjs", "cjs"} {
-		if strings.HasSuffix(base, ".test."+ext) || strings.HasSuffix(base, ".spec."+ext) {
-			return true
-		}
-	}
-	return false
-}
+// isTestFilePath reports whether a project-relative path looks like a test file;
+// the heuristic lives in the graph package so rankings share it.
+func isTestFilePath(p string) bool { return graph.IsTestFilePath(p) }
 
 // heuristicTestCoverage finds test files that REFERENCE the symbol's bare name (a
 // word-boundary match), as a conservative fallback for coverage the call graph

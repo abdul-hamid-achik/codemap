@@ -1,52 +1,127 @@
 ---
 title: Desktop app
-description: Codemap Studio — an Electron workbench that wires every codemap feature into one reviewable interface.
+description: Codemap Studio — a desktop app that shows a codebase as a map, lists what it can do, traces how each feature works, and runs every codemap command.
 ---
 
 # Codemap Studio (desktop)
 
-Codemap Studio is an Electron workbench over the same store the CLI and MCP
-server use. It does not reimplement anything: every panel spawns
-`codemap … --json` against your project and renders the structured report, so
-the CLI stays the single source of truth — including its exit-code taxonomy
-and its `{ok:false,error,code,hint}` failure envelope.
+Codemap Studio is an Electron app over the same store the CLI and MCP server
+use. It has two halves:
+
+- **Learn** turns an indexed repository into something you can look at: a map
+  of its directories, the list of things the software can do, and the call tree
+  behind each one.
+- **Workspace** runs every codemap command as a panel: search, a graph
+  explorer, a source browser, the review desk, and an MCP inspector.
+
+It does not reimplement anything: every view spawns `codemap … --json` against
+your project and renders the structured report, so the CLI stays the single
+source of truth — including its exit-code taxonomy and its
+`{ok:false,error,code,hint}` failure envelope.
+
+## Run it
+
+You need a `codemap` binary (see [installation](/quick-start)), Node.js, and a
+checkout of the repository:
 
 ```bash
 cd desktop
 npm install
 npm start          # launch the app
-npm run icons      # re-render build/icon.{icns,ico,png} from docs/public/mark.svg
-npm test           # registry + renderer + view + graph + icon tests
-npm run test:live  # every read-only feature against the real binary
-npm run smoke      # boot the real app headlessly, walk every view, screenshot
 ```
 
-The app icon is not a separate asset: `scripts/make-icons.mjs` composes the same
-glyph the docs site ships (`docs/public/mark.svg`) onto the Studio dark tile and
-rasterises it with Chromium into a full `.iconset`, an `.icns`, a PNG-in-`.ico`
-and `icon.png`, so the Dock, the window and a packaged bundle all carry the
-brand mark at every size.
+Open a project with the project chip in the title bar. If it is not indexed
+yet, the app offers to run `codemap index` for you. An indexed project opens on
+**Overview**.
 
-## What is wired
+## Learn a repository
 
-The **Feature catalog** (sidebar → App → Feature catalog, or `⌘P`) lists every
-capability the app integrates: the CLI command behind it, the MCP tool it maps
-to, the flags the panel exposes, and whether it writes state. The catalog's
-**Audit vs CLI** button parses `codemap --help` (and every nested subcommand's
-help) from the running binary and fails loudly if any advertised command has no
-panel, so the list cannot silently drift from the CLI.
+The Learn section is the visual version of the [Learn a codebase](/learn)
+walkthrough. Everything in it comes from three commands — `atlas`, `features`
+and `flow` — so an agent sees the same answers over MCP.
 
-Workspace views compose several features rather than mapping 1:1 onto a
-command:
+### Overview
+
+![Overview: the README summary, size, languages, and a six-step learning path](/desktop/overview.jpg)
+
+The landing page for a project. It shows the README's first paragraph, how big the
+repository is, its language mix, and whether the index is fresh. Below that is a
+six-step **learning path**:
+
+1. the top-level directories and what each one is for;
+2. what the software can do, by surface;
+3. where execution starts;
+4. the core types and functions, with their docs;
+5. three features worth tracing end to end;
+6. your notes (annotations).
+
+Progress is remembered per project.
+
+### Atlas
+
+![Atlas: the internal directory as a treemap, with the detail panel open](/desktop/atlas.jpg)
+
+The repository as a zoomable treemap. Tile size follows symbols, lines or files.
+Tile colour follows language, role (source vs. tests, docs, config), coupling
+(inbound edges) or test share.
+
+Click a directory to zoom in; press Esc to go back out. The detail panel shows:
+
+- the directory's description, taken from its README, package doc, manifest or
+  leading comment — never generated;
+- its size and coupling;
+- its key symbols;
+- the directories it talks to most.
+
+From there you can trace a flow, list the features that live in it, or copy a
+markdown summary for an agent.
+
+### Features
+
+![Features: CLI commands grouped with their sub-commands, each with its footprint](/desktop/features.jpg)
+
+Everything the software can do: CLI commands, MCP/RPC tools, HTTP routes,
+pages, and programs. Each card shows the description from the registration
+itself (a cobra `Short`, an MCP tool description) and the footprint — how much
+code the feature touches and how many tests cover it specifically. Click a card
+to see how the feature works.
+
+### Flow
+
+![Flow: the call tree of the review command beside the selected step's source](/desktop/flow.jpg)
+
+The call tree behind one feature, in the order the code makes the calls. Each
+step carries:
+
+- its subsystem colour and its one-line doc;
+- a confidence badge;
+- `+N alt` when a name-based graph matched several definitions and the app
+  shows the most plausible one;
+- `ambiguous` when no single definition fits.
+
+The route strip at the top summarises which subsystems the feature passes
+through. Select a step to read its source, re-root the flow there, or open its
+context and impact. The **Diagram** tab draws the same tree left to right.
+**Copy as brief** produces a numbered outline you can paste into an agent chat
+or a note.
+
+## Workspace
+
+The rest of the sidebar runs codemap's commands. The **Feature catalog**
+(`⌘P`) lists every capability the app integrates: the CLI command behind it,
+the MCP tool it maps to, the flags the panel exposes, and whether it writes
+state. Its **Audit vs CLI** button parses `codemap --help` (and every nested
+subcommand's help) from the running binary. It fails loudly if any advertised
+command has no panel, so the list cannot silently drift from the CLI.
 
 | View | What it answers |
 | --- | --- |
-| Dashboard | Is the index fresh, honest and complete — and what should I look at first? |
+| Health | Is the index fresh, honest and complete — and what should I look at first? |
 | Unified search | One box over four retrieval modes: name, indexed text, semantic, intent |
 | Graph explorer | Typed relations from one exact source definition, drawn and expandable |
 | Source browser | Indexed source with symbols overlaid; every position-aware feature from any line |
 | Review desk | The real `git diff` beside codemap's diff-scoped impact, tests and risk band |
-| Architecture map | Subsystems, directed bridges, hubs and entrypoints as a graph |
+| Architecture map | Subsystems and the directed bridges between them, as a graph |
 | MCP inspector | A live `codemap serve` handshake: profiles, tool schemas, direct tool calls |
 | Raw command | Any argv at all — the guarantee that coverage is total |
 
@@ -76,14 +151,3 @@ report.
   `<userData>/codemap-studio.json`. The graph, vectors and annotations remain
   exactly where codemap keeps them.
 
-## Testing
-
-`desktop/test/` holds trimmed captures of real `codemap --json` reports
-(`fixtures/`) plus a minimal DOM stub, so the renderer is exercised without a
-window: every fixture must render through its feature panel, every declared
-renderer must exist, and the highlighter must round-trip source exactly.
-`test/integration.test.mjs` runs every read-only feature against the live
-binary and accepts only honest answers (a report, or codemap's own structured
-envelope). `test/smoke.mjs` boots the real Electron app headlessly, walks every
-view, runs live features, performs the MCP handshake and writes screenshots to
-`/tmp/codemap-studio-smoke/shots`.

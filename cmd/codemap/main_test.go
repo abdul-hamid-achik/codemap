@@ -29,7 +29,8 @@ func TestPreciseEdgeNote(t *testing.T) {
 		{"ts precise", 3, map[string]int{"typescript": 6}, "precise via callHierarchy", "go/types"},
 		{"mixed precise", 10, map[string]int{"go": 4, "typescript": 6}, "go/types + callHierarchy", ""},
 		{"go name-based", 0, map[string]int{"go": 657}, "name-based", "TypeScript"},
-		{"ts no call graph", 0, map[string]int{"typescript": 6}, "no call graph yet", "name-based"},
+		{"ts partial call graph", 0, map[string]int{"typescript": 6}, "partial call graph", "no call graph"},
+		{"python no call graph", 0, map[string]int{"python": 6}, "no call graph yet", "partial"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -138,13 +139,13 @@ func TestPreciseTips(t *testing.T) {
 	}
 
 	ts := preciseTips(map[string]int{"typescript": 4}, true)
-	if !has(ts, "no call graph for typescript") || has(ts, "name-based") {
-		t.Errorf("TS-only project should get the LSP call-graph tip only, got %v", ts)
+	if !has(ts, "typescript call edges are name-based candidates") || !has(ts, "same-file calls and imported bindings") || has(ts, "Go call edges") || has(ts, "no call graph") {
+		t.Errorf("TS-only project should get the partial-call-graph tip only, got %v", ts)
 	}
 
 	mixed := preciseTips(map[string]int{"go": 3, "javascript": 5, "python": 2}, true)
-	if !has(mixed, "name-based") || !has(mixed, "javascript/python") {
-		t.Errorf("mixed project should get both the Go tip and the JS/Python tip, got %v", mixed)
+	if !has(mixed, "Go call edges are name-based") || !has(mixed, "javascript call edges are name-based candidates") || !has(mixed, "no call graph for python") {
+		t.Errorf("mixed project should get the Go tip, the JS partial tip, and the Python no-graph tip, got %v", mixed)
 	}
 
 	if len(preciseTips(map[string]int{}, true)) != 0 {
@@ -414,5 +415,27 @@ func TestReviewDeletionGuidanceRunsTestsBeforeReindex(t *testing.T) {
 	}
 	if got, want := reviewDeletionAnalysisLine(analysis), "  deleted analysis: 2/3 analyzed from last index · 1 missing"; got != want {
 		t.Fatalf("deletion analysis line = %q, want %q", got, want)
+	}
+}
+
+// TestDocsHelpListsEveryTopic pins that `codemap docs --help` is derived from the
+// same topic list `codemap docs` prints (it used to omit "formats").
+func TestDocsHelpListsEveryTopic(t *testing.T) {
+	for _, topic := range app.DocTopicNames() {
+		if !strings.Contains(docsCmd.Short, topic) {
+			t.Errorf("docs --help summary %q is missing topic %q", docsCmd.Short, topic)
+		}
+	}
+	if !strings.Contains(docsCmd.Short, "formats") {
+		t.Errorf("docs --help summary must list the formats topic: %q", docsCmd.Short)
+	}
+}
+
+// TestRankingFlagsRegistered pins the opt-in that re-includes test code.
+func TestRankingFlagsRegistered(t *testing.T) {
+	for _, c := range []*cobra.Command{hotspotsCmd, readOrderCmd} {
+		if c.Flags().Lookup("include-tests") == nil {
+			t.Errorf("%s: --include-tests not registered", c.Name())
+		}
 	}
 }

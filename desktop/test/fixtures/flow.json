@@ -1,0 +1,410 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "indexed": true,
+ "found": true,
+ "root": {
+  "id": "s0",
+  "symbol": "runReview",
+  "fqn": "main.runReview",
+  "kind": "function",
+  "file": "cmd/codemap/query.go",
+  "start_line": 690,
+  "subsystem": "cmd/codemap",
+  "signature": "func runReview(cmd *cobra.Command, args []string) error",
+  "doc": "runReview renders diff-scoped intelligence: the symbols the working diff (or a --since range, or --s",
+  "selector": {
+   "file": "cmd/codemap/query.go",
+   "start_line": 690,
+   "fqn": "main.runReview"
+  },
+  "depth": 0,
+  "confidence": "confirmed",
+  "alternatives": 0,
+  "call_order": 0,
+  "cycle": false,
+  "leaf_reason": "",
+  "children": [
+   {
+    "id": "s1",
+    "symbol": "parseFailOnRiskFlag",
+    "fqn": "main.parseFailOnRiskFlag",
+    "kind": "function",
+    "file": "cmd/codemap/gate.go",
+    "start_line": 28,
+    "subsystem": "cmd/codemap",
+    "signature": "func parseFailOnRiskFlag(cmd *cobra.Command) (threshold int, set bool, err error)",
+    "doc": "parseFailOnRiskFlag validates --fail-on-risk's value.",
+    "selector": {
+     "file": "cmd/codemap/gate.go",
+     "start_line": 28,
+     "fqn": "main.parseFailOnRiskFlag"
+    },
+    "depth": 1,
+    "confidence": "candidate",
+    "alternatives": 0,
+    "call_order": 1,
+    "cycle": false,
+    "leaf_reason": "",
+    "children": [
+     {
+      "id": "s2",
+      "symbol": "RiskLevelOrdinal",
+      "fqn": "app.RiskLevelOrdinal",
+      "kind": "function",
+      "file": "internal/app/gate.go",
+      "start_line": 15,
+      "subsystem": "internal/app",
+      "signature": "func RiskLevelOrdinal(level string) int",
+      "doc": "RiskLevelOrdinal maps a risk level to its position in the low < medium < high order, for --fail-on-r",
+      "selector": {
+       "file": "internal/app/gate.go",
+       "start_line": 15,
+       "fqn": "app.RiskLevelOrdinal"
+      },
+      "depth": 2,
+      "confidence": "candidate",
+      "alternatives": 0,
+      "call_order": 1,
+      "cycle": false,
+      "leaf_reason": "",
+      "children": [],
+      "children_total": 0
+     }
+    ],
+    "children_total": 1
+   },
+   {
+    "id": "s3",
+    "symbol": "openSession",
+    "fqn": "main.openSession",
+    "kind": "function",
+    "file": "cmd/codemap/main.go",
+    "start_line": 297,
+    "subsystem": "cmd/codemap",
+    "signature": "func openSession(cmd *cobra.Command) (*app.Session, error)",
+    "doc": "",
+    "selector": {
+     "file": "cmd/codemap/main.go",
+     "start_line": 297,
+     "fqn": "main.openSession"
+    },
+    "depth": 1,
+    "confidence": "candidate",
+    "alternatives": 0,
+    "call_order": 2,
+    "cycle": false,
+    "leaf_reason": "",
+    "children": [
+     {
+      "id": "s4",
+      "symbol": "openSessionAt",
+      "fqn": "main.openSessionAt",
+      "kind": "function",
+      "file": "cmd/codemap/main.go",
+      "start_line": 304,
+      "subsystem": "cmd/codemap",
+      "signature": "func openSessionAt(cmd *cobra.Command, dir string) (*app.Session, error)",
+      "doc": "openSessionAt loads project-local configuration as though dir were the process working directory, th",
+      "selector": {
+       "file": "cmd/codemap/main.go",
+       "start_line": 304,
+       "fqn": "main.openSessionAt"
+      },
+      "depth": 2,
+      "confidence": "candidate",
+      "alternatives": 0,
+      "call_order": 1,
+      "cycle": false,
+      "leaf_reason": "",
+      "children": [
+       {
+        "id": "s5",
+        "symbol": "Open",
+        "fqn": "app.Open",
+        "kind": "function",
+        "file": "internal/app/session.go",
+        "start_line": 60,
+        "subsystem": "internal/app",
+        "signature": "func Open(configPath string) (*Session, error)",
+        "doc": "Open loads configuration (honoring the --config path / CODEMAP_CONFIG) and ensures the XDG data dire",
+        "selector": {
+         "file": "internal/app/session.go",
+         "start_line": 60,
+         "fqn": "app.Open"
+        },
+        "depth": 3,
+        "confidence": "candidate",
+        "alternatives": 2,
+        "call_order": 1,
+        "cycle": false,
+        "leaf_reason": "",
+        "children": [
+         {
+          "id": "s6",
+          "symbol": "Load",
+          "fqn": "config.Load",
+          "kind": "function",
+          "file": "internal/config/config.go",
+          "start_line": 226,
+          "subsystem": "internal/config",
+          "signature": "func Load(explicitPath string) (*Config, error)",
+          "doc": "Load resolves configuration with the precedence (low → high):",
+          "selector": {
+           "file": "internal/config/config.go",
+           "start_line": 226,
+           "fqn": "config.Load"
+          },
+          "depth": 4,
+          "confidence": "candidate",
+          "alternatives": 2,
+          "call_order": 1,
+          "cycle": false,
+          "leaf_reason": "depth",
+          "children": [],
+          "children_total": 9
+         },
+         {
+          "id": "s7",
+          "symbol": "EnsureDirs",
+          "fqn": "config.EnsureDirs",
+          "kind": "function",
+          "file": "internal/config/paths.go",
+          "start_line": 137,
+          "subsystem": "internal/config",
+          "signature": "func EnsureDirs() error",
+          "doc": "EnsureDirs creates the config, data, cache, and registry directories.",
+          "selector": {
+           "file": "internal/config/paths.go",
+           "start_line": 137,
+           "fqn": "config.EnsureDirs"
+          },
+          "depth": 4,
+          "confidence": "candidate",
+          "alternatives": 0,
+          "call_order": 2,
+          "cycle": false,
+          "leaf_reason": "depth",
+          "children": [],
+          "children_total": 4
+         }
+        ],
+        "children_total": 2
+       },
+       {
+        "id": "s8",
+        "symbol": "applyConfigFlags",
+        "fqn": "main.applyConfigFlags",
+        "kind": "function",
+        "file": "cmd/codemap/configflags.go",
+        "start_line": 55,
+        "subsystem": "cmd/codemap",
+        "signature": "func applyConfigFlags(cmd *cobra.Command, cfg *config.Config)",
+        "doc": "applyConfigFlags overlays explicitly-set CLI flags onto cfg, giving flags the highest precedence (ab",
+        "selector": {
+         "file": "cmd/codemap/configflags.go",
+         "start_line": 55,
+         "fqn": "main.applyConfigFlags"
+        },
+        "depth": 3,
+        "confidence": "candidate",
+        "alternatives": 0,
+        "call_order": 2,
+        "cycle": false,
+        "leaf_reason": "",
+        "children": [
+         {
+          "id": "s9",
+          "symbol": "Lookup",
+          "fqn": "",
+          "kind": "",
+          "file": "",
+          "start_line": 0,
+          "subsystem": "",
+          "signature": "",
+          "doc": "",
+          "depth": 4,
+          "confidence": "candidate",
+          "alternatives": 2,
+          "call_order": 1,
+          "cycle": false,
+          "leaf_reason": "ambiguous",
+          "candidates": [
+           {
+            "selector": {
+             "file": "internal/branchstate/state.go",
+             "start_line": 98,
+             "fqn": "branchstate.State.Lookup",
+             "kind": "method"
+            },
+            "signature": "func (s *State) Lookup(branch string) (BranchEntry, bool)",
+            "file": "internal/branchstate/state.go",
+            "start_line": 98
+           },
+           {
+            "selector": {
+             "file": "internal/cachestate/state.go",
+             "start_line": 101,
+             "fqn": "cachestate.State.Lookup",
+             "kind": "method"
+            },
+            "signature": "func (s *State) Lookup(treeHash string) (CacheEntry, bool)",
+            "file": "internal/cachestate/state.go",
+            "start_line": 101
+           }
+          ],
+          "children": [],
+          "children_total": 0
+         }
+        ],
+        "children_total": 2
+       }
+      ],
+      "children_total": 4
+     },
+     {
+      "id": "s16",
+      "symbol": "targetDir",
+      "fqn": "main.targetDir",
+      "kind": "function",
+      "file": "cmd/codemap/main.go",
+      "start_line": 39,
+      "subsystem": "cmd/codemap",
+      "signature": "func targetDir(cmd *cobra.Command) string",
+      "doc": "targetDir returns the project directory the command should operate on: the --path / -C flag value wh",
+      "selector": {
+       "file": "cmd/codemap/main.go",
+       "start_line": 39,
+       "fqn": "main.targetDir"
+      },
+      "depth": 2,
+      "confidence": "candidate",
+      "alternatives": 0,
+      "call_order": 2,
+      "cycle": false,
+      "leaf_reason": "",
+      "children": [
+       {
+        "id": "s17",
+        "symbol": "ExpandPath",
+        "fqn": "config.ExpandPath",
+        "kind": "function",
+        "file": "internal/config/paths.go",
+        "start_line": 123,
+        "subsystem": "internal/config",
+        "signature": "func ExpandPath(p string) string",
+        "doc": "ExpandPath expands a leading \"~\" or \"~/\" to the user's home directory.",
+        "selector": {
+         "file": "internal/config/paths.go",
+         "start_line": 123,
+         "fqn": "config.ExpandPath"
+        },
+        "depth": 3,
+        "confidence": "candidate",
+        "alternatives": 0,
+        "call_order": 1,
+        "cycle": false,
+        "leaf_reason": "",
+        "children": [],
+        "children_total": 0
+       }
+      ],
+      "children_total": 1
+     }
+    ],
+    "children_total": 2
+   },
+   {
+    "id": "s18",
+    "symbol": "Close",
+    "fqn": "app.Session.Close",
+    "kind": "method",
+    "file": "internal/app/session.go",
+    "start_line": 316,
+    "subsystem": "internal/app",
+    "signature": "func (s *Session) Close() error",
+    "doc": "Close closes any stores that were opened.",
+    "selector": {
+     "file": "internal/app/session.go",
+     "start_line": 316,
+     "fqn": "app.Session.Close"
+    },
+    "depth": 1,
+    "confidence": "candidate",
+    "alternatives": 8,
+    "call_order": 3,
+    "repeat_of": "s14",
+    "cycle": false,
+    "leaf_reason": "repeat",
+    "children": [],
+    "children_total": 0
+   }
+  ],
+  "children_total": 15
+ },
+ "steps_total": 141,
+ "steps_emitted": 13,
+ "max_depth": 4,
+ "max_nodes": 120,
+ "truncated": true,
+ "depth_truncated": true,
+ "subsystems": [
+  {
+   "name": "cmd/codemap",
+   "steps": 17,
+   "first_depth": 0
+  },
+  {
+   "name": "internal/app",
+   "steps": 43,
+   "first_depth": 1
+  },
+  {
+   "name": "internal/git",
+   "steps": 17,
+   "first_depth": 2
+  },
+  {
+   "name": "internal/index",
+   "steps": 5,
+   "first_depth": 2
+  },
+  {
+   "name": "internal/config",
+   "steps": 8,
+   "first_depth": 3
+  },
+  {
+   "name": "internal/graph",
+   "steps": 13,
+   "first_depth": 3
+  },
+  {
+   "name": "internal/extract",
+   "steps": 10,
+   "first_depth": 4
+  }
+ ],
+ "files": [
+  {
+   "file": "internal/graph/store.go",
+   "steps": 13
+  },
+  {
+   "file": "internal/app/review.go",
+   "steps": 10
+  },
+  {
+   "file": "internal/app/service_core.go",
+   "steps": 10
+  }
+ ],
+ "ambiguous_calls": 26,
+ "call_graph": "name",
+ "stale": false,
+ "notes": [
+  "calls are name-based candidates: edges to same-named definitions were collapsed using call-site syntax and package/directory proximity; run 'codemap index --precise' for exact edges",
+  "26 step(s) involve same-named definitions (alternatives > 0); placeholders with leaf_reason \"ambiguous\" are not expanded"
+ ],
+ "partial_errors": []
+}

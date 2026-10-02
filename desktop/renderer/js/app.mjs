@@ -23,6 +23,11 @@ import { historyView } from './views/historyview.mjs'
 import { settingsView } from './views/settingsview.mjs'
 import { onboardView } from './views/onboard.mjs'
 import { featureView } from './views/feature.mjs'
+import { overviewView } from './views/overview.mjs'
+import { atlasView } from './views/atlasview.mjs'
+import { featuresView } from './views/featuresview.mjs'
+import { flowView } from './views/flowview.mjs'
+import { clearLearnCache } from './learn.mjs'
 
 const viewRoot = () => document.getElementById('view-root')
 let current = null // {id, instance}
@@ -134,7 +139,9 @@ function buildSidebar() {
   }
 
   const items = []
-  items.push(navGroup('Workspace', APP_VIEWS.slice(0, 6).map((v) => ({ id: `view:${v.id}`, label: v.label, icon: v.icon, view: v.id }))))
+  const viewEntry = (v) => ({ id: `view:${v.id}`, label: v.label, icon: v.icon, view: v.id })
+  items.push(navGroup('Learn', APP_VIEWS.filter((v) => v.group === 'learn').map(viewEntry), 'learn'))
+  items.push(navGroup('Workspace', APP_VIEWS.filter((v) => v.group === 'app').slice(0, 6).map(viewEntry), 'workspace'))
   for (const g of GROUPS) {
     const feats = groups.get(g.id) || []
     if (!feats.length) continue
@@ -196,6 +203,10 @@ function route(view, opts = {}) {
     state.featureId = null
     make = () => {
       switch (view) {
+        case 'overview': return overviewView(ctx)
+        case 'atlas': return atlasView(ctx, opts)
+        case 'features': return featuresView(ctx, opts)
+        case 'flow': return flowView(ctx, opts)
         case 'dashboard': return dashboardView(ctx)
         case 'catalog': return catalogView(ctx)
         case 'search': return searchView(ctx, opts)
@@ -225,6 +236,7 @@ function route(view, opts = {}) {
     if (opts.file && instance.open) instance.open(opts.file, opts.line)
     if (opts.query && instance.search) instance.search(opts.query, opts.engine)
     if (opts.at && instance.setStart) instance.setStart(opts.at)
+    instance.navigate?.(opts)
     if (opts.featureId && view !== 'feature') instance.reload?.()
   } else {
     instance = make()
@@ -320,7 +332,7 @@ function paletteItems(q) {
   const push = (item) => out.push(item)
   for (const v of APP_VIEWS) {
     const s = fuzzyScore(q, `${v.label} ${v.id}`)
-    if (s > 0) push({ kind: 'view', score: s + 40, label: v.label, sub: `${v.icon} workspace view`, id: v.id, icon: v.icon })
+    if (s > 0) push({ kind: 'view', score: s + 40, label: v.label, sub: `${v.icon} ${v.group === 'learn' ? 'learn view' : 'workspace view'}`, id: v.id, icon: v.icon })
   }
   for (const f of FEATURES) {
     const hay = `${f.title} ${f.id} ${f.blurb} ${(f.cmd || []).join(' ')} ${f.mcp || ''} ${f.group}`
@@ -525,8 +537,9 @@ async function boot() {
   wireBus()
 
   const needsOnboard = !state.boot.binary || !state.project
-  route(needsOnboard ? 'onboard' : 'dashboard')
-  if (!needsOnboard) {
+  if (needsOnboard) route('onboard')
+  else {
+    mount(viewRoot(), h('div.view', spinner('opening the project…')))
     await afterProjectChange()
   }
   document.getElementById('side-version').textContent = `${state.boot.version ? state.boot.version.split('\n')[0] : 'codemap: not found'} · studio ${info.version}`
@@ -543,8 +556,20 @@ async function afterProjectChange() {
   await loadProjects()
   updateStatusbar()
   updateHealthChip()
-  if (current?.view === 'onboard') route('dashboard')
-  else if (current?.view === 'dashboard') instances.get('view:dashboard')?.reload?.()
+  // a different project invalidates everything the Learn views cached
+  clearLearnCache()
+  for (const id of ['view:overview', 'view:atlas', 'view:features', 'view:flow']) {
+    instances.get(id)?.destroy?.()
+    instances.delete(id)
+  }
+  route(landingView(), { fresh: true })
+}
+
+// An indexed project opens on the Overview; anything else needs the Health
+// dashboard's "index it" actions first.
+function landingView() {
+  const s = state.status
+  return s && s.registered !== false && (s.nodes ?? 0) > 0 ? 'overview' : 'dashboard'
 }
 
 function wireChrome() {
@@ -643,6 +668,7 @@ function wireBus() {
   })
   bus.on(EVENTS.INSPECTOR, () => drawInspector())
   bus.on(EVENTS.RESULT, (res) => {
+    if (res.ok && (res.featureId === 'index' || res.featureId === 'index-precise')) clearLearnCache()
     const cmd = (res.command || []).slice(1).join(' ')
     updateStatusbar(`$ codemap ${cmd} → exit ${res.exitCode} in ${fmt.ms(res.ms)}`)
   })

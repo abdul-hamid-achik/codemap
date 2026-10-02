@@ -55,7 +55,7 @@ test('exit-code taxonomy matches the documented contract', () => {
 test('runCodemap executes a real command and parses the report', { skip: !bin && 'no codemap binary in the repository' }, async () => {
   const res = await runCodemap({ binary: bin, args: ['version'], json: false, cwd: repo, timeoutMs: 30000 })
   assert.equal(res.ok, true)
-  assert.match(res.stdout, /codemap v\d/)
+  assert.match(res.stdout, /codemap (v\d|dev)/)
   assert.equal(res.exitCode, 0)
   assert.equal(res.code, 'answered')
 })

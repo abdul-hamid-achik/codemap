@@ -20,11 +20,12 @@ const (
 	DependencyConfidenceConfirmed = "confirmed"
 	DependencyConfidenceCandidate = "candidate"
 
-	DependencyReasonPrecise      = "precise"
-	DependencyReasonSamePackage  = "same_package"
-	DependencyReasonNameFanout   = "name_fanout"
-	DependencyReasonPackageScope = "package_scope"
-	DependencyReasonStale        = "stale_snapshot"
+	DependencyReasonPrecise        = "precise"
+	DependencyReasonSamePackage    = "same_package"
+	DependencyReasonNameFanout     = "name_fanout"
+	DependencyReasonPackageScope   = "package_scope"
+	DependencyReasonResolvedImport = "resolved_import"
+	DependencyReasonStale          = "stale_snapshot"
 
 	dependencyFileCap         = 25
 	dependencySampleCap       = 3
@@ -54,7 +55,7 @@ type DependencySample struct {
 	Provenance       string             `json:"provenance"`
 	Weight           float64            `json:"weight"`
 	Confidence       string             `json:"confidence"`        // confirmed|candidate
-	ConfidenceReason string             `json:"confidence_reason"` // precise|same_package|name_fanout|package_scope|stale_snapshot
+	ConfidenceReason string             `json:"confidence_reason"` // precise|same_package|resolved_import|name_fanout|package_scope|stale_snapshot
 }
 
 // DependencyKindEvidence groups one dependent file's logical relationships by
@@ -356,6 +357,14 @@ func dependencyConfidence(edge graph.FileDependencyEdge, scope string, stale boo
 	}
 	if edge.Provenance == graph.ProvPrecise {
 		return DependencyConfidenceConfirmed, DependencyReasonPrecise
+	}
+	// A file→file import (TS/JS/Vue relative or alias specifier, Ruby/Lua require,
+	// HTML asset) is written by the import resolver only when the specifier
+	// resolved to exactly one project file, so it is a confirmed dependency, not
+	// name fan-out. Go imports are package-scoped (handled above) and never reach
+	// here.
+	if edge.EdgeType == graph.EdgeImports && scope == DependencyTargetFile && edge.Target.Kind == graph.KindFile {
+		return DependencyConfidenceConfirmed, DependencyReasonResolvedImport
 	}
 	// The Go parser marks unqualified same-package references at full weight after
 	// narrowing them to the caller's directory. Qualified calls retain the lower

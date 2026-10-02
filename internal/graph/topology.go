@@ -11,6 +11,11 @@ import (
 type TopologyOptions struct {
 	MaxSubsystems int
 	MaxBridges    int
+	// IncludeTests counts edges whose source or target is test code (a test node or
+	// a node in a test path) toward subsystem edge counts and bridges. Default
+	// false: tests are consumers of product code, and counting them makes
+	// "internal/extract -> internal/index calls x669" mostly *_test.go noise.
+	IncludeTests bool
 }
 
 const (
@@ -58,6 +63,9 @@ type ProjectTopology struct {
 	SubsystemsTotal int                 `json:"subsystems_total"`
 	BridgesTotal    int                 `json:"bridges_total"`
 	Truncated       bool                `json:"truncated,omitempty"`
+	// TestsExcluded is true when edges touching test code were left out of the
+	// subsystem edge counts and bridges (the default).
+	TestsExcluded bool `json:"tests_excluded"`
 }
 
 type topologyBridgeKey struct {
@@ -126,6 +134,9 @@ func (s *Store) projectArchitecture(projectID int64, opts TopologyOptions, after
 		if !srcOK || !tgtOK {
 			continue
 		}
+		if !opts.IncludeTests && (IsTestNode(src) || IsTestNode(tgt)) {
+			continue
+		}
 		from := topologySubsystemName(src.FilePath)
 		to := topologySubsystemName(tgt.FilePath)
 		if from == to {
@@ -150,7 +161,7 @@ func (s *Store) projectArchitecture(projectID int64, opts TopologyOptions, after
 		acc.targetFiles[tgt.FilePath] = struct{}{}
 	}
 
-	out := &ProjectTopology{Strategy: "source_path"}
+	out := &ProjectTopology{Strategy: "source_path", TestsExcluded: !opts.IncludeTests}
 	for _, sub := range subsystems {
 		out.Subsystems = append(out.Subsystems, *sub)
 	}
@@ -224,6 +235,10 @@ func topologySubsystemName(path string) string {
 	}
 	return parts[0]
 }
+
+// SubsystemOf returns the deterministic source-path subsystem a project-relative
+// file belongs to — the same grouping codemap map uses.
+func SubsystemOf(filePath string) string { return topologySubsystemName(filePath) }
 
 func sortedTopologyKeys(in map[string]struct{}) []string {
 	out := make([]string, 0, len(in))

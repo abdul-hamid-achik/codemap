@@ -81,6 +81,65 @@ func TestImportsEdgesWired(t *testing.T) {
 	}
 }
 
+// A Go import targets a package, and the edge needs one representative file. It
+// must be a non-test file (here db.go), even though the test file sorts first
+// and so used to win by walk order.
+func TestGoImportRepresentativeFileSkipsTests(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module imports-test\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, src := range map[string]string{
+		"db/backend_integration_test.go": "package db\n\nimport \"testing\"\n\nfunc TestX(t *testing.T) {}\n",
+		"db/db.go":                       "package db\n\nfunc Open() {}\n",
+		"b.go":                           "package b\n\nimport \"imports-test/db\"\n\nfunc Run() { db.Open() }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := graph.Open(filepath.Join(t.TempDir(), "g.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	v, err := vector.Open(":memory:", embed.EmbeddingProfile{Provider: "fake", Model: "fake", Dimensions: 4, Distance: "cosine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, v, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	deps, err := g.InboundFileDependencies(pid, "db/db.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range deps {
+		if d.EdgeType == graph.EdgeImports && d.Source.File == "b.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("b.go's import of package db must target db/db.go, not the test file: %+v", deps)
+	}
+	testDeps, err := g.InboundFileDependencies(pid, "db/backend_integration_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range testDeps {
+		if d.EdgeType == graph.EdgeImports {
+			t.Fatalf("package import must not target a _test.go file: %+v", d)
+		}
+	}
+}
+
 // TestIndexFilesMaintainsImportEdges verifies that the watcher path resolves
 // imports against the whole project and replaces stale edges when an importing
 // file changes. Repeating the same IndexFiles call must remain idempotent.

@@ -228,7 +228,8 @@ func (svc *Service) relationBySelector(cwd string, selector SymbolSelector, quer
 	resolvedFiles, _ := res.graph.CallGraphResolvedFiles(res.project.ID)
 	rep.CallGraph = callGraphEnum(resolvedFiles, []graph.Node{n})
 	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, []graph.Node{n}); unavailable {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — callers/callees are unresolved (not absent); run 'codemap index --precise'", lang) + svc.coverageHintResolved(res.graph, res.project.ID, resolvedFiles)
+		head, state := callGraphGap(lang)
+		rep.Resolution = fmt.Sprintf("%s — callers/callees are %s; run 'codemap index --precise'", head, state) + svc.coverageHintResolved(res.graph, res.project.ID, resolvedFiles)
 	}
 	rep.Annotations = nodeAnnotationsFor(res.graph, res.project.ID, n.FQN, n.Symbol)
 	return rep, nil
@@ -377,9 +378,11 @@ func (svc *Service) PathBySelectors(cwd string, from, to SymbolSelector) (*PathR
 	rep.CallGraph = callGraphEnum(resolvedFiles, confidenceNodes)
 	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, confidenceNodes); unavailable {
 		if rep.Found {
-			rep.Resolution = fmt.Sprintf("a path was found, but the %s call graph is not available without precise indexing — path completeness is unresolved", lang)
+			head, state := callGraphGap(lang)
+			rep.Resolution = fmt.Sprintf("a path was found, but %s; path completeness is %s", head, state)
 		} else {
-			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — whether this path exists is unresolved", lang)
+			head, state := callGraphGap(lang)
+			rep.Resolution = fmt.Sprintf("%s — whether this path exists is %s", head, state)
 		}
 		rep.Resolution += svc.coverageHintResolved(fromRes.graph, fromRes.project.ID, resolvedFiles)
 	}

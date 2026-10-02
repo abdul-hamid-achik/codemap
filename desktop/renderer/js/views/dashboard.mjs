@@ -80,7 +80,7 @@ export function dashboardView(ctx) {
     const out = h('div.stack', [
       h('div.view-head', [
         h('div.vh-main', [
-          h('h1', 'Dashboard'),
+          h('h1', 'Health'),
           h('div.vh-sub', 'Everything codemap knows about this project right now — health, honesty signals, and the shortest path into the graph.'),
         ]),
         h('div.vh-actions', [

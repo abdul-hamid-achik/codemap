@@ -18,6 +18,7 @@ const (
 	CodeNotARepo     = "not_a_repo"    // a git operation was required but cwd isn't a git repository
 	CodeInvalidInput = "invalid_input" // the call itself is malformed (bad/empty argument); fix the input, not an internal fault
 	CodeOperational  = "operational"   // an unclassified runtime failure (default; exit 1)
+	CodeNotFound     = "not_found"     // a query dead-end: the requested symbol/definition is not in the index (reports carry it additively; the CLI exits 2)
 )
 
 type CodedError struct {

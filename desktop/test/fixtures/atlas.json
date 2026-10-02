@@ -1,0 +1,580 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "root": "/Users/abdulachik/projects/codemap",
+ "indexed": true,
+ "prefix": "",
+ "depth": 2,
+ "files_included": true,
+ "summary": "Local-first code intelligence that gives AI agents and people structural awareness of codebases — combining a code graph (LSP + parsers) with semantic retrieval (local veclite, with an optional one-ho",
+ "summary_source": "README.md",
+ "totals": {
+  "dirs": 63,
+  "files": 438,
+  "symbols": 8408,
+  "lines": 119538,
+  "tests": 1107,
+  "languages": {
+   "css": 320,
+   "gdscript": 26,
+   "go": 4344,
+   "html": 1,
+   "javascript": 1125,
+   "markdown": 192,
+   "yaml": 2838
+  }
+ },
+ "tree": {
+  "path": "",
+  "name": "codemap",
+  "type": "dir",
+  "files": 438,
+  "symbols": 8408,
+  "lines": 119538,
+  "tests": 1107,
+  "languages": {
+   "css": 320,
+   "gdscript": 26,
+   "go": 4344,
+   "html": 1,
+   "javascript": 1125,
+   "markdown": 192,
+   "yaml": 2838
+  },
+  "roles": [
+   "source",
+   "entrypoint"
+  ],
+  "summary": "Local-first code intelligence that gives AI agents and people structural awareness of codebases — combining a code graph (LSP + parsers) with semantic retrieval",
+  "summary_source": "README.md",
+  "inbound": 0,
+  "outbound": 0,
+  "internal": 29474,
+  "entrypoints": 3,
+  "key_symbols": [
+   {
+    "symbol": "Service",
+    "fqn": "app.Service",
+    "kind": "type",
+    "file": "internal/app/service_core.go",
+    "start_line": 15,
+    "in_degree": 432,
+    "doc": "Service implements codemap's operations over a Session.",
+    "selector": {
+     "file": "internal/app/service_core.go",
+     "start_line": 15,
+     "fqn": "app.Service",
+     "kind": "type"
+    }
+   },
+   {
+    "symbol": "Store",
+    "fqn": "graph.Store",
+    "kind": "type",
+    "file": "internal/graph/store.go",
+    "start_line": 72,
+    "in_degree": 417,
+    "doc": "Store is a handle to the SQLite graph database.",
+    "selector": {
+     "file": "internal/graph/store.go",
+     "start_line": 72,
+     "fqn": "graph.Store",
+     "kind": "type"
+    }
+   }
+  ],
+  "top_neighbors": {
+   "in": [],
+   "out": []
+  },
+  "children": [
+   {
+    "path": "internal",
+    "name": "internal",
+    "type": "dir",
+    "files": 254,
+    "symbols": 3569,
+    "lines": 84398,
+    "tests": 979,
+    "languages": {
+     "gdscript": 26,
+     "go": 3797
+    },
+    "roles": [
+     "source"
+    ],
+    "summary": "",
+    "summary_source": "",
+    "inbound": 1629,
+    "outbound": 7758,
+    "internal": 18448,
+    "entrypoints": 0,
+    "key_symbols": [
+     {
+      "symbol": "Service",
+      "fqn": "app.Service",
+      "kind": "type",
+      "file": "internal/app/service_core.go",
+      "start_line": 15,
+      "in_degree": 432,
+      "doc": "Service implements codemap's operations over a Session.",
+      "selector": {
+       "file": "internal/app/service_core.go",
+       "start_line": 15,
+       "fqn": "app.Service",
+       "kind": "type"
+      }
+     },
+     {
+      "symbol": "Store",
+      "fqn": "graph.Store",
+      "kind": "type",
+      "file": "internal/graph/store.go",
+      "start_line": 72,
+      "in_degree": 417,
+      "doc": "Store is a handle to the SQLite graph database.",
+      "selector": {
+       "file": "internal/graph/store.go",
+       "start_line": 72,
+       "fqn": "graph.Store",
+       "kind": "type"
+      }
+     }
+    ],
+    "top_neighbors": {
+     "in": [
+      {
+       "path": "cmd/codemap",
+       "edges": 1455
+      },
+      {
+       "path": "bench",
+       "edges": 174
+      }
+     ],
+     "out": [
+      {
+       "path": "desktop",
+       "edges": 6282
+      },
+      {
+       "path": "bench",
+       "edges": 746
+      }
+     ]
+    },
+    "children": [
+     {
+      "path": "internal/app",
+      "name": "app",
+      "type": "dir",
+      "files": 100,
+      "symbols": 1309,
+      "lines": 34099,
+      "tests": 372,
+      "languages": {
+       "go": 1409
+      },
+      "roles": [
+       "source"
+      ],
+      "summary": "Package app is codemap's shared service layer. The CLI, MCP server, and TUI all go through it; none of them contain business logic. A Session lazily opens the g",
+      "summary_source": "package doc",
+      "inbound": 1596,
+      "outbound": 4946,
+      "internal": 3516,
+      "entrypoints": 0,
+      "key_symbols": [
+       {
+        "symbol": "Service",
+        "fqn": "app.Service",
+        "kind": "type",
+        "file": "internal/app/service_core.go",
+        "start_line": 15,
+        "in_degree": 432,
+        "doc": "Service implements codemap's operations over a Session.",
+        "selector": {
+         "file": "internal/app/service_core.go",
+         "start_line": 15,
+         "fqn": "app.Service",
+         "kind": "type"
+        }
+       },
+       {
+        "symbol": "Graph",
+        "fqn": "app.Session.Graph",
+        "kind": "method",
+        "file": "internal/app/session.go",
+        "start_line": 79,
+        "in_degree": 52,
+        "doc": "Graph opens (once) and returns the graph store.",
+        "selector": {
+         "file": "internal/app/session.go",
+         "start_line": 79,
+         "fqn": "app.Session.Graph",
+         "kind": "method"
+        }
+       }
+      ],
+      "top_neighbors": {
+       "in": [
+        {
+         "path": "cmd/codemap",
+         "edges": 456
+        },
+        {
+         "path": "internal/index",
+         "edges": 244
+        }
+       ],
+       "out": [
+        {
+         "path": "internal/extract",
+         "edges": 868
+        },
+        {
+         "path": "internal/index",
+         "edges": 756
+        }
+       ]
+      },
+      "children": [],
+      "children_total": 100,
+      "children_truncated": false
+     },
+     {
+      "path": "internal/graph",
+      "name": "graph",
+      "type": "dir",
+      "files": 22,
+      "symbols": 319,
+      "lines": 7238,
+      "tests": 74,
+      "languages": {
+       "go": 341
+      },
+      "roles": [
+       "source"
+      ],
+      "summary": "Package graph is codemap's structural code graph: a pure-Go SQLite store of code nodes (files, functions, types, …) and the edges between them (calls, imports, ",
+      "summary_source": "package doc",
+      "inbound": 1666,
+      "outbound": 775,
+      "internal": 856,
+      "entrypoints": 0,
+      "key_symbols": [
+       {
+        "symbol": "Store",
+        "fqn": "graph.Store",
+        "kind": "type",
+        "file": "internal/graph/store.go",
+        "start_line": 72,
+        "in_degree": 417,
+        "doc": "Store is a handle to the SQLite graph database.",
+        "selector": {
+         "file": "internal/graph/store.go",
+         "start_line": 72,
+         "fqn": "graph.Store",
+         "kind": "type"
+        }
+       },
+       {
+        "symbol": "GetProjectByName",
+        "fqn": "graph.Store.GetProjectByName",
+        "kind": "method",
+        "file": "internal/graph/store.go",
+        "start_line": 356,
+        "in_degree": 31,
+        "doc": "GetProjectByName returns the project with the given name.",
+        "selector": {
+         "file": "internal/graph/store.go",
+         "start_line": 356,
+         "fqn": "graph.Store.GetProjectByName",
+         "kind": "method"
+        }
+       }
+      ],
+      "top_neighbors": {
+       "in": [
+        {
+         "path": "internal/app",
+         "edges": 753
+        },
+        {
+         "path": "internal/index",
+         "edges": 383
+        }
+       ],
+       "out": [
+        {
+         "path": "internal/app",
+         "edges": 138
+        },
+        {
+         "path": "internal/index",
+         "edges": 135
+        }
+       ]
+      },
+      "children": [],
+      "children_total": 22,
+      "children_truncated": false
+     },
+     {
+      "path": "internal/index",
+      "name": "index",
+      "type": "dir",
+      "files": 28,
+      "symbols": 309,
+      "lines": 10463,
+      "tests": 125,
+      "languages": {
+       "go": 337
+      },
+      "roles": [
+       "source",
+       "tests"
+      ],
+      "summary": "Package index walks a project, extracts its structure, embeds node sources, and stores the result as a graph (SQLite) plus vectors (veclite). Indexing is increm",
+      "summary_source": "package doc",
+      "inbound": 2034,
+      "outbound": 1780,
+      "internal": 855,
+      "entrypoints": 0,
+      "key_symbols": [
+       {
+        "symbol": "Indexer",
+        "fqn": "index.Indexer",
+        "kind": "type",
+        "file": "internal/index/indexer.go",
+        "start_line": 199,
+        "in_degree": 201,
+        "doc": "Indexer turns project files into a stored graph + vectors.",
+        "selector": {
+         "file": "internal/index/indexer.go",
+         "start_line": 199,
+         "fqn": "index.Indexer",
+         "kind": "type"
+        }
+       },
+       {
+        "symbol": "Any",
+        "fqn": "index.Staleness.Any",
+        "kind": "method",
+        "file": "internal/index/staleness.go",
+        "start_line": 39,
+        "in_degree": 18,
+        "doc": "Any reports whether the index is behind the working tree in any way.",
+        "selector": {
+         "file": "internal/index/staleness.go",
+         "start_line": 39,
+         "fqn": "index.Staleness.Any",
+         "kind": "method"
+        }
+       }
+      ],
+      "top_neighbors": {
+       "in": [
+        {
+         "path": "internal/app",
+         "edges": 756
+        },
+        {
+         "path": "internal/extract",
+         "edges": 687
+        }
+       ],
+       "out": [
+        {
+         "path": "internal/graph",
+         "edges": 383
+        },
+        {
+         "path": "desktop",
+         "edges": 290
+        }
+       ]
+      },
+      "children": [],
+      "children_total": 28,
+      "children_truncated": false
+     }
+    ],
+    "children_total": 17,
+    "children_truncated": false
+   },
+   {
+    "path": "specs",
+    "name": "specs",
+    "type": "dir",
+    "files": 48,
+    "symbols": 2114,
+    "lines": 2603,
+    "tests": 0,
+    "languages": {
+     "yaml": 2162
+    },
+    "roles": [
+     "tests",
+     "config"
+    ],
+    "summary": "",
+    "summary_source": "",
+    "inbound": 0,
+    "outbound": 0,
+    "internal": 0,
+    "entrypoints": 0,
+    "key_symbols": [],
+    "top_neighbors": {
+     "in": [],
+     "out": []
+    },
+    "children": [
+     {
+      "path": "specs/studio.yml",
+      "name": "studio.yml",
+      "type": "file",
+      "language": "yaml",
+      "files": 1,
+      "symbols": 150,
+      "lines": 178,
+      "tests": 0,
+      "languages": {
+       "yaml": 151
+      },
+      "roles": [
+       "tests",
+       "config"
+      ],
+      "summary": "",
+      "summary_source": "",
+      "inbound": 0,
+      "outbound": 0,
+      "internal": 0,
+      "entrypoints": 0,
+      "key_symbols": [],
+      "children": [],
+      "children_total": 0,
+      "children_truncated": false
+     },
+     {
+      "path": "specs/mcp_profile.yml",
+      "name": "mcp_profile.yml",
+      "type": "file",
+      "language": "yaml",
+      "files": 1,
+      "symbols": 118,
+      "lines": 134,
+      "tests": 0,
+      "languages": {
+       "yaml": 119
+      },
+      "roles": [
+       "tests",
+       "config"
+      ],
+      "summary": "",
+      "summary_source": "",
+      "inbound": 0,
+      "outbound": 0,
+      "internal": 0,
+      "entrypoints": 0,
+      "key_symbols": [],
+      "children": [],
+      "children_total": 0,
+      "children_truncated": false
+     }
+    ],
+    "children_total": 48,
+    "children_truncated": false
+   },
+   {
+    "path": "cmd",
+    "name": "cmd",
+    "type": "dir",
+    "files": 37,
+    "symbols": 344,
+    "lines": 9579,
+    "tests": 55,
+    "languages": {
+     "go": 381
+    },
+    "roles": [
+     "source",
+     "entrypoint"
+    ],
+    "summary": "",
+    "summary_source": "",
+    "inbound": 764,
+    "outbound": 1753,
+    "internal": 767,
+    "entrypoints": 1,
+    "key_symbols": [
+     {
+      "symbol": "targetDir",
+      "fqn": "main.targetDir",
+      "kind": "function",
+      "file": "cmd/codemap/main.go",
+      "start_line": 39,
+      "in_degree": 46,
+      "doc": "targetDir returns the project directory the command should operate on: the --pat",
+      "selector": {
+       "file": "cmd/codemap/main.go",
+       "start_line": 39,
+       "fqn": "main.targetDir",
+       "kind": "function"
+      }
+     },
+     {
+      "symbol": "requireIndexed",
+      "fqn": "main.requireIndexed",
+      "kind": "function",
+      "file": "cmd/codemap/query.go",
+      "start_line": 1733,
+      "in_degree": 31,
+      "doc": "requireIndexed reports whether the target project has been indexed.",
+      "selector": {
+       "file": "cmd/codemap/query.go",
+       "start_line": 1733,
+       "fqn": "main.requireIndexed",
+       "kind": "function"
+      }
+     }
+    ],
+    "top_neighbors": {
+     "in": [
+      {
+       "path": "internal/app",
+       "edges": 241
+      },
+      {
+       "path": "internal/tui",
+       "edges": 177
+      }
+     ],
+     "out": [
+      {
+       "path": "internal/app",
+       "edges": 456
+      },
+      {
+       "path": "internal/extract",
+       "edges": 244
+      }
+     ]
+    },
+    "children": [],
+    "children_total": 1,
+    "children_truncated": false
+   }
+  ],
+  "children_total": 7,
+  "children_truncated": false
+ },
+ "nodes_emitted": 14,
+ "truncated": false,
+ "call_graph": "unresolved",
+ "resolution": "call graph not available for javascript without precise indexing — key symbols fall back to exported/documented symbols; run 'codemap index --precise' — 25/345 callable files currently have precise coverage; coverage decays when a daemon watches without --precise (see 'codemap coverage', restart with 'codemap index --precise --watch')",
+ "stale": false,
+ "partial_errors": []
+}

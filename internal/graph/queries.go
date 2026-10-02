@@ -345,14 +345,17 @@ type NameEdgeFile struct {
 // outgoing `calls` edges are still provenance='name'. A clean precise pass
 // supersedes a covered file's name edges, so a survivor means the coverage row
 // and the edge set contradict each other (partial failure, out-of-band write,
-// or a supersede that silently missed).
+// or a supersede that silently missed). Edges sourced from the FILE node itself
+// (module-level calls, top-level JSX) are excluded: callHierarchy only roots at
+// callables, so a precise pass can neither confirm nor refute them and they
+// legitimately coexist with coverage.
 func (s *Store) NameCallEdgesOnResolvedFiles(projectID int64) ([]NameEdgeFile, error) {
 	rows, err := s.db.Query(`
 		SELECT n.file_path, n.language, c.resolver, COUNT(*) AS name_edges
 		FROM edges e
 		JOIN nodes n ON e.source_id = n.id
 		JOIN call_graph_coverage c ON c.project_id = n.project_id AND c.file_path = n.file_path
-		WHERE n.project_id = ? AND e.edge_type = ? AND e.provenance = ?
+		WHERE n.project_id = ? AND e.edge_type = ? AND e.provenance = ? AND n.kind <> 'file'
 		GROUP BY n.file_path, n.language, c.resolver
 		ORDER BY n.file_path`, projectID, EdgeCalls, ProvName)
 	if err != nil {

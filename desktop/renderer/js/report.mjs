@@ -34,6 +34,8 @@ import {
   shortPath,
 } from './components.mjs'
 import { langFromPath } from './highlight.mjs'
+import { languageBar, routeStrip, featureCard, surfaceCounts, surfaceLabel, flowList, roleBadges } from './learn-ui.mjs'
+import { featureFlowTarget, featureLabel, shortNum, baseName } from './learn.mjs'
 
 const CALLOUT_KEYS = {
   note: 'info',
@@ -228,6 +230,9 @@ export const RENDERERS = {
   explore: renderExplore,
   readorder: renderReadOrder,
   map: renderMap,
+  atlas: renderAtlas,
+  features: renderFeatures,
+  flow: renderFlow,
   symlist: renderSymListReport,
   relation: renderRelation,
   references: renderReferences,
@@ -748,6 +753,95 @@ function renderMap(json, ctx) {
       : null,
     json.hubs?.length ? card({ title: 'Hubs', body: symList(json.hubs, { onPick: ctx.onSymbol, meta: (r) => `fan-in ${fmt.num(r.in_degree)}${r.shared_name ? ` · ${r.shared_name} share this name` : ''}` }) }) : null,
     json.entrypoints?.length ? card({ title: 'Likely entrypoints', body: symList(json.entrypoints, { onPick: ctx.onSymbol, meta: (r) => [r.reason, r.score !== undefined ? `score ${Number(r.score).toFixed(2)}` : null].filter(Boolean).join(' · ') }) }) : null,
+  ])
+}
+
+function renderAtlas(json, ctx) {
+  const tree = json.tree || {}
+  const totals = json.totals || tree
+  const kids = tree.children || []
+  const open = (prefix) => ctx.go?.('atlas', { prefix })
+  return h('div.stack', [
+    countsRow([
+      ['dirs', totals.dirs],
+      ['files', totals.files],
+      ['symbols', totals.symbols],
+      ['lines', totals.lines],
+      ['tests', totals.tests],
+      ['nodes', json.nodes_emitted],
+    ]),
+    json.indexed === false ? callout('warn', 'not indexed', 'Index the project to build the atlas.') : null,
+    json.truncated ? callout('info', 'truncated', 'The atlas hit its node cap. Zoom into a directory with --prefix to see the rest.') : null,
+    json.summary ? h('p', { style: 'margin:0;color:var(--text-2);line-height:1.6;max-width:760px' }, json.summary) : null,
+    Object.keys(totals.languages || {}).length ? languageBar(totals.languages, { legend: true, max: 7 }) : null,
+    kids.length
+      ? card({
+          title: tree.path ? `Inside ${tree.path}` : 'Top level',
+          sub: `${kids.length} of ${tree.children_total ?? kids.length}`,
+          actions: [h('button.btn.sm.primary', { type: 'button', onclick: () => open(json.prefix || '') }, '▦ Open in Atlas')],
+          body: h('div.rep-list', kids.slice(0, 60).map((c) =>
+            h('button.rep-row', { type: 'button', onclick: () => open(c.path) }, [
+              h('span.rep-name', c.type === 'dir' ? `${baseName(c.path)}/` : baseName(c.path)),
+              h('span.rep-sum', c.summary || ''),
+              h('span.rep-lang', Object.keys(c.languages || {}).length ? languageBar(c.languages, { thin: true }) : null),
+              h('span.rep-n', `${shortNum(c.symbols ?? 0)} sym`),
+              h('span.rep-roles', roleBadges(c.roles)),
+            ]),
+          )),
+        })
+      : null,
+    tree.key_symbols?.length ? card({ title: 'Key symbols', body: symList(tree.key_symbols, { onPick: ctx.onSymbol, meta: (r) => (r.doc ? String(r.doc).split('\n')[0] : '') }) }) : null,
+  ])
+}
+
+function renderFeatures(json, ctx) {
+  const list = json.features || []
+  const counts = surfaceCounts(list)
+  const openFlow = (f) => {
+    const t = featureFlowTarget(f)
+    if (t) ctx.go?.('flow', { ...t, label: featureLabel(f), description: f.description, feature: f })
+  }
+  return h('div.stack', [
+    h('div.row.gap2', [
+      ...counts.map(([s, n]) => badge(`${fmt.num(n)} ${surfaceLabel(s, n)}`, 'accent')),
+      ...(json.frameworks || []).map((f) => badge(f, 'plain')),
+    ]),
+    json.indexed === false ? callout('warn', 'not indexed', 'Index the project to detect features.') : null,
+    json.truncated ? callout('info', 'truncated', 'The list hit its cap. Narrow it with --query or --kind.') : null,
+    list.length
+      ? card({
+          title: 'Features',
+          sub: `${list.length} of ${json.features_total ?? list.length}`,
+          actions: [h('button.btn.sm.primary', { type: 'button', onclick: () => ctx.go?.('features') }, '✦ Open Features')],
+          body: h('div.fc-list.compact', list.slice(0, 60).map((f) => featureCard(f, { compact: true, onOpen: openFlow }))),
+        })
+      : emptyState({ icon: '✦', title: 'No features detected', note: 'Nothing matched the filters, or the detectors do not know this framework yet.' }),
+  ])
+}
+
+function renderFlow(json, ctx) {
+  const root = json.root
+  if (json.found === false || !root) {
+    return callout('warn', 'No definition found', 'Nothing in the index matches that symbol or position.')
+  }
+  return h('div.stack', [
+    countsRow([
+      ['steps', `${json.steps_emitted ?? '?'}/${json.steps_total ?? json.steps_emitted ?? '?'}`],
+      ['max depth', json.max_depth],
+      ['ambiguous calls', json.ambiguous_calls],
+      ['files', json.files?.length],
+    ]),
+    h('div.row.gap2', [kindBadge(root.kind || 'function'), h('span.mono', root.fqn || root.symbol), root.file ? h('span.small.dim.mono', `${root.file}:${root.start_line}`) : null]),
+    json.subsystems?.length ? routeStrip(json.subsystems) : null,
+    card({
+      title: 'Call tree',
+      sub: 'in call order',
+      actions: [
+        h('button.btn.sm.primary', { type: 'button', onclick: () => ctx.go?.('flow', { selector: root.selector, symbol: root.fqn || root.symbol, label: root.symbol }) }, '⇢ Open in Flow'),
+      ],
+      body: flowList(root, { max: 120, onPick: (n) => ctx.onSymbol?.(n) }),
+    }),
+    json.notes?.length ? h('details', [h('summary.small.muted', `${json.notes.length} note(s)`), h('div.small.muted', { style: 'white-space:pre-wrap;margin-top:6px' }, json.notes.join('\n'))]) : null,
   ])
 }
 
@@ -1526,6 +1620,7 @@ function humanKey(key) {
 /** Build a {nodes, edges} payload from any report that carries relations. */
 export function graphPayloadFor(feat, json) {
   if (!json || typeof json !== 'object') return null
+  if (feat?.id === 'flow' || (json.root && json.steps_total !== undefined)) return flowGraphPayload(json)
   const nodes = new Map()
   const edges = []
   const addNode = (o, role) => {
@@ -1611,6 +1706,37 @@ export function graphPayloadFor(feat, json) {
     nodes: [...nodes.values()],
     edges,
     title: json.symbol || json.file || json.query || feat?.title || 'graph',
+    subtitle: `${nodes.size} nodes · ${edges.length} edges · call_graph ${json.call_graph || '?'}`,
+  }
+}
+
+/** A flow's call tree as graph nodes + parent→child call edges. */
+function flowGraphPayload(json) {
+  const root = json?.root
+  if (!root) return null
+  const nodes = new Map()
+  const edges = []
+  const idOf = new Map()
+  const add = (n, role) => {
+    if (!n?.file) return null
+    const id = `${n.file}:${n.start_line ?? 0}:${n.fqn || n.symbol || ''}`
+    if (!nodes.has(id)) {
+      nodes.set(id, { id, label: n.symbol || n.fqn || n.file, fqn: n.fqn || n.symbol || '', kind: n.kind || 'function', file: n.file, line: n.start_line ?? 0, role, depth: n.depth })
+    }
+    idOf.set(n.id, id)
+    return id
+  }
+  const walk = (n, parentId) => {
+    const id = add(n, parentId ? 'callee' : 'focus')
+    if (id && parentId && id !== parentId) edges.push({ source: parentId, target: id, type: 'calls', confidence: n.confidence === 'candidate' ? 'candidate' : 'confirmed' })
+    for (const c of n.children || []) walk(c, id || parentId)
+  }
+  walk(root, null)
+  if (nodes.size < 2) return null
+  return {
+    nodes: [...nodes.values()],
+    edges,
+    title: root.fqn || root.symbol || 'flow',
     subtitle: `${nodes.size} nodes · ${edges.length} edges · call_graph ${json.call_graph || '?'}`,
   }
 }

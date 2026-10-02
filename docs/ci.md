@@ -43,8 +43,8 @@ job summary, which works on push events and forked PRs where commenting is block
 `--precise --no-embed` — the review is purely structural, so CI needs no Ollama
 and no embedding keys. For TypeScript/JavaScript/Python repos, opt into language-server
 installs via the action's inputs; without them the comment says honestly that the
-call graph is unresolved. Plain function calls in these languages have no name-based
-fallback (the base TS/JS JSX/import/framework edges are candidates, not resolved coverage),
+call graph is unresolved. Complete function calls in these languages need `--precise` (the base
+TS/JS JSX, import, framework, same-file call, and imported-binding edges are candidates, not resolved coverage; Python has none),
 and `fail-on-untested: true` fails closed because their test coverage cannot be established.
 
 The Action fails closed on infrastructure and policy ambiguity: a nonzero index or
@@ -132,9 +132,10 @@ when a staged change touches an untested symbol or its test coverage is unresolv
   with the language server/`go/types` on every commit would blow past the "fast
   enough for a hook" bar. Name-based resolution is what's already indexed, so
   the hook stays well under 2s on a small diff; the cost is the usual
-  same-named-method over-match on cross-package Go calls, and plain TypeScript/
-  JavaScript/Python function calls get **no** call graph without `--precise`
-  (TS/JS JSX/import edges are name-based candidates only). Their risk
+  same-named-method over-match on cross-package Go calls, and TypeScript/
+  JavaScript/Python get only a partial call graph without `--precise`
+  (TS/JS JSX, import, same-file call, and imported-binding edges are name-based candidates only;
+  Python has none). Their risk
   factor becomes `unresolved` → `level:"unknown"`, which `--fail-on-risk` never
   trips on an otherwise complete report. The default `--fail-on-untested` does fail
   closed in that state because test coverage is unknown; see the honesty rule in the CLI guide.

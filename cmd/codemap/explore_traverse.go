@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
@@ -201,8 +202,13 @@ func renderTraverse(rep *app.TraverseReport) {
 			if hop.Direction == graph.TraversalIncoming {
 				arrow = "←"
 			}
+			name := disp(hop.Symbol.FQN, hop.Symbol.Symbol)
+			if hop.TargetScope == app.DependencyTargetPackage {
+				// A Go import targets a package; the file is only a representative.
+				name = "package " + path.Dir(hop.Symbol.File)
+			}
 			fmt.Printf("  d%-2d %s %-12s %-36s %s:%d  [%s]\n",
-				hop.Depth, arrow, hop.EdgeType, truncStr(disp(hop.Symbol.FQN, hop.Symbol.Symbol), 36),
+				hop.Depth, arrow, hop.EdgeType, truncStr(name, 36),
 				hop.Symbol.File, hop.Symbol.StartLine, hop.Confidence)
 		}
 	}

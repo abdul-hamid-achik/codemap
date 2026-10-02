@@ -197,6 +197,25 @@ func mergeShifted(res *extract.FileResult, fr *extract.FileResult, offset int) {
 	}
 	for _, r := range fr.References {
 		r.Line += shift
+		if r.FromLine > 0 {
+			r.FromLine += shift
+		}
+		if r.ToLine > 0 {
+			r.ToLine += shift
+		}
+		// File-scoped references (tsscan call candidates) name the delegate's
+		// synthetic sibling path; rebind them to the real .vue file.
+		if fr.Path != "" {
+			if r.From == fr.Path {
+				r.From = res.Path
+			}
+			if r.FromFile == fr.Path {
+				r.FromFile = res.Path
+			}
+			if r.ToFile == fr.Path {
+				r.ToFile = res.Path
+			}
+		}
 		res.References = append(res.References, r)
 	}
 	res.Imports = append(res.Imports, fr.Imports...)

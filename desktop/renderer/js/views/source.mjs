@@ -18,7 +18,7 @@ export function sourceView(ctx, initial = {}) {
   const detailHost = h('div')
   let files = []
   let filtered = []
-  let filterText = ''
+  let filterText = initial.filter || ''
   let current = null // {path, text, symbols, lang}
   let line = initial.line || 0
 
@@ -270,5 +270,11 @@ export function sourceView(ctx, initial = {}) {
   return {
     node: host,
     open: (file, l) => openFile(file, { line: l }),
+    navigate(opts = {}) {
+      if (opts.filter !== undefined) {
+        filterText = opts.filter || ''
+        if (files.length) drawTree()
+      }
+    },
   }
 }

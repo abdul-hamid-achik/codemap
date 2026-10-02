@@ -19,6 +19,10 @@ type HotspotRef struct {
 	StartLine  int    `json:"start_line"`
 	InDegree   int    `json:"in_degree"`
 	SharedName int    `json:"shared_name,omitempty"` // defs sharing this name (>1 ⇒ in-degree inflated)
+	// EffectiveInDegree is the ranking key: precise in-degree plus name-based
+	// in-degree divided by the number of definitions sharing the name (see
+	// graph.RankedHotspots). It equals in_degree for uniquely-named symbols.
+	EffectiveInDegree float64 `json:"effective_in_degree"`
 	// QueryFrequency counts how many past searches surfaced this symbol —
 	// the learning-from-use signal (additive in v1, omitted when 0). A
 	// consumer can tie-break equal-confidence hubs by how often they were
@@ -33,6 +37,16 @@ type HotspotsReport struct {
 	CallGraph  string       `json:"call_graph"`           // resolved|name|unresolved|none across project callable definitions
 	Resolution string       `json:"resolution,omitempty"` // human explanation when some callable graph is unavailable
 	Note       string       `json:"note,omitempty"`
+	// TestsExcluded is true when test code was left out of the ranking (the
+	// default): test callers do not count and test-defined symbols are not ranked.
+	TestsExcluded bool `json:"tests_excluded"`
+	total         int  // exact number of ranked hubs before the limit
+}
+
+// HotspotOpts bounds and tunes Hotspots.
+type HotspotOpts struct {
+	Limit        int
+	IncludeTests bool // count test callers and rank test-defined symbols too
 }
 
 // OrphansReport is returned by Orphans. Resolution carries the same
@@ -276,13 +290,26 @@ func readLineRange(path string, start, end int) (string, error) {
 	return strings.Join(lines[start-1:end], "\n"), nil
 }
 
-// Hotspots returns the most-referenced nodes (hubs).
+// Hotspots returns the most-referenced nodes (hubs), tests excluded.
 func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
+	return svc.HotspotsWith(cwd, HotspotOpts{Limit: limit})
+}
+
+// HotspotsWith is Hotspots with options. Hubs are ranked by effective in-degree
+// (graph.RankedHotspots: name-based in-degree divided by the number of definitions
+// sharing the name, precise edges counted fully); in_degree and shared_name keep
+// their raw meaning. Unless opts.IncludeTests, calls from test code do not count
+// and symbols defined in test code are not ranked.
+func (svc *Service) HotspotsWith(cwd string, opts HotspotOpts) (*HotspotsReport, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
 	pid, name, found, err := svc.project(cwd)
 	if err != nil {
 		return nil, err
 	}
-	rep := &HotspotsReport{Project: name, Hotspots: []HotspotRef{}, CallGraph: CallGraphNone}
+	rep := &HotspotsReport{Project: name, Hotspots: []HotspotRef{}, CallGraph: CallGraphNone, TestsExcluded: !opts.IncludeTests}
 	if !found {
 		return rep, nil
 	}
@@ -294,32 +321,33 @@ func (svc *Service) Hotspots(cwd string, limit int) (*HotspotsReport, error) {
 	resolvedFiles, _ := g.CallGraphResolvedFiles(pid)
 	rep.CallGraph = callGraphEnum(resolvedFiles, callables)
 	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, callables); unavailable {
-		rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — hotspot rankings are incomplete; run 'codemap index --precise'", lang) + svc.coverageHintResolved(g, pid, resolvedFiles)
+		head, _ := callGraphGap(lang)
+		rep.Resolution = fmt.Sprintf("%s — hotspot rankings are incomplete; run 'codemap index --precise'", head) + svc.coverageHintResolved(g, pid, resolvedFiles)
 		rep.Note = "hotspot ranking is unreliable while some callable files are unresolved"
 	}
-	hs, err := g.Hotspots(pid, limit)
+	ranked, err := g.RankedHotspots(pid, graph.HotspotRankOptions{IncludeTests: opts.IncludeTests})
 	if err != nil {
 		return nil, err
 	}
-	// Flag entries whose in-degree is inflated by name-based fan-out (e.g. six
-	// Close() methods each credited with every Close call). The flag is
-	// provenance-aware: it fires only when the name is shared (>1 def) AND the node
-	// still has name-based in-edges — so on a `--precise` index, where those edges
-	// were resolved exactly, an accurate count is no longer mislabeled "inflated".
-	shared, _ := g.SymbolDefCounts(pid)
-	ids := make([]int64, len(hs))
-	for i, h := range hs {
-		ids[i] = h.Node.ID
+	rep.total = len(ranked)
+	if len(ranked) > limit {
+		ranked = ranked[:limit]
 	}
-	nameInflated, _ := g.HasNameInEdges(ids)
 	queryHits, _ := g.QueryHitCounts(pid)
-	for _, h := range hs {
+	for _, h := range ranked {
 		ref := HotspotRef{
 			Symbol: h.Node.Symbol, FQN: h.Node.FQN, Kind: h.Node.Kind,
 			File: h.Node.FilePath, StartLine: h.Node.StartLine, InDegree: h.InDegree,
+			EffectiveInDegree: round2(h.EffectiveInDegree),
 		}
-		if n := shared[h.Node.Symbol]; n > 1 && nameInflated[h.Node.ID] {
-			ref.SharedName = n
+		// Flag entries whose in-degree is inflated by name-based fan-out (e.g. six
+		// Close() methods each credited with every Close call). The flag is
+		// provenance-aware: it fires only when the name is shared (>1 def) AND the
+		// node still has name-based in-edges — so on a `--precise` index, where
+		// those edges were resolved exactly, an accurate count is no longer
+		// mislabeled "inflated".
+		if h.SharedDefs > 1 && h.NameInDegree > 0 {
+			ref.SharedName = h.SharedDefs
 		}
 		ref.QueryFrequency = queryHits[h.Node.Symbol]
 		rep.Hotspots = append(rep.Hotspots, ref)
@@ -346,7 +374,8 @@ func (svc *Service) Orphans(cwd string, limit int) (*OrphansReport, error) {
 		resolvedFiles, _ := g.CallGraphResolvedFiles(pid)
 		rep.CallGraph = callGraphEnum(resolvedFiles, callables)
 		if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, callables); unavailable {
-			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — orphan candidates are incomplete", lang) + svc.coverageHintResolved(g, pid, resolvedFiles)
+			head, _ := callGraphGap(lang)
+			rep.Resolution = fmt.Sprintf("%s — orphan candidates are incomplete", head) + svc.coverageHintResolved(g, pid, resolvedFiles)
 			rep.Note = "orphan list is unreliable — run 'codemap index --precise' to resolve the call graph, then re-check"
 		}
 	}
@@ -461,9 +490,11 @@ func (svc *Service) finishPathReport(g *graph.Store, pid int64, rep *PathReport,
 	rep.CallGraph = callGraphEnum(resolvedFiles, confidenceNodes)
 	if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, confidenceNodes); unavailable {
 		if rep.Found {
-			rep.Resolution = fmt.Sprintf("a path was found, but the %s call graph is not available without precise indexing — path completeness is unresolved", lang)
+			head, state := callGraphGap(lang)
+			rep.Resolution = fmt.Sprintf("a path was found, but %s; path completeness is %s", head, state)
 		} else {
-			rep.Resolution = fmt.Sprintf("call graph not available for %s without precise indexing — whether this path exists is unresolved", lang)
+			head, state := callGraphGap(lang)
+			rep.Resolution = fmt.Sprintf("%s — whether this path exists is %s", head, state)
 		}
 		rep.Resolution += svc.coverageHintResolved(g, pid, resolvedFiles)
 	}

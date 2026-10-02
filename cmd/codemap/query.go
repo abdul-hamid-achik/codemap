@@ -135,7 +135,7 @@ no dynamic or otherwise-unindexed wiring.`,
 	}
 	hotspotsCmd = &cobra.Command{
 		Use:   "hotspots",
-		Short: "List the most-referenced symbols (hubs)",
+		Short: "List the most-referenced symbols (hubs), ranked by same-name-corrected in-degree; tests ignored",
 		RunE:  runHotspots,
 	}
 	orphansCmd = &cobra.Command{
@@ -225,7 +225,7 @@ Distinct from 'codemap semantic' (meaning/similarity search over embeddings) and
 	}
 	docsCmd = &cobra.Command{
 		Use:   "docs [topic]",
-		Short: "Print the agent guide to codemap (topics: overview, workflow, commands, annotations, accuracy, ecosystem)",
+		Short: "Print the agent guide to codemap (topics: " + strings.Join(app.DocTopicNames(), ", ") + ")",
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runDocs,
 	}
@@ -964,7 +964,8 @@ func runReadOrder(cmd *cobra.Command, args []string) error {
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	rep, err := svc.ReadOrder(cwd, app.ReadOrderOpts{Top: top, Query: query})
+	includeTests, _ := cmd.Flags().GetBool("include-tests")
+	rep, err := svc.ReadOrder(cwd, app.ReadOrderOpts{Top: top, Query: query, IncludeTests: includeTests})
 	if err != nil {
 		return err
 	}
@@ -1393,7 +1394,8 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
 	}
-	rep, err := svc.Hotspots(cwd, top)
+	includeTests, _ := cmd.Flags().GetBool("include-tests")
+	rep, err := svc.HotspotsWith(cwd, app.HotspotOpts{Limit: top, IncludeTests: includeTests})
 	if err != nil {
 		return err
 	}
@@ -1408,9 +1410,11 @@ func runHotspots(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Hotspots in %s:\n", rep.Project)
 	anyInflated := false
 	for _, h := range rep.Hotspots {
-		line := fmt.Sprintf("  %4d  %-36s %s:%d", h.InDegree, disp(h.FQN, h.Symbol), h.File, h.StartLine)
+		// The leading column is the ranking key (effective in-degree); the raw
+		// caller count is shown on rows where the two differ.
+		line := fmt.Sprintf("  %5s  %-36s %s:%d", fmtEffective(h.EffectiveInDegree), disp(h.FQN, h.Symbol), h.File, h.StartLine)
 		if h.SharedName > 1 { // count fanned across same-named defs (name-based)
-			line += fmt.Sprintf("  ⚠ name shared by %d (inflated)", h.SharedName)
+			line += fmt.Sprintf("  ⚠ name shared by %d (inflated) — %d raw callers", h.SharedName, h.InDegree)
 			anyInflated = true
 		}
 		fmt.Println(line)

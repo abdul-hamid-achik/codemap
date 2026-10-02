@@ -18,18 +18,28 @@ or a single LSP call cannot — *"who calls this and what tests cover it"*, *"wh
 radius of changing this type across all my projects"*, *"find auth-like code, then show me
 what calls it."*
 
-Two surfaces over one structural store (semantic retrieval may be delegated to vecgrep):
+Three surfaces over one structural store (semantic retrieval may be delegated to vecgrep):
 - **CLI** — human commands *and* `--json` machine output for agents (Cobra).
 - **MCP server** — `codemap serve` (stdio), `codemap_*` tools for agents.
+- **Codemap Studio** — the Electron desktop app in `desktop/`; it never reimplements anything,
+  every panel spawns `codemap … --json` (see `docs/desktop.md`).
 
-Product docs for humans start at `docs/quick-start.md`; agent workflows at `docs/agents.md` and `docs/mcp.md`. The former Studio TUI is not shipped — use CLI + MCP instead (see `docs/studio.md`).
+Product docs for humans start at `docs/quick-start.md`; agent workflows at `docs/agents.md` and `docs/mcp.md`. The learning layer (`atlas`, `features`, `flow`) is documented for both audiences at `docs/learn.md`. The terminal Studio TUI was retired: `internal/tui` and `specs/studio*.yml` are unwired legacy (nothing imports the package and there is no `codemap studio` command); do not extend them.
 
 Key features:
+- **Learning layer** — `atlas` (the repo as a described dir/file tree: metrics, roles, summaries
+  read from READMEs/package docs/leading comments — never generated — key symbols, coupling),
+  `features` (capability inventory: CLI commands, HTTP routes, MCP/RPC tools, pages, programs, each
+  with its registration description, handler selector and bounded footprint; Go registrations via
+  `go/ast`, TS/JS/Python by pattern) and `flow` (call tree from one entry in call order, docs per
+  step, same-name fan-out collapsed). Rankings (`read-order`, `hotspots`, `map` hubs) ignore test
+  code by default and divide name-based in-degree by the number of same-named definitions.
 - **Structural graph** — nodes (files, functions, types, methods, tests) + `calls`/`defines` edges
   in pure-Go SQLite (Go, Ruby, and Lua call edges are name-based by default, Go exact via `go/types`
-  with `--precise`; base TS/JS gets name-based JSX component-usage call edges, import edges, and
-  Next.js framework-wiring references via `tsscan`, while plain TS/JS/Python function-call edges
-  come only from `--precise` via `callHierarchy`;
+  with `--precise`; base TS/JS gets name-based JSX component-usage call edges, high-precision
+  name-based call candidates for same-file calls and imported bindings (`tsscan.CallRefs`), import
+  edges, and Next.js framework-wiring references via `tsscan`, while the complete TS/JS call graph
+  and all Python function-call edges come only from `--precise` via `callHierarchy`;
   Vue SFC script blocks currently produce symbols + `defines` + import edges but no call graph;
   Go callback/handler uses and TS/JS framework wiring are persisted as `references`; Go imports are
   package-scoped evidence, TS/JS/Vue/Ruby/Lua imports resolve file→file;
@@ -60,7 +70,7 @@ codemap/
 │                            #   Each RunE handler is THIN → opens a session → calls internal/app.
 │                            #   Files carry the header `/* Copyright © 2026 abdul hamid <abdulachik@icloud.com> */`.
 ├── internal/
-│   ├── app/                 # shared service layer; CLI + MCP + TUI all call this
+│   ├── app/                 # shared service layer; CLI + MCP (and the desktop app, via the CLI) call this
 │   │   ├── service_core.go        #   Service + Session wiring, common helpers
 │   │   ├── service_init.go        #   init / index / status
 │   │   ├── service_query.go       #   callers / callees / path / symbols / find / source
@@ -80,6 +90,9 @@ codemap/
 │   │   ├── risk.go                #   0..1 change-risk score
 │   │   ├── readorder.go           #   entrypoint + hub ranking
 │   │   ├── service_map.go         #   bounded architecture overview (subsystems/bridges/hubs/entrypoints)
+│   │   ├── atlas.go / atlas_summary.go # described dir/file tree (metrics, roles, summaries, key symbols)
+│   │   ├── features*.go           #   capability inventory: scan registrations → handlers → bounded footprints
+│   │   ├── flow*.go               #   call tree in call order (call-site scan, ambiguity collapse, docs)
 │   │   ├── service_explore.go     #   intent search → bounded exact structural neighborhoods
 │   │   ├── service_traverse.go    #   durable-selector heterogeneous graph traversal
 │   │   ├── service_task_context.go #  mode-scoped task orientation bundle (task-context/codemap_task_context)
@@ -100,11 +113,15 @@ codemap/
 │   │   ├── schema.go         #   SQL schema + migrations (PRAGMA user_version); edges.provenance
 │   │   ├── queries.go        #   callers/callees, blast radius, hotspots/orphans/path
 │   │   ├── topology.go       #   deterministic source-path subsystems + directed bridges
+│   │   ├── ranking.go        #   de-noised importance (tests excluded, same-name in-degree divided)
+│   │   ├── testpaths.go      #   the one shared test-file / test-directory heuristic (IsTestPath/IsTestNode)
 │   │   ├── traversal.go      #   bounded cycle-safe typed-edge walks
 │   │   ├── dependencies.go   #   deduped inbound call/reference/import evidence
 │   │   └── references.go     #   project-scoped inbound references with ambiguity metadata
 │   ├── extract/              # code structure extraction (pluggable backends)
 │   │   ├── extractor.go      #   Extractor interface + Symbol/Reference/FileResult
+│   │   ├── featuresrc/       #   feature registrations: Go AST (cobra/urfave/net-http/chi/gin/echo/MCP/gRPC/main),
+│   │   │                     #   TS/JS/Python patterns, Next.js paths, package.json bin
 │   │   ├── gosrc/            #   stdlib go/parser backend (pure Go, default for Go)
 │   │   ├── typesrc/          #   in-process go/types pass (Go --precise; exact call edges)
 │   │   ├── lspsrc/           #   LSP-backed extractor (documentSymbol → symbols; callHierarchy)
@@ -125,8 +142,8 @@ codemap/
 │   │   ├── watcher.go        #   fsnotify watcher (daemon hook)
 │   │   └── import_index.go   #   resolve import specifiers to file→file import edges
 │   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app
-│   │                        #   (45 full; 26 agent/core — CODEMAP_MCP_PROFILE)
-│   ├── tui/                   # studio TUI (Charm v2): model/view/theme/run + anim + highlight
+│   │                        #   (48 full; 28 agent/core — CODEMAP_MCP_PROFILE)
+│   ├── tui/                   # LEGACY, unwired (nothing imports it; no `codemap studio` command) — do not extend
 │   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search/Path)
 │   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
 │   │   ├── theme.go          #   lipgloss v2 styles
@@ -179,8 +196,8 @@ codemap/
 
 **Package boundaries are part of the contract.** The dependency direction is one-way:
 `cmd → app → {graph, vector, index, extract, embed, lsp, config, daemon, git, snapshot,
-branchstate, cachestate}`. The `tui`, `mcp`, and CLI RunE handlers are all *thin* and call
-`internal/app`. Never put business logic in `mcp` or `tui`. (Same rule glyphrun documents
+branchstate, cachestate}`. The `mcp` package and CLI RunE handlers are all *thin* and call
+`internal/app`; the desktop app only spawns the CLI. Never put business logic in `mcp` or `desktop/`. (Same rule glyphrun documents
 for its own MCP package.)
 
 ## Documentation Discipline (read this)
@@ -258,11 +275,23 @@ task install         # go install ./cmd/codemap
   (`.tsx`/`.jsx` only; member expressions resolve to the root binding, lowercase intrinsics never
   match, comments/strings are sanitized), and Next.js framework-wiring references (App Router
   special files, `route.ts` HTTP verbs, middleware, Pages Router) so React components and
-  framework entrypoints stop reading as orphans. These edges carry candidate weight (0.7);
-  `--precise` additionally resolves exact call edges via
-  `callHierarchy` in `Indexer.resolveLSPCallEdges` and supersedes the candidates per file
-  (an EMPTY on-demand precise answer never erases non-empty name-based candidates —
-  see `autoUpgradeRelation`). The import resolver understands `@/`/`~/` aliases and
+  framework entrypoints stop reading as orphans. `tsscan.CallRefs` adds the text-attributable
+  subset of plain calls (any TS/JS/Vue file): `name(`/`new Name(`/`await name(` to a function,
+  class or variable defined in the SAME file and lexically visible, `Owner.member(` for a
+  same-file member, `this.method(` to the same class, and calls through an import binding
+  (named/default/namespace, `require`) — the latter carry `Reference.ImportSpec`, which
+  `Indexer.bindImportRefs` resolves with the project import resolver into `ToFile`, so the edge
+  lands only on that file's export (a package import or unresolved specifier yields no edge;
+  barrel re-exports are not followed). File-scoped refs (`FromFile`/`ToFile`, with
+  `FromLine`/`ToLine` for repeated FQNs) resolve through `resolveScopedRef`, never by
+  project-wide name. Known false positives: a parameter/local shadowing a same-file or imported
+  callable name. These edges carry candidate weight (0.7, provenance `name`) but the `call_graph`
+  enum stays `unresolved` for uncovered TS/JS — the graph is partial, notes say so
+  (`callGraphGap`); `--precise` additionally resolves exact call edges via
+  `callHierarchy` in `Indexer.resolveLSPCallEdges` and supersedes the file's name-based call
+  candidates (JSX and `tsscan.CallRefs`) whenever its callHierarchy answer is complete and
+  non-empty (an EMPTY precise answer, and the on-demand `autoUpgradeRelation` path, never erase
+  non-empty name-based candidates). The import resolver understands `@/`/`~/` aliases and
   monorepo workspace packages via `package.json` names (`exports`/`module`/`main`), resolved
   deterministically on duplicate names. `appendSymbols` drops
   Variable symbols nested inside a callable (pyright reports params/locals as variables). A Go-only repo
@@ -339,16 +368,16 @@ task install         # go install ./cmd/codemap
   tool, `glyph`, reported "Failed to connect" in Claude Code purely because it used
   Content-Length framing. vecgrep/noted/vidtrace use newline-delimited and connect fine.)
 - `ServerOptions.Instructions` should give agents a one-paragraph usage hint.
-- Tool names are `codemap_`-prefixed. Current set (45, full profile; agent/core = 26): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `file_context`, `refactor_plan`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `coverage`, `read_order`, `map`, `explore`, `traverse`, `task_context`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `grep`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Project-scoped tools generally take an optional `path` (project dir, defaults to cwd) and return JSON; `projects`, `docs`, and `doctor` take no project path. Callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `map` returns bounded source-path subsystems, directed cross-subsystem bridges, entrypoints, and hubs; `explore` turns an intent query into bounded semantic/name seeds plus exact context neighborhoods; `traverse` walks selected relationship domains from a required durable selector with per-edge confidence; `task_context` composes freshness, explore seeds, brief contexts, impact drill-downs, and related files into one mode-scoped task orientation (`understand|change|debug`; schema `codemap.task-context.v1`); `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `refactor_plan` plans a rename/move (call sites, value references, dependent files, covering tests, blast radius); `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path (`external_id` makes automated writes idempotent within project + source); `coverage` returns per-file precise call-graph coverage rolled up by language/directory — the project-wide, per-file signal behind the per-query `call_graph` enum. `codemap_map`, `codemap_traverse`, `codemap_refactor_plan`, and `codemap_task_context` are registered only in the `full` MCP profile.
+- Tool names are `codemap_`-prefixed. Current set (48, full profile; agent/core = 28): `init`, `index`, `status`, `doctor`, `semantic`, `callers`, `callees`, `references`, `impact`, `file_impact`, `file_context`, `refactor_plan`, `dependencies`, `review`, `secret_impact`, `required_keys`, `risk`, `hotspots`, `orphans`, `coverage`, `read_order`, `map`, `atlas`, `features`, `flow`, `explore`, `traverse`, `task_context`, `path`, `related_files`, `symbols`, `symbol_at`, `find`, `grep`, `source`, `context`, `context_batch`, `projects`, `docs`, `annotate`, `annotations`, `unannotate`, `branch_status`, `branch_switch`, `cache_save`, `cache_restore`, `cache_list`, `cache_drop`. Project-scoped tools generally take an optional `path` (project dir, defaults to cwd) and return JSON; `projects`, `docs`, and `doctor` take no project path. Callers/callees take `precise`; `references` returns bounded callback/handler value-use sites with partial-coverage confidence; `map` returns bounded source-path subsystems, directed cross-subsystem bridges, entrypoints, and hubs; `explore` turns an intent query into bounded semantic/name seeds plus exact context neighborhoods; `traverse` walks selected relationship domains from a required durable selector with per-edge confidence; `task_context` composes freshness, explore seeds, brief contexts, impact drill-downs, and related files into one mode-scoped task orientation (`understand|change|debug`; schema `codemap.task-context.v1`); `dependencies` returns bounded inbound call/reference/import evidence plus domain coverage; `source` returns a symbol's body; `context` bundles a symbol's definition+callers+callees+value references+covering tests+blast radius; `refactor_plan` plans a rename/move (call sites, value references, dependent files, covering tests, blast radius); `docs` returns the agent guide; `annotate`/`annotations` pin/list notes on a symbol or `from→to` path (`external_id` makes automated writes idempotent within project + source); `coverage` returns per-file precise call-graph coverage rolled up by language/directory — the project-wide, per-file signal behind the per-query `call_graph` enum. `atlas` returns the described dir/file tree (`codemap.atlas` schema_version 1); `features` the capability inventory with handler selectors and footprints; `flow` the call-order call tree from one entry. `codemap_map`, `codemap_atlas`, `codemap_traverse`, `codemap_refactor_plan`, and `codemap_task_context` are registered only in the `full` MCP profile; `codemap_features` and `codemap_flow` are taught (agent/core).
 - **Tool profiles**: `CODEMAP_MCP_PROFILE=agent|core|full` (env) / `mcp.profile` (config file) /
   `--profile` on `codemap serve` (flag) gates the registered set at the go-sdk `mcp.AddTool` call
   site (`Server.include`, `internal/mcp/server.go`) — registration-time only, zero behavior change
-  for any tool that IS registered. Default `full` is the back-compatible 45-tool expert surface.
-  `agent` is exactly the 25 tools named by `RenderPlaybook`/the workflow topic plus `codemap_docs`;
+  for any tool that IS registered. Default `full` is the back-compatible 48-tool expert surface.
+  `agent` is exactly the 27 tools named by `RenderPlaybook`/the workflow topic plus `codemap_docs`;
   `TestAgentProfileExactlyMatchesTaughtWorkflow` pins both inclusion and exclusion. `core` preserves
-  its shipped 26-tool inventory and currently matches `agent`, but is a separate compatibility
-  contract. The hermetic `BenchmarkProfileSchemaTax` measures 31,808 schema characters (≈7,952
-  schema-approx-tokens) for agent/core versus 47,784 (≈11,946) for full on the current 45-tool
+  its shipped 28-tool inventory and currently matches `agent`, but is a separate compatibility
+  contract. The hermetic `BenchmarkProfileSchemaTax` measures 35,616 schema characters (≈8,904
+  schema-approx-tokens) for agent/core versus 53,197 (≈13,300) for full on the current 48-tool
   build. Lean profiles also help harnesses with a hard tool-count ceiling (Cursor caps
   ~40 across ALL MCP servers — `codemap agent setup cursor` defaults its generated entry to
   `core` for exactly this reason; every other harness stays `full`).
@@ -360,7 +389,7 @@ task install         # go install ./cmd/codemap
 - The CLI exposes the same service reports for overlapping operations, but it is not a strict
   flag-for-field mirror: CLI `index` additionally has `--watch` and `--no-lsp` (MCP
   `codemap_index` currently has neither), and several operational surfaces are CLI-only. Current
-  commands: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`; repeat `--at`, optionally `--batch`, for bounded partial-success frame batches), `file-impact`, `dependencies`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`), `semantic` (`--top`), `read-order`, `map` (`--top-subsystems`/`--top-bridges`/`--top-hubs`/`--top-entrypoints`), `explore <query>` (`--seeds`/`--edges`/`--depth`), `traverse --at <file>:<line>` (`--direction outgoing|incoming|both`/`--edge-types` CSV/`--depth`/`--limit`), `task-context <task>` (alias `brief`; `--mode understand|change|debug`, repeatable `--at`), `symbols`, `symbol-at`, `find`, `grep` (`--regex`/`-i`), `source`, `context` (multi-arg → batch), `related-files`, `annotate` (`--external-id` for retry-safe writes; `--retarget <id> <symbol>|<from> <to>` repoints an existing annotation after a rename — the repair for dangling notes)/`annotations` (`--rm <id>`), `inconsistencies` (CLI-only, like structural-manifest: the `codemap.inconsistencies.v1` contradictions report — dangling annotations, name-based call edges surviving on precise-resolved files, coverage rows for files with no indexed nodes, plus a stale flag), `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `cache export`/`import` (`--force`; portable team/CI-shareable
+  commands: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`; repeat `--at`, optionally `--batch`, for bounded partial-success frame batches), `file-impact`, `dependencies`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`; `hotspots` and `read-order` take `--include-tests`), `semantic` (`--top`), `read-order`, `map` (`--top-subsystems`/`--top-bridges`/`--top-hubs`/`--top-entrypoints`), `atlas` (`--prefix`/`--depth`/`--files`/`--max-nodes`/`--key-symbols`), `features` (`--kind`/`--query`/`--top`/`--depth`/`--no-footprint`), `flow <symbol>` (or `--at <file>:<line>`; `--depth`/`--max-nodes`/`--include-tests`), `explore <query>` (`--seeds`/`--edges`/`--depth`), `traverse --at <file>:<line>` (`--direction outgoing|incoming|both`/`--edge-types` CSV/`--depth`/`--limit`), `task-context <task>` (alias `brief`; `--mode understand|change|debug`, repeatable `--at`), `symbols`, `symbol-at`, `find`, `grep` (`--regex`/`-i`), `source`, `context` (multi-arg → batch), `related-files`, `annotate` (`--external-id` for retry-safe writes; `--retarget <id> <symbol>|<from> <to>` repoints an existing annotation after a rename — the repair for dangling notes)/`annotations` (`--rm <id>`), `inconsistencies` (CLI-only, like structural-manifest: the `codemap.inconsistencies.v1` contradictions report — dangling annotations, name-based call edges surviving on precise-resolved files, coverage rows for files with no indexed nodes, plus a stale flag), `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `cache export`/`import` (`--force`; portable team/CI-shareable
 index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start`/`status`/`stop`, `agent setup`/`list`/`playbook` (register codemap with an AI coding harness — CLI-only, no MCP tool), `docs`, `serve` — query commands accept `--json`.
   `structural-manifest` and `export-symbols` are also CLI-only: the former is a lightweight
   `codemap.structural-manifest.v1` identity/freshness preflight that streams indexed metadata
@@ -389,8 +418,9 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   from the matching definition files: all covered → `resolved`; uncovered TS/JS/Python/Vue wins →
   `unresolved`; otherwise parser-backed (Go/Ruby/Lua) → `name`. One precise edge never upgrades an unrelated file, and
   changed files lose coverage until their precise pass succeeds again. TS/JS get name-based
-  candidate edges for JSX component usage, imports, and Next.js framework wiring; plain TS/JS
-  function calls and all Python calls have **no** name-based edges, so `--precise` is
+  candidate edges for JSX component usage, imports, Next.js framework wiring, and same-file /
+  imported-binding function calls (a partial graph: other plain calls such as `obj.method()` have
+  no edge); all Python calls have **no** name-based edges, so `--precise` is
   what gives those languages a complete call graph (for Go it *replaces* the name-based edges;
   name-based stays the Go/Ruby/Lua
   default). The Go pass degrades
@@ -494,16 +524,21 @@ change to the preamble or the `workflow`/`accuracy` topics, regenerate the pinne
 
 **Add a graph query:** implement traversal in `internal/graph/queries.go` (BFS with a
 visited set — **always detect cycles**), expose it through `internal/app` (a `service_*.go`
-method), then surface in CLI + MCP + TUI.
+method), then surface in CLI + MCP, plus a desktop panel (registry row in
+`desktop/renderer/js/features.mjs`).
 
 **Data-model change:** edit `internal/graph/schema.go` with a migration; bump the schema
 version; never break an existing index without a rebuild path.
 
-**Add a studio tab/widget:** add the view code in `internal/tui/view.go` and the
-state/keys in `model.go` (there is no `update.go` — model.go holds the update logic; no
-`tab_*.go` convention). Use Charm **v2** (`charm.land/...`). For charts use the hand-rolled
-ASCII bars + the harmonica spring frame loop in `anim.go` — **not** ntcharts (its go.mod
-`replace`s bubbletea to a fork that fights stock `charm.land/bubbletea/v2`; see the Gotchas section).
+**Add a desktop panel or view:** every CLI command needs a row in the registry
+`desktop/renderer/js/features.mjs` (`test/features.test.mjs` audits it against `codemap --help`);
+give it a renderer in `report.mjs` and a trimmed real fixture in `desktop/test/fixtures/`.
+Workspace views live in `desktop/renderer/js/views/` and are routed from `APP_VIEWS`. The renderer
+is dependency-free ES modules — no npm runtime deps; use the theme tokens in `styles/theme.css`.
+Verify with `npm test` (DOM-stubbed renderer over trimmed real fixtures), `npm run test:live`
+(every read-only feature against the real binary) and `npm run smoke` (headless walk + screenshots;
+`SMOKE_ONLY=learn` walks just the Learn views). `npm run icons` re-renders `build/icon.*` from
+`docs/public/mark.svg`; the public screenshots in `docs/public/desktop/` come from a smoke run.
 
 ## Code Style
 
@@ -517,7 +552,7 @@ ASCII bars + the harmonica spring frame loop in `anim.go` — **not** ntcharts (
 
 - High unit coverage on `graph` (traversal, cycles), `extract`, `search`, `config`.
 - Ollama-dependent tests skip when Ollama isn't running.
-- `task race` for the TUI and concurrent indexer.
+- `task race` for the concurrent indexer and daemon.
 - glyphrun specs in `specs/` are the E2E contract: declare **intent + outcomes** (the
   contract) and **steps** (repairable hints). Stamp the `contractHash` with
   `glyph spec verify specs/x.yml --stamp` after an intentional intent/outcome change. Run
@@ -543,9 +578,11 @@ when the user asks.
   is introduced, use the official `github.com/tree-sitter/go-tree-sitter` (not the
   abandoned `smacker` fork) and keep the default release pure-Go.
 - **Flows are local-only (CI skips them)**, and each needs its toolchain:
-  `studio.yml`→`gopls` · `semantic.yml`→local Ollama with `nomic-embed-text` ·
-  `precise.yml`→`go` (runs `index --precise`) · `typescript.yml`/`javascript.yml`/`jsx.yml`/
-  `studio_ts.yml`→`typescript-language-server`+`node` · `python.yml`→`pyright-langserver`+
+  (`studio*.yml` exercise the retired TUI — `codemap studio` no longer exists, so they fail;
+  legacy until removed.)
+  `semantic.yml`→local Ollama with `nomic-embed-text` ·
+  `precise.yml`→`go` (runs `index --precise`) · `typescript.yml`/`javascript.yml`/`jsx.yml`→
+  `typescript-language-server`+`node` · `python.yml`→`pyright-langserver`+
   `node` · `polyglot.yml`→all of them. The toolchain-dependent flows only isolate
   `CODEMAP_DATA`, not `HOME`, so an asdf shim still resolves.
 

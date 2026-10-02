@@ -79,6 +79,8 @@ The existing export-symbols feed carries these definitions to Vecgrep.`},
 
   1. codemap index             # build the graph (+ embeddings if Ollama is up)
   2. where to start            # codemap_read_order  (entrypoints + hubs ranked — orient on a new repo)
+                               # codemap_features  (what the software can DO: CLI commands, routes, MCP tools,
+                               #   pages, programs — each with its handler selector and footprint)
   3. find the entry point      # codemap_semantic "<intent>" OR codemap_find <name>
                                # OR codemap_grep "<exact text>" (string literal, error message, route, env-var)
                                # codemap_explore "<intent>" (fuzzy goal → bounded context neighborhoods, source-light)
@@ -92,7 +94,8 @@ The existing export-symbols feed carries these definitions to Vecgrep.`},
                                # codemap_file_context <file>  (ONE call: symbol outline + file impact + related files)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
                                # codemap_related_files <file>  (the other files structurally tied to this one)
-  7. trace flow                # codemap_path <from> <to>  (shortest call chain)
+  7. trace flow                # codemap_flow <handler>  (how a feature works: call tree in call order, with docs)
+                               # codemap_path <from> <to>  (shortest call chain)
   8. AFTER you edit            # codemap_review  (your diff → changed symbols, blast radius, the TESTS TO RUN)
   9. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
 
@@ -143,6 +146,14 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
   map [--top-subsystems N ...]       architecture overview: subsystems, directed bridges, entrypoints, hubs
                                      (codemap_map is available in the full MCP profile)
+  atlas [--prefix P --depth N --files]  the repo as a described tree: per dir/file size, roles, summary (README,
+                                     package doc, leading comment — never generated), key symbols, coupling
+                                     (codemap_atlas is available in the full MCP profile)
+  features [--kind K --query Q]      capability inventory: CLI commands, HTTP routes, MCP/RPC tools, pages,
+                                     programs — description from the registration, handler selector, footprint
+  flow <sym> | --at <file>:<line> [--depth N --max-nodes N]
+                                     call tree from one entry in call order: docs, subsystems, confidence;
+                                     same-name fan-out collapsed (alternatives) or left ambiguous
   explore <query> [--seeds N --edges N --depth N]
                                      intent search → bounded exact context neighborhoods, no source bodies
                                      (codemap_explore is taught and registered in every MCP profile)
@@ -190,7 +201,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
 callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, secret_impact,
-required_keys, risk, hotspots, orphans, coverage, read_order, map, explore, traverse, task_context, path, related_files, symbols,
+required_keys, risk, hotspots, orphans, coverage, read_order, map, atlas, features, flow, explore, traverse, task_context, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
@@ -250,11 +261,12 @@ pass; for the LSP languages (TypeScript, JavaScript, Python) it drives the langu
 server's callHierarchy. Successful precise coverage is recorded per file; a query is
 "resolved" only when every matched definition file completed the pass. Partial failures
 remain honestly "name" or "unresolved" rather than upgrading the whole project. (TS/JS have
-name-based candidate edges for JSX component usage, imports, and framework wiring at the
-base level — but plain function calls still come only from --precise, so impact/callers/callees
-on a non-JSX TS/JS/Python symbol return a "resolution" note saying the call graph is
-unavailable, NOT a confidently-empty result or untested:true; the callers/tests are
-unresolved, not absent. Ruby and Lua carry name-based call edges from their built-in
+name-based candidate edges at the base level — JSX component usage, imports, framework
+wiring, and plain calls to same-file definitions and imported bindings (arbitrary
+obj.method() calls are not linked) — so the graph is partial until --precise, and
+impact/callers/callees on an uncovered TS/JS/Python symbol return a "resolution" note and
+call_graph:"unresolved", NOT a confidently-empty result or untested:true; missing
+callers/tests are unresolved, not absent. Python has no base-level call edges. Ruby and Lua carry name-based call edges from their built-in
 backends and classify as "name".) Every impact/callers/callees/review/
 context/hotspots/orphans/path report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
 so a consumer can switch on confidence (resolved→high, name→medium, unresolved/none→low) instead of

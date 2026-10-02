@@ -12,7 +12,12 @@ function setProps(node, props) {
     if (key === 'class' || key === 'className') {
       node.setAttribute('class', String(value))
     } else if (key === 'style' && typeof value === 'object') {
-      Object.assign(node.style, value)
+      for (const [sk, sv] of Object.entries(value)) {
+        if (sv === null || sv === undefined) continue
+        // custom properties (--c) only take effect through setProperty
+        if (sk.startsWith('--') && typeof node.style.setProperty === 'function') node.style.setProperty(sk, String(sv))
+        else node.style[sk] = sv
+      }
     } else if (key === 'dataset') {
       for (const [dk, dv] of Object.entries(value)) {
         if (dv !== null && dv !== undefined) node.dataset[dk] = String(dv)

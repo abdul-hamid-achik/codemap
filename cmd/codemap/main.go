@@ -192,6 +192,8 @@ func init() {
 	refactorPlanCmd.Flags().String("at", "", "select one definition by source position instead of a name: <file>:<line>")
 	semanticCmd.Flags().Int("top", 10, "maximum results")
 	hotspotsCmd.Flags().Int("top", 20, "maximum results")
+	hotspotsCmd.Flags().Bool("include-tests", false, "count calls from test code and rank test-defined symbols too (default: tests are ignored)")
+	readOrderCmd.Flags().Bool("include-tests", false, "count calls from test code and rank test-defined symbols too (default: tests are ignored)")
 	orphansCmd.Flags().Int("top", 50, "maximum results")
 	findCmd.Flags().Int("top", 50, "maximum results")
 	grepCmd.Flags().Bool("regex", false, "interpret <pattern> as a Go RE2 regular expression instead of a literal substring")
@@ -340,31 +342,38 @@ func printJSON(v any) error {
 
 // preciseTips returns the "add --precise" hints shown after a non-precise index,
 // tailored to the languages present: Go's name-based edges can be made exact,
-// while the LSP languages (TypeScript/JavaScript/Python) have no call graph at
-// all without --precise — so a new user isn't left with empty `callers`/`impact`
-// and no idea why. A language only appears here when its files were indexed,
+// while the LSP languages have only a partial call graph without --precise
+// (TypeScript/JavaScript: same-file calls and imported bindings) or none at all
+// (Python) — so a new user isn't left with sparse `callers`/`impact` and no idea
+// why. A language only appears here when its files were indexed,
 // which means its server was present, so the tip is always actionable.
 func preciseTips(languages map[string]int, goAvailable bool) []string {
 	var tips []string
 	if languages["go"] > 0 && goAvailable {
 		tips = append(tips, "Go call edges are name-based; add --precise to resolve them exactly (eliminates same-named over-matching)")
 	}
-	var lsp []string
-	for _, l := range []string{"typescript", "javascript", "python"} {
+	// TS/JS carry a PARTIAL name-based call graph (tsscan: same-file calls and
+	// imported bindings); Python still has none. Say exactly that.
+	var partial []string
+	for _, l := range []string{"typescript", "javascript"} {
 		if languages[l] > 0 {
-			lsp = append(lsp, l)
+			partial = append(partial, l)
 		}
 	}
-	if len(lsp) > 0 {
-		tips = append(tips, "no call graph for "+strings.Join(lsp, "/")+" yet — add --precise for callers/impact/hotspots/path")
+	if len(partial) > 0 {
+		tips = append(tips, strings.Join(partial, "/")+" call edges are name-based candidates (same-file calls and imported bindings only) — add --precise for a complete call graph (callers/impact/hotspots/path)")
+	}
+	if languages["python"] > 0 {
+		tips = append(tips, "no call graph for python yet — add --precise for callers/impact/hotspots/path")
 	}
 	return tips
 }
 
 // preciseEdgeNote renders the parenthetical after the edge count in `status`,
 // engine-aware so it never lies: precise edges come from go/types for Go but
-// callHierarchy for TypeScript, and a TS project without --precise has *no* call
-// edges at all (not "name-based" — TS has no name-based call resolution).
+// callHierarchy for TypeScript, and a TS project without --precise has only a
+// PARTIAL call graph (name-based candidates for same-file calls and imported
+// bindings — not the complete, "name-based" Go-style graph).
 func preciseEdgeNote(preciseEdges int, languages map[string]int) string {
 	hasGo := languages["go"] > 0
 	hasTS := languages["typescript"] > 0
@@ -386,8 +395,12 @@ func preciseEdgeNote(preciseEdges int, languages map[string]int) string {
 		}
 	}
 	if hasLSP && !hasGo {
-		// TS/JS/Python/Vue have no name-based call edges — --precise is
-		// the only source.
+		// TS/JS/Vue carry only partial name-based candidates (same-file calls
+		// and imported bindings); Python has none — --precise is the only
+		// complete source.
+		if hasTS || hasJS || languages["vue"] > 0 {
+			return " (partial call graph: name-based candidates for same-file calls and imported bindings; run 'codemap index --precise' for a complete one)"
+		}
 		return " (no call graph yet; run 'codemap index --precise' to resolve LSP-backed calls)"
 	}
 	return " (name-based; run 'codemap index --precise' for exact call edges)"

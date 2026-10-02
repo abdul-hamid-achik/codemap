@@ -53,6 +53,15 @@ func TestTraverseBySelectorPreservesDomainConfidence(t *testing.T) {
 		if hop.EdgeType == graph.EdgeImports && hop.Symbol.Kind != graph.KindFile {
 			t.Fatalf("production import must reach its file node: %+v", hop)
 		}
+		// A Go import is package-scoped: the hop must say so instead of presenting
+		// the representative file as the target.
+		wantScope := ""
+		if hop.EdgeType == graph.EdgeImports {
+			wantScope = DependencyTargetPackage
+		}
+		if hop.TargetScope != wantScope {
+			t.Fatalf("%s hop target_scope = %q, want %q", hop.EdgeType, hop.TargetScope, wantScope)
+		}
 		confidence[hop.EdgeType] = hop.Confidence
 	}
 	if confidence[graph.EdgeCalls] != "confirmed" || confidence[graph.EdgeImports] != "candidate" {

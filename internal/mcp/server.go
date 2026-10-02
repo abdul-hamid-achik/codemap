@@ -25,9 +25,9 @@ import (
 )
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
-// (the default, back-compat) registers every tool (45). ProfileCore preserves
-// the shipped lean 26-tool contract. ProfileAgent is a separately pinned
-// 26-tool contract containing exactly the tools named by the canonical
+// (the default, back-compat) registers every tool (48). ProfileCore preserves
+// the shipped lean 28-tool contract. ProfileAgent is a separately pinned
+// 28-tool contract containing exactly the tools named by the canonical
 // playbook plus codemap_docs for self-discovery. Core and agent intentionally
 // start with the same inventory: keeping separate sets lets the taught agent
 // workflow evolve without silently changing the backwards-compatible core
@@ -59,9 +59,11 @@ var coreTools = map[string]bool{
 	"codemap_dependencies":  true,
 	"codemap_docs":          true,
 	"codemap_explore":       true,
+	"codemap_features":      true,
 	"codemap_file_impact":   true,
 	"codemap_file_context":  true,
 	"codemap_find":          true,
+	"codemap_flow":          true,
 	"codemap_grep":          true,
 	"codemap_hotspots":      true,
 	"codemap_impact":        true,
@@ -94,9 +96,11 @@ var agentTools = map[string]bool{
 	"codemap_dependencies":  true,
 	"codemap_docs":          true,
 	"codemap_explore":       true,
+	"codemap_features":      true,
 	"codemap_file_impact":   true,
 	"codemap_file_context":  true,
 	"codemap_find":          true,
+	"codemap_flow":          true,
 	"codemap_grep":          true,
 	"codemap_hotspots":      true,
 	"codemap_impact":        true,
@@ -137,6 +141,11 @@ and full-profile traverse; --precise does not give these formats a call graph.
 Optional semantic retrieval owned by local veclite or the sibling vecgrep CLI. Index a project once with codemap_index,
 then query it — until you do, query tools return {"indexed": false} with a hint to index first.
 Every tool takes an optional "path" (project dir; defaults to cwd) and returns JSON.
+
+Learn a repo:
+- codemap_features — what the software can DO (CLI commands, HTTP routes, MCP/RPC tools, pages,
+  programs), each with its registration description, handler selector and footprint.
+- codemap_flow — how one feature works: the call tree from its handler in call order, with docs.
 
 Find code:
 - codemap_semantic — by meaning ("jwt validation middleware"); needs an embedded index in the configured semantic owner.
@@ -217,9 +226,9 @@ local toolchain) — useful when wiring codemap into a harness.`
 func instructionsFor(profile string) string {
 	switch profile {
 	case ProfileCore:
-		return instructions + "\n\nprofile: core — admin and extended tools (init, doctor, projects, symbols, map, traverse, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
+		return instructions + "\n\nprofile: core — admin and extended tools (init, doctor, projects, symbols, map, atlas, traverse, secret_impact, required_keys, annotate/annotations/unannotate, branch_status/branch_switch, cache_save/restore/list/drop) are available under CODEMAP_MCP_PROFILE=full."
 	case ProfileAgent:
-		return instructions + "\n\nprofile: agent — this session exposes exactly 25 taught workflow tools plus codemap_docs for self-discovery (26 total); use CODEMAP_MCP_PROFILE=full for admin and extended tools."
+		return instructions + "\n\nprofile: agent — this session exposes exactly 27 taught workflow tools plus codemap_docs for self-discovery (28 total); use CODEMAP_MCP_PROFILE=full for admin and extended tools."
 	default:
 		return instructions
 	}
@@ -359,10 +368,21 @@ type reviewInput struct {
 	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for each changed symbol's blast radius (default 3)"`
 }
 
+type atlasInput struct {
+	Path       string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Prefix     string `json:"prefix,omitempty" jsonschema:"project-relative directory to zoom into (default: project root); unknown prefix is a not_found error"`
+	Depth      int    `json:"depth,omitempty" jsonschema:"directory levels below the prefix to expand (default 2, max 8)"`
+	Files      bool   `json:"files,omitempty" jsonschema:"include file leaves in every expanded directory (default false)"`
+	MaxNodes   int    `json:"max_nodes,omitempty" jsonschema:"maximum tree nodes to emit (default 1500, max 20000); largest children are kept"`
+	KeySymbols int    `json:"key_symbols,omitempty" jsonschema:"key symbols per directory/file (default 5, max 20)"`
+}
+
 type readOrderInput struct {
 	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Query string `json:"query,omitempty" jsonschema:"optional case-insensitive name/path filter to narrow the ranking (e.g. 'http')"`
 	Top   int    `json:"top,omitempty" jsonschema:"maximum entries to rank (default 20)"`
+	// IncludeTests counts test callers and ranks test-defined symbols too.
+	IncludeTests bool `json:"include_tests,omitempty" jsonschema:"count test callers and rank test-defined symbols too (default false: tests are ignored)"`
 }
 
 type mapInput struct {
@@ -371,6 +391,15 @@ type mapInput struct {
 	TopBridges     int    `json:"top_bridges,omitempty" jsonschema:"maximum directed cross-subsystem bridges to include (default 100)"`
 	TopHubs        int    `json:"top_hubs,omitempty" jsonschema:"maximum call-graph hubs to include (default 20)"`
 	TopEntrypoints int    `json:"top_entrypoints,omitempty" jsonschema:"maximum likely entrypoints to include (default 10)"`
+}
+
+type featuresInput struct {
+	Path        string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Kind        string `json:"kind,omitempty" jsonschema:"only these kinds, comma-separated: program, cli_command, rpc_tool, http_route, api_route, page"`
+	Query       string `json:"query,omitempty" jsonschema:"case-insensitive substring over label, description, handler and file"`
+	Top         int    `json:"top,omitempty" jsonschema:"maximum features to return (default 200, max 2000)"`
+	NoFootprint bool   `json:"no_footprint,omitempty" jsonschema:"skip per-feature call footprints (faster)"`
+	Depth       int    `json:"depth,omitempty" jsonschema:"footprint call-walk depth (default 3, max 6)"`
 }
 
 type exploreInput struct {
@@ -388,6 +417,15 @@ type traverseInput struct {
 	EdgeTypes []string           `json:"edge_types,omitempty" jsonschema:"relation types to follow; defaults to calls,references,imports,implements,overrides,depends_on,tests,styles,reads,writes,documents"`
 	Depth     int                `json:"depth,omitempty" jsonschema:"maximum traversal depth (default 2, max 10)"`
 	Limit     int                `json:"limit,omitempty" jsonschema:"maximum reached nodes (default 100, max 500)"`
+}
+
+type flowInput struct {
+	Symbol       string              `json:"symbol,omitempty" jsonschema:"entry symbol name or FQN (a handler, command RunE, any function); ambiguous names return candidates[] to re-query with a selector"`
+	Selector     *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact entry definition {file,start_line,fqn,kind}; use instead of symbol"`
+	Path         string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth        int                 `json:"depth,omitempty" jsonschema:"maximum call depth (default 4, max 8)"`
+	MaxNodes     int                 `json:"max_nodes,omitempty" jsonschema:"maximum steps to emit (default 120, max 1000)"`
+	IncludeTests bool                `json:"include_tests,omitempty" jsonschema:"include test functions and test-file helpers (default false)"`
 }
 
 type relatedFilesInput struct {
@@ -444,6 +482,12 @@ type requiredKeysInput struct {
 	Path       string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	ViaVault   string   `json:"via_vault,omitempty" jsonschema:"optional: tinyvault project whose value-free key inventory supplies candidates"`
 	Prefix     string   `json:"prefix,omitempty" jsonschema:"optional: restrict tinyvault inventory candidates to this prefix"`
+}
+
+type hotspotsInput struct {
+	Path         string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Top          int    `json:"top,omitempty" jsonschema:"maximum results"`
+	IncludeTests bool   `json:"include_tests,omitempty" jsonschema:"count test callers and rank test-defined symbols too (default false: tests are ignored)"`
 }
 
 type limitInput struct {
@@ -638,6 +682,12 @@ func (s *Server) register() {
 			Description: "Diff-scoped impact + regression test selection — the query to run AFTER editing. Maps your git diff (whole working tree by default; staged=true for the index; since=<ref> for everything since a branch point) to the symbols it touches, then returns their union blast_radius, the covering_tests to run (regression test selection), the changed symbols that are untested or are hotspots (many callers), plus stale/resolution honesty signals. Answers 'what did I just affect, and what should I run?' in one call instead of chaining diff parsing + per-symbol codemap_impact. Degrades to a plain changed-file list with a note when the project isn't indexed or isn't a git repo.",
 		}, s.handleReview)
 	}
+	if s.include("codemap_atlas") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_atlas",
+			Description: "The repo as a described directory/file tree for learning an unfamiliar codebase: per node size metrics (files, symbols, lines, tests), coarse roles (source/tests/docs/config/entrypoint/...), a plain-language summary taken from README files, package docs, docstrings or leading comments (never generated; summary_source says where), the call-graph key symbols inside it with durable selectors, inbound/outbound/internal coupling and top neighbouring subsystems. Start with the default (depth 2), then zoom with prefix; add files:true for file leaves. Bounded by depth/max_nodes with children_truncated/collapsed_dirs flags; carries call_graph, resolution, stale and partial_errors honesty signals. Use the key_symbols selectors with codemap_context to drill down. Available in the full MCP profile.",
+		}, s.handleAtlas)
+	}
 	if s.include("codemap_read_order") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_read_order",
@@ -649,6 +699,12 @@ func (s *Server) register() {
 			Name:        "codemap_map",
 			Description: "Bounded architecture overview for an unfamiliar project: deterministic source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and call-graph hubs. Returns totals/truncation plus call_graph, resolution, stale, and partial_errors honesty signals. Use the selectors in the entrypoint/hub rows with codemap_context to drill down. Available in the full MCP profile.",
 		}, s.handleMap)
+	}
+	if s.include("codemap_features") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_features",
+			Description: "Capability inventory: what the software can DO and where each capability lives. Lists user-facing entry surfaces (CLI commands, HTTP routes, MCP/RPC tools, Next.js pages and API routes, programs), each tied to its handler symbol (with a durable selector), the description from the framework registration itself, and a bounded call footprint (symbols, files, subsystems, covering tests). Go registrations are read from the AST (confirmed); TS/JS/Python are pattern-detected (candidate). Filter by kind/query; pass a handler selector to codemap_flow (how it works), codemap_context or codemap_impact to drill in. Returns totals/truncation plus call_graph, resolution, stale, notes, and partial_errors honesty signals.",
+		}, s.handleFeatures)
 	}
 	if s.include("codemap_explore") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
@@ -667,6 +723,12 @@ func (s *Server) register() {
 			Name:        "codemap_traverse",
 			Description: "Bounded heterogeneous graph walk (full profile) from one REQUIRED durable selector:{file,start_line,fqn,kind}; bare name unions are not accepted. Filters by outgoing|incoming|both and edge_types, remains cycle-safe, and returns per-hop type/provenance/confirmed|candidate confidence plus domain summaries, call_graph honesty, and truncation.",
 		}, s.handleTraverse)
+	}
+	if s.include("codemap_flow") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_flow",
+			Description: "Explain a feature end to end: from ONE entry symbol (a handler, command RunE, any function; give symbol or selector) return a bounded CALL TREE in the order the code calls things, each step with file:line, subsystem, signature, one-line doc, and confirmed|candidate confidence. Same-named definitions that name-based indexing fans out to (every Close/Name/String) are collapsed to the most plausible one (alternatives>0) or an unexpanded leaf_reason:\"ambiguous\" placeholder with candidates[]; precise edges are never collapsed. Repeats/cycles/depth/max_nodes cuts are explicit (repeat_of, cycle, leaf_reason, children_total), plus subsystems/files summaries, call_graph, stale, notes, and partial_errors. Use it instead of opening a dozen files to learn what a handler does; use codemap_traverse for typed multi-relation walks.",
+		}, s.handleFlow)
 	}
 	if s.include("codemap_related_files") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
@@ -1124,11 +1186,22 @@ func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in r
 	return result(rep, err)
 }
 
+func (s *Server) handleAtlas(_ context.Context, _ *sdkmcp.CallToolRequest, in atlasInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Atlas(cwdOf(in.Path), app.AtlasOptions{
+		Prefix: in.Prefix, Depth: in.Depth, Files: in.Files,
+		MaxNodes: in.MaxNodes, KeySymbols: in.KeySymbols,
+	})
+	return result(rep, err)
+}
+
 func (s *Server) handleReadOrder(_ context.Context, _ *sdkmcp.CallToolRequest, in readOrderInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.ReadOrder(cwdOf(in.Path), app.ReadOrderOpts{Top: in.Top, Query: in.Query})
+	rep, err := s.svc.ReadOrder(cwdOf(in.Path), app.ReadOrderOpts{Top: in.Top, Query: in.Query, IncludeTests: in.IncludeTests})
 	return result(rep, err)
 }
 
@@ -1139,6 +1212,16 @@ func (s *Server) handleMap(_ context.Context, _ *sdkmcp.CallToolRequest, in mapI
 	rep, err := s.svc.ArchitectureMap(cwdOf(in.Path), app.ArchitectureMapOptions{
 		TopSubsystems: in.TopSubsystems, TopBridges: in.TopBridges,
 		TopHubs: in.TopHubs, TopEntrypoints: in.TopEntrypoints,
+	})
+	return result(rep, err)
+}
+
+func (s *Server) handleFeatures(_ context.Context, _ *sdkmcp.CallToolRequest, in featuresInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Features(cwdOf(in.Path), app.FeaturesOptions{
+		Kinds: []string{in.Kind}, Query: in.Query, Top: in.Top, Depth: in.Depth, NoFootprint: in.NoFootprint,
 	})
 	return result(rep, err)
 }
@@ -1162,6 +1245,23 @@ func (s *Server) handleTraverse(_ context.Context, _ *sdkmcp.CallToolRequest, in
 	}
 	rep, err := s.svc.TraverseBySelector(cwdOf(in.Path), in.Selector, app.TraverseOptions{
 		Direction: in.Direction, EdgeTypes: in.EdgeTypes, Depth: in.Depth, Limit: in.Limit,
+	})
+	return result(rep, err)
+}
+
+func (s *Server) handleFlow(_ context.Context, _ *sdkmcp.CallToolRequest, in flowInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	if strings.TrimSpace(in.Symbol) == "" && in.Selector == nil {
+		return invalidInputResult("flow needs symbol or selector", "pass symbol (name or FQN) or selector:{file,start_line,fqn,kind}"), nil, nil
+	}
+	if strings.TrimSpace(in.Symbol) != "" && in.Selector != nil {
+		return invalidInputResult("flow takes symbol or selector, not both", "pass only one of symbol or selector"), nil, nil
+	}
+	rep, err := s.svc.Flow(cwdOf(in.Path), app.FlowOptions{
+		Symbol: in.Symbol, Selector: in.Selector,
+		Depth: in.Depth, MaxNodes: in.MaxNodes, IncludeTests: in.IncludeTests,
 	})
 	return result(rep, err)
 }
@@ -1246,11 +1346,11 @@ func (s *Server) handleSecretImpact(ctx context.Context, _ *sdkmcp.CallToolReque
 	return result(rep, err)
 }
 
-func (s *Server) handleHotspots(_ context.Context, _ *sdkmcp.CallToolRequest, in limitInput) (*sdkmcp.CallToolResult, any, error) {
+func (s *Server) handleHotspots(_ context.Context, _ *sdkmcp.CallToolRequest, in hotspotsInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.Hotspots(cwdOf(in.Path), in.Top)
+	rep, err := s.svc.HotspotsWith(cwdOf(in.Path), app.HotspotOpts{Limit: in.Top, IncludeTests: in.IncludeTests})
 	return result(rep, err)
 }
 

@@ -50,7 +50,7 @@ export function globalArgs() {
  * Execute argv against the active project.
  * @returns {Promise<object>} the normalized result
  */
-export async function runArgs(args, { featureId = 'raw', cwd, json = true, stream = false, timeoutMs, runKey } = {}) {
+export async function runArgs(args, { featureId = 'raw', cwd, json = true, stream = false, timeoutMs, runKey, quiet = false } = {}) {
   state.running++
   bus.emit(EVENTS.RUNNING, state.running)
   const started = Date.now()
@@ -69,7 +69,9 @@ export async function runArgs(args, { featureId = 'raw', cwd, json = true, strea
     state.lastResult = result
     state.results.set(featureId, result)
     bus.emit(EVENTS.RESULT, result)
-    if (!result.ok && !result.gateFailed) {
+    if (quiet) {
+      // the caller renders failures inline
+    } else if (!result.ok && !result.gateFailed) {
       toast(result.error || `exit ${result.exitCode}`, { tone: result.code === 'not_indexed' || result.code === 'index_missing' ? 'warn' : 'error', title: describeCode(result.code) })
     } else if (result.gateFailed) {
       toast('Gate failed (exit 6) — the report itself is complete and printed above.', { tone: 'warn', title: 'Gate verdict' })

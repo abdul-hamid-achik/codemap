@@ -69,6 +69,32 @@ type Reference struct {
 	// SQL tables cannot accidentally resolve to same-named Go functions.
 	ToFQN   string
 	ToKinds []string
+
+	// FromFile scopes From to one file: From names a symbol FQN that is only
+	// unique inside its own file (TS/JS documentSymbol FQNs carry no file
+	// prefix, so "App" or "GET" collide across a project). When From equals
+	// FromFile the source is the file node itself (module-level code).
+	FromFile string
+	// FromLine / ToLine, when non-zero, are the declaration start lines of the
+	// scoped source / target symbol. They pick the exact definition when the
+	// same FQN is declared more than once in a file (test callbacks, overloads,
+	// repeated nested names); without them the first declaration is used.
+	FromLine, ToLine int
+	// ToFile scopes the target to one file: the indexer looks To up as an FQN
+	// inside ToFile only and never falls back to project-wide name matching.
+	// tsscan sets it for same-file calls; for imported bindings it sets
+	// ImportSpec and the indexer fills ToFile from the resolved specifier.
+	ToFile string
+	// ImportSpec is the module specifier the callee binding was imported from
+	// ("./x", "@/lib/y", "@scope/pkg"). The indexer resolves it with the
+	// project's import resolver (relative paths, @/ ~/ aliases, workspace
+	// packages) into ToFile; a specifier that resolves to no project file
+	// (an npm dependency, node:fs) drops the reference.
+	ImportSpec string
+	// DefaultExport marks an ImportSpec target as the imported module's default
+	// export: To is then the member path under it ("" for the export itself,
+	// "get" for api.get()), and the indexer prefixes the export's own name.
+	DefaultExport bool
 }
 
 // FileResult is everything extracted from one file.

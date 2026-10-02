@@ -11,7 +11,7 @@ releases page is the authoritative history.
 ### Added
 
 - **`codemap task-context` / `codemap_task_context`** — mode-scoped task orientation in one
-  call (CLI alias `brief`; 45th full-profile MCP tool). The task text is used verbatim as the
+  call (CLI alias `brief`; full-profile MCP tool). The task text is used verbatim as the
   retrieval query (intent never interpreted); `--mode understand|change|debug` selects the
   deterministic composition — understand: freshness + explore neighborhoods; change: exact
   selectors or explore-joined targets + brief context bundles + per-target impact drill-downs
@@ -28,6 +28,68 @@ releases page is the authoritative history.
   processed at the time, so a later plain incremental run skips it forever even after the
   language server would have recovered on a fresh connection. Same glob semantics as
   `--exclude-extra`; a no-op once `--reindex` is already set.
+- **`codemap atlas` / `codemap_atlas`** — the repository as a described directory/file tree for
+  learning an unfamiliar codebase (full MCP profile). Per node: files, symbols, lines, tests,
+  roles (`source`/`tests`/`docs`/`config`/`entrypoint`/`examples`/`bench`/`generated`/`vendor`),
+  a `summary` with its `summary_source` (README first paragraph, Go package doc, Python module
+  docstring, leading file comment, or Markdown; extracted from the project, never generated), key
+  symbols (de-noised in-degree, with selectors), inbound/outbound/internal coupling, and top
+  neighbours. Flags: `--prefix`, `--depth` (default 2), `--files`, `--max-nodes`, `--key-symbols`.
+  A directory without its own doc falls back to its manifest description (`package.json`,
+  `pyproject.toml`, `Cargo.toml`), and a wrapper directory holding a single sub-directory (`cmd/`)
+  borrows that sub-directory's summary (`summary_source: "subdirectory <name>/"`).
+  JSON `schema_version: 1` with `call_graph`, `stale`, `truncated`, and `partial_errors`.
+- **`codemap features` / `codemap_features`** — capability inventory (agent, core, and full
+  profiles): kinds `program`, `cli_command`, `rpc_tool`, `http_route`, `api_route`, and `page`.
+  Go registrations are read from the AST (cobra, urfave/cli, net/http, chi/gin/echo/gorilla and
+  Go 1.22 route patterns, MCP go-sdk and mark3labs, gRPC `Register*Server`, `func main`) and
+  reported `confidence: confirmed`; TS/JS (Express-style routes, commander/yargs, Next.js App and
+  Pages routers, package.json `bin`) and Python (FastAPI/Flask, Django `path()`, click/typer,
+  `__main__`) are pattern-detected and reported `candidate`. Each feature carries its invocation,
+  description from the registration or docstring, handler selector, parent for nested commands,
+  and a bounded call footprint (symbols, files, subsystems, feature-specific tests,
+  `ambiguous_edges`). Flags: `--kind`, `--query`, `--top`, `--depth`, `--no-footprint`. Ruby, Lua,
+  and GDScript detection is not implemented; a note says so.
+- **`codemap flow <symbol>` / `codemap_flow`** — a call tree from one entry in the order the code
+  calls things (agent, core, and full profiles), each step with `file:line`, subsystem, signature,
+  one-line doc, and confidence. Same-name fan-out on name-based graphs is collapsed to the most
+  plausible definition (`alternatives`) or left as an unexpanded `ambiguous` step with candidates;
+  repeats, cycles, and depth/`max-nodes` cuts are explicit. Flags: `--at`, `--depth` (default 4),
+  `--max-nodes` (default 120), `--include-tests`.
+- **TS/JS call candidates in the base index** — non-`--precise` indexing now emits
+  high-precision name-based call edges for same-file calls (`f()`, `new C()`, `await f()`,
+  `this.m()`) and for calls through imported bindings (named, default, and namespace imports,
+  `require`; relative paths, `@/`/`~/` aliases, workspace packages). Arbitrary `obj.method()`
+  calls are not linked, Python still has no base-level call edges, and `call_graph` stays
+  `unresolved` for uncovered TS/JS (a partial graph). `--precise` supersedes the candidates per
+  file.
+- **`--include-tests` on `hotspots` and `read-order`** (MCP `include_tests`) — count calls from
+  test code and rank test-defined symbols; see Changed for the new default.
+- **Codemap Studio** — an Electron desktop app in `desktop/` that wires codemap features into one
+  interface: panels run `codemap … --json`, with a graph explorer, review desk, architecture map,
+  and MCP inspector. Its **Learn** section (the landing view for an indexed project) draws the
+  repository from `atlas`, `features`, and `flow`: an Overview with a persisted six-step learning
+  path, a zoomable Atlas treemap with a detail panel, a Features catalog grouped by surface, and a
+  Flow view (outline, left-to-right diagram, source preview, "Copy as brief"). Docs:
+  `docs/desktop.md`.
+
+### Changed
+
+- **Ranking ignores test code by default** — `read-order`, `hotspots`, and the hubs in `map`
+  no longer count calls from tests or rank symbols defined in test files and directories, and
+  rank by `effective_in_degree` (precise callers plus name-based callers divided by the number
+  of same-named definitions) so a common method name stops outranking real hubs. Pass
+  `--include-tests` on `hotspots` or `read-order` for the previous behavior. `map` bridges and
+  subsystem edge counts also exclude test code (`tests_excluded: true`).
+- **Entrypoint semantics** — the `cmd`/`main` ranking boost now applies only to `main()` and to
+  functions wired by value (for example a cobra `RunE` that nothing calls directly). Methods
+  never get it, and a `main()` under bench, examples, scripts, tools, or hack ranks as an
+  "auxiliary program entrypoint".
+- **MCP profiles** — `codemap_features` and `codemap_flow` join the taught workflow, so the
+  `agent` and `core` profiles grow from 26 to 28 tools and `full` from 45 to 48 (with
+  `codemap_atlas`). `BenchmarkProfileSchemaTax` now measures 35,616 schema characters
+  (≈8,904 approximate tokens) for `agent`/`core` versus 53,197 (≈13,300) for `full`.
+  `codemap agent setup cursor` still defaults to `core`, now 28 tools.
 
 ### Fixed
 
@@ -44,9 +106,16 @@ releases page is the authoritative history.
   heartbeat (phase, file N of M) now goes to **stderr** when stderr is a terminal; stdout stays
   byte-identical, so agents parsing `--json` are unaffected.
 - **Stale profile claim for `codemap_explore`** — docs/README said it was full-profile-only;
-  it is part of the taught workflow and registered in every profile (agent/core stay at 26
-  tools; `codemap_task_context` joins `codemap_map`/`codemap_traverse`/`codemap_refactor_plan`
+  it is part of the taught workflow and registered in every profile (`codemap_task_context` joins `codemap_map`/`codemap_traverse`/`codemap_refactor_plan`
   as full-profile surfaces).
+- **`codemap docs --help` lists every topic** — including `formats`.
+- **`codemap_context` not-found** now carries `code:"not_found"` and a `hint`, matching the other
+  MCP tools.
+- **File imports resolved to exactly one file are `confirmed`** — `dependencies` marks them with
+  reason `resolved_import`. As a result, `file-impact` can report `delete_verdict:"unsafe"` for
+  imported TS/JS files; that is intended.
+- **Go package imports point at a deterministic non-test file** — and `traverse` hops carry
+  `target_scope:"package"`.
 
 ## [0.63.1] — 2026-08-22
 

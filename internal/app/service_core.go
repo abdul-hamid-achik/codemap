@@ -38,15 +38,43 @@ func nextAction(tool, why string, args map[string]any) NextAction {
 // NewService wraps a session.
 func NewService(s *Session) *Service { return &Service{s: s} }
 
-// noNameBasedCallLang reports whether a language has NO name-based call edges — its
-// call graph exists ONLY under `index --precise` (callHierarchy). For these, empty
-// callers/callees/blast/tests on a name-based index means "unresolved", not "none".
+// noNameBasedCallLang reports whether a language lacks a COMPLETE name-based call
+// graph — a complete one exists ONLY under `index --precise` (callHierarchy).
+// Python has no name-based call edges at all; TS/JS/Vue have a partial set of
+// name-based candidates (same-file calls and imported bindings, from tsscan) whose
+// absence still does not prove "no caller". For these, empty callers/callees/
+// blast/tests on a name-based index means "unresolved", not "none", so the
+// call_graph classification stays "unresolved" until a precise pass covers the file.
 func noNameBasedCallLang(lang string) bool {
 	switch lang {
 	case "typescript", "javascript", "python", "vue":
 		return true
 	}
 	return false
+}
+
+// partialNameCallLang reports whether a language's non-precise index carries a
+// PARTIAL name-based call graph: TS/JS/Vue get high-precision candidates for
+// same-file calls and imported bindings (tsscan.CallRefs), so their edges are
+// present but incomplete — unlike Python, which has none.
+func partialNameCallLang(lang string) bool {
+	switch lang {
+	case "typescript", "javascript", "vue":
+		return true
+	}
+	return false
+}
+
+// callGraphGap returns the honest head and state phrases for a language whose
+// call graph is unresolved without a precise pass, so every user-facing note
+// states the same truth: "partial" (name-based candidates exist, but only for
+// same-file calls and imported bindings) for TS/JS/Vue, "not available" for
+// the rest. The machine field call_graph is unaffected (stays "unresolved").
+func callGraphGap(lang string) (head, state string) {
+	if partialNameCallLang(lang) {
+		return fmt.Sprintf("call graph for %s is partial without precise indexing (name-based candidates cover same-file calls and imported bindings only)", lang), "incomplete (absent edges are not proof of absence)"
+	}
+	return fmt.Sprintf("call graph not available for %s without precise indexing", lang), "unresolved (not absent)"
 }
 
 // callGraphUnavailable returns the language (and true) when at least one queried

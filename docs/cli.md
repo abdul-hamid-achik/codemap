@@ -36,7 +36,7 @@ anything else.
 | `codemap status [--full] [--skip-stale]` | Show index statistics (nodes, edges, languages, kinds), plus **index freshness** — warns when files have changed/been added/removed since the last index (a `stale` field in `--json`), so you know to reindex before trusting queries. The default status deliberately skips opening the local vector store; use `--full` when the exact local vector count is needed (it can use substantial memory). `--skip-stale` skips the dirty-tree drift walk for cheap readiness probes (e.g. Cortex setup); default status still reports stale. JSON exposes `vectors_known` to distinguish a skipped count from zero. `precise` contains an explicit boolean for each indexed call-graph language: `true` only when every indexed file in that language completed precise resolution at the last index. Combine it with `stale` and each query's `call_graph`; `precise_edges` is diagnostic only. Also reports a running [background daemon](#background-daemon) (a `daemon` object in `--json`) |
 | `codemap doctor` | Check the environment — go toolchain, gopls, language servers (TS/JS, Python, Vue SFC via the same `typescript-language-server`), Ollama embeddings, and the [background daemon](#background-daemon) — with install hints (`--json`) |
 | `codemap projects` | List all registered projects and their index sizes |
-| `codemap docs [topic]` | Print the agent guide (overview, workflow, commands, annotations, accuracy, ecosystem) |
+| `codemap docs [topic]` | Print the agent guide (topics: overview, formats, workflow, commands, annotations, accuracy, ecosystem; `codemap docs --help` lists them) |
 | `codemap structural-manifest --json` | Emit the single-response `codemap.structural-manifest.v1` preflight for `export-symbols`: explicit export schema version, project identity, the exact export fingerprint, total records, completeness, and working-tree freshness counters plus the per-file delta (`changed_files`/`new_files`/`deleted_files`), so a consumer can decide what to re-ingest instead of re-reading the whole export. Also carries the additive `reindex_delta` attestation (from/to fingerprint + the files that run moved) when the latest index run can honestly certify one. It streams indexed metadata without reading source bodies or loading the full export. |
 | `codemap export-symbols [--offset N] [--limit N] [--max-content-bytes N] [--files <csv>] [--files-from <path>] --json` | Export deterministic, paginated structural records under `codemap.structural-export.v1`: a contiguous global ordinal, durable selectors, hashes, signature/doc, and bounded current content. Stale/missing/unsafe content is omitted explicitly. With `--files` (CSV) or `--files-from` (one path per line; `-` for stdin), the response switches to `codemap.structural-export.v2`: ordinals and totals scope to the requested slice, `files_filter` + `files_filter_fingerprint` echo it, and `index_fingerprint` still identifies the full index — the seam vecgrep uses to re-ingest only an attested delta. This is the CLI-only boundary consumed by vecgrep `structural_chunks` modes `auto`, `off`, and `required`; it never shares codemap's DB or Go packages. |
 | `codemap annotate <sym> \| <from> <to>` | Pin a `--note` and/or `--data` (e.g. DB rows) to a symbol or call path (`--source`). Automation should add `--external-id <id>`: retries upsert one row within project + source and report `action:"created\|updated\|unchanged"`; reads return the external ID. |
@@ -86,9 +86,11 @@ e.g. `callers Close` lists callers of every `Close`). **The best fix is to reind
 Python). Successful coverage is recorded per file;
 a query is `resolved` only when all matched definition files completed the pass, while partial
 failures remain `name`/`unresolved`. (TypeScript and JavaScript get name-based candidate edges for
-JSX component usage, imports, and Next.js framework wiring; plain function calls there — and all
-Python calls — have no name-based edges, so `--precise` is what gives covered files a complete
-call graph, superseding the candidates per file.) Vue SFCs currently provide script-block
+JSX component usage, imports, Next.js framework wiring, and high-precision calls: same-file calls
+(`f()`, `new C()`, `await f()`, `this.m()`) and calls through imported bindings (named, default, and
+namespace imports and `require`, resolved through relative paths, `@/`/`~/` aliases, and workspace
+packages). Arbitrary `obj.method()` calls are not linked, and Python has no base-level call edges, so
+`--precise` is what gives covered files a complete call graph, superseding the candidates per file.) Vue SFCs currently provide script-block
 symbols, `defines`, and import edges only; precise indexing does not add Vue call edges yet. For a one-off exact answer without
 reindexing, `callers`/`callees` accept `--precise`; it degrades to the indexed graph with a note
 when the language server isn't available — never a hard error. The old `--lsp` spelling remains a
@@ -111,6 +113,40 @@ as dead-code *candidates*.
 `index --precise` removes the call-edge inflation outright. See
 [Accuracy](https://github.com/abdul-hamid-achik/codemap#accuracy-name-based-vs-precise).
 
+## Orientation
+
+Learn an unfamiliar repository from the top down: the shape of the tree, what the software
+can do, and how one feature works. The [Learn a codebase](/learn) page walks through these in
+order, with real output. `read-order` and `map` (in [Analysis](#analysis)) and `explore`
+(in [Semantic](#semantic)) cover entrypoints, hubs, and intent search.
+
+| Command | Description |
+|---|---|
+| `codemap atlas [--prefix <dir>] [--depth N] [--files] [--max-nodes N] [--key-symbols N]` | **The repo as a described tree.** Per directory (and per file with `--files`): files, symbols, lines, tests, roles (`source`, `tests`, `docs`, `config`, `entrypoint`, `examples`, `bench`, `generated`, `vendor`), a `summary` with its `summary_source`, key symbols with durable selectors, inbound/outbound/internal coupling, and top neighbouring directories. Summaries are extracted from the project's own text (README first paragraph, Go package doc, Python module docstring, leading file comment, Markdown), never generated. `--prefix` zooms into a directory, `--depth` (default 2, max 8) sets how many levels to expand, `--max-nodes` (default 1500, max 20000) bounds the tree, `--key-symbols` (default 5, max 20) sets symbols per node. JSON is `schema_version: 1` with `call_graph`, `stale`, `truncated`, and `partial_errors`. MCP counterpart `codemap_atlas` is full-profile only. |
+| `codemap features [--kind <csv>] [--query <text>] [--top N] [--depth N] [--no-footprint]` | **What the software can do.** Lists entry surfaces of kind `program`, `cli_command`, `rpc_tool`, `http_route`, `api_route`, and `page`. Each has a label, invocation, description (from the registration, such as a cobra `Short` or MCP `Description`, or a docstring), handler with durable selector (null for inline handlers), parent for nested CLI commands, and a bounded call footprint: symbols, files, subsystems, feature-specific tests, `ambiguous_edges`. Go registrations are read from the syntax tree (`confidence: confirmed`); TS/JS and Python are pattern-detected (`candidate`). `--kind` is a comma-separated list, `--query` filters by substring over label, description, handler, and file, `--top` defaults to 200, `--depth` (default 3, max 6) sets the footprint walk, and `--no-footprint` skips it. Ruby, Lua, and GDScript detection is not implemented; `notes` says so. MCP counterpart `codemap_features` is in the `agent`, `core`, and `full` profiles. |
+| `codemap flow <symbol> [--depth N] [--max-nodes N] [--include-tests]` | **How one feature works.** A call tree from one entry (a handler, a cobra `RunE`, any function) in the order the code calls things, each step with `file:line`, subsystem, signature, one-line doc, and `confirmed`/`candidate` confidence. On a name-based graph, same-name fan-out is collapsed to the most plausible definition (`alternatives`) or left as an unexpanded `ambiguous` step with candidates; precise edges are never collapsed. Repeats, cycles, and depth or node cuts are explicit (`leaf_reason`). Select the entry with a name or FQN, or with `--at <file>:<line>`. `--depth` defaults to 4 (max 8), `--max-nodes` to 120 (max 1000); tests are skipped unless `--include-tests`. MCP counterpart `codemap_flow` takes `symbol` or `selector` and is in the `agent`, `core`, and `full` profiles. |
+| `codemap task-context <task> [--mode understand\|change\|debug] [--at <file>:<line>]` | One-call, mode-scoped orientation for a concrete task (alias `brief`): freshness, explore neighbourhoods, and for `change`/`debug` contexts, impact drill-downs, and related files. The task text is used verbatim as the retrieval query. Default mode is `understand`; `--at` is repeatable and requires `change` or `debug`. MCP counterpart `codemap_task_context` is full-profile only. |
+
+```text
+$ codemap atlas --prefix internal --depth 1
+internal                             3,569 sym   254 files [source]
+├─ app/                              1,309 sym   100 files [source]  Package app is codemap's shared service layer. The…
+├─ extract/                            618 sym    40 files [source]  Package extract turns source files into structural…
+├─ graph/                              319 sym    22 files [source]  Package graph is codemap's structural code graph: …
+
+$ codemap features --kind cli_command --query review
+CLI (1):
+  review          Diff-scoped impact + test selection: what your changes affe…  cmd/codemap/query.go:690
+                    61 sym · 21 files · 6 subsystems · 34 tests
+
+$ codemap flow runReview --depth 1
+runReview                               cmd/codemap/query.go:690 — runReview renders diff-scoped intelligence…
+├─ 1 parseFailOnRiskFlag                cmd/codemap/gate.go:28 — parseFailOnRiskFlag validates --fail-on-risk's value.  (+1 deeper)
+├─ 2 openSession                        cmd/codemap/main.go:297  (+2 deeper)
+├─ 3 app.Session.Close                  internal/app/session.go:316 — Close closes any stores that were opened.  (+8 alt) (+1 deeper)
+…
+```
+
 ## Analysis
 
 The commands built around a change: how far it reaches, what tests cover it, how risky
@@ -119,17 +155,17 @@ it is, and — for `review` — what your current diff already touched.
 | Command | Description |
 |---|---|
 | `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, covering tests, and copy/paste-ready `test_commands`. `--at file:line` selects one definition; repeat `--at` to analyze up to 25 positions in one ordered, partial-success batch. A missed frame carries item-level `error.code:"symbol_not_found"`. Add `--batch` to force the stable batch envelope for one position. |
-| `codemap dependencies <file>` | Direct inbound call/reference/import evidence grouped by dependent file and edge kind. Every relationship is classified as **confirmed** or **candidate** with a reason (`precise`, `same_package`, `name_fanout`, `package_scope`, or `stale_snapshot`); totals and bounded source→target samples preserve that confidence. Coverage remains explicit for calls, references, imports, runtime wiring, and external consumers. Missing evidence never means safe. |
+| `codemap dependencies <file>` | Direct inbound call/reference/import evidence grouped by dependent file and edge kind. Every relationship is classified as **confirmed** or **candidate** with a reason (`precise`, `same_package`, `resolved_import`, `name_fanout`, `package_scope`, or `stale_snapshot`); totals and bounded source→target samples preserve that confidence. Coverage remains explicit for calls, references, imports, runtime wiring, and external consumers. Missing evidence never means safe. |
 | `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Returns grouped dependency evidence, coverage, blast radius, tests, and `delete_verdict`. Only fresh, confirmed, file-scoped indexed evidence can prove `unsafe`; name-fanout candidates, stale evidence, and Go's package-scoped imports remain `unknown` for the exact file. Missing evidence never proves safety; legacy `safe_to_delete` stays false. |
 | `codemap review [--since <ref>] [--staged] [--depth N] [--fail-on-risk <low\|medium\|high>] [--fail-on-untested]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, `stale`/`resolution`, and stable `call_graph` honesty signals. `--fail-on-risk`/`--fail-on-untested` gate on that data — see [Gating a commit or script](#gating-a-commit-or-script). |
 | `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). Each request accepts at most 256 unique names, 256 bytes per name. |
 | `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. Candidate input is capped at 256 unique names, 256 bytes per name. |
 | `codemap risk <symbol> [--depth N] [--fail-on-risk <low\|medium\|high>]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. `--fail-on-risk` gates on the level — see [Gating a commit or script](#gating-a-commit-or-script). |
-| `codemap hotspots [--top N]` | Most-referenced symbols (hubs); each entry carries `query_frequency` — how many past searches surfaced it — so equal-confidence hubs can be tie-broken by how often they are actually queried |
+| `codemap hotspots [--top N] [--include-tests]` | Most-referenced symbols (hubs), ranked by `effective_in_degree` (precise callers plus name-based callers divided by the number of same-named definitions). Test code is ignored by default: calls from tests do not count and test-defined symbols are not ranked; `--include-tests` counts them. Each entry carries `query_frequency` — how many past searches surfaced it — so equal-confidence hubs can be tie-broken by how often they are actually queried |
 | `codemap orphans [--top N]` | Functions/methods with no callers (dead-code candidates) |
 | `codemap coverage [--prefix P] [--lang L] [--uncovered] [--files] [--top N]` | Per-file precise call-graph coverage: rollups by language and by directory (worst-covered first), plus a bounded per-file list (`--files`, or any filter, includes it; capped at `--top`, default 200) showing each file's `resolver`, `resolved_at`, and whether it's gone `stale` since the last index. Complements, does not replace, the per-query `call_graph` enum. |
-| `codemap read-order [query] [--top N]` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/` packages, module index files, exported public API) and load-bearing hubs (call-graph in-degree) into a newcomer's reading guide, each with the reason it ranked. Optional `query` narrows by name/path. The agent-facing answer to "I just landed in this repo — what do I read first?" |
-| `codemap map [--top-subsystems N] [--top-bridges N] [--top-hubs N] [--top-entrypoints N]` | **Architecture overview** — deterministic source-path subsystems, directed cross-subsystem bridges with relationship provenance, likely entrypoints, and hubs. JSON includes `schema_version`, totals/truncation, `call_graph`, `resolution`, `stale`, and `partial_errors`. |
+| `codemap read-order [query] [--top N] [--include-tests]` | **Where to start reading** — ranks entrypoints and load-bearing hubs (`effective_in_degree`) into a newcomer's reading guide, each with the reason it ranked. Tests are ignored by default (`--include-tests` counts them). The `cmd`/`main` boost applies only to `main()` and to functions wired by value (for example a cobra `RunE` that nothing calls directly); methods never get it, and a `main()` under bench, examples, scripts, tools, or hack ranks as an auxiliary program entrypoint. Optional `query` narrows by name/path. The agent-facing answer to "I just landed in this repo — what do I read first?" |
+| `codemap map [--top-subsystems N] [--top-bridges N] [--top-hubs N] [--top-entrypoints N]` | **Architecture overview** — deterministic source-path subsystems, directed cross-subsystem bridges with relationship provenance, likely entrypoints, and hubs. Test code is excluded from bridges, subsystem edge counts, and hubs (`tests_excluded: true`). JSON includes `schema_version`, totals/truncation, `call_graph`, `resolution`, `stale`, and `partial_errors`. |
 | `codemap traverse --at <file>:<line> [--direction outgoing\|incoming\|both] [--edge-types calls,references,...] [--depth N] [--limit N]` | **Exact heterogeneous walk** — starts from the one indexed definition enclosing `--at` (no ambiguous positional name), resolves it to the durable `{file,start_line,fqn,kind}` identity, then walks selected relationship domains cycle-safely. `--edge-types` is CSV from `calls`, `references`, `imports`, `implements`, `overrides`, `depends_on`, `tests`, and `defines`; depth is 1–10 (default 2), node limit is 1–500 (default 100). JSON v1 includes every hop's parent selector, direction, edge type/provenance, and confirmed/candidate confidence. MCP counterpart `codemap_traverse` is full-profile only and requires the typed durable `selector`. |
 | `codemap inconsistencies --json` | **Where the compiled knowledge contradicts itself**: dangling annotations whose target no longer exists (repair: `annotate --retarget` or `--rm`), precise-resolved files still emitting name-based call edges (repair: re-run `--precise`), and coverage recorded for files with no indexed nodes (repair: reindex). Reports `stale` when the working tree has drifted, since that makes every claim provisional. Emits `codemap.inconsistencies.v1`; an empty report is evidence of internal coherence, not correctness. CLI-only by contract. |
 
@@ -141,7 +177,7 @@ name fragment, or by literal text.
 | Command | Description |
 |---|---|
 | `codemap semantic <query> [--top N] [--backend fallback\|local\|vecgrep] [--fusion auto\|balanced]` | Meaning-based search across the indexed graph (alias: `codemap search`); the backend flag explicitly selects the semantic owner |
-| `codemap explore <query> [--seeds N] [--edges N] [--depth N]` | **Intent to structure** — finds semantic/name seeds, joins each usable hit to an exact durable selector, then returns bounded caller/callee/reference/test neighborhoods without source bodies. Seeds are 1–10 (default 5), edges per neighborhood are 1–20 (default 5), and depth is 1–10 (default 2). MCP counterpart `codemap_explore` is full-profile only. |
+| `codemap explore <query> [--seeds N] [--edges N] [--depth N]` | **Intent to structure** — finds semantic/name seeds, joins each usable hit to an exact durable selector, then returns bounded caller/callee/reference/test neighborhoods without source bodies. Seeds are 1–10 (default 5), edges per neighborhood are 1–20 (default 5), and depth is 1–10 (default 2). MCP counterpart `codemap_explore` is registered in every profile. |
 | `codemap find <query> [--top N]` | Find symbols by name, with signatures (offline; no embeddings needed) |
 | `codemap grep <pattern> [--regex] [-i] [--top N]` | Exact text search over indexed file content, each hit resolved to its enclosing symbol (offline, no embeddings) |
 
@@ -188,12 +224,12 @@ config) for the exact pre-adaptive equal-weighted behavior.
 
 ## Surfaces
 
-The three ways to run codemap beyond one-off CLI queries: as an MCP server, as an
-interactive TUI, or just check what's installed.
+The three ways to run codemap beyond one-off CLI queries: as an MCP server, or just
+check what's installed.
 
 | Command | Description |
 |---|---|
-| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile agent\|core\|full` selects the [tool profile](/mcp#tool-profiles): `agent` is exactly 25 taught workflow tools plus `codemap_docs` (26 total), `core` preserves the compatible 26-tool surface, and default `full` exposes all 44. Same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting. |
+| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile agent\|core\|full` selects the [tool profile](/mcp#tool-profiles): `agent` is exactly 27 taught workflow tools plus `codemap_docs` (28 total), `core` preserves the compatible 28-tool surface, and default `full` exposes all 48. Same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting. |
 | `codemap version` | Print version information |
 
 ## Agent harness setup
@@ -248,8 +284,7 @@ below (see [Configuration](/configuration)).
 | `codemap daemon stop` | Stop the running daemon |
 
 When a daemon is running, `codemap status` and the `codemap_status` MCP tool report
-it (a `daemon` object in `--json`), `codemap doctor` lists it as a health check, and
-the [studio](/studio) header shows a live `● daemon` indicator.
+it (a `daemon` object in `--json`), `codemap doctor` lists it as a health check.
 
 While a daemon is running, `codemap index` **delegates** the reindex to it over
 the control socket instead of opening a second write handle (which would
@@ -361,7 +396,7 @@ successfully mapped post-image subset from hiding old definitions that review co
 `hotspots`/`orphans`/`path`/`map`/`traverse`
 tells a consumer how much to trust the call graph without parsing prose: `resolved`
 (every matched definition file has precise coverage), `name` (Go/Ruby/Lua name-based — same-named symbols may over-match), `unresolved`
-(TS/JS/Python without successful precise coverage, or Vue whose call graph is not supported yet — callers/blast/tests are incomplete, not absent; TS/JS may still return name-based JSX candidates),
+(TS/JS/Python without successful precise coverage, or Vue whose call graph is not supported yet — callers/blast/tests are incomplete, not absent; TS/JS may still return name-based candidates for JSX, same-file calls, and imported bindings),
 `none` (no matching symbol). The free-form `resolution` sentence stays for humans.
 
 **`risk`** on `review` is one band for the whole diff — `level` (unknown/low/medium/high),

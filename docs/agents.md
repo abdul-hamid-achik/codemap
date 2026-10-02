@@ -15,7 +15,7 @@ Query and report commands take `--json`, and the core query surface has thin
 identical, while transport-level misses follow each surface's convention (CLI exit
 codes/error envelopes; MCP structured tool results). Administration and export workflows
 such as `structural-manifest`, `export-symbols`, cache export/import, daemon management,
-branch snapshots, agent setup, `serve`, and `studio` remain CLI-only. The built-in guide
+branch snapshots, agent setup, and `serve` remain CLI-only. The built-in guide
 `codemap docs workflow` (and the `codemap_docs` tool) is the in-band version of this
 page.
 
@@ -58,10 +58,10 @@ to paste.
 
 Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
 [MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
-*all* servers combined; every other harness above stays on the full 44-tool default.
+*all* servers combined; every other harness above stays on the full 48-tool default.
 For a manually configured harness, choose `CODEMAP_MCP_PROFILE=agent` to bind its
 surface exactly to this page's taught loop. `agent` and the backwards-compatible
-`core` profile both contain 26 tools today; `full` is the explicit expert/admin
+`core` profile both contain 28 tools today; `full` is the explicit expert/admin
 surface and remains the default for compatibility.
 
 ### Claude Code plugin
@@ -87,12 +87,14 @@ whether to trust what it returned — full tool descriptions live in the
 
 | Stage | Tool | Check |
 |---|---|---|
-| **Orient** — where do I start? | `codemap_read_order` | ranked entrypoints + hubs, each with a reason — read these first, once per repo |
+| **Orient** — where do I start? | `codemap_read_order` (entrypoints + hubs) / `codemap_features` (what the software can do, with each handler's selector) | a reason on each `read_order` entry; `confidence` (`confirmed` or `candidate`) on each feature — read these first, once per repo |
 | **Locate** — find the symbol | `codemap_find` (by name) / `codemap_semantic` (by meaning) / `codemap_grep` (exact text) / `codemap_symbol_at` (resolve a `file:line`) | `matched_in` on `find`, `fusion` on `semantic`, `resolution` on `symbol_at` — why/how the hit surfaced |
-| **Understand** — read it in full | `codemap_context` (one symbol) / `codemap_context_batch` (several) / `codemap_file_context` (one-call orientation on a whole file) | `call_graph` — trust level; `candidates` if the name is ambiguous, re-query with `candidates[i].selector` |
+| **Understand** — read it in full | `codemap_flow` (how a handler works, as an ordered call tree) / `codemap_context` (one symbol) / `codemap_context_batch` (several) / `codemap_file_context` (one-call orientation on a whole file) | `call_graph` — trust level; `alternatives`/`leaf_reason:"ambiguous"` on `flow` steps; `candidates` if the name is ambiguous, re-query with `candidates[i].selector` |
 | **Gate** — how careful, and is this even current? | `codemap_risk` (change-risk score) alongside `codemap_impact` / `codemap_file_impact` for the blast surface | `stale` — an index that's drifted since last run makes every other signal provisional |
 | **Edit** — make the change | informed by the tools above; codemap has no write path | — |
 | **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` — the diff's changed symbols, blast radius, and the tests to run |
+
+On an unfamiliar repo the first moves are `codemap_read_order` or `codemap_features` to find an entry point, then `codemap_flow` on its handler selector, then `codemap_context` on any step; the CLI equivalent is walked through in [Learn a codebase](/learn).
 
 Deeper tools plug into the same stages on demand: `codemap_dependencies` and
 `codemap_references` sharpen **Locate**/**Gate** with confirmed-vs-candidate file and
@@ -109,7 +111,7 @@ after every change — those two bookend the loop.
 `full` profile additionally exposes two bounded orientation tools outside the lean taught loop:
 `codemap_map` surveys subsystems and `codemap_traverse` walks selected relation types from a
 required durable selector (`direction`/`edge_types`/`depth`/`limit`). Those two are intentionally
-not registered in the current 26-tool `agent` or `core` profiles.
+not registered in the current 28-tool `agent` or `core` profiles. The third full-profile orientation tool, `codemap_atlas`, returns the repository as a described directory tree; `codemap_task_context` composes one mode-scoped orientation bundle.
 
 ## Honesty signals — why an agent can trust the answers
 
@@ -127,10 +129,11 @@ calibrate its confidence:
   post-image line, recognized callable/type declaration lines removed in mixed or equal-count hunks, and an exact
   source rename with no mapped symbols at its new path. Fresh indexed untracked source files and exact source renames map as
   whole files; documentation/assets remain ordinary zero-symbol changes. A stale, partial, or capped review always reports aggregate `risk.level:"unknown"`.
-- **`resolution`** — set when a call graph is *unavailable* (plain TypeScript/JavaScript/
-  Python calls without successful precise coverage, or Vue SFCs whose call edges are not yet
+- **`resolution`** — set when a call graph is *unavailable or partial* (TypeScript/JavaScript/
+  Python without successful precise coverage, or Vue SFCs whose call edges are not yet
   supported even by precise indexing): callers/blast/tests are **unresolved, not absent**
-  (TS/JS may still return name-based JSX component-usage candidates).
+  (TS/JS may still return name-based candidates for JSX component usage, same-file calls, and
+  imported-binding calls).
   `codemap_review`/`codemap_risk` will not assert "no tests" in that state, and
   `--fail-on-untested` fails closed because coverage cannot be established;
   `codemap_file_impact` reports deletion as `unsafe` only from fresh confirmed
@@ -171,8 +174,9 @@ calibrate its confidence:
 ## Precision when you need it
 
 The Go, Ruby, and Lua graphs start name-based from built-in pure-Go backends; base TS/JS carries
-name-based JSX component-usage, import, and Next.js framework-wiring edges. For plain
-TypeScript/JavaScript/Python calls — and for
+name-based JSX component-usage, import, Next.js framework-wiring, same-file call, and
+imported-binding call edges (arbitrary `obj.method()` calls are not linked, and Python has no
+base-level call edges). For complete TypeScript/JavaScript/Python calls — and for
 exact Go method resolution — run `codemap index --precise` (go/types + language-server
 `callHierarchy`). Precise coverage is tracked per file: a query is `resolved` only when every
 matched definition file completed the pass; partial failures remain `name`/`unresolved`, and

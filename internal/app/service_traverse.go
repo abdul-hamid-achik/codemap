@@ -44,6 +44,11 @@ type TraverseHop struct {
 	Provenance       string          `json:"provenance"`
 	Confidence       string          `json:"confidence"`
 	ConfidenceReason string          `json:"confidence_reason"`
+	// TargetScope is "package" when the hop is a Go import: Go imports are
+	// package-scoped, so the file reached is only one representative non-test file
+	// of the imported package (empty symbol), not a claim about that file. Absent
+	// for every other hop (additive).
+	TargetScope string `json:"target_scope,omitempty"`
 }
 
 type TraverseReport struct {
@@ -133,11 +138,15 @@ func (svc *Service) TraverseBySelector(cwd string, selector SymbolSelector, opts
 		} else {
 			domain.Candidate++
 		}
+		scope := ""
+		if step.Edge.EdgeType == graph.EdgeImports && (step.Node.Language == "go" || parent.Language == "go") {
+			scope = DependencyTargetPackage
+		}
 		rep.Hops = append(rep.Hops, TraverseHop{
 			Symbol: nodeToRef(step.Node), Selector: selectorForNode(step.Node), ParentSelector: selectorForNode(parent),
 			Depth: step.Depth, Direction: step.Direction, EdgeType: step.Edge.EdgeType,
 			Weight: step.Edge.Weight, Provenance: step.Edge.Provenance,
-			Confidence: confidence, ConfidenceReason: reason,
+			Confidence: confidence, ConfidenceReason: reason, TargetScope: scope,
 		})
 	}
 	for _, domain := range domains {
@@ -152,7 +161,8 @@ func (svc *Service) TraverseBySelector(cwd string, selector SymbolSelector, opts
 			rep.Resolution = declarativeGuidance
 		}
 		if lang, unavailable := callGraphUnavailableResolved(resolvedFiles, []graph.Node{resolved.node}); unavailable {
-			rep.Resolution = fmt.Sprintf("call relations are unresolved for %s without precise indexing; non-call domains remain independently available", lang) + svc.coverageHintResolved(resolved.graph, resolved.project.ID, resolvedFiles)
+			head, _ := callGraphGap(lang)
+			rep.Resolution = fmt.Sprintf("call relations are not fully resolved: %s; non-call domains remain independently available", head) + svc.coverageHintResolved(resolved.graph, resolved.project.ID, resolvedFiles)
 		}
 	}
 	return rep, nil

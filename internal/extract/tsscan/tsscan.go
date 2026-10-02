@@ -54,6 +54,7 @@ func Enrich(res *extract.FileResult, relPath string, src []byte) {
 		res.References = append(res.References, ClassNameRefs(relPath, src, res.Symbols)...)
 	}
 	res.References = append(res.References, FrameworkRefs(relPath, src)...)
+	res.References = append(res.References, CallRefs(relPath, src, res.Symbols)...)
 }
 
 // isJSXPath reports whether a path may legally contain JSX elements. Plain .ts

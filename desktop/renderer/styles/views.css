@@ -310,6 +310,7 @@
   left: var(--sp-3);
   top: var(--sp-3);
   display: grid;
+  justify-items: start;
   gap: 6px;
   pointer-events: none;
 }

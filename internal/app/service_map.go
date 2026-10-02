@@ -31,27 +31,30 @@ type ArchitectureMapOptions struct {
 // entrypoints. It is graph-only and carries the same call-graph/freshness honesty
 // signals as the lower-level structural queries.
 type ArchitectureMapReport struct {
-	SchemaVersion        int                       `json:"schema_version"`
-	Project              string                    `json:"project"`
-	Indexed              bool                      `json:"indexed"`
-	Strategy             string                    `json:"strategy,omitempty"`
-	Subsystems           []graph.TopologySubsystem `json:"subsystems"`
-	SubsystemsTotal      int                       `json:"subsystems_total"`
-	Bridges              []graph.TopologyBridge    `json:"bridges"`
-	BridgesTotal         int                       `json:"bridges_total"`
-	Hubs                 []HotspotRef              `json:"hubs"`
-	HubsTotal            int                       `json:"hubs_total"`
-	Entrypoints          []ReadEntry               `json:"entrypoints"`
-	EntrypointsTotal     int                       `json:"entrypoints_total"`
-	CallGraph            string                    `json:"call_graph"`
-	Resolution           string                    `json:"resolution,omitempty"`
-	Stale                bool                      `json:"stale,omitempty"`
-	Truncated            bool                      `json:"truncated,omitempty"`
-	SubsystemsTruncated  bool                      `json:"subsystems_truncated,omitempty"`
-	BridgesTruncated     bool                      `json:"bridges_truncated,omitempty"`
-	HubsTruncated        bool                      `json:"hubs_truncated,omitempty"`
-	EntrypointsTruncated bool                      `json:"entrypoints_truncated,omitempty"`
-	PartialErrors        []string                  `json:"partial_errors,omitempty"`
+	SchemaVersion   int                       `json:"schema_version"`
+	Project         string                    `json:"project"`
+	Indexed         bool                      `json:"indexed"`
+	Strategy        string                    `json:"strategy,omitempty"`
+	Subsystems      []graph.TopologySubsystem `json:"subsystems"`
+	SubsystemsTotal int                       `json:"subsystems_total"`
+	Bridges         []graph.TopologyBridge    `json:"bridges"`
+	BridgesTotal    int                       `json:"bridges_total"`
+	// TestsExcluded is true when edges touching test code were left out of the
+	// subsystem edge counts and bridges, and test code out of hubs/entrypoints.
+	TestsExcluded        bool         `json:"tests_excluded"`
+	Hubs                 []HotspotRef `json:"hubs"`
+	HubsTotal            int          `json:"hubs_total"`
+	Entrypoints          []ReadEntry  `json:"entrypoints"`
+	EntrypointsTotal     int          `json:"entrypoints_total"`
+	CallGraph            string       `json:"call_graph"`
+	Resolution           string       `json:"resolution,omitempty"`
+	Stale                bool         `json:"stale,omitempty"`
+	Truncated            bool         `json:"truncated,omitempty"`
+	SubsystemsTruncated  bool         `json:"subsystems_truncated,omitempty"`
+	BridgesTruncated     bool         `json:"bridges_truncated,omitempty"`
+	HubsTruncated        bool         `json:"hubs_truncated,omitempty"`
+	EntrypointsTruncated bool         `json:"entrypoints_truncated,omitempty"`
+	PartialErrors        []string     `json:"partial_errors,omitempty"`
 }
 
 // ArchitectureMap returns a bounded, deterministic architecture projection for
@@ -86,6 +89,7 @@ func (svc *Service) ArchitectureMap(cwd string, opts ArchitectureMapOptions) (*A
 		return nil, err
 	}
 	rep.Strategy = topology.Strategy
+	rep.TestsExcluded = topology.TestsExcluded
 	rep.Subsystems = topology.Subsystems
 	rep.SubsystemsTotal = topology.SubsystemsTotal
 	rep.Bridges = topology.Bridges
@@ -100,12 +104,8 @@ func (svc *Service) ArchitectureMap(cwd string, opts ArchitectureMapOptions) (*A
 		rep.Hubs = hotspots.Hotspots
 		rep.CallGraph = hotspots.CallGraph
 		rep.Resolution = hotspots.Resolution
-		if total, countErr := g.HotspotCount(pid); countErr != nil {
-			rep.PartialErrors = append(rep.PartialErrors, "hotspot_count: "+countErr.Error())
-		} else {
-			rep.HubsTotal = total
-			rep.HubsTruncated = len(rep.Hubs) < total
-		}
+		rep.HubsTotal = hotspots.total
+		rep.HubsTruncated = len(rep.Hubs) < rep.HubsTotal
 	}
 
 	readOrder, rErr := svc.ReadOrder(cwd, ReadOrderOpts{Top: opts.TopEntrypoints, EntrypointsOnly: true})

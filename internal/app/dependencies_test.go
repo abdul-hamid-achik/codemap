@@ -69,6 +69,48 @@ func TestDependenciesGroupsEvidenceAndExposesCoverage(t *testing.T) {
 	}
 }
 
+// A file→file import that the resolver mapped to exactly one project file (here a
+// Lua require; TS/JS/Vue relative imports take the same path) is a confirmed
+// dependency, not "candidate (name fanout)". Go imports stay package-scoped
+// candidates (TestDependenciesGoImportIsPackageScopedAndIncremental).
+func TestDependenciesResolvedFileImportIsConfirmed(t *testing.T) {
+	isolate(t)
+	proj := t.TempDir()
+	mustWrite(t, proj, "util.lua", "local M = {}\nfunction M.helper() end\nreturn M\n")
+	mustWrite(t, proj, "main.lua", "local util = require(\"util\")\nfunction run() util.helper() end\n")
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := svc.Dependencies(proj, "util.lua")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sample *DependencySample
+	for _, dep := range rep.Dependents {
+		for _, kind := range dep.Kinds {
+			if kind.Kind != graph.EdgeImports {
+				continue
+			}
+			if len(kind.Samples) > 0 {
+				sample = &kind.Samples[0]
+			}
+		}
+	}
+	if sample == nil {
+		t.Fatalf("expected an imports sample for util.lua: %+v", rep)
+	}
+	if sample.TargetScope != DependencyTargetFile || sample.Confidence != DependencyConfidenceConfirmed || sample.ConfidenceReason != DependencyReasonResolvedImport {
+		t.Fatalf("resolved file import sample = %+v, want confirmed/resolved_import", *sample)
+	}
+	assertDependencyTotals(t, rep)
+}
+
 func TestDependenciesUnindexed(t *testing.T) {
 	isolate(t)
 	sess, err := Open("")

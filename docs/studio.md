@@ -1,11 +1,11 @@
-# Studio (removed)
+# Studio (retired)
 
-The interactive Studio terminal UI is not shipped in the CLI for now.
+The terminal Studio TUI was retired and there is no `codemap studio` command.
 
-Use:
+Codemap Studio is now the [desktop app](/desktop): an Electron workbench that runs `codemap … --json` behind a graph explorer, review desk, architecture map, and MCP inspector.
+
+For terminal and agent workflows, use:
 
 - [Quick Start](/quick-start) for human CLI workflows
 - [For agents](/agents) for the agent guide
 - [MCP server](/mcp) for assistant integration
-
-All operations are available through the CLI (`--json` for machines) and the MCP server (`codemap serve`).

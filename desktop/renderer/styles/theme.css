@@ -287,3 +287,34 @@ kbd,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Categorical palette: languages, subsystems and anything else that needs
+   "a distinct hue". Tuned per theme; consumed via js/palette.mjs. */
+html[data-theme='dark'] {
+  --cat-1: #5fd0e8;
+  --cat-2: #a98af0;
+  --cat-3: #f0b264;
+  --cat-4: #5fd39a;
+  --cat-5: #f2708a;
+  --cat-6: #6c9cf5;
+  --cat-7: #f08a5d;
+  --cat-8: #b5d96a;
+  --cat-9: #e87fd0;
+  --cat-10: #3fbfa8;
+  --cat-11: #c9b58a;
+  --cat-12: #8fa2b6;
+}
+html[data-theme='light'] {
+  --cat-1: #0a8aa3;
+  --cat-2: #6a3fc0;
+  --cat-3: #a8690f;
+  --cat-4: #12805a;
+  --cat-5: #b02a4b;
+  --cat-6: #2f63c4;
+  --cat-7: #c2531d;
+  --cat-8: #6f8f14;
+  --cat-9: #b0309a;
+  --cat-10: #0f8a76;
+  --cat-11: #8a7647;
+  --cat-12: #5c6878;
+}

@@ -13,7 +13,7 @@ capabilities, and the JSON contracts keep that distinction visible.
 | Language | Symbols and definitions | Relationships | Requirement / limit |
 |---|---|---|---|
 | **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + a buildable module for the precise pass. One-off `callers --precise` / `callees --precise` uses `gopls`. |
-| **TypeScript + JavaScript** | `documentSymbol` through one shared `typescript-language-server` process, including TSX/JSX and cross-language projects | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, and Next.js framework wiring; plain function calls need `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | `node` + `typescript-language-server`. The name-based scan rides on LSP symbol extraction, so it also needs the server. |
+| **TypeScript + JavaScript** | `documentSymbol` through one shared `typescript-language-server` process, including TSX/JSX and cross-language projects | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, Next.js framework wiring, same-file calls, and calls through imported bindings; arbitrary `obj.method()` calls are not linked, so the graph is partial until `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | `node` + `typescript-language-server`. The name-based scan rides on LSP symbol extraction, so it also needs the server. |
 | **Python** | `documentSymbol` through `pyright-langserver` | No name-based edges; `--precise` uses LSP `callHierarchy` | `node` + `pyright-langserver`. |
 | **Ruby** | Built in with a pure-Go scanner: modules, classes, `def` (incl. `def self.x`, endless defs, `private def`); heredoc-, `=begin`-, and string-safe | Name-based calls plus `require`/`require_relative` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **Lua** | Built in with a pure-Go scanner: `function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe | Name-based calls plus `require` imports; no precise pass yet | None — works offline like Go's name-based path. |
@@ -39,7 +39,7 @@ is language-agnostic once source-bearing symbols are indexed, and Ollama remains
 
 ### TS/JS name-based edges — what they cover and what they don't
 
-The base (non-`--precise`) TS/JS graph carries three kinds of name-based evidence:
+The base (non-`--precise`) TS/JS graph carries four kinds of name-based evidence:
 
 - **JSX component usage** (`.tsx`/`.jsx` only) — `<Foo/>` creates a candidate call edge from the
   enclosing component to `Foo`; member expressions (`<Foo.Bar/>`, `<motion.div/>`) resolve to the
@@ -54,14 +54,20 @@ The base (non-`--precise`) TS/JS graph carries three kinds of name-based evidenc
 - **Next.js framework wiring** — App Router special files (`page`/`layout`/`route` HTTP verbs/
   `error`/metadata routes/…), `middleware`, and Pages Router modules get a reference from the
   file to their framework-invoked exports, so those symbols stop appearing as orphans.
+- **Calls** — high-precision candidate call edges for same-file calls (`f()`, `new C()`, `await f()`,
+  `this.m()`) and for calls through imported bindings: named, default, and namespace imports and
+  `require`, resolved through relative specifiers, `@/`/`~/` aliases, and workspace packages. A call
+  to an unresolvable receiver, such as `obj.method()` on an arbitrary object, is not linked.
 
-These are *candidate* edges (weight 0.7 — the same over-match contract as Go's name-based
+These are *candidate* edges (the same over-match contract as Go's name-based
 selector calls); a `--precise` pass supersedes them per file with exact `callHierarchy` edges.
 Honest limits: a component passed only as a **prop** (`<Nav Link={AuthLink}/>`) is never
 JSX-rendered by name and can still appear as an orphan; a **wrapped default export**
 (`export default memo(Page)`) isn't framework-wired because the invoked identifier isn't
-name-resolvable; and plain function calls (`foo()`) still have no name-based TS/JS edges at all —
-`--precise` remains the only source for those.
+name-resolvable; and calls that are neither same-file nor through an imported binding
+(`obj.method()`, dynamic dispatch, callbacks resolved at runtime) have no name-based edges, so
+`call_graph` stays `unresolved` (a partial graph) for uncovered TS/JS and `--precise` remains the
+only source for complete calls. Python has no base-level call edges.
 
 ## Support ladder
 

@@ -19,7 +19,7 @@ export const EXIT_MEANING = {
   6: 'gate_failed',
 }
 
-const MAX_CAPTURE = 4 * 1024 * 1024
+const MAX_CAPTURE = 16 * 1024 * 1024
 
 function truncate(text) {
   if (text.length <= MAX_CAPTURE) return text

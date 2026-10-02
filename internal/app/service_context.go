@@ -63,6 +63,11 @@ type ContextReport struct {
 	// the report usable and are surfaced here instead of being silently dropped.
 	PartialErrors []ContextPartialError `json:"partial_errors,omitempty"`
 	Next          []NextAction          `json:"next,omitempty"`
+	// Code and Hint are set only when found is false (additive): the same
+	// not_found code and remediation hint the CLI prints with exit code 2, so an
+	// MCP consumer can tell an unknown symbol from a symbol with an empty bundle.
+	Code string `json:"code,omitempty"`
+	Hint string `json:"hint,omitempty"`
 }
 
 // ContextPartialError is one non-fatal failure while assembling a context
@@ -177,6 +182,12 @@ func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol
 	rep.Annotations = src.Annotations
 	rep.Found = len(src.Matches) > 0
 	if !rep.Found {
+		rep.Code = CodeNotFound
+		if selector != nil {
+			rep.Hint = "the selected definition is no longer in the index — run: codemap index"
+		} else {
+			rep.Hint = fmt.Sprintf("run: codemap find %q to check the name", rep.Symbol)
+		}
 		return rep, nil, nil // unknown symbol: empty bundle, no point querying relations
 	}
 	var ca *RelationReport

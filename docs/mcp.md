@@ -54,7 +54,7 @@ index → understand → read workflow on its own.
 
 ## Tool profiles
 
-By default `codemap serve` registers all 45 tools. That's a real cost: a
+By default `codemap serve` registers all 48 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
 measured **+95% input tokens** on the codemap arm, driven by every tool's schema
 riding in every session's context — and some clients (Cursor) cap total MCP tools
@@ -62,10 +62,10 @@ at ~40 *across all servers combined*, so a full codemap registration can crowd o
 every other server.
 
 Set `CODEMAP_MCP_PROFILE=agent` (env), `mcp.profile: agent` (`codemap.yaml`), or pass
-`--profile agent` to `codemap serve` for the exact **26-tool** surface derived from
-the canonical taught workflow: the 25 tools it names plus `codemap_docs` for
+`--profile agent` to `codemap serve` for the exact **28-tool** surface derived from
+the canonical taught workflow: the 27 tools it names plus `codemap_docs` for
 self-discovery. The shipped `core` profile remains compatible and currently has
-the same 26-tool inventory; its contract stays stable while `agent` is pinned to
+the same 28-tool inventory; its contract stays stable while `agent` is pinned to
 what the playbook actually teaches. `full` remains the default for backwards
 compatibility and is the explicit expert/admin surface.
 
@@ -75,13 +75,13 @@ compatibility and is the explicit expert/admin surface.
 `codemap_callees`, `codemap_references`, `codemap_risk`, `codemap_dependencies`,
 `codemap_file_impact`, `codemap_file_context`, `codemap_review`, `codemap_path`,
 `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_explore`,
-`codemap_symbol_at`, `codemap_related_files`.
+`codemap_symbol_at`, `codemap_related_files`, `codemap_features`, `codemap_flow`.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
-server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **31,808
-schema characters (≈7,952 tokens using the declared chars/4 planning estimate)**;
-`full` serializes **47,784 characters (≈11,946 estimated tokens)**. That is about
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **35,616
+schema characters (≈8,904 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **53,197 characters (≈13,300 estimated tokens)**. That is about
 33% less schema context for the taught surface. Reproduce it with:
 
 ```bash
@@ -94,7 +94,7 @@ Everything else — `codemap_init`, `codemap_doctor`, `codemap_projects`,
 `codemap_unannotate`, `codemap_branch_status` / `codemap_branch_switch`, and
 `codemap_cache_save` / `codemap_cache_restore` / `codemap_cache_list` /
 `codemap_cache_drop`, plus the full-profile orientation surfaces `codemap_map`,
-`codemap_traverse`, and `codemap_task_context` — is admin/ecosystem/extended surface, available
+`codemap_atlas`, `codemap_traverse`, and `codemap_task_context` — is admin/ecosystem/extended surface, available
 under the default `full` profile and excluded from both current lean profiles. Precedence is the same three-way order as every
 other codemap setting: config file < environment < CLI flag. An unrecognized value
 is a startup error, not a silent fallback. [`codemap agent setup
@@ -111,7 +111,7 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | Tool | Description |
 |---|---|
 | `codemap_init` | Register a project directory |
-| `codemap_index` | Index/reindex a project (`reindex`, `no_embed`, `precise` → exact call edges via `go/types` for Go and LSP `callHierarchy` for TypeScript/JavaScript/Python; Vue remains symbols + imports only). Base TS/JS indexing already carries name-based import, JSX component-usage, and Next.js framework-wiring edges; Ruby and Lua index name-based with no server |
+| `codemap_index` | Index/reindex a project (`reindex`, `no_embed`, `precise` → exact call edges via `go/types` for Go and LSP `callHierarchy` for TypeScript/JavaScript/Python; Vue remains symbols + imports only). Base TS/JS indexing already carries name-based import, JSX component-usage, Next.js framework-wiring, same-file call, and imported-binding call edges; Ruby and Lua index name-based with no server |
 | `codemap_status` | Index statistics **plus freshness** — a `stale` count of files changed/added/removed since indexing, so an agent reindexes before trusting results. The health call skips the local vector-store count (`vectors_known:false`) to stay bounded; use the CLI's explicit `codemap status --full` for that diagnostic |
 | `codemap_doctor` | Check the environment (go toolchain, gopls, TS/JS + Python language servers, Ollama) with install hints — diagnose why a language isn't indexed or semantic search is off |
 | `codemap_semantic` | Semantic search by meaning (`query`, `top_k`). Adaptively balances the vector/BM25 hybrid-search fusion by query shape — an identifier-looking query leans BM25, a natural-language question leans vector — and reports the chosen profile as `fusion` (`identifier`/`natural_language`/`balanced`). Set `semantic.fusion: balanced` (or `CODEMAP_SEMANTIC_FUSION=balanced`) on the server for exact equal weighting |
@@ -124,13 +124,17 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_file_impact` | **File-level impact** — returns confidence-aware `dependency_evidence`, blast/tests, and a conservative `delete_verdict`. Only fresh confirmed file-scoped evidence proves `unsafe`; name-fanout candidates, stale snapshots, Go package imports, and missing evidence remain `unknown`. Legacy `safe_to_delete` stays false. |
 | `codemap_required_keys` | **Least-privilege key set** — for an `entrypoint`, the candidate secret key NAMES its transitive call tree actually reads. Supply `keys` directly or use `via_vault` plus optional `prefix`; operates on names only, never values. Candidate input is capped at 256 unique names, 256 bytes per name |
 | `codemap_secret_impact` | **Secret-key rotation blast radius** — for each key NAME, the symbols that read it (`os.Getenv`/`os.environ`/`process.env`), the transitive callers affected, and covering tests (`untested:true` warns a key no test reaches). Operates on key NAMES only — never reads/returns values. Pairs with [tinyvault](/ecosystem); `via_vault` fetches names from it. Each request is capped at 256 unique names, 256 bytes per name. Name-based unless the index is `--precise` |
-| `codemap_hotspots` | Most-referenced symbols (`top`), with project-wide `call_graph`/`resolution` so incomplete rankings are explicit |
+| `codemap_hotspots` | Most-referenced symbols (`top`), ranked by `effective_in_degree` (precise callers plus name-based callers divided by the number of same-named definitions). Test code is ignored unless `include_tests` is true. Carries project-wide `call_graph`/`resolution` so incomplete rankings are explicit |
 | `codemap_risk` | **Change-risk score** for a `symbol` or exact `selector` — untested coverage + fan-in + cross-package spread + name ambiguity combined into a 0..1 `score` + `level` (unknown/low/medium/high), with the `factors` behind it. An unavailable call graph is `unknown`, never a reassuring `low` |
 | `codemap_orphans` | Dead-code candidates (`top`), with project-wide `call_graph`/`resolution` so an unresolved graph never reads as proven dead code |
 | `codemap_coverage` | **Per-file precise call-graph coverage** — rollups by language/directory (worst-covered first) always included; `prefix`/`language`/`uncovered` filters or `files:true` add the bounded per-file list (`top`, default/max 200/2000; `files_total`/`files_truncated` disclose the real count). Each file reports `resolver`/`resolved_at`/`stale`. Complements the per-query `call_graph` enum — use it to calibrate trust per package before asking a symbol question. |
-| `codemap_read_order` | **Where to start reading** — ranks entrypoints (`main()`, `cmd/`, module index files, exported API) + call-graph hubs into a reading guide, each with a reason and score. Optional `query` narrows it. Run on first contact with an unfamiliar repo, then drill the top entries with `codemap_context` |
-| `codemap_map` | **Architecture overview** (full profile) — bounded source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and hubs. Independent `top_subsystems`/`top_bridges`/`top_hubs`/`top_entrypoints` caps; response carries totals/truncation plus freshness and call-graph honesty. |
+| `codemap_read_order` | **Where to start reading** — ranks entrypoints (`main()` and functions wired by value such as handlers, module index files, exported API) + call-graph hubs into a reading guide, each with a reason and score. Tests are ignored unless `include_tests` is true. Optional `query` narrows it. Run on first contact with an unfamiliar repo, then drill the top entries with `codemap_context` |
+| `codemap_atlas` | **The repo as a described directory/file tree** (full profile) — per node: files, symbols, lines, tests, roles (`source`/`tests`/`docs`/`config`/`entrypoint`/`examples`/`bench`/`generated`/`vendor`), a `summary` with `summary_source` (README first paragraph, Go package doc, Python module docstring, leading file comment, Markdown; extracted, never generated), key symbols with durable selectors, inbound/outbound/internal coupling, and top neighbours. Inputs: `prefix` (zoom into a directory), `depth` (default 2, max 8), `files` (include file leaves), `max_nodes` (default 1500, max 20000), `key_symbols` (default 5, max 20). Carries `schema_version: 1`, `call_graph`, `resolution`, `stale`, `truncated`, and `partial_errors`. |
+| `codemap_features` | **Capability inventory** (agent, core, and full profiles) — what the software can do and where each capability lives: `program`, `cli_command`, `rpc_tool`, `http_route`, `api_route`, and `page` features, each with label, invocation, description (from the registration or a docstring), handler with durable `selector` (null for inline handlers), `parent` for nested CLI commands, and a bounded call `footprint` (symbols, files, subsystems, feature-specific tests, `ambiguous_edges`). Go registrations are read from the syntax tree (`confidence: confirmed`); TS/JS and Python are pattern-detected (`candidate`). Inputs: `kind` (comma-separated), `query`, `top` (default 200, max 2000), `depth` (default 3, max 6), `no_footprint`. Ruby, Lua, and GDScript detection is not implemented and `notes` says so. Pass a handler selector to `codemap_flow` or `codemap_context`. |
+| `codemap_flow` | **How one feature works** (agent, core, and full profiles) — a bounded call tree from one entry, given as `symbol` or exact `selector`, in the order the code calls things. Each step carries `file:line`, subsystem, signature, one-line doc, and `confirmed`/`candidate` confidence. Same-name fan-out on a name-based graph is collapsed to the most plausible definition (`alternatives`) or left as an unexpanded `leaf_reason: "ambiguous"` step with candidates; precise edges are never collapsed. Repeats, cycles, and depth or node cuts are explicit. Inputs: `depth` (default 4, max 8), `max_nodes` (default 120, max 1000), `include_tests`. |
+| `codemap_map` | **Architecture overview** (full profile) — bounded source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and hubs. Test code is excluded from bridges, subsystem edge counts, and hubs (`tests_excluded: true`). Independent `top_subsystems`/`top_bridges`/`top_hubs`/`top_entrypoints` caps; response carries totals/truncation plus freshness and call-graph honesty. |
 | `codemap_explore` | **Intent to exact neighborhoods** — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (name fallback otherwise), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. |
+| `codemap_task_context` | **Mode-scoped task orientation** (full profile) — one call that composes freshness, explore neighbourhoods, brief contexts, impact drill-downs, and related files for a `task`, with `mode` `understand`, `change`, or `debug` (and optional `selectors`) (schema `codemap.task-context.v1`). The task text is the retrieval query verbatim. |
 | `codemap_traverse` | **Typed heterogeneous graph walk** (full profile) — requires `selector:{file,start_line,fqn,kind}` and never accepts an ambiguous name union. `direction` is `outgoing`, `incoming`, or `both`; `edge_types` is a list drawn from `calls`, `references`, `imports`, `implements`, `overrides`, `depends_on`, `tests`, and `defines`; `depth` is 1–10 and `limit` is 1–500 nodes. Each hop returns durable child/parent selectors, edge provenance, and confirmed/candidate confidence; the report is cycle-safe, bounded, and exposes truncation/domain totals. |
 | `codemap_path` | Shortest call path (`from`, `to`, or paired `from_selector`/`to_selector`), with endpoint-scoped `call_graph`/`resolution` distinguishing disconnected from unresolved. Unique FQNs are exact endpoints too |
 | `codemap_related_files` | Files structurally related to a `file` via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence. Graph-accurate alternative to import-text heuristics |
@@ -142,7 +146,7 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_context` | **Everything about a symbol in one call** — definition (with source), callers, callees, value-reference wiring, covering tests + `test_commands`, blast-radius size, and annotations. `selector` keeps the full bundle on one definition; lists are capped with `*_total` counts (`test_commands` is derived from the full, uncapped test list). Uses the indexed graph only; optional component failures are explicit in `partial_errors`. `brief:true` drops each definition's `source` (keeping `signature`/`doc`/location) and sets `source_omitted:true` — everything else in the bundle is unchanged; follow up with `codemap_source` for the one body you actually need |
 | `codemap_context_batch` | **Context for several symbols in one call** — each symbol's bundle (including its own `test_commands`) plus `combined_blast_radius` and `common_callers` (callers that reach two or more of them — a shared entrypoint/coupling). Build a component's mental model without N round-trips; deduped and capped at 25. Aggregate source bodies are capped at 64 KiB with `source_budget` and per-definition `source_truncations` metadata — or pass `brief:true` to drop every body up front (`source_omitted:true` per definition) instead of spending that budget |
 | `codemap_projects` | List all registered projects and their index sizes |
-| `codemap_docs` | Return the agent guide (`topic`: overview/workflow/commands/annotations/accuracy/ecosystem) so a harness can learn the tool |
+| `codemap_docs` | Return the agent guide (`topic`: overview/formats/workflow/commands/annotations/accuracy/ecosystem) so a harness can learn the tool |
 | `codemap_annotate` | Pin a note / opaque `data` to a `symbol` or a `from`→`to` path (`source` label). Automated writers should pass a stable `external_id`; retries upsert within project + source and return the same annotation `id` with `action:"created\|updated\|unchanged"`. |
 | `codemap_annotations` | List annotations: all, for a `symbol`, or for a `from`→`to` path |
 | `codemap_unannotate` | Remove an annotation by `id` — prune/correct the knowledge layer |
@@ -198,11 +202,11 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
 
 - **`call_graph`** — a stable enum on `codemap_impact`/`codemap_callers`/`codemap_callees`/`codemap_references`/
   `codemap_review`/`codemap_context`/`codemap_hotspots`/`codemap_orphans`/`codemap_path`/
-  `codemap_map`/`codemap_traverse`
+  `codemap_map`/`codemap_traverse`/`codemap_atlas`/`codemap_features`/`codemap_flow`
   that a consumer switches on (no prose parsing):
   - `resolved` — every matched definition file has precise coverage (go/types for Go, language-server callHierarchy for TS/JS/Python/Vue)
   - `name` — name-based call graph (the Go/Ruby/Lua default; same-named symbols may over-match)
-  - `unresolved` — plain calls in the language have no name-based edges and the index isn't precise (TS/JS/Python/Vue) — callers/blast/tests are **incomplete, not absent** (TS/JS may still carry name-based JSX component-usage candidates); reindex with `codemap_index precise:true`
+  - `unresolved` — the language has no complete call graph and the index isn't precise (TS/JS/Python/Vue) — callers/blast/tests are **incomplete, not absent** (TS/JS still carry name-based candidates for JSX component usage, same-file calls, and calls through imported bindings; Python and Vue have none); reindex with `codemap_index precise:true`
   - `none` — no matching symbol / nothing to classify
 
   The free-form `resolution` sentence stays for humans. Map resolved→high, name→medium, unresolved/none→low confidence.

@@ -41,7 +41,7 @@ instead of dozens of file reads.
   With the listed language server installed, **TypeScript + JavaScript** and **Python** provide
   symbols + structure and a **precise call graph** under `--precise`; one
   `typescript-language-server` resolves calls across the `.ts`↔`.js` boundary. Base (non-precise)
-  TS/JS indexing additionally extracts name-based **import edges**, **JSX component-usage edges**
+  TS/JS indexing additionally extracts name-based **import edges**, high-precision **call candidates** (same-file calls and calls through imported bindings), **JSX component-usage edges**
   (`<Foo/>` in `.tsx`/`.jsx` — rendering *is* invocation for a function component, so React
   codebases no longer read as disconnected), and **Next.js framework-wiring references** (App
   Router special files, `route.ts` HTTP verbs, middleware, Pages Router), so framework-invoked
@@ -77,16 +77,21 @@ instead of dozens of file reads.
   `resolved` only when every matched definition file completed that pass; partial failures remain
   honestly `name`/`unresolved` instead of upgrading the whole project. It's the unified exact-resolution pass across languages: an in-process, pure-Go
   `go/types` pass for **Go**, and the language server's `callHierarchy` for the **LSP languages**
-  (TypeScript, JavaScript, Python — which have no name-based call edges, so `--precise` is what gives
-  them a call graph at all). Opt-in and additive (name-based stays the default for Go); the Go pass
+  (TypeScript, JavaScript, Python — whose base graph is partial or absent, so `--precise` is what gives
+  them complete calls). Opt-in and additive (name-based stays the default for Go); the Go pass
   degrades to name-based **with a note**
   when the `go` toolchain or module isn't available. For a one-off exact answer without reindexing,
   `callers`/`callees` also take `--precise` (language-server `callHierarchy`). CLI + MCP.
 - **Incremental** — hash-based reindex; an embedding-profile guard forces a rebuild when the
   provider, model, dimensions, or distance changes instead of corrupting the vector space.
 - **Two surfaces, one structural store** — a Cobra **CLI** (with `--json` for agents) and a stdio **MCP server**.
+- **Learn a codebase** — `atlas` prints the repo as a described directory tree (summaries are
+  extracted from READMEs, package docs, and docstrings, never generated), `features` lists what the
+  software can do (CLI commands, routes, MCP tools, pages) with each handler and call footprint, and
+  `flow <handler>` shows how one feature works as an ordered call tree. See
+  [Learn a codebase](docs/learn.md).
 - **Graph analytics** — `map` (subsystems, directed bridges, entrypoints, hubs), `hotspots`
-  (hubs), `orphans` (dead-code candidates), `explore` (intent → bounded exact neighborhoods),
+  (hubs; tests are ignored by default), `orphans` (dead-code candidates), `explore` (intent → bounded exact neighborhoods),
   `traverse` (typed, heterogeneous graph walks), `task-context` (one-call, mode-scoped
   orientation for a task: freshness + neighborhoods + impact + related files), and `path`
   (shortest call path between two symbols).
@@ -99,7 +104,11 @@ instead of dozens of file reads.
 
 ## Surfaces
 
-codemap ships as a **CLI** and an **MCP server** (`codemap serve`). Use `--json` on CLI commands for machine output. The former Studio TUI is not shipped — see [docs/studio.md](docs/studio.md).
+codemap has three surfaces over one structural store:
+
+- **CLI** — human commands, plus `--json` on query commands for machine output.
+- **MCP server** — `codemap serve` (stdio) exposes `codemap_*` tools to agents.
+- **Codemap Studio** — an Electron desktop app in [`desktop/`](desktop/) that runs `codemap … --json` behind a graph explorer, review desk, and architecture map. See [docs/desktop.md](docs/desktop.md).
 
 ## Installation
 
@@ -126,7 +135,7 @@ language-agnostic once symbols are indexed. A precise call graph
 | Language | How | Extensions | Call graph |
 |---|---|---|---|
 | **Go** | stdlib `go/parser` (pure Go, always) · `--precise` adds exact edges via in-process `go/types` | `.go` | name-based by default; exact via `--precise` |
-| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) + a name-based scan for imports, JSX component usage, and Next.js framework wiring | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | name-based JSX/import/framework edges by default; plain function calls via `--precise` only |
+| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) + a name-based scan for imports, JSX component usage, and Next.js framework wiring | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | name-based JSX, import, framework, same-file call, and imported-binding edges by default (partial); complete calls via `--precise` |
 | **Python** | `pyright-langserver` | `.py` `.pyw` `.pyi` | `--precise` only |
 | **Ruby** | built-in pure-Go scanner (modules/classes/defs incl. `def self.x`, endless defs, `private def`; heredoc-, `=begin`-, and string-safe) | `.rb` | name-based (calls + `require`/`require_relative` imports) |
 | **Lua** | built-in pure-Go scanner (`function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe) | `.lua` | name-based (calls + `require` imports) |
@@ -198,7 +207,12 @@ codemap references authenticateUser # where it is stored/passed as a callback or
 codemap path     Handler Login     # shortest call path between two symbols
 codemap traverse --at auth.go:42 --direction both --edge-types calls,references --depth 2
 
-# 5. Analyze impact and structure
+# 5. Learn an unfamiliar repo: shape, capabilities, one feature end to end
+codemap atlas                      # described directory tree (--prefix internal --depth 1 to zoom)
+codemap features --kind cli_command  # what it can do, with each handler
+codemap flow runReview --depth 2   # ordered call tree from one handler
+
+# 6. Analyze impact and structure
 codemap impact   authenticateUser --depth 3   # callers + blast radius + tests
 codemap map                              # architecture: subsystems + bridges + entrypoints + hubs
 codemap hotspots --top 20          # most-referenced symbols (hubs)
@@ -207,13 +221,13 @@ codemap review                     # diff-scoped impact + tests to run
 codemap status                     # bounded-memory stats + warns if the index is stale
 codemap status --full              # include the local vector count (may use substantial memory)
 
-# 6. Search by meaning (needs an embedded index)
+# 7. Search by meaning (needs an embedded index)
 codemap semantic "jwt validation middleware" --top 10
 codemap semantic "jwt validation middleware" --backend vecgrep  # one semantic owner
 codemap explore "jwt validation middleware" --seeds 5 --edges 5 --depth 2
 codemap task-context "jwt validation middleware" --mode change  # freshness + contexts + impact + related files in one call
 
-# 7. Inspect a symbol neighborhood
+# 8. Inspect a symbol neighborhood
 codemap context main.go:42 --json
 ```
 
@@ -281,10 +295,11 @@ complete set.
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, value references, tests, blast radius |
+| Learn | `atlas` / `features` / `flow` | the repo as a described tree (`--prefix`, `--depth`, `--files`), the capability inventory (`--kind`, `--query`), and an ordered call tree from one handler (`--depth`, `--include-tests`) |
 | Navigate | `read-order` / `map` / `explore` / `task-context` | ranked reading list, bounded architecture overview, intent-to-structure orientation, or one-call mode-scoped task orientation (`--mode understand\|change\|debug`, alias `brief`) |
 | Navigate | `traverse --at <file>:<line>` | bounded walk from one exact definition across selected edge types and directions |
 | Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact (repeat `impact --at` for a partial-success frame batch; `--batch` stabilizes the one-item envelope), file dependency evidence, or diff-scoped tests |
-| Analyze | `hotspots` / `orphans` | hubs / dead-code candidates |
+| Analyze | `hotspots` / `orphans` | hubs / dead-code candidates; `hotspots` and `read-order` ignore tests unless `--include-tests` |
 | Analyze | `coverage` | per-file precise call-graph coverage: rollups by language/directory + bounded per-file detail |
 | Analyze | `risk` | 0..1 change-risk score with factors |
 | Analyze | `secret-impact` / `required-keys` | key-rotation blast radius and least-privilege key sets |
@@ -323,7 +338,7 @@ and turns `hotspots` from name-collision noise into genuine hubs. Requirements a
 - Interface dispatch is statically undecidable, so a precise edge points at the interface method, not
   the concrete implementors.
 
-**For TypeScript/JavaScript, plain function calls still come only from `--precise`.** Base indexing
+**For TypeScript/JavaScript, complete call coverage comes only from `--precise`.** Base indexing
 now extracts real name-based edges for TS/JS: import edges (`import`/`export … from`/`require`/
 dynamic `import()`, comment-safe, with `@/` and `~/` alias and workspace-package resolution), JSX
 component-usage call edges in `.tsx`/`.jsx` (`<Foo/>` — rendering is invocation; member expressions
@@ -331,8 +346,10 @@ like `<Foo.Bar/>` and `<motion.div/>` resolve to the root binding; lowercase int
 `<div>` never create edges; generics/comparisons are excluded, and commented-out or string-literal
 JSX creates nothing), and Next.js framework-wiring references. Like all name-based extraction these
 are *candidate* edges (same over-match contract as Go selector calls) — but a React codebase no
-longer reads as disconnected. Ordinary function calls (`foo()`) still have no name-based TS/JS
-edges: `index --precise` drives `typescript-language-server` `callHierarchy`; files it resolves gain
+longer reads as disconnected. Base indexing also links same-file calls (`f()`, `new C()`, `await f()`, `this.m()`) and calls through
+imported bindings (named, default, and namespace imports, `require`). Arbitrary `obj.method()` calls
+are not linked, and Python has no base-level call edges, so uncovered definitions stay `unresolved`.
+`index --precise` drives `typescript-language-server` `callHierarchy`; files it resolves gain
 exact edges that supersede the candidates per file, while any uncovered definition remains
 explicitly `unresolved`. The same
 `callers`/`callees`/`impact`/`hotspots`/`path` queries then use that indexed coverage with no flag of their own.
@@ -405,16 +422,16 @@ For any other MCP client, add a stdio server to its config (the key may be `mcpS
 
 Once connected, an agent can call `codemap_docs` to learn the tools and workflow on its own.
 
-`CODEMAP_MCP_PROFILE=agent` selects exactly the 26-tool surface derived from the taught agent
-workflow (25 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
-today; the default `full` profile remains the explicit 45-tool expert/admin surface. See
+`CODEMAP_MCP_PROFILE=agent` selects exactly the 28-tool surface derived from the taught agent
+workflow (27 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
+today; the default `full` profile remains the explicit 48-tool expert/admin surface. See
 [MCP tool profiles](docs/mcp.md#tool-profiles) for the measured schema cost and precedence rules.
 
-Tools (45): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+Tools (48): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
 `codemap_file_context`, `codemap_refactor_plan`, `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
 `codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_read_order`,
-`codemap_map`, `codemap_explore`, `codemap_traverse`, `codemap_task_context`, `codemap_path`,
+`codemap_map`, `codemap_atlas`, `codemap_features`, `codemap_flow`, `codemap_explore`, `codemap_traverse`, `codemap_task_context`, `codemap_path`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_grep`, `codemap_source`,
 `codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,
@@ -490,7 +507,7 @@ explicitly instead of being embedded as if it were current.
 
 ## Documentation
 
-Product docs: **[codemap.tools](https://codemap.tools)** · [Quick start](docs/quick-start.md) ·
+Product docs: **[codemap.tools](https://codemap.tools)** · [Quick start](docs/quick-start.md) · [Learn a codebase](docs/learn.md) ·
 [CLI](docs/cli.md) · [Configuration](docs/configuration.md) · [Agent guide](docs/agents.md) ·
 [MCP](docs/mcp.md) · [Languages](docs/languages.md). Contributor rules live in
 [AGENTS.md](./AGENTS.md).
