@@ -107,6 +107,11 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **Codemap Studio Run/Stop buttons and packaged binary detection** — the generic feature panel's
+  Run and Stop buttons had no click handlers (only Enter in a field ran a command); Run now runs
+  and Stop cancels any run by its feature id. The packaged app probed `codemap version` from
+  inside `app.asar` (a file), so spawn failed with ENOTDIR and a found binary read as "codemap:
+  not found"; the probe now runs from the home directory.
 - **Multi-hour LSP stall on large monorepos** — `typescript-language-server` stops returning
   symbols part-way through a big index (empty `documentSymbol`, instantly, with no error). The
   per-file parse-wait retry then burned its whole ~10s backoff ladder on every remaining file
