@@ -5,7 +5,7 @@ intent: |
     search finds code by meaning: a query that shares no words with the symbol
     name still surfaces the relevant function, ranked above an unrelated one.
     Demonstrates the vector path end-to-end. Requires a local Ollama with
-    nomic-embed-text (like studio.yml requires gopls); not run in CI.
+    nomic-embed-text; not run in CI.
 target:
     cmd:
         - "/bin/sh"
@@ -38,4 +38,4 @@ outcomes:
       verify:
         screen:
             contains: "\"fusion\": \"identifier\""
-contractHash: sha256:da33ce0c9ed36565332a7f8fadfba109e6699e6e0cc44c5a8f9384d9493b07c2
+contractHash: sha256:4178c226239ee315344e9749c861047b1cf2fa8d4104f6550d83257770c2b68d

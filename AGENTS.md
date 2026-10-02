@@ -24,7 +24,7 @@ Three surfaces over one structural store (semantic retrieval may be delegated to
 - **Codemap Studio** — the Electron desktop app in `desktop/`; it never reimplements anything,
   every panel spawns `codemap … --json` (see `docs/desktop.md`).
 
-Product docs for humans start at `docs/quick-start.md`; agent workflows at `docs/agents.md` and `docs/mcp.md`. The learning layer (`atlas`, `features`, `flow`) is documented for both audiences at `docs/learn.md`. The terminal Studio TUI was retired: `internal/tui` and `specs/studio*.yml` are unwired legacy (nothing imports the package and there is no `codemap studio` command); do not extend them.
+Product docs for humans start at `docs/quick-start.md`; agent workflows at `docs/agents.md` and `docs/mcp.md`. The learning layer (`atlas`, `features`, `flow`) is documented for both audiences at `docs/learn.md`. The terminal Studio TUI was retired and removed; Codemap Studio is the desktop app.
 
 Key features:
 - **Learning layer** — `atlas` (the repo as a described dir/file tree: metrics, roles, summaries
@@ -143,13 +143,6 @@ codemap/
 │   │   └── import_index.go   #   resolve import specifiers to file→file import edges
 │   ├── mcp/server.go         # stdio MCP server — THIN pass-through to internal/app
 │   │                        #   (48 full; 28 agent/core — CODEMAP_MCP_PROFILE)
-│   ├── tui/                   # LEGACY, unwired (nothing imports it; no `codemap studio` command) — do not extend
-│   │   ├── model.go          #   state, msgs, commands, key handling (Graph/Metrics/Impact/Search/Path)
-│   │   ├── view.go           #   full-screen layout, call-graph explorer, map, bar charts
-│   │   ├── theme.go          #   lipgloss v2 styles
-│   │   ├── anim.go           #   harmonica spring frame loop (bars + map reveal + spinner)
-│   │   ├── highlight.go      #   chroma v2 syntax highlighting for the source overlay
-│   │   └── run.go            #   tea.NewProgram entry
 │   ├── daemon/               # background watcher: fsnotify, throttle, control socket, delegation
 │   ├── git/                  # branch / ref / diff helpers (review + branch-switch)
 │   ├── snapshot/             # fcheap-backed index snapshot/restore
@@ -182,13 +175,13 @@ codemap/
 │                              #   .github/workflows/codemap-review.yml via `uses: ./integrations/github-action`;
 │                              #   consumers: `uses: abdul-hamid-achik/codemap/integrations/github-action@main`)
 ├── .claude-plugin/            # marketplace.json (repo-root plugin marketplace entry)
-├── specs/                     # glyphrun E2E specs (*.yml, 48): version/help/index_status/query/context/
+├── specs/                     # glyphrun E2E specs (*.yml, 44): version/help/index_status/query/context/
 │                              #   annotations/staleness/incremental/config/index_progress/mcp_serve/
-│                              #   studio(+_ts)/semantic/precise/typescript/javascript/python/jsx/
+│                              #   semantic/precise/typescript/javascript/python/jsx/
 │                              #   polyglot/review/read_order/risk/file_impact/daemon/cache_cli/semantic_degraded/cache_export/grep/
 │                              #   exclude_extra/index_watch/timing/progress_eta/onboarding/coverage/
-│                              #   ts_impact_note/studio_visuals/index_via_daemon/selectors/dependencies/
-│                              #   review_deletion/references/studio_annotations/agent_setup/review_gate/task_context
+│                              #   ts_impact_note/index_via_daemon/selectors/dependencies/
+│                              #   review_deletion/references/agent_setup/review_gate/task_context
 ├── Taskfile.yml .golangci.yml .goreleaser.yaml glyphrun.config.yml .pre-commit-hooks.yaml
 ├── .github/workflows/         # ci.yml + release.yml
 └── README.md AGENTS.md LICENSE
@@ -578,8 +571,6 @@ when the user asks.
   is introduced, use the official `github.com/tree-sitter/go-tree-sitter` (not the
   abandoned `smacker` fork) and keep the default release pure-Go.
 - **Flows are local-only (CI skips them)**, and each needs its toolchain:
-  (`studio*.yml` exercise the retired TUI — `codemap studio` no longer exists, so they fail;
-  legacy until removed.)
   `semantic.yml`→local Ollama with `nomic-embed-text` ·
   `precise.yml`→`go` (runs `index --precise`) · `typescript.yml`/`javascript.yml`/`jsx.yml`→
   `typescript-language-server`+`node` · `python.yml`→`pyright-langserver`+

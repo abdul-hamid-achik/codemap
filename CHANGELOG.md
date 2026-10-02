@@ -91,6 +91,13 @@ releases page is the authoritative history.
   (≈8,904 approximate tokens) for `agent`/`core` versus 53,197 (≈13,300) for `full`.
   `codemap agent setup cursor` still defaults to `core`, now 28 tools.
 
+### Removed
+
+- **The retired terminal Studio TUI** — `internal/tui` (unwired since the `codemap studio`
+  command was dropped; nothing imported it) and its four glyphrun specs (`specs/studio*.yml`)
+  are deleted; `go mod tidy` drops `chroma` and leaves `harmonica` only as an indirect
+  dependency. Codemap Studio is the desktop app in `desktop/`.
+
 ### Fixed
 
 - **Multi-hour LSP stall on large monorepos** — `typescript-language-server` stops returning
