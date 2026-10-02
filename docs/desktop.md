@@ -22,7 +22,7 @@ source of truth — including its exit-code taxonomy and its
 ## Install
 
 Every [release](https://github.com/abdul-hamid-achik/codemap/releases) since
-v0.69.0 attaches Codemap Studio next to the CLI archives:
+v0.69.1 attaches Codemap Studio next to the CLI archives:
 
 | Platform | File |
 | --- | --- |
