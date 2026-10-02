@@ -1,7 +1,8 @@
 version: 1
 name: help
 intent: |
-    codemap --help shows its positioning line and lists the core commands.
+    codemap --help shows its positioning line and lists the core commands, including the
+    learning-layer commands (atlas, features, flow) that orient on an unfamiliar repo.
 target:
     cmd:
         - "/bin/sh"
@@ -10,7 +11,7 @@ target:
     cwd: "."
 terminal:
     cols: 100
-    rows: 30
+    rows: 120
     profile: xterm-256color
 steps:
     - wait:
@@ -34,9 +35,19 @@ outcomes:
       verify:
         screen:
             contains: "serve"
-    - id: studio_cmd
-      description: lists the studio command
+    - id: atlas_cmd
+      description: lists the atlas command (the described repository tree)
       verify:
         screen:
-            contains: "studio"
-contractHash: sha256:2e74f405b0c7e6ab2a390dca5ee45ac2ae11a5be3ed2162388f42385e21978dc
+            contains: "atlas"
+    - id: features_cmd
+      description: lists the features command (the capability inventory)
+      verify:
+        screen:
+            contains: "features"
+    - id: flow_cmd
+      description: lists the flow command (a call tree in call order)
+      verify:
+        screen:
+            contains: "flow"
+contractHash: sha256:e485f3eb70bf2405fe8f5c24076492fe48925768eaf9e402e2696922c52265af

@@ -1,11 +1,11 @@
 version: 1
 name: ts_impact_note
 intent: |
-    On a name-based index, TypeScript/JavaScript/Python have NO call graph (it exists
-    only under --precise via callHierarchy). Before, impact/callers returned a
-    confidently-empty result + untested:true for a TS symbol — reading as ground-truth
-    "no callers / no tests" when it really means "unresolved". Now they return a clear
-    `resolution` note pointing at `index --precise` instead, and DON'T claim untested.
+    On a name-based index, TypeScript/JavaScript have only a PARTIAL call graph:
+    high-precision candidates for same-file calls and imported bindings; the complete
+    graph exists only under --precise via callHierarchy. impact on a TS symbol must find
+    the same-file caller, yet still say the graph is partial (absent edges are not proof
+    of absence) and point at `index --precise` — never a confidently-complete answer.
     (FIX.md §1.) Needs typescript-language-server (isolates CODEMAP_DATA only, not HOME,
     so the asdf shim resolves).
 target:
@@ -25,11 +25,16 @@ steps:
         timeoutMs: 30000
     - snapshot: ts_impact_note
 outcomes:
-    - id: impact_states_unavailable
-      description: impact on a TS symbol without --precise explains the call graph is unavailable, not empty
+    - id: impact_states_partial
+      description: impact on a TS symbol without --precise explains the call graph is partial, not complete
       verify:
         screen:
-            contains: "call graph not available"
+            contains: "call graph for typescript is partial"
+    - id: finds_same_file_caller
+      description: the name-based candidate edge surfaces the same-file caller in the blast radius
+      verify:
+        screen:
+            contains: "run                                  src/a.ts:2"
     - id: points_at_precise
       description: the note tells you how to resolve it
       verify:
@@ -40,4 +45,4 @@ outcomes:
       verify:
         process:
             exitCode: 0
-contractHash: sha256:2e1f305809b0ffa06bd042421085db58af9c2196caa085f5f321021b1cbd9f09
+contractHash: sha256:2a608b8745588c04f5fd1c5696bf7adafc303f2502c360014bb4c12be2b4592f
