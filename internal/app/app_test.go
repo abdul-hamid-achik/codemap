@@ -30,6 +30,20 @@ func isolate(t *testing.T) {
 	t.Setenv("CODEMAP_DATA", filepath.Join(home, "data"))
 	t.Setenv("CODEMAP_CONFIG", "")
 	t.Setenv("XDG_DATA_HOME", "")
+	// Tests that probe the go toolchain (doctor, --precise) run `go` under this
+	// sandboxed HOME. With telemetry on, go forks a detached upload child that
+	// writes <UserConfigDir>/go/telemetry after the test returns, racing
+	// TempDir's RemoveAll ("directory not empty"). Pin telemetry off the way
+	// `go telemetry off` does.
+	if cfgDir, err := os.UserConfigDir(); err == nil {
+		mode := filepath.Join(cfgDir, "go", "telemetry", "mode")
+		if err := os.MkdirAll(filepath.Dir(mode), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(mode, []byte("off"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestServiceLifecycle(t *testing.T) {
