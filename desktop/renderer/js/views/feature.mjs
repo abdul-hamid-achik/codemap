@@ -22,8 +22,9 @@ export function featureView(feat, ctx, initial = {}) {
   const cmdPreview = h('code')
   const resultHost = h('div')
   const logHost = h('div')
-  const runBtn = h('button.btn.primary', { type: 'button' }, runLabel(feat))
-  const stopBtn = h('button.btn.danger', { type: 'button', text: 'Stop', hidden: true })
+  const runBtn = h('button.btn.primary', { type: 'button', onclick: () => doRun() }, runLabel(feat))
+  // runFeature passes runKey: feat.id, which the main process maps to the live run.
+  const stopBtn = h('button.btn.danger', { type: 'button', text: 'Stop', hidden: true, onclick: () => window.studio.cancel(feat.id) })
 
   function refreshPreview() {
     const v = form ? form.values() : values

@@ -49,6 +49,9 @@ export function createRuntime({ appRoot, settings, getWin, isDev = false }) {
   let resolved = { binary: null, source: 'none' }
   let envCache = null
   let daemonProc = null
+  // runKey (the caller's handle, e.g. a feature id) → live runId, so a Stop button can
+  // cancel a run it never saw start (non-streaming runs emit no events).
+  const runIdsByKey = new Map()
 
   async function env() {
     if (!envCache) envCache = await shellEnv()
@@ -123,7 +126,9 @@ export function createRuntime({ appRoot, settings, getWin, isDev = false }) {
     ipcMain.handle('binary:version', async () => {
       try {
         const bin = await binary()
-        const r = await runCodemap({ binary: bin, args: ['version'], json: false, cwd: appRoot, env: await env(), timeoutMs: 20000 })
+        // Not appRoot: packaged, it is <resources>/app.asar — a file, so spawn
+        // fails with ENOTDIR and a working binary reads as "not found".
+        const r = await runCodemap({ binary: bin, args: ['version'], json: false, cwd: app.getPath('home'), env: await env(), timeoutMs: 20000 })
         return { ok: r.ok, binary: bin, version: r.stdout.trim(), error: r.error }
       } catch (err) {
         return { ok: false, binary: null, error: err.message, tried: err.tried }
@@ -159,8 +164,12 @@ export function createRuntime({ appRoot, settings, getWin, isDev = false }) {
         cwd: dir,
         env: await env(),
         timeoutMs: limit,
-        onEvent: stream ? (evt) => send('codemap:stream', { ...evt, featureId, runKey: req?.runKey }) : undefined,
+        onEvent: (evt) => {
+          if (evt.type === 'start' && req?.runKey) runIdsByKey.set(req.runKey, evt.runId)
+          if (stream) send('codemap:stream', { ...evt, featureId, runKey: req?.runKey })
+        },
       })
+      if (req?.runKey) runIdsByKey.delete(req.runKey)
       result.cwd = dir
       result.featureId = featureId
       if (record) {
@@ -179,7 +188,7 @@ export function createRuntime({ appRoot, settings, getWin, isDev = false }) {
       return result
     })
 
-    ipcMain.handle('codemap:cancel', (_e, runId) => cancelRun(runId))
+    ipcMain.handle('codemap:cancel', (_e, idOrKey) => cancelRun(typeof idOrKey === 'string' ? runIdsByKey.get(idOrKey) : idOrKey))
     ipcMain.handle('codemap:active', () => activeRuns())
 
     ipcMain.handle('project:pick', async () => {

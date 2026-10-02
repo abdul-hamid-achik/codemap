@@ -328,3 +328,47 @@ test('palette gives languages and subsystems stable, distinct hues', async () =>
   assert.equal(subsystemColor('internal/app'), colors[1], 'stable on repeat')
   assert.ok(isSupport(['tests', 'config']) && !isSupport(['source']) && !isSupport(['docs', 'entrypoint']))
 })
+
+// ------------------------------------------------------------- run button
+
+test('clicking Run on a feature panel runs it, and Stop cancels it by feature id', async () => {
+  const { featureView } = await import('../renderer/js/views/feature.mjs')
+  const realRun = window.studio.run
+  const realCancel = window.studio.cancel
+  const runs = []
+  const cancels = []
+  let release
+  window.studio.run = (req) => {
+    runs.push(req)
+    return new Promise((resolve) => {
+      release = () => resolve({ ok: true, json: { project: 'p', nodes: 1 }, stdout: '', stderr: '', exitCode: 0, ms: 1, command: ['codemap', ...req.args] })
+    })
+  }
+  window.studio.cancel = async (key) => {
+    cancels.push(key)
+    return true
+  }
+  try {
+    const view = featureView(FEATURES.find((f) => f.id === 'status'), ctx, {})
+    const buttons = []
+    const walk = (n) => {
+      if (n?.tagName === 'BUTTON') buttons.push(n)
+      for (const c of n?.childNodes || []) walk(c)
+    }
+    walk(view.node)
+    const run = buttons.find((b) => /Run/.test(b.textContent))
+    const stop = buttons.find((b) => b.textContent === 'Stop')
+    assert.ok(run, 'the panel renders a Run button')
+    run.click()
+    await new Promise((r) => setTimeout(r, 0))
+    assert.equal(runs.length, 1, 'a click on Run must start the command (it used to do nothing)')
+    assert.deepEqual(runs[0].args.slice(0, 1), ['status'])
+    stop.click()
+    assert.deepEqual(cancels, ['status'], 'Stop cancels the run through its feature id')
+    release()
+    await new Promise((r) => setTimeout(r, 0))
+  } finally {
+    window.studio.run = realRun
+    window.studio.cancel = realCancel
+  }
+})

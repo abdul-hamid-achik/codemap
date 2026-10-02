@@ -22,7 +22,7 @@ const api = {
   },
 
   run: (req) => invoke('codemap:run', req),
-  cancel: (runId) => invoke('codemap:cancel', runId),
+  cancel: (runIdOrKey) => invoke('codemap:cancel', runIdOrKey),
   active: () => invoke('codemap:active'),
 
   project: {
