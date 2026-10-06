@@ -10,7 +10,7 @@ tracked in the vault's `BACKLOG.md` (`~/notes/projects/codemap/BACKLOG.md`) — 
 ## Project Overview
 
 codemap is local-first code intelligence: it combines a **structural code graph**
-(LSP + stdlib parsers; tree-sitter remains planned and is not shipped) with **semantic
+(stdlib parsers + pure-Go tree-sitter for TS/JS/Python; LSP for --precise) with **semantic
 retrieval** (local veclite plus an optional one-hop vecgrep fallback, or vecgrep as the
 explicit owner) and
 exposes both as a unified query layer for agents and people. It answers questions a grep
@@ -124,6 +124,10 @@ codemap/
 │   │   │                     #   TS/JS/Python patterns, Next.js paths, package.json bin
 │   │   ├── gosrc/            #   stdlib go/parser backend (pure Go, default for Go)
 │   │   ├── typesrc/          #   in-process go/types pass (Go --precise; exact call edges)
+│   │   ├── sittersrc/        #   DEFAULT TS/JS/Python backend: pure-Go tree-sitter (gotreesitter) emulating
+│   │   │                     #   the servers' documentSymbol trees (TS navtree + pyright scopes) → lspsrc
+│   │   │                     #   .FromDocumentSymbols; Hybrid attaches a server for --precise; parity_test.go
+│   │   │                     #   diffs against live servers, testdata/navtree goldens pin the quirks
 │   │   ├── lspsrc/           #   LSP-backed extractor (documentSymbol → symbols; callHierarchy)
 │   │   ├── tsscan/           #   name-based TS/JS enrichment (imports, JSX usage, Next.js wiring)
 │   │   ├── rubysrc/          #   pure-Go Ruby line scanner (symbols, name-based calls, requires)
@@ -245,9 +249,13 @@ task install         # go install ./cmd/codemap
   embeddings. Embedding tests skip if Ollama is unreachable.
 - **Task** (`go install github.com/go-task/task/v3/cmd/task@latest`).
 - **glyph** (glyphrun) for E2E specs; **Bun** for docs; **golangci-lint** for lint.
-- LSP servers for LSP-backed indexing: `typescript-language-server` (TS/JS/Vue) and
-  `pyright-langserver` (Python). `gopls` is used for one-off precise Go relations and Studio's
-  precise toggle; graph-wide Go `--precise` uses in-process `go/types`.
+- Language servers are OPTIONAL: `typescript-language-server` (TS/JS) and `pyright-langserver`
+  (Python) only power `--precise` call edges (and the parity harness / golden regeneration);
+  plain indexing uses the built-in tree-sitter backend. `gopls` is used for one-off precise Go
+  relations and Studio's precise toggle; graph-wide Go `--precise` uses in-process `go/types`.
+- Release builds pass `-tags ` (Taskfile var; mirrored in `.goreleaser.yaml` and
+  `desktop/scripts/stage-binary.mjs`) so gotreesitter embeds only the TS/TSX/JS/Python grammars;
+  `task test` re-runs `TestGrammarSubsetLoadsEveryGrammar` under those tags.
 
 ## Architecture Notes
 
@@ -256,7 +264,24 @@ task install         # go install ./cmd/codemap
   `--precise` adds exact edges via `go/types`; Ruby and Lua are pure-Go line scanners producing
   symbols, name-based call references, and `require` imports — heredoc/`=begin`/string-safe for
   Ruby, long-string/comment-safe for Lua; no precise pass for either yet).
-  **`lspsrc` (the LSP backend) is now wired in**: `IndexProject` runs a present-aware
+  **`sittersrc` is the default for TypeScript/JavaScript/Python** (registered in `index.New`
+  unless `index.structural_backend: lsp`): a pure-Go tree-sitter parse (odvcencio/gotreesitter,
+  pinned) that EMULATES the documentSymbol tree the servers return — TS 5.9's navigationBar
+  (`addChildrenRecursively`/`getItemName`/`tryMergeEs5Class`, incl. ES5 class synthesis, CommonJS
+  assignment declarations, JSDoc typedefs) plus tsl's conversion, and pyright's SymbolIndexer
+  (last typed decl else first; deferred function-body binding for `self.x`/`global`; `__slots__`)
+  — and feeds it to the SAME `lspsrc.FromDocumentSymbols` normalization, so kinds/FQNs/test
+  classification/positions match the LSP path (100% symbol parity on several real repos; the
+  remaining diffs are LSP-side empty answers and minified bundles with parse errors). Quirks are
+  replicated on purpose (an arrow `const` is a variable) — changing graph semantics is a separate
+  decision. Parse errors keep the recovered tree; files over 1 MiB are skipped with an error.
+  It is `ConcurrentSafe` (extracted in the parallel pool, as is Vue delegating to it). In this
+  mode `registerLSP` runs only for `--precise`, and `registerServer` attaches each spawned server
+  to tree-sitter as a `sittersrc.Hybrid` (structure from tree-sitter, `CallEdges` + parse-error
+  fallback from the server) — never displacing another registered extractor. The daemon's
+  `RegisterLSPForProject(ctx, root, precise)` follows the same rule. A missing server then only
+  blocks `--precise`: its `tooling.Issue` carries `capability:"precise"`.
+  **`lspsrc` (the LSP backend)** — in `lsp` structural mode, and as the precise resolver in both: `IndexProject` runs a present-aware
   `registerLSP` that, for each `lspsrc.DefaultServers` spec, spawns its server **once** if any of the
   server's languages are present and the binary is on PATH, then registers an extractor per present
   language sharing that one connection (via `Extractor.Bind`) — so **one `typescript-language-server`
@@ -297,9 +322,10 @@ task install         # go install ./cmd/codemap
   are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns
   the server itself to serve the script blocks. Symbols + `defines` edges only —
   no `--precise` call graph for Vue yet.
-- Languages present but missing their server are recorded in `Result.MissingServers` and surfaced
-  as an actionable "install X" message; genuinely-unsupported languages are still `Result.Unsupported`
-  ("skipped, planned"). `--no-lsp` disables the LSP backend.
+- Languages present but missing their server are recorded in `Result.MissingServers`/`ServerIssues`
+  and surfaced as an actionable "install X" message (precise-scoped in tree-sitter mode); genuinely
+  unsupported languages are still `Result.Unsupported` ("skipped, planned"). `--no-lsp` never spawns
+  a server (tree-sitter mode still indexes TS/JS/Python).
 - **Every LSP request is bounded.** `conn.Call` applies a 30s default per-request timeout when the
   caller sets no deadline (`internal/lsp/jsonrpc.go`), so a hung/misbehaving server can't freeze the
   index — a stalled request returns a deadline error and the file is skipped (recorded in
@@ -307,10 +333,9 @@ task install         # go install ./cmd/codemap
 - **Default backends are pure-Go** so release binaries stay `CGO_ENABLED=0` and cross-compile
   cleanly (the language server is a spawned subprocess, like gopls — never linked in). LSP edges
   carry weight `1.0`; heuristic/parser edges `0.7`.
-- **tree-sitter is not implemented today.** `internal/extract/treesitter` is a planned backend;
-  there is no current tree-sitter dependency or `treesitter` build-tagged implementation. If it
-  is added, keep the CGO-dependent backend optional and out of default `CGO_ENABLED=0` releases
-  until its build matrix and accuracy fixtures are established.
+- **tree-sitter runs in pure Go** (gotreesitter, no CGO) — `internal/extract/sittersrc`. Do not add
+  the CGO `go-tree-sitter` bindings to default builds. New languages on the same runtime need the
+  same discipline: emulate an authoritative symbol source, add a parity harness and goldens.
 - LSP client is **hand-rolled in `internal/lsp`** (no third-party deps): a Content-Length
   framed JSON-RPC 2.0 conn + `Initialize`/`DidOpen`/`DocumentSymbols`/`References` and call
   hierarchy methods. The wired `internal/extract/lspsrc` backend maps `documentSymbol` to
@@ -571,9 +596,12 @@ when the user asks.
 - **veclite payload vs content**: filterable fields (`path`, `lang`, `kind`, `node_id`) go
   in Payload; the embeddable/searchable source text goes in Content (or a `WithTextIndex`
   field). `HybridSearch` needs a text index enabled.
-- **Tree-sitter is planned, not present.** Do not describe it as a current backend. If it
-  is introduced, use the official `github.com/tree-sitter/go-tree-sitter` (not the
-  abandoned `smacker` fork) and keep the default release pure-Go.
+- **Tree-sitter = gotreesitter (pure Go), not the CGO bindings.** gotreesitter is young and
+  single-maintainer: keep it pinned, bump deliberately, and re-run the parity harness
+  (`CODEMAP_PARITY_ROOT=… go test ./internal/extract/sittersrc -run Parity`) on a few real repos
+  plus the goldens before merging an upgrade. tree-sitter-typescript misparses a few constructs
+  (`async <T>(…) =>` as comparisons, `async *gen()` names, `using` declarations) — sittersrc
+  normalizes them; add a golden for any new one.
 - **Flows are local-only (CI skips them)**, and each needs its toolchain:
   `semantic.yml`→local Ollama with `nomic-embed-text` ·
   `precise.yml`→`go` (runs `index --precise`) · `typescript.yml`/`javascript.yml`/`jsx.yml`→

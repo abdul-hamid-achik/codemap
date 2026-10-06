@@ -187,7 +187,7 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	// through the same path the one-shot index used. Missing/failed
 	// servers land in d.info.MissingServers for status reporting.
 	var missingServers map[string]string
-	if missing, lspErr := d.ix.RegisterLSPForProject(ctx, d.root); lspErr != nil {
+	if missing, lspErr := d.ix.RegisterLSPForProject(ctx, d.root, cfg.Precise); lspErr != nil {
 		// Non-fatal: best-effort LSP registration. Fall back to Go-only
 		// watching rather than aborting startup.
 		fmt.Fprintf(os.Stderr, "codemap daemon: LSP registration error: %v\n", lspErr)

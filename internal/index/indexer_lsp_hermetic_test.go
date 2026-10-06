@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
@@ -113,7 +112,7 @@ func TestResolveLSPCallEdgesHermetic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ix.Register(fake) // pre-registered => walk routes .ts here, registerLSP never spawns a server
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -229,7 +228,7 @@ func TestResolveLSPCallEdgesDowngradesFailedFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ix.Register(fake)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

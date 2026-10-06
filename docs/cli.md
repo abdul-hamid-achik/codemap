@@ -1,4 +1,4 @@
----
+| `codemap doctor` | Check the environment — go toolchain, gopls, the optional language servers behind `--precise` (TS/JS via `typescript-language-server`, Python via `pyright-langserver`), Ollama embeddings,---
 description: Complete codemap CLI reference for indexing, navigation, impact analysis, search, caching, and automation.
 ---
 

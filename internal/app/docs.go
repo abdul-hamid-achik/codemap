@@ -15,9 +15,11 @@ graph. Use the CLI for terminal workflows or 'codemap serve' for stdio MCP.
 Both call the same services. Stored-graph queries work offline; embeddings are optional.
 
 Start: codemap init; codemap index --no-embed; codemap docs workflow.
-Go, Ruby, Lua, GDScript, SQL, YAML, Markdown, HTML and stylesheets have built-in
-backends. TypeScript/JavaScript/Vue use typescript-language-server; Python uses
-pyright-langserver. --precise resolves Go/TS/JS/Python calls where supported.
+Go, TypeScript, JavaScript, Python, Vue script blocks, Ruby, Lua, GDScript, SQL,
+YAML, Markdown, HTML and stylesheets have built-in backends (TS/JS/Python via
+tree-sitter) — no language server is needed to index. --precise resolves exact
+calls: in-process go/types for Go, typescript-language-server (TS/JS) and
+pyright-langserver (Python) when installed.
 
 Use context/impact for functions, dependencies/traverse for non-call relations,
 and source with a durable selector for one exact definition. SQL reads/writes,
@@ -110,9 +112,10 @@ before the reindex that prunes them. (A registered-but-never-indexed project
 reports indexed:false — codemap_index first.)
 
 After codemap_index: if the result has degraded:true (or tooling.issues is
-non-empty), do NOT treat the graph as complete for the skipped languages —
-common on TS/JS/Python when a language server is missing or an asdf/mise shim
-dies under the project pin (code lsp_version_manager_gap). Follow
+non-empty), do NOT treat the graph as complete for the affected languages. An
+issue with capability:"precise" means symbols were indexed but the --precise
+call graph is missing (a language server is absent, or an asdf/mise shim dies
+under the project pin — code lsp_version_manager_gap). Follow
 tooling.issues[].agent_fix steps, re-run index, and check languages.* counts
 (a TS repo that only indexed html/css is a failed setup, not a partial win).
 Doctor probes (under the project root) exercise servers the same way index

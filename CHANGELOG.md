@@ -8,6 +8,21 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+### Changed
+
+- **TypeScript, JavaScript, and Python index without language servers** — a new built-in
+  backend (`internal/extract/sittersrc`) parses them with a pure-Go tree-sitter runtime
+  (gotreesitter, no CGO) and reproduces the symbol trees `typescript-language-server` and
+  `pyright-langserver` return, quirks included, through the same normalization the LSP path
+  uses. The graph is unchanged (100% symbol parity against the live servers on several real
+  repositories), indexing is several times faster on TypeScript-heavy repos (a 1,100-file one: 19.5 s →
+  2.5 s), and Vue script blocks and `--no-lsp` now index too. Language servers are spawned only
+  for `--precise`, attached to the tree-sitter backend so a precise run produces the same symbols
+  and the same precise edges as before; a missing server is reported with
+  `capability: "precise"` instead of skipped files. `index.structural_backend: lsp`
+  (`CODEMAP_STRUCTURAL_BACKEND=lsp`) restores the previous behavior. Release binaries embed only
+  the four grammars via `grammar_subset` build tags (+~6 MB).
+
 ### Added
 
 - **`codemap task-context` / `codemap_task_context`** — mode-scoped task orientation in one

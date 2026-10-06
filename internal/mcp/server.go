@@ -321,7 +321,7 @@ type indexInput struct {
 	Reindex      bool     `json:"reindex,omitempty" jsonschema:"wipe and rebuild the whole index"`
 	NoEmbed      bool     `json:"no_embed,omitempty" jsonschema:"skip semantic embeddings (structure only)"`
 	Precise      bool     `json:"precise,omitempty" jsonschema:"resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via language-server callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph"`
-	NoLSP        bool     `json:"no_lsp,omitempty" jsonschema:"skip language-server extraction (index only the built-in Go/Ruby/Lua/CSS/HTML backends)"`
+	NoLSP        bool     `json:"no_lsp,omitempty" jsonschema:"never spawn language servers (TS/JS/Python still index via tree-sitter; their precise call graph needs the servers)"`
 	ExcludeExtra []string `json:"exclude_extra,omitempty" jsonschema:"extra path globs to skip, appended to the configured excludes (bare name = any depth, slash = root-anchored, **/ = any depth)"`
 }
 

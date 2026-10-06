@@ -313,20 +313,29 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 			return nil, wrapExtractErr(e.lang, relPath, err)
 		}
 	}
-	res := &extract.FileResult{Path: relPath, Language: e.lang}
+	return FromDocumentSymbols(e.lang, relPath, src, syms), nil
+}
+
+// FromDocumentSymbols maps a documentSymbol tree for one file into a
+// FileResult — the single normalization shared by this backend and any other
+// backend that emulates a language server's symbol tree (internal/extract/
+// sittersrc), so kinds, FQNs, test classification, docstrings, and source
+// slices can never drift between them.
+func FromDocumentSymbols(lang, relPath string, src []byte, syms []lsp.DocumentSymbol) *extract.FileResult {
+	res := &extract.FileResult{Path: relPath, Language: lang}
 	lines := strings.Split(string(src), "\n")
 	for _, s := range syms {
-		appendSymbols(res, lines, e.lang, "", false, relPath, s)
+		appendSymbols(res, lines, lang, "", false, relPath, s)
 	}
 	// documentSymbol yields definitions only — no imports and no references at
 	// all, which left TS/JS with a disconnected base graph (every React
 	// component an orphan). Enrich adds the cheap name-based layer: import
 	// specifiers (persisted as file→file imports edges by the indexer), JSX
 	// component-usage call references, and Next.js framework-wiring references.
-	if e.lang == "typescript" || e.lang == "javascript" {
+	if lang == "typescript" || lang == "javascript" {
 		tsscan.Enrich(res, relPath, src)
 	}
-	return res, nil
+	return res
 }
 
 // CallEdges resolves the outgoing calls of every function/method in relPath via

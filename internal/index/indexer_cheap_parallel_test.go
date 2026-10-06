@@ -15,6 +15,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/luasrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/rubysrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/sittersrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/vuesrc"
 )
 
@@ -108,6 +109,19 @@ func TestUsesLanguageServerByExtractorNotGoOnly(t *testing.T) {
 	for _, ft := range lsp {
 		if !usesLanguageServer(ft) {
 			t.Errorf("%s classified as cheap extract, want language-server serial queue", ft.lang)
+		}
+	}
+
+	// The tree-sitter backend (and Vue delegating to it) parses in parallel.
+	ts, _ := sittersrc.New("typescript")
+	js, _ := sittersrc.New("javascript")
+	for _, ft := range []fileTask{
+		{lang: "typescript", ext: ts},
+		{lang: "typescript", ext: sittersrc.WithServer(ts, &lspsrc.Extractor{})},
+		{lang: "vue", ext: vuesrc.New(ts, js)},
+	} {
+		if usesLanguageServer(ft) {
+			t.Errorf("%s (%T) classified as language-server extract, want cheap pool", ft.lang, ft.ext)
 		}
 	}
 }

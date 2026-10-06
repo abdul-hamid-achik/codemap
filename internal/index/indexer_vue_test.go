@@ -119,14 +119,14 @@ func TestIndexVueOnlyProjectSpawnsServer(t *testing.T) {
 	}
 }
 
-// TestIndexVueDisabledByNoLSP confirms --no-lsp keeps .vue unindexed
+// TestIndexVueDisabledByNoLSP confirms that in "lsp" structural mode --no-lsp keeps .vue unindexed
 // deterministically (it never spawns a server), same contract as TypeScript.
 func TestIndexVueDisabledByNoLSP(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "Counter.vue", vueFixture)
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("vue", dir, "vue")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	res, err := ix.IndexProject(context.Background(), pid, "vue", dir, Options{NoLSP: true})
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestIndexVueMissingServerReported(t *testing.T) {
 	writeFile(t, dir, "Counter.vue", vueFixture)
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("vue", dir, "vue")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	res, err := ix.IndexProject(context.Background(), pid, "vue", dir, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -201,5 +201,26 @@ func TestIndexVueJSFallback(t *testing.T) {
 	}
 	if ns, _ := g.FindNodesBySymbol(pid, "increment"); len(ns) == 0 {
 		t.Errorf("expected increment (TS setup block) indexed alongside a JS-only real project, res=%+v", res)
+	}
+}
+
+// TestTreeSitterIndexesVueWithoutServer pins the default backend: a .vue
+// file's script block indexes through the tree-sitter TypeScript extractor
+// with no language server, even under --no-lsp, and parses in parallel.
+func TestTreeSitterIndexesVueWithoutServer(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "Counter.vue", vueFixture)
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("vue", dir, "vue")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	res, err := ix.IndexProject(context.Background(), pid, "vue", dir, Options{NoLSP: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Nodes == 0 || len(res.Unsupported) != 0 || len(res.ServerIssues) != 0 {
+		t.Fatalf("vue via tree-sitter: nodes=%d unsupported=%v issues=%+v", res.Nodes, res.Unsupported, res.ServerIssues)
+	}
+	if usesLanguageServer(fileTask{lang: "vue", ext: ix.extractors["vue"]}) {
+		t.Error("vue delegating to tree-sitter should parse in the parallel pool")
 	}
 }

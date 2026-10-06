@@ -96,11 +96,13 @@ func (svc *Service) DoctorAt(ctx context.Context, cwd string) *DoctorReport {
 	addTool(ctx, add, "go toolchain", "go", root, "index --precise on Go", "install Go: https://go.dev/dl")
 	addTool(ctx, add, "gopls", "gopls", root, "callers/callees --precise on Go", "go install golang.org/x/tools/gopls@latest")
 
-	// Language servers for the LSP-backed languages.
+	// Language servers: with the default tree-sitter backend they only serve
+	// --precise; in "lsp" structural mode they index the languages.
+	preciseOnly := svc.s.Config.Index.UsesTreeSitter()
 	for _, spec := range lspsrc.DefaultServers {
 		langs := specLangs(spec)
 		name := spec.Cmd + " (" + langs + ")"
-		addLanguageServer(ctx, add, name, spec.Cmd, root, strings.Split(langs, "/"))
+		addLanguageServer(ctx, add, name, spec.Cmd, root, strings.Split(langs, "/"), preciseOnly)
 	}
 
 	// Embeddings (Ollama) for semantic search — structure/queries work without it.
@@ -172,15 +174,21 @@ func addTool(ctx context.Context, add func(DoctorCheck), name, bin, cwd, purpose
 	add(DoctorCheck{Name: name, OK: true, Detail: path})
 }
 
-func addLanguageServer(ctx context.Context, add func(DoctorCheck), name, bin, cwd string, langs []string) {
+func addLanguageServer(ctx context.Context, add func(DoctorCheck), name, bin, cwd string, langs []string, preciseOnly bool) {
 	pr := tooling.Probe(ctx, bin, cwd)
 	if !pr.OK {
 		iss := classifyProbeResult(bin, cwd, langs, pr)
+		capability, hint := "index "+strings.Join(langs, "/"), "install "+bin+" to index "+strings.Join(langs, "/")
+		if preciseOnly {
+			iss.Capability = tooling.CapabilityPrecise
+			capability = "index --precise on " + strings.Join(langs, "/") + " (symbols index without it)"
+			hint = "install " + bin + " for the exact --precise call graph on " + strings.Join(langs, "/")
+		}
 		c := DoctorCheck{
 			Name:     name,
 			OK:       false,
-			Detail:   doctorDetail(&iss, "index "+strings.Join(langs, "/")),
-			Hint:     doctorHint(&iss, "install "+bin+" to index "+strings.Join(langs, "/")),
+			Detail:   doctorDetail(&iss, capability),
+			Hint:     doctorHint(&iss, hint),
 			Code:     iss.Code,
 			AgentFix: iss.AgentFix,
 			Probe:    doctorProbeFromIssue(&iss),

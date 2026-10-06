@@ -18,6 +18,13 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+    # Embed only the grammars sittersrc parses (see Taskfile GOTAGS).
+    tags:
+      - grammar_subset
+      - grammar_subset_typescript
+      - grammar_subset_tsx
+      - grammar_subset_javascript
+      - grammar_subset_python
     ldflags:
       - -s -w
       - -X github.com/abdul-hamid-achik/codemap/internal/version.Version={{.Version}}

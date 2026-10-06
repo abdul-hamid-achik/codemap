@@ -13,6 +13,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
+	"github.com/abdul-hamid-achik/codemap/internal/tooling"
 )
 
 // TestIndexTypeScriptSymbols proves the LSP backend indexes TypeScript into the
@@ -31,7 +32,7 @@ export function makeService() { return new UserService(); }
 `)
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("ts", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -88,7 +89,7 @@ func TestIndexTypeScriptCallEdges(t *testing.T) {
 	writeFile(t, dir, "caller.ts", "import { callee } from \"./callee\";\n\nexport function caller() { return callee(); }\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("ts", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	res, err := ix.IndexProject(ctx, pid, "ts", dir, Options{Precise: true})
@@ -115,7 +116,7 @@ func TestIndexTypeScriptCallEdges(t *testing.T) {
 	// an imported binding resolved through the import) — never precise ones.
 	g2, _ := newStores(t)
 	pid2, _ := g2.UpsertProject("ts", dir, "typescript")
-	ix2 := New(g2, nil, nil, config.DefaultConfig().Index)
+	ix2 := New(g2, nil, nil, lspModeConfig())
 	defer ix2.Close()
 	if _, err := ix2.IndexProject(context.Background(), pid2, "ts", dir, Options{}); err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func TestIndexTSXCallEdges(t *testing.T) {
 	writeFile(t, dir, "App.tsx", "export function Button(props: { label: string }) {\n  return <button>{props.label}</button>;\n}\nexport function App() {\n  return <Button label=\"hi\" />;\n}\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("tsx", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if _, err := ix.IndexProject(ctx, pid, "tsx", dir, Options{Precise: true}); err != nil {
@@ -176,7 +177,7 @@ func TestIndexJSXNameBasedEdges(t *testing.T) {
 	writeFile(t, dir, "components/legacy.jsx", "export function Legacy() {\n  return <Button label=\"old\" />;\n}\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("jsx-name", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	res, err := ix.IndexProject(ctx, pid, "jsx-name", dir, Options{}) // NOT precise
@@ -262,7 +263,7 @@ func TestIndexJavaScriptMixed(t *testing.T) {
 	writeFile(t, dir, "app.ts", "import { add } from \"./math.js\";\n\nexport function compute(x: number): number { return add(x, 1); }\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("mix", dir, "javascript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	res, err := ix.IndexProject(ctx, pid, "mix", dir, Options{Precise: true})
@@ -304,7 +305,7 @@ func TestIndexPython(t *testing.T) {
 	writeFile(t, dir, "calc.py", "def add(a, b):\n    return a + b\n\ndef compute(x):\n    return add(x, 1)\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("py", dir, "python")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	res, err := ix.IndexProject(ctx, pid, "py", dir, Options{Precise: true})
@@ -344,7 +345,7 @@ func TestIndexTypeScriptDisabledByNoLSP(t *testing.T) {
 	writeFile(t, dir, "svc.ts", "export function f() {}\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("ts", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	res, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{NoLSP: true})
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +377,7 @@ func TestMissingServerReportedNotSilent(t *testing.T) {
 	writeFile(t, dir, "svc.ts", "export function f() {}\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("ts", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	res, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{}) // LSP enabled
 	if err != nil {
 		t.Fatal(err)
@@ -426,7 +427,7 @@ func TestDeadVersionManagerShimReportsStructuredIssue(t *testing.T) {
 	writeFile(t, dir, "svc.ts", "export function f() {}\n")
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("ts", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	res, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -452,5 +453,66 @@ func TestDeadVersionManagerShimReportsStructuredIssue(t *testing.T) {
 	}
 	if !strings.Contains(iss.Stderr, "No version is set") {
 		t.Errorf("stderr should carry asdf message, got %q", iss.Stderr)
+	}
+}
+
+// lspModeConfig selects the previous structural backend — language servers
+// for TS/JS/Python symbols — which the tests in this file (and the hermetic
+// fake-server tests) exercise. The default tree-sitter mode is covered by
+// TestTreeSitter* below and internal/extract/sittersrc.
+func lspModeConfig() config.IndexConfig {
+	cfg := config.DefaultConfig().Index
+	cfg.StructuralBackend = config.StructuralLSP
+	return cfg
+}
+
+// TestTreeSitterIndexesTypeScriptWithoutServers pins the default backend's
+// contract: TS/JS/Python index with no language server — under --no-lsp, and
+// with every configured server missing — and a missing server is reported
+// only when --precise needs it, scoped to the precise call graph.
+func TestTreeSitterIndexesTypeScriptWithoutServers(t *testing.T) {
+	saved := lspsrc.DefaultServers
+	t.Cleanup(func() { lspsrc.DefaultServers = saved })
+	lspsrc.DefaultServers = []lspsrc.ServerSpec{{
+		Cmd:   "codemap-no-such-language-server",
+		Args:  []string{"--stdio"},
+		Langs: []lspsrc.LangBinding{{Lang: "typescript", LangID: "typescript"}},
+	}}
+
+	for _, opts := range []Options{{NoLSP: true}, {}} {
+		dir := t.TempDir()
+		writeFile(t, dir, "svc.ts", "export function f() {}\nexport class Svc { run() { f(); } }\n")
+		g, _ := newStores(t)
+		pid, _ := g.UpsertProject("ts", dir, "typescript")
+		ix := New(g, nil, nil, config.DefaultConfig().Index)
+		res, err := ix.IndexProject(context.Background(), pid, "ts", dir, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, _ := g.FindNodesBySymbol(pid, "run"); len(n) != 1 || n[0].Kind != graph.KindMethod {
+			t.Errorf("opts %+v: Svc.run not indexed by tree-sitter: %+v", opts, n)
+		}
+		if len(res.Unsupported) != 0 || len(res.ServerIssues) != 0 || len(res.MissingServers) != 0 {
+			t.Errorf("opts %+v: no server should be needed, got unsupported=%v issues=%+v", opts, res.Unsupported, res.ServerIssues)
+		}
+	}
+
+	dir := t.TempDir()
+	writeFile(t, dir, "svc.ts", "export function f() {}\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("ts", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	res, err := ix.IndexProject(context.Background(), pid, "ts", dir, Options{Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := g.FindNodesBySymbol(pid, "f"); len(n) != 1 {
+		t.Errorf("--precise without a server must still index symbols, got %+v", n)
+	}
+	if len(res.ServerIssues) != 1 || res.ServerIssues[0].Capability != tooling.CapabilityPrecise {
+		t.Fatalf("--precise without a server should report one precise-scoped issue, got %+v", res.ServerIssues)
+	}
+	if line := tooling.WarningLine(res.ServerIssues[0]); !strings.Contains(line, "precise call graph unavailable") || strings.Contains(line, "skipped") {
+		t.Errorf("warning should scope the gap to --precise, got %q", line)
 	}
 }

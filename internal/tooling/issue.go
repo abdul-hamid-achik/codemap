@@ -44,7 +44,14 @@ type Issue struct {
 	Cwd            string          `json:"cwd,omitempty"`
 	VersionManager *VersionManager `json:"version_manager,omitempty"`
 	AgentFix       *AgentFix       `json:"agent_fix,omitempty"`
+	// Capability narrows what the failure blocks. Empty means the languages'
+	// files could not be indexed at all; "precise" means they were indexed by
+	// the built-in parser and only the --precise call graph is unavailable.
+	Capability string `json:"capability,omitempty"`
 }
+
+// CapabilityPrecise marks an issue that only blocks the --precise call graph.
+const CapabilityPrecise = "precise"
 
 // VersionManager describes a project-scoped runtime manager (asdf/mise/nvm)
 // that can make a PATH shim resolve differently than a global install.
@@ -304,13 +311,19 @@ func WarningLine(iss Issue) string {
 		lang = "language"
 	}
 	files := ""
-	if n > 0 {
+	switch {
+	case iss.Capability == CapabilityPrecise:
+		files = lang + " precise call graph unavailable (symbols are indexed without it) — "
+	case n > 0:
 		files = fmt.Sprintf("%d %s file(s) skipped — ", n, lang)
-	} else {
+	default:
 		files = lang + " — "
 	}
 	switch iss.Code {
 	case CodeNotFound:
+		if iss.Capability == CapabilityPrecise {
+			return files + fmt.Sprintf("%q not found on PATH (install it to use --precise)", iss.Binary)
+		}
 		return files + fmt.Sprintf("%q not found on PATH (install it, or run with --no-lsp)", iss.Binary)
 	case CodeVersionManagerGap:
 		path := iss.ResolvedPath
