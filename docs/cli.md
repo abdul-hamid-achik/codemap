@@ -203,6 +203,15 @@ matched. It's still substring/keyword matching, not meaning search: it won't fin
 symbol that shares no words with the query — for that, embed the index (`codemap index`, with Ollama
 running) and use `codemap semantic`.
 
+**`codemap explore` / `codemap task-context` without embeddings**: their search requires no vectors.
+When name search finds nothing (a question like `how does signup work` has no symbol containing every
+word) or fewer hits than requested, a lexical floor fills the rest: it drops question words and
+stopwords, then ranks definitions by BM25 over symbol names, FQNs, file paths, docstrings, and
+signatures, preferring definitions that match more of the remaining words. Matching is
+case-insensitive substring (trigram), so `signup` reaches `signupUser` and
+`app/api/auth/signup/route.ts`. The JSON `search_mode` is `lexical` when only that floor answered and
+`name+lexical` when exact name matches lead; `matched_in` may then also be `"path"` or `"signature"`.
+
 `codemap grep` searches only the **indexed file set** — the files codemap extracted structure from
 (same excludes as `codemap index`) — not every byte in the repo; a config/YAML/README file with no
 registered extractor is invisible to it, exactly as it already is to `codemap find`/`codemap symbols`.

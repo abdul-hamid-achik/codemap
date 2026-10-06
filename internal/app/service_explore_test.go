@@ -132,3 +132,72 @@ func TestPreferCodeHitsKeepsBackendRankWithinTiers(t *testing.T) {
 		t.Fatalf("all-declarative hits reordered: %+v", out)
 	}
 }
+
+func TestExploreQuestionFallsBackToLexicalSearch(t *testing.T) {
+	isolate(t)
+	root := t.TempDir()
+	files := map[string]string{
+		"go.mod":              "module example.com/lexical\n\ngo 1.25\n",
+		"auth/signup/user.go": "package signup\n\n// CreateAccount registers a new user.\nfunc CreateAccount() { hashPassword() }\n\nfunc hashPassword() {}\n",
+		"queue/work.go":       "package queue\n\nfunc WorkQueue() {}\nfunc DoesNothing() {}\n",
+		"auth/login.go":       "package auth\n\nfunc LoginRateLimit() {}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	sess.Config.Vecgrep.Enabled = false
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), root, index.Options{NoLSP: true}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// No symbol contains every word, so name search alone found nothing and
+	// explore returned not-found; the lexical floor matches the signup path.
+	rep, err := svc.Explore(context.Background(), root, "how does signup work", ExploreOptions{Seeds: 5, Edges: 2, Depth: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.SearchMode != "lexical" || rep.Note == "" {
+		t.Fatalf("explore search mode = %q note=%q, want lexical with a note", rep.SearchMode, rep.Note)
+	}
+	got := map[string]bool{}
+	for _, seed := range rep.Seeds {
+		got[seed.Symbol] = true
+		if seed.Selector == nil {
+			t.Fatalf("lexical seed not joined to a definition: %+v", seed)
+		}
+	}
+	if !got["CreateAccount"] || !got["hashPassword"] || got["WorkQueue"] || got["DoesNothing"] {
+		t.Fatalf("lexical seeds = %v, want the auth/signup definitions only", got)
+	}
+	if len(rep.Contexts) == 0 {
+		t.Fatal("lexical seeds must still get structural contexts")
+	}
+
+	// A partial name hit is topped up with lexical matches, name hits first.
+	search, err := svc.Search(context.Background(), root, "login rate limit", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search.Mode != "name" || len(search.Hits) != 1 || search.Hits[0].Symbol != "LoginRateLimit" {
+		t.Fatalf("full name match should stay name-only: %+v", search)
+	}
+	search, err = svc.Search(context.Background(), root, "auth limit", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search.Mode != "name+lexical" || len(search.Hits) < 2 {
+		t.Fatalf("search = mode %q hits %d, want name+lexical top-up", search.Mode, len(search.Hits))
+	}
+}

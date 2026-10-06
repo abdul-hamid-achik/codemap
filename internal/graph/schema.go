@@ -5,8 +5,9 @@ package graph
 // v2 adds annotations, v3 edge provenance, v4 composite query indexes, v5
 // per-file precise call-graph coverage, v6 idempotent annotation keys, v7
 // per-symbol query-frequency counters, v8 the attested reindex delta, and
-// v9 unresolved declarative references (scoped incremental reconciliation).
-const schemaVersion = 9
+// v9 unresolved declarative references (scoped incremental reconciliation),
+// and v10 the nodes_fts lexical index (BM25 search floor without embeddings).
+const schemaVersion = 10
 
 // Edge provenance: how an edge's target was resolved. Name-based fan-out (the
 // fast default) tags 'name'; the opt-in go/types pass tags 'precise' and
@@ -221,4 +222,33 @@ CREATE TABLE IF NOT EXISTS unresolved_refs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_unresolved_refs_name ON unresolved_refs(project_id, to_name);
+
+-- Lexical search floor: a contentless FTS5 index over each node's identity
+-- text, so a natural-language question ("how does signup work") ranks
+-- definitions by BM25 with no embeddings. The trigram tokenizer gives
+-- case-insensitive substring matching, so "signup" hits signupUser and the
+-- .../auth/signup/route.ts path without a camelCase-aware tokenizer.
+--
+-- Maintaining FTS5 row by row inside the indexer's per-file transactions
+-- cost ~14x the whole extract phase (and even a trigger that only queued ids
+-- cost ~+70%), while one bulk pass costs ~0.1s per 16k nodes. So nothing runs
+-- on the node insert/delete path: SyncLexical reconciles in one transaction
+-- after each index run and before a lexical search. It needs no queue because
+-- node ids are AUTOINCREMENT (never reused — new nodes are exactly those above
+-- the highest indexed id) and node text is never updated in place (a changed
+-- file is delete + insert), so deletions are an anti-join of nodes_fts_ids
+-- against nodes. contentless_delete lets a gone id be removed without its old
+-- text. The column-scoped UPDATE trigger is a safety net should an in-place
+-- text update ever be added; the embed pass's vec_id updates never fire it.
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+    symbol, fqn, file_path, docstring, signature,
+    content='', contentless_delete=1, tokenize='trigram'
+);
+
+CREATE TABLE IF NOT EXISTS nodes_fts_ids   (id INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS nodes_fts_dirty (id INTEGER PRIMARY KEY);
+
+CREATE TRIGGER IF NOT EXISTS nodes_fts_au AFTER UPDATE OF symbol, fqn, file_path, docstring, signature ON nodes BEGIN
+    INSERT OR IGNORE INTO nodes_fts_dirty(id) VALUES (old.id);
+END;
 `

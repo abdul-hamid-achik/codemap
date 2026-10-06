@@ -10,6 +10,17 @@ releases page is the authoritative history.
 
 ### Added
 
+- **Lexical search floor for `explore` / `task-context` without embeddings** — a question such
+  as `how does signup work` used to return `not_found` because name search requires every word
+  in one symbol. When name search finds nothing or too little, a BM25 floor now drops
+  question words/stopwords and ranks definitions over symbol names, FQNs, file paths,
+  docstrings, and signatures (case-insensitive substring via an FTS5 trigram index; broader
+  word coverage first, production code before tests). `search_mode` reports `lexical` or
+  `name+lexical`; `matched_in` may be `path` or `signature`. Graph schema v10 adds the
+  contentless `nodes_fts` index, reconciled in one bulk pass after each index run (no per-row
+  triggers on the write path; ~+0.1 s per 8k nodes on a full build). Upgraded databases build
+  it on first use.
+
 - **`codemap task-context` / `codemap_task_context`** — mode-scoped task orientation in one
   call (CLI alias `brief`; full-profile MCP tool). The task text is used verbatim as the
   retrieval query (intent never interpreted); `--mode understand|change|debug` selects the

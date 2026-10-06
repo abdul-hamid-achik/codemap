@@ -51,7 +51,7 @@ type ExploreReport struct {
 	PartialErrors []ContextPartialError `json:"partial_errors,omitempty"`
 }
 
-// Explore searches by intent (semantic when available, name fallback
+// Explore searches by intent (semantic when available, name search plus a BM25 lexical floor
 // otherwise), joins every usable hit to a durable selector, then assembles a
 // compact Context bundle for each exact definition. No source bodies are read.
 func (svc *Service) Explore(ctx context.Context, cwd, query string, opts ExploreOptions) (*ExploreReport, error) {
