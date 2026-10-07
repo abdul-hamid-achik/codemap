@@ -241,6 +241,7 @@ export const RENDERERS = {
   traverse: renderTraverse,
   dependencies: renderDependencies,
   related: renderRelated,
+  affected: renderAffected,
   impact: renderImpact,
   fileimpact: renderFileImpact,
   filecontext: renderFileContext,
@@ -1057,6 +1058,45 @@ function renderDependencies(json, ctx) {
             { dense: true, onRow: (r) => (r.from_file || r.from) && ctx.onFile?.(r.from_file || r.from) },
           ),
         })
+      : null,
+  ])
+}
+
+function renderAffected(json, ctx) {
+  const tests = json.tests || []
+  const unmapped = json.unmapped || []
+  return h('div.stack', [
+    h('div.row.gap3', [
+      badge(`source: ${json.source || 'files'}${json.since ? ` ${json.since}` : ''}`, 'accent'),
+      badge(`${tests.length} test file(s)`, tests.length ? 'ok' : 'plain'),
+      json.indexed === false ? badge('not indexed', 'warn') : null,
+      boolBadge('analysis complete', json.analysis_complete, { okWhen: true }),
+      json.stale ? staleBadge(true) : null,
+      callGraphBadge(json.call_graph),
+    ]),
+    countsRow([
+      ['changed files', (json.files || []).length],
+      ['unmapped', unmapped.length],
+      ['filtered out', json.filtered_out],
+      ['depth', json.depth],
+    ]),
+    json.note ? callout('warn', 'Note', json.note) : null,
+    tests.length
+      ? table(
+          [
+            { key: 'file', label: 'Test file', cls: 'code', render: (r) => shortPath(r.file) },
+            {
+              key: 'reasons',
+              label: 'Why it runs',
+              render: (r) => h('div.pill-list', [...(r.reasons || []).map((x) => badge(x, x === 'changed' ? 'accent' : x.startsWith('imports:') ? 'plain' : 'ok')), r.reasons_truncated ? badge(`+${r.reasons_truncated} more`, 'plain') : null]),
+            },
+          ],
+          tests,
+          { onRow: (r) => ctx.onFile?.(r.file) },
+        )
+      : emptyState({ title: 'No affected tests', note: 'Nothing indexed maps from these files to a test file.' }),
+    unmapped.length
+      ? card({ title: 'Unmapped files', body: h('div.pill-list', unmapped.map((f) => codeInline(f))), tight: true })
       : null,
   ])
 }

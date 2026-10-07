@@ -54,7 +54,7 @@ index → understand → read workflow on its own.
 
 ## Tool profiles
 
-By default `codemap serve` registers all 49 tools. That's a real cost: a
+By default `codemap serve` registers all 50 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
 measured **+95% input tokens** on the codemap arm, driven by every tool's schema
 riding in every session's context — and some clients (Cursor) cap total MCP tools
@@ -79,10 +79,10 @@ compatibility and is the explicit expert/admin surface.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
-server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **35,662
-schema characters (≈8,916 tokens using the declared chars/4 planning estimate)**;
-`full` serializes **54,839 characters (≈13,710 estimated tokens)**. That is about
-35% less schema context for the taught surface. Reproduce it with:
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **36,705
+schema characters (≈9,177 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **57,809 characters (≈14,453 estimated tokens)**. That is about
+37% less schema context for the taught surface. Reproduce it with:
 
 ```bash
 go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime=100x -benchmem
@@ -94,7 +94,7 @@ Everything else — `codemap_init`, `codemap_doctor`, `codemap_projects`,
 `codemap_unannotate`, `codemap_branch_status` / `codemap_branch_switch`, and
 `codemap_cache_save` / `codemap_cache_restore` / `codemap_cache_list` /
 `codemap_cache_drop`, plus the full-profile orientation surfaces `codemap_map`,
-`codemap_atlas`, `codemap_traverse`, and `codemap_task_context` — is admin/ecosystem/extended surface, available
+`codemap_atlas`, `codemap_traverse`, `codemap_task_context`, and `codemap_affected` — is admin/ecosystem/extended surface, available
 under the default `full` profile and excluded from both current lean profiles. Precedence is the same three-way order as every
 other codemap setting: config file < environment < CLI flag. An unrecognized value
 is a startup error, not a silent fallback. [`codemap agent setup
@@ -120,6 +120,7 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_references` | Places a function/method is used as a value rather than called (callbacks, handlers, registrations — and, for TS/JS, Next.js framework wiring). Accepts an exact `selector`; returns capped source sites with totals plus independent `coverage` and confirmed/candidate confidence. Coverage is partial and name fan-out remains candidate, so an empty result is not proof of no runtime wiring. |
 | `codemap_impact` | Callers + blast radius + covering tests + `test_commands` (copy/paste-ready runner invocations derived from those tests, same derivation as `codemap_review`) (`depth`). `selector` scopes all traversal to one definition. Also returns `buckets` (blast radius grouped into depth-1 `direct` and depth-2+ `transitive` nodes, with counts; the flat `blast_radius` is unchanged) and a per-node `confidence` (`confirmed` = every edge on a shortest path is precise or same-file; `candidate` = name-based cross-file fan-out or a heuristic test). `min_confidence:"confirmed"` drops candidate nodes from `blast_radius`/`buckets`/`tests`/`direct_callers` and reports the dropped count as `filtered:{candidate:N}`; the default (`candidate`) changes nothing. Carries `call_graph` alongside the human `resolution` note — `unresolved` means callers/blast/tests are unknown, not absent (for example, uncovered TS/JS/Python definitions or Vue, whose call graph is not supported yet). Optional `max_tokens` bounds the payload (see [Response token budgets](#response-token-budgets)) |
 | `codemap_review` | **Diff-scoped impact + test selection** — maps a working/staged/`since` diff to changed symbols, `blast_radius`, `covering_tests`, `test_commands`, aggregate `risk`, confidence, and bounded `next` actions. `analysis_complete` plus total/analyzed/truncated counts and bounded `partial_errors` prevent stale, capped, or partially failed analysis from looking authoritative; structural-source mapping errors include failed symbol lookup, deletion-only hunks, recognized callable/type declaration lines removed in mixed or equal-count hunks, and exact source renames with no mapped symbols. Documentation/assets remain visible in `changed_files` without structural mapping failures. Fresh indexed untracked source files and exact source renames map as whole files. Incomplete analysis forces `risk.level:"unknown"`. The additive `coverage` block (`verdict` covered/partial/uncovered/unknown plus `covered_symbols`/`uncovered_symbols`/`unknown_symbols`) answers "is each changed symbol tested?" separately from `risk`: a changed or new test file in the same diff that references a changed symbol counts as covering it, and `unknown` (unresolved call graph and no test link) is never evidence of missing tests. `gate.would_fail_on.uncovered` is the report-level form of CLI `--fail-on-uncovered`. Nodes carry `confidence` as on `codemap_impact`. Deleted source files are analyzed from retained last-index definitions when available; `deletion_analysis` reports completeness and test actions precede reindexing. |
+| `codemap_affected` | **Changed files → the test files to run** (full profile). Inputs: `files` (project-relative; absolute paths under the root accepted), `since` / `staged` (take the git diff; with no inputs the whole working tree is used), `filter` (glob over the reported test paths), `depth` (call-graph and import hops, default 3, max 10). Returns `schema_version: 1`, `files`, sorted unique `tests` each with `reasons` (`covers:<symbol>`, `imports:<file>`, `changed`), `unmapped`, `call_graph` (weakest confidence among contributing symbols), `analysis_complete`, `stale`, and a `note` when coverage is name-based or unresolved. Lighter than `codemap_review` when only the test list is needed. |
 | `codemap_dependencies` | Direct inbound dependency evidence for a `file`, grouped and capped by dependent file and calls/references/imports. Every sample carries `confidence`/`confidence_reason`; confirmed/candidate totals, file-vs-package scope, truncation, freshness/`call_graph`, and domain coverage stay explicit. |
 | `codemap_file_impact` | **File-level impact** — returns confidence-aware `dependency_evidence`, blast/tests, and a conservative `delete_verdict`. Only fresh confirmed file-scoped evidence proves `unsafe`; name-fanout candidates, stale snapshots, Go package imports, and missing evidence remain `unknown`. Legacy `safe_to_delete` stays false. |
 | `codemap_required_keys` | **Least-privilege key set** — for an `entrypoint`, the candidate secret key NAMES its transitive call tree actually reads. Supply `keys` directly or use `via_vault` plus optional `prefix`; operates on names only, never values. Candidate input is capped at 256 unique names, 256 bytes per name |

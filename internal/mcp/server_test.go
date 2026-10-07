@@ -642,6 +642,7 @@ func TestMCPNotIndexedSignal(t *testing.T) {
 		{"codemap_hotspots", map[string]any{"path": proj}},
 		{"codemap_map", map[string]any{"path": proj}},
 		{"codemap_atlas", map[string]any{"path": proj}},
+		{"codemap_affected", map[string]any{"path": proj, "files": []string{"main.go"}}},
 		{"codemap_features", map[string]any{"path": proj}},
 		{"codemap_processes", map[string]any{"path": proj}},
 		{"codemap_explore", map[string]any{"path": proj, "query": "run"}},
@@ -733,6 +734,7 @@ func TestMCPHandlerWiring(t *testing.T) {
 		{"codemap_atlas", map[string]any{"path": proj, "depth": 2, "files": true}, "\"schema_version\":1"},
 		{"codemap_features", map[string]any{"path": proj, "kind": "program,rpc_tool", "depth": 2, "top": 10}, `"features":[`},
 		{"codemap_processes", map[string]any{"path": proj, "depth": 2, "top": 10}, `"processes":[`},
+		{"codemap_affected", map[string]any{"path": proj, "files": []string{"main.go"}}, `"schema_version":1`},
 		{"codemap_orphans", map[string]any{"path": proj}, ""},
 		{"codemap_hotspots", map[string]any{"path": proj}, ""},
 		{"codemap_projects", map[string]any{}, ""},
@@ -1551,7 +1553,7 @@ func listToolNames(t *testing.T, srv *Server) map[string]bool {
 var fullToolNames = []string{
 	"codemap_init", "codemap_index", "codemap_status", "codemap_semantic",
 	"codemap_callers", "codemap_callees", "codemap_references", "codemap_impact",
-	"codemap_review", "codemap_read_order", "codemap_map", "codemap_atlas", "codemap_features", "codemap_flow", "codemap_explore", "codemap_processes", "codemap_traverse", "codemap_task_context", "codemap_related_files", "codemap_dependencies",
+	"codemap_review", "codemap_affected", "codemap_read_order", "codemap_map", "codemap_atlas", "codemap_features", "codemap_flow", "codemap_explore", "codemap_processes", "codemap_traverse", "codemap_task_context", "codemap_related_files", "codemap_dependencies",
 	"codemap_file_impact", "codemap_file_context", "codemap_refactor_plan", "codemap_risk", "codemap_symbol_at", "codemap_secret_impact",
 	"codemap_required_keys", "codemap_hotspots", "codemap_orphans", "codemap_coverage",
 	"codemap_path", "codemap_symbols", "codemap_find", "codemap_grep", "codemap_source",
@@ -1617,7 +1619,7 @@ func assertExactToolSet(t *testing.T, got map[string]bool, want []string) {
 }
 
 // TestMCPToolsByProfile pins the exact registered-tool set for all profiles:
-// ProfileFull remains all 49 tools, ProfileCore remains its shipped 28-tool
+// ProfileFull remains all 50 tools, ProfileCore remains its shipped 28-tool
 // inventory, and ProfileAgent is the separately versioned taught workflow.
 func TestMCPToolsByProfile(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
