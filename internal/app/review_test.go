@@ -1590,6 +1590,19 @@ func TestReviewContractV1(t *testing.T) {
 				map[string]any{"factor": "unresolved", "severity": -0.01, "detail": "invalid"},
 			}
 		}},
+		{name: "null coverage", mutate: func(root map[string]any) { root["coverage"] = nil }},
+		{name: "invalid coverage verdict", mutate: func(root map[string]any) {
+			root["coverage"].(map[string]any)["verdict"] = "mostly"
+		}},
+		{name: "negative uncovered symbols", mutate: func(root map[string]any) {
+			root["coverage"].(map[string]any)["uncovered_symbols"] = float64(-1)
+		}},
+		{name: "coverage missing unknown count", mutate: func(root map[string]any) {
+			delete(root["coverage"].(map[string]any), "unknown_symbols")
+		}},
+		{name: "invalid impact node confidence", mutate: func(root map[string]any) {
+			root["blast_radius"].([]any)[0].(map[string]any)["confidence"] = "likely"
+		}},
 		{name: "camel case schema version alias", mutate: func(root map[string]any) {
 			root["schemaVersion"] = root["schema_version"]
 			delete(root, "schema_version")
@@ -1619,6 +1632,7 @@ func TestReviewContractV1(t *testing.T) {
 	root["future_optional_field"] = true
 	root["changed_symbols"].([]any)[0].(map[string]any)["future_symbol_field"] = "additive"
 	root["risk"].(map[string]any)["future_risk_field"] = 1
+	root["coverage"].(map[string]any)["future_coverage_field"] = "additive"
 	if err := resolved.Validate(root); err != nil {
 		t.Fatalf("v1 schema rejected additive optional fields: %v", err)
 	}

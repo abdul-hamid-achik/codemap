@@ -25,6 +25,22 @@ releases page is the authoritative history.
 
 ### Added
 
+- **Impact depth buckets and confidence filtering** — `codemap impact` / `codemap_impact` add an
+  additive `buckets` view (`direct` depth-1 vs `transitive` depth-2+, with counts) next to the
+  unchanged flat `blast_radius`, and a per-node `confidence` (`confirmed` when every edge on a
+  shortest path is precise or same-file, else `candidate`). New `--min-confidence confirmed|candidate`
+  (MCP `min_confidence`) drops candidate nodes from `blast_radius`/`buckets`/`tests`/`direct_callers`
+  and reports `filtered: {"candidate": N}`; the default is unchanged. Review `blast_radius` and
+  `covering_tests` nodes carry the same `confidence`.
+- **Review coverage verdict separate from risk** — `codemap review` / `codemap_review` add an
+  optional `coverage` block (`verdict` covered|partial|uncovered|unknown, `covered_symbols`,
+  `uncovered_symbols`, `unknown_symbols`); `unknown` means no test link and no usable call graph and
+  is never evidence of missing tests. The risk band is unchanged. A test file changed or added in the
+  same diff that references a changed symbol by name now counts as covering it (before reindexing).
+  New `--fail-on-uncovered` exits 6 only on `uncovered`/`partial` with known-uncovered symbols, never
+  on `unknown`; `--fail-on-untested` is unchanged. `gate.would_fail_on.uncovered` mirrors it in the
+  report. `schemas/codemap.review.v1.schema.json` gains the optional `coverage`, node `confidence`,
+  and `uncovered` properties (additive within v1).
 - **Lexical search floor for `explore` / `task-context` without embeddings** — a question such
   as `how does signup work` used to return `not_found` because name search requires every word
   in one symbol. When name search finds nothing or too little, a BM25 floor now drops

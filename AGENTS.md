@@ -412,7 +412,7 @@ task install         # go install ./cmd/codemap
 - The CLI exposes the same service reports for overlapping operations, but it is not a strict
   flag-for-field mirror: CLI `index` additionally has `--watch` and `--no-lsp` (MCP
   `codemap_index` currently has neither), and several operational surfaces are CLI-only. Current
-  commands: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`; repeat `--at`, optionally `--batch`, for bounded partial-success frame batches), `file-impact`, `dependencies`, `review` (`--staged`/`--since`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`; `hotspots` and `read-order` take `--include-tests`), `semantic` (`--top`), `read-order`, `map` (`--top-subsystems`/`--top-bridges`/`--top-hubs`/`--top-entrypoints`), `atlas` (`--prefix`/`--depth`/`--files`/`--max-nodes`/`--key-symbols`), `features` (`--kind`/`--query`/`--top`/`--depth`/`--no-footprint`), `flow <symbol>` (or `--at <file>:<line>`; `--depth`/`--max-nodes`/`--include-tests`), `explore <query>` (`--seeds`/`--edges`/`--depth`), `traverse --at <file>:<line>` (`--direction outgoing|incoming|both`/`--edge-types` CSV/`--depth`/`--limit`), `task-context <task>` (alias `brief`; `--mode understand|change|debug`, repeatable `--at`), `symbols`, `symbol-at`, `find`, `grep` (`--regex`/`-i`), `source`, `context` (multi-arg → batch), `related-files`, `annotate` (`--external-id` for retry-safe writes; `--retarget <id> <symbol>|<from> <to>` repoints an existing annotation after a rename — the repair for dangling notes)/`annotations` (`--rm <id>`), `inconsistencies` (CLI-only, like structural-manifest: the `codemap.inconsistencies.v1` contradictions report — dangling annotations, name-based call edges surviving on precise-resolved files, coverage rows for files with no indexed nodes, plus a stale flag), `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `cache export`/`import` (`--force`; portable team/CI-shareable
+  commands: `init`, `index` (`--reindex`/`--no-embed`/`--precise`/`--watch`/`--no-lsp`), `status`, `config path/show`, `doctor`, `projects`, `callers`/`callees` (`--precise`), `path`, `impact` (`--depth`, `--min-confidence confirmed|candidate`; repeat `--at`, optionally `--batch`, for bounded partial-success frame batches), `file-impact`, `dependencies`, `review` (`--staged`/`--since`/`--fail-on-risk`/`--fail-on-untested`/`--fail-on-uncovered`), `secret-impact`, `required-keys`, `risk`, `hotspots`/`orphans` (`--top`; `hotspots` and `read-order` take `--include-tests`), `semantic` (`--top`), `read-order`, `map` (`--top-subsystems`/`--top-bridges`/`--top-hubs`/`--top-entrypoints`), `atlas` (`--prefix`/`--depth`/`--files`/`--max-nodes`/`--key-symbols`), `features` (`--kind`/`--query`/`--top`/`--depth`/`--no-footprint`), `flow <symbol>` (or `--at <file>:<line>`; `--depth`/`--max-nodes`/`--include-tests`), `explore <query>` (`--seeds`/`--edges`/`--depth`), `traverse --at <file>:<line>` (`--direction outgoing|incoming|both`/`--edge-types` CSV/`--depth`/`--limit`), `task-context <task>` (alias `brief`; `--mode understand|change|debug`, repeatable `--at`), `symbols`, `symbol-at`, `find`, `grep` (`--regex`/`-i`), `source`, `context` (multi-arg → batch), `related-files`, `annotate` (`--external-id` for retry-safe writes; `--retarget <id> <symbol>|<from> <to>` repoints an existing annotation after a rename — the repair for dangling notes)/`annotations` (`--rm <id>`), `inconsistencies` (CLI-only, like structural-manifest: the `codemap.inconsistencies.v1` contradictions report — dangling annotations, name-based call edges surviving on precise-resolved files, coverage rows for files with no indexed nodes, plus a stale flag), `branch-status`/`branch-switch`/`branch-snapshot`, `cache save`/`restore`/`list`/`drop`, `cache export`/`import` (`--force`; portable team/CI-shareable
 index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start`/`status`/`stop`, `agent setup`/`list`/`playbook` (register codemap with an AI coding harness — CLI-only, no MCP tool), `docs`, `serve` — query commands accept `--json`.
   `structural-manifest` and `export-symbols` are also CLI-only: the former is a lightweight
   `codemap.structural-manifest.v1` identity/freshness preflight that streams indexed metadata
@@ -474,6 +474,31 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   are compatible within v1. Renames, removals, required-field additions, enum narrowing, or
   nested shape changes require a new schema major and a consumer dual-read window. Keep the hard
   CLI error envelope outside the success schema.
+  **Impact confidence (additive).** `ImpactNode` carries an optional `confidence`
+  (`confirmed`|`candidate`): `graph.NodeDepth.Confirmed` is set by the blast-radius BFS
+  (`callerEdgesBatch`, one query per level, no extra round-trips) when some shortest path to the node
+  uses only precise-provenance or same-file edges; heuristic covering tests are always `candidate`.
+  `ImpactReport` adds `buckets` (`direct` depth 1 / `transitive` depth ≥ 2 + counts; the flat
+  `blast_radius` is untouched). `min_confidence` (CLI `--min-confidence`, MCP `min_confidence`;
+  `candidate` is the no-op default, `confirmed` filters) is applied by `ImpactReport.ApplyMinConfidence`
+  /`ImpactBatchReport.ApplyMinConfidence` after the analysis — cmd/mcp only call that thin method — and
+  records `min_confidence` plus `filtered:{"candidate":N}` (distinct candidate nodes dropped from
+  blast_radius/tests); `untested` keeps its pre-filter call-graph meaning. Review unions nodes across
+  changed symbols and keeps `confirmed` if any path is confirmed.
+  **Review coverage verdict (additive).** `ReviewReport.coverage` =
+  `{verdict: covered|partial|uncovered|unknown, covered_symbols, uncovered_symbols, unknown_symbols}`
+  (`internal/app/review_coverage.go`), separate from `risk` and absent when no non-test symbol is
+  assessed. Per symbol: covered = any test (call graph, heuristic, or a changed/new test file in the same
+  diff that references the symbol by name — Go requires the same directory); uncovered = usable call
+  graph (`resolved`/`name`) and no test; unknown = no test link and unresolved/`none` call graph, or the
+  symbol was never analyzed. Test symbols are skipped. Verdict: no covered+uncovered → `unknown`;
+  no covered → `uncovered`; no uncovered and no unknown → `covered`; otherwise `partial`. The risk band
+  semantics and `--fail-on-untested` are unchanged. `review --fail-on-uncovered` (exit 6) trips only when
+  `coverage.UncoveredGateTrips()` (verdict `uncovered`/`partial` with `uncovered_symbols > 0`), never on
+  `unknown` — the honesty rule — and does not fail closed on incomplete analysis;
+  `gate.would_fail_on.uncovered` mirrors it. Schema additions are optional (`coverage`, node
+  `confidence`, `would_fail_on.uncovered`); the golden fixture is regenerated with
+  `go test ./internal/app -run TestReviewContractV1 -update-review-contract`.
   `explore` and `traverse` likewise emit `schema_version: 1`; `explore` caps intent seeds and each
   joined context neighborhood, while `traverse` caps depth/nodes and reports per-domain confidence.
 - **Dependency confidence contract**: `dependencies` and embedded `file_impact.dependency_evidence`

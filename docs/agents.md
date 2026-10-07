@@ -92,7 +92,7 @@ whether to trust what it returned — full tool descriptions live in the
 | **Understand** — read it in full | `codemap_flow` (how a handler works, as an ordered call tree) / `codemap_context` (one symbol) / `codemap_context_batch` (several) / `codemap_file_context` (one-call orientation on a whole file) | `call_graph` — trust level; `alternatives`/`leaf_reason:"ambiguous"` on `flow` steps; `candidates` if the name is ambiguous, re-query with `candidates[i].selector` |
 | **Gate** — how careful, and is this even current? | `codemap_risk` (change-risk score) alongside `codemap_impact` / `codemap_file_impact` for the blast surface | `stale` — an index that's drifted since last run makes every other signal provisional |
 | **Edit** — make the change | informed by the tools above; codemap has no write path | — |
-| **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` — the diff's changed symbols, blast radius, and the tests to run |
+| **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` + `coverage.verdict` — the diff's changed symbols, blast radius, and the tests to run; gate on `coverage` (not `risk`) to ask "is anything provably untested?" |
 
 On an unfamiliar repo the first moves are `codemap_read_order` or `codemap_features` to find an entry point, then `codemap_flow` on its handler selector, then `codemap_context` on any step; the CLI equivalent is walked through in [Learn a codebase](/learn).
 
@@ -168,6 +168,16 @@ calibrate its confidence:
   `CODEMAP_SEMANTIC_FUSION=balanced`).
 - **`untested` / `heuristic`** — a symbol has no covering tests, or a test was matched
   by name-scan rather than the call graph (flag it, don't trust it blindly).
+- **`confidence` / `buckets` / `min_confidence` on `codemap_impact`** — each blast-radius and test
+  node is `confirmed` (every edge on a shortest path is precise or same-file) or `candidate`
+  (name-based cross-file fan-out). `buckets.direct` is the depth-1 slice; on a name-based hub
+  pass `min_confidence:"confirmed"` to drop candidates instead of grep-verifying them (the
+  response says how many it hid under `filtered.candidate`).
+- **`coverage` on `codemap_review`** — `verdict` covered/partial/uncovered/unknown with
+  covered/uncovered/unknown symbol counts, separate from `risk`. A test file changed in the same
+  diff counts as covering the symbols it references, even before reindexing. `unknown` means no
+  test link and no usable call graph — never read it as "untested". CLI
+  `--fail-on-uncovered` trips only on `uncovered`/`partial` with known-uncovered symbols.
 - **`*_total`** — true counts behind a capped list, so you know when to drill with
   `codemap_callers`/`impact` for the full set.
 

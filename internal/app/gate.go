@@ -65,6 +65,11 @@ type ReviewGateWouldFail struct {
 	// Untested: --fail-on-untested would trip (untested symbols present, or
 	// test coverage unresolved on a non-empty diff).
 	Untested bool `json:"untested"`
+	// Uncovered: --fail-on-uncovered would trip — coverage.verdict is uncovered
+	// or partial AND at least one changed symbol is known-uncovered. Never trips
+	// on unknown coverage (the honesty rule), and unlike Untested it does not
+	// fail on an unresolved call graph.
+	Uncovered bool `json:"uncovered"`
 	// RiskAtOrAbove: --fail-on-risk would trip at each threshold.
 	RiskAtOrAbove RiskThresholds `json:"risk_at_or_above"`
 }
@@ -84,6 +89,7 @@ func (rep *ReviewReport) ComputeGate() *ReviewGate {
 		WouldFailOn: ReviewGateWouldFail{
 			IncompleteAnalysis: rep.IsRepo && rep.Indexed && !rep.AnalysisComplete,
 			Untested:           len(rep.UntestedSymbols) > 0 || rep.testCoverageUnresolved(),
+			Uncovered:          rep.Coverage.UncoveredGateTrips(),
 			RiskAtOrAbove:      riskThresholds(level),
 		},
 	}

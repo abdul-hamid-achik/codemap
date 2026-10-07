@@ -154,10 +154,10 @@ it is, and — for `review` — what your current diff already touched.
 
 | Command | Description |
 |---|---|
-| `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, covering tests, and copy/paste-ready `test_commands`. `--at file:line` selects one definition; repeat `--at` to analyze up to 25 positions in one ordered, partial-success batch. A missed frame carries item-level `error.code:"symbol_not_found"`. Add `--batch` to force the stable batch envelope for one position. |
+| `codemap impact <symbol> [--depth N] [--min-confidence confirmed\|candidate]` | Definition sites, direct callers, blast radius, covering tests, and copy/paste-ready `test_commands`. JSON adds `buckets` (the blast radius grouped into `direct` depth-1 and `transitive` depth-2+ nodes, with counts) and a per-node `confidence`; `--min-confidence confirmed` drops name-based candidates — see [Confidence-filtered impact](#confidence-filtered-impact). `--at file:line` selects one definition; repeat `--at` to analyze up to 25 positions in one ordered, partial-success batch. A missed frame carries item-level `error.code:"symbol_not_found"`. Add `--batch` to force the stable batch envelope for one position. |
 | `codemap dependencies <file>` | Direct inbound call/reference/import evidence grouped by dependent file and edge kind. Every relationship is classified as **confirmed** or **candidate** with a reason (`precise`, `same_package`, `resolved_import`, `name_fanout`, `package_scope`, or `stale_snapshot`); totals and bounded source→target samples preserve that confidence. Coverage remains explicit for calls, references, imports, runtime wiring, and external consumers. Missing evidence never means safe. |
 | `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Returns grouped dependency evidence, coverage, blast radius, tests, and `delete_verdict`. Only fresh, confirmed, file-scoped indexed evidence can prove `unsafe`; name-fanout candidates, stale evidence, and Go's package-scoped imports remain `unknown` for the exact file. Missing evidence never proves safety; legacy `safe_to_delete` stays false. |
-| `codemap review [--since <ref>] [--staged] [--depth N] [--fail-on-risk <low\|medium\|high>] [--fail-on-untested]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, `stale`/`resolution`, and stable `call_graph` honesty signals. `--fail-on-risk`/`--fail-on-untested` gate on that data — see [Gating a commit or script](#gating-a-commit-or-script). |
+| `codemap review [--since <ref>] [--staged] [--depth N] [--fail-on-risk <low\|medium\|high>] [--fail-on-untested] [--fail-on-uncovered]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, a separate test-coverage `coverage` verdict, `stale`/`resolution`, and stable `call_graph` honesty signals. `--fail-on-risk`/`--fail-on-untested`/`--fail-on-uncovered` gate on that data — see [Gating a commit or script](#gating-a-commit-or-script). |
 | `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). Each request accepts at most 256 unique names, 256 bytes per name. |
 | `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. Candidate input is capped at 256 unique names, 256 bytes per name. |
 | `codemap risk <symbol> [--depth N] [--fail-on-risk <low\|medium\|high>]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. `--fail-on-risk` gates on the level — see [Gating a commit or script](#gating-a-commit-or-script). |
@@ -348,6 +348,23 @@ blast-radius nodes and the first covering tests, with a `… (N more)` line. `--
 always carries the complete set. (The README shows the same command run on codemap
 itself.)
 
+#### Confidence-filtered impact
+
+On a name-based index a hub name like `Update` fans out to every same-named method, so the flat
+`blast_radius` can be mostly noise. `--json` therefore adds, without touching the flat list:
+
+- `buckets` — `{direct, transitive, direct_count, transitive_count}`: the same `blast_radius`
+  nodes split at depth 1 vs depth 2+, so the direct callers can be read first.
+- `confidence` on every blast-radius and test node — `confirmed` when a shortest path from the
+  symbol to that node uses only precise edges (an `index --precise` pass) or same-file edges,
+  otherwise `candidate` (cross-file name-based fan-out; heuristic covering tests are always
+  candidates).
+- `--min-confidence confirmed` (MCP `min_confidence`) — drops candidate nodes from
+  `blast_radius`, `buckets`, `tests`, `direct_callers`, and `test_commands`, and reports how many
+  distinct candidate nodes it removed as `filtered: {"candidate": N}` (with `min_confidence`
+  echoed). `candidate`, or leaving it unset, is the default and changes nothing. `untested` keeps
+  its call-graph meaning — it is computed before filtering.
+
 ### `review` — the post-edit query
 
 Where `impact` starts from a *symbol*, `review` starts from your *diff*. After editing
@@ -376,7 +393,7 @@ agent can execute the selected regressions without deriving runner syntax. The
 `schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case:
 `{schema_version, changed_symbols, analysis_complete, total_symbols, analyzed_symbols,
 truncated_symbols, partial_errors, blast_radius, covering_tests, test_commands,
-untested_symbols, hotspots, stale, resolution, call_graph, risk, next}`. Version 1 permits
+untested_symbols, hotspots, stale, resolution, call_graph, risk, coverage, next}`. Version 1 permits
 additive optional properties but does not rename or repurpose existing fields. The command
 degrades gracefully (a plain changed-file list with a note) when the project isn't indexed or
 isn't a git repo; hard-failure error envelopes are separate from the success schema.
@@ -416,13 +433,24 @@ zero-symbol diff and early no-repository/no-index degradation; a finalized incom
 review emits `unknown` even when no symbol could be mapped safely. `unknown` also covers a changed
 symbol whose call graph is unavailable.
 
+**`coverage`** on `review` is the test-coverage verdict, kept apart from the structural `risk`
+band: `{verdict, covered_symbols, uncovered_symbols, unknown_symbols}` with `verdict` one of
+`covered`, `partial`, `uncovered`, or `unknown`. Per changed symbol, *covered* means a call-graph
+path, a heuristic name match, or a test file **in the same diff** reaches it (a changed or new test
+file that references the symbol by name counts even before reindexing; for Go it must live in the
+symbol's directory); *uncovered* means the call graph is usable (`resolved`/`name`) and no test was
+found; *unknown* means no test link was found and the call graph cannot say (TS/JS/Python without
+`--precise`, declarative formats), or the symbol was never analyzed (truncated or failed).
+Test symbols are the coverage, not its subject, so they are skipped. The block is absent when the
+diff maps no non-test symbol. `unknown` is never evidence of missing tests.
+
 ### Gating a commit or script
 
 `codemap review` and `codemap risk` compute a risk level and an untested-symbols
 list either way, but historically always exited `0` — a caller wanting to block
 on "this diff touches untested high-risk code" had to hand-roll the check
 against `--json` output (exactly what the [GitHub Action](/ci) did before it
-grew `fail-on-untested`/`fail-on-risk` inputs). Two flags turn that into a
+grew `fail-on-untested`/`fail-on-risk` inputs). Three flags turn that into a
 first-class exit code instead:
 
 - `--fail-on-risk <low|medium|high>` — after printing the normal output
@@ -437,6 +465,14 @@ first-class exit code instead:
   `unresolved`/`none` call graph and test coverage therefore cannot be established.
   An empty list is not proof of coverage when relationships are unknown. `review`
   only (there is no untested-*symbols* list on `risk`, which reports one symbol at a time).
+- `--fail-on-uncovered` — after printing the normal output (unchanged), exit **6** only
+  when `coverage.verdict` is `uncovered`, or `partial` with at least one known-uncovered
+  symbol. It never trips on `unknown` coverage (an unresolved call graph with no test link)
+  or on a `partial` made only of covered and unknown symbols — the honesty rule — so unlike
+  `--fail-on-untested` it is usable on polyglot diffs. It does not fail closed on an
+  incomplete analysis; pair it with `--fail-on-risk`/`--fail-on-untested` if you want that.
+  `--fail-on-untested` itself is unchanged. `review` only; the report's
+  `gate.would_fail_on.uncovered` reproduces it from the JSON.
 
 For `review`, enabling **either** gate also requires a complete analysis. An
 indexed Git repository with `analysis_complete:false` exits **6** before policy

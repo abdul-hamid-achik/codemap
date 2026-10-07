@@ -14,6 +14,11 @@ import (
 type NodeDepth struct {
 	Node  Node
 	Depth int
+	// Confirmed is true when at least one shortest path from the query node to
+	// this node is made only of confirmed call edges: precise-provenance edges
+	// or edges between two nodes of the same file (file-scoped, never a
+	// cross-file name match). Any other node is a name-based candidate.
+	Confirmed bool
 }
 
 func (s *Store) startNodeIDs(projectID int64, symbol string) ([]int64, error) {
@@ -41,17 +46,28 @@ func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 // limit (default 999), matching DeleteCallEdgesBySource.
 const inChunkSize = 500
 
-// callerIDsBatch returns the distinct source ids that call ANY of the target
-// nodes via `calls` edges, in chunked IN(…) queries. It replaces the per-node
-// callerIDs round-trip that made the blast-radius BFS an N+1 (one query per
-// reached node). Distinct is applied within each chunk and deduped across
-// chunks, so a caller hitting targets in several chunks is returned once.
-func (s *Store) callerIDsBatch(targets []int64) ([]int64, error) {
+// callerEdge is one incoming `calls` edge reaching a target, with whether the
+// edge itself is confirmed (precise provenance, or caller and callee in the same
+// file) rather than a name-based cross-file match.
+type callerEdge struct {
+	source    int64
+	target    int64
+	confirmed bool
+}
+
+// callerEdgesBatch returns every incoming `calls` edge into ANY of the target
+// nodes, in chunked IN(…) queries. It replaces the per-node round-trip that made
+// the blast-radius BFS an N+1 (one query per reached node), and carries the edge
+// confirmation the BFS needs to classify each reached node without extra
+// queries. Distinct (source, target) pairs are deduped across chunks; a pair
+// with several edges is confirmed when any of them is.
+func (s *Store) callerEdgesBatch(targets []int64) ([]callerEdge, error) {
 	if len(targets) == 0 {
 		return nil, nil
 	}
-	seen := make(map[int64]bool, len(targets))
-	var out []int64
+	type pair struct{ src, tgt int64 }
+	idx := make(map[pair]int)
+	var out []callerEdge
 	for start := 0; start < len(targets); start += inChunkSize {
 		end := start + inChunkSize
 		if end > len(targets) {
@@ -59,28 +75,36 @@ func (s *Store) callerIDsBatch(targets []int64) ([]int64, error) {
 		}
 		batch := targets[start:end]
 		ph := make([]string, len(batch))
-		args := make([]any, 0, len(batch)+1)
+		args := make([]any, 0, len(batch)+2)
+		args = append(args, ProvPrecise)
 		for i, id := range batch {
 			ph[i] = "?"
 			args = append(args, id)
 		}
 		args = append(args, EdgeCalls)
 		rows, err := s.db.Query(
-			"SELECT DISTINCT source_id FROM edges WHERE target_id IN ("+strings.Join(ph, ",")+") AND edge_type=?",
+			"SELECT e.source_id, e.target_id, (e.provenance = ? OR (src.file_path <> '' AND src.file_path = tgt.file_path)) "+
+				"FROM edges e JOIN nodes src ON src.id = e.source_id JOIN nodes tgt ON tgt.id = e.target_id "+
+				"WHERE e.target_id IN ("+strings.Join(ph, ",")+") AND e.edge_type=?",
 			args...)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
+			var e callerEdge
+			if err := rows.Scan(&e.source, &e.target, &e.confirmed); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
-			if !seen[id] {
-				seen[id] = true
-				out = append(out, id)
+			k := pair{e.source, e.target}
+			if i, ok := idx[k]; ok {
+				if e.confirmed {
+					out[i].confirmed = true
+				}
+				continue
 			}
+			idx[k] = len(out)
+			out = append(out, e)
 		}
 		err = rows.Err()
 		_ = rows.Close()
@@ -553,33 +577,44 @@ func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth i
 		}
 	}
 	// Level-by-level BFS over incoming call edges. The whole frontier at each
-	// depth is expanded in ONE batched query (callerIDsBatch) instead of one
+	// depth is expanded in ONE batched query (callerEdgesBatch) instead of one
 	// callerIDs round-trip per reached node — the previous shape made blast
 	// radius (and codemap_review, which unions it per changed symbol) a per-node
 	// N+1. First reach is the minimum depth (BFS processes levels in order), so a
 	// visited set keyed by id is enough for cycle-safety and min-depth.
 	visited := make(map[int64]int, len(starts)) // node id -> min depth
+	// confirmed[id]: some shortest path start→id uses only confirmed edges. The
+	// starts are trivially confirmed. A node's flag can only be upgraded while
+	// its own level is being expanded, so by the time it joins a frontier its
+	// flag is final and each edge reads it without re-walking paths.
+	confirmed := make(map[int64]bool, len(starts))
 	frontier := make([]int64, 0, len(starts))
 	for _, id := range starts {
 		if _, seen := visited[id]; seen {
 			continue
 		}
 		visited[id] = 0
+		confirmed[id] = true
 		frontier = append(frontier, id)
 	}
 	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
-		callers, err := s.callerIDsBatch(frontier)
+		edges, err := s.callerEdgesBatch(frontier)
 		if err != nil {
 			return nil, err
 		}
 		nd := depth + 1
-		next := make([]int64, 0, len(callers))
-		for _, c := range callers {
-			if _, seen := visited[c]; seen {
+		next := make([]int64, 0, len(edges))
+		for _, e := range edges {
+			pathConfirmed := confirmed[e.target] && e.confirmed
+			if d, seen := visited[e.source]; seen {
+				if d == nd && pathConfirmed {
+					confirmed[e.source] = true // another shortest path, fully confirmed
+				}
 				continue
 			}
-			visited[c] = nd
-			next = append(next, c)
+			visited[e.source] = nd
+			confirmed[e.source] = pathConfirmed
+			next = append(next, e.source)
 		}
 		frontier = next
 	}
@@ -599,7 +634,7 @@ func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth i
 	}
 	out := make([]NodeDepth, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, NodeDepth{Node: n, Depth: visited[n.ID]})
+		out = append(out, NodeDepth{Node: n, Depth: visited[n.ID], Confirmed: confirmed[n.ID]})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Depth != out[j].Depth {
@@ -679,7 +714,7 @@ func (s *Store) CalleesOfNode(projectID, nodeID int64) ([]Node, error) {
 
 // calleeIDsBatch returns the distinct target ids called by ANY of the source
 // nodes via `calls` edges, in chunked IN(…) queries — the forward-edge twin of
-// callerIDsBatch, replacing a per-node callee round-trip in CalleeClosure and
+// callerEdgesBatch, replacing a per-node callee round-trip in CalleeClosure and
 // the path BFS expansion.
 func (s *Store) calleeIDsBatch(sources []int64) ([]int64, error) {
 	if len(sources) == 0 {
