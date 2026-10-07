@@ -58,7 +58,7 @@ to paste.
 
 Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
 [MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
-*all* servers combined; every other harness above stays on the full 48-tool default.
+*all* servers combined; every other harness above stays on the full 49-tool default.
 For a manually configured harness, choose `CODEMAP_MCP_PROFILE=agent` to bind its
 surface exactly to this page's taught loop. `agent` and the backwards-compatible
 `core` profile both contain 28 tools today; `full` is the explicit expert/admin
@@ -94,7 +94,7 @@ whether to trust what it returned — full tool descriptions live in the
 | **Edit** — make the change | informed by the tools above; codemap has no write path | — |
 | **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` — the diff's changed symbols, blast radius, and the tests to run |
 
-On an unfamiliar repo the first moves are `codemap_read_order` or `codemap_features` to find an entry point, then `codemap_flow` on its handler selector, then `codemap_context` on any step; the CLI equivalent is walked through in [Learn a codebase](/learn).
+On an unfamiliar repo the first moves are `codemap_read_order` or `codemap_features` to find an entry point, then `codemap_flow` on its handler selector, then `codemap_context` on any step; on the full profile `codemap_processes` returns every entry point's ordered flow in one call, and `codemap_explore` attaches the matching entry flows (`processes`) to its seeds; the CLI equivalent is walked through in [Learn a codebase](/learn).
 
 Deeper tools plug into the same stages on demand: `codemap_dependencies` and
 `codemap_references` sharpen **Locate**/**Gate** with confirmed-vs-candidate file and

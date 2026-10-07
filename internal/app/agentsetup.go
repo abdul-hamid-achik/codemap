@@ -122,17 +122,17 @@ var harnesses = []HarnessSetup{
 			}
 			// I01: cursor is the one harness here with a hard tool-count ceiling
 			// (~40 across ALL MCP servers), so codemap defaults to the lean
-			// CODEMAP_MCP_PROFILE=core here (28 tools, not 48) to leave room for
+			// CODEMAP_MCP_PROFILE=core here (28 tools, not 49) to leave room for
 			// other servers — set CODEMAP_MCP_PROFILE=full in this env block for
 			// every tool. No other harness in this registry has that ceiling, so
-			// they all keep the full 44-tool default.
+			// they all keep the full 49-tool default.
 			if err := doJSONServer(&rep, path, "mcpServers", "codemap", cursorServerValue(), opts.DryRun); err != nil {
 				return rep, err
 			}
 			if err := doPlaybook(&rep, opts, filepath.Join(dir, ".cursor", "rules", "codemap.mdc"), RenderPlaybook(FormatCursorRule), true); err != nil {
 				return rep, err
 			}
-			rep.Notes = append(rep.Notes, "cursor caps tools at ~40 across all MCP servers; codemap defaults to CODEMAP_MCP_PROFILE=core here (28 tools) to leave room for other servers — set it to full for all 48")
+			rep.Notes = append(rep.Notes, "cursor caps tools at ~40 across all MCP servers; codemap defaults to CODEMAP_MCP_PROFILE=core here (28 tools) to leave room for other servers — set it to full for all 49")
 			return rep, nil
 		},
 	},

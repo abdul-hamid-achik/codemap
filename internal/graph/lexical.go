@@ -254,3 +254,8 @@ func (s *Store) LexicalSearch(projectID int64, query string, limit int) ([]Symbo
 	}
 	return result, nil
 }
+
+// LexicalTerms exposes the lexical floor's query tokenization (content words:
+// lower-cased, stopwords and short words dropped) so other layers filter with
+// exactly the words LexicalSearch would match.
+func LexicalTerms(query string) []string { return lexicalTerms(query) }

@@ -54,7 +54,7 @@ index → understand → read workflow on its own.
 
 ## Tool profiles
 
-By default `codemap serve` registers all 48 tools. That's a real cost: a
+By default `codemap serve` registers all 49 tools. That's a real cost: a
 [hermetic benchmark](https://github.com/abdul-hamid-achik/codemap/blob/main/bench/README.md)
 measured **+95% input tokens** on the codemap arm, driven by every tool's schema
 riding in every session's context — and some clients (Cursor) cap total MCP tools
@@ -79,10 +79,10 @@ compatibility and is the explicit expert/admin surface.
 
 The current offline microbenchmark drives real `tools/list` calls through the Go
 MCP SDK's in-memory transport, with no model, network, embeddings, or language
-server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **35,616
-schema characters (≈8,904 tokens using the declared chars/4 planning estimate)**;
-`full` serializes **53,197 characters (≈13,300 estimated tokens)**. That is about
-33% less schema context for the taught surface. Reproduce it with:
+server. On an Apple M5 over 100 iterations, `agent`/`core` each serialize **35,662
+schema characters (≈8,916 tokens using the declared chars/4 planning estimate)**;
+`full` serializes **54,839 characters (≈13,710 estimated tokens)**. That is about
+35% less schema context for the taught surface. Reproduce it with:
 
 ```bash
 go test ./internal/mcp -run '^$' -bench '^BenchmarkProfileSchemaTax$' -benchtime=100x -benchmem
@@ -131,9 +131,10 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_read_order` | **Where to start reading** — ranks entrypoints (`main()` and functions wired by value such as handlers, module index files, exported API) + call-graph hubs into a reading guide, each with a reason and score. Tests are ignored unless `include_tests` is true. Optional `query` narrows it. Run on first contact with an unfamiliar repo, then drill the top entries with `codemap_context` |
 | `codemap_atlas` | **The repo as a described directory/file tree** (full profile) — per node: files, symbols, lines, tests, roles (`source`/`tests`/`docs`/`config`/`entrypoint`/`examples`/`bench`/`generated`/`vendor`), a `summary` with `summary_source` (README first paragraph, Go package doc, Python module docstring, leading file comment, Markdown; extracted, never generated), key symbols with durable selectors, inbound/outbound/internal coupling, and top neighbours. Inputs: `prefix` (zoom into a directory), `depth` (default 2, max 8), `files` (include file leaves), `max_nodes` (default 1500, max 20000), `key_symbols` (default 5, max 20). Carries `schema_version: 1`, `call_graph`, `resolution`, `stale`, `truncated`, and `partial_errors`. |
 | `codemap_features` | **Capability inventory** (agent, core, and full profiles) — what the software can do and where each capability lives: `program`, `cli_command`, `rpc_tool`, `http_route`, `api_route`, and `page` features, each with label, invocation, description (from the registration or a docstring), handler with durable `selector` (null for inline handlers), `parent` for nested CLI commands, and a bounded call `footprint` (symbols, files, subsystems, feature-specific tests, `ambiguous_edges`). Go registrations are read from the syntax tree (`confidence: confirmed`); TS/JS and Python are pattern-detected (`candidate`). Inputs: `kind` (comma-separated), `query`, `top` (default 200, max 2000), `depth` (default 3, max 6), `no_footprint`. Ruby, Lua, and GDScript detection is not implemented and `notes` says so. Pass a handler selector to `codemap_flow` or `codemap_context`. |
+| `codemap_processes` | **Execution flows from every entry point** (full profile) — for each CLI command, HTTP route, MCP/RPC tool, page, or program with a resolved handler, the chain of definitions it reaches in call order: `id` (`kind:name`), `kind`, `name`, entry `selector`, `steps[{symbol,fqn,kind,file,start_line,depth}]`, `files`, `truncated`, `call_graph`. Same-name fan-out is collapsed as in `codemap_flow`. Computed on demand from the stored graph; nothing is persisted. Inputs: `kind` (comma-separated), `query` (content words matched against the name and every step), `top` (default 50, max 200), `depth` (default 4, max 8), `max_steps` (default 40, max 200). Returns `processes_total`, `truncated`, `call_graph`, `resolution`, `stale`, `notes`, and `partial_errors`. Pass an entry `selector` to `codemap_flow` for the full annotated tree. |
 | `codemap_flow` | **How one feature works** (agent, core, and full profiles) — a bounded call tree from one entry, given as `symbol` or exact `selector`, in the order the code calls things. Each step carries `file:line`, subsystem, signature, one-line doc, and `confirmed`/`candidate` confidence. Same-name fan-out on a name-based graph is collapsed to the most plausible definition (`alternatives`) or left as an unexpanded `leaf_reason: "ambiguous"` step with candidates; precise edges are never collapsed. Repeats, cycles, and depth or node cuts are explicit. Inputs: `depth` (default 4, max 8), `max_nodes` (default 120, max 1000), `include_tests`. |
 | `codemap_map` | **Architecture overview** (full profile) — bounded source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and hubs. Test code is excluded from bridges, subsystem edge counts, and hubs (`tests_excluded: true`). Independent `top_subsystems`/`top_bridges`/`top_hubs`/`top_entrypoints` caps; response carries totals/truncation plus freshness and call-graph honesty. |
-| `codemap_explore` | **Intent to exact neighborhoods** — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (otherwise name search, topped up by a BM25 lexical floor over names, paths, and docs — `search_mode` `name`, `lexical`, or `name+lexical`), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. |
+| `codemap_explore` | **Intent to exact neighborhoods** — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (otherwise name search, topped up by a BM25 lexical floor over names, paths, and docs — `search_mode` `name`, `lexical`, or `name+lexical`), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. The result also carries `processes` (up to 3): entry-point flows whose steps contain a joined seed (`id`, `kind`, `name`, `entry`, `matched_seeds`, call-order `steps` capped at 8, `call_graph`), empty when the project has no detected entry points or no flow reaches a seed. `codemap_task_context` embeds the same field in its explore section. |
 | `codemap_task_context` | **Mode-scoped task orientation** (full profile) — one call that composes freshness, explore neighbourhoods, brief contexts, impact drill-downs, and related files for a `task`, with `mode` `understand`, `change`, or `debug` (and optional `selectors`) (schema `codemap.task-context.v1`). The task text is the retrieval query verbatim. |
 | `codemap_traverse` | **Typed heterogeneous graph walk** (full profile) — requires `selector:{file,start_line,fqn,kind}` and never accepts an ambiguous name union. `direction` is `outgoing`, `incoming`, or `both`; `edge_types` is a list drawn from `calls`, `references`, `imports`, `implements`, `overrides`, `depends_on`, `tests`, and `defines`; `depth` is 1–10 and `limit` is 1–500 nodes. Each hop returns durable child/parent selectors, edge provenance, and confirmed/candidate confidence; the report is cycle-safe, bounded, and exposes truncation/domain totals. |
 | `codemap_path` | Shortest call path (`from`, `to`, or paired `from_selector`/`to_selector`), with endpoint-scoped `call_graph`/`resolution` distinguishing disconnected from unresolved. Unique FQNs are exact endpoints too |
@@ -202,7 +203,7 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
 
 - **`call_graph`** — a stable enum on `codemap_impact`/`codemap_callers`/`codemap_callees`/`codemap_references`/
   `codemap_review`/`codemap_context`/`codemap_hotspots`/`codemap_orphans`/`codemap_path`/
-  `codemap_map`/`codemap_traverse`/`codemap_atlas`/`codemap_features`/`codemap_flow`
+  `codemap_map`/`codemap_traverse`/`codemap_atlas`/`codemap_features`/`codemap_processes`/`codemap_flow`
   that a consumer switches on (no prose parsing):
   - `resolved` — every matched definition file has precise coverage (go/types for Go, language-server callHierarchy for TS/JS/Python/Vue)
   - `name` — name-based call graph (the Go/Ruby/Lua default; same-named symbols may over-match)

@@ -296,7 +296,7 @@ complete set.
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, value references, tests, blast radius |
-| Learn | `atlas` / `features` / `flow` | the repo as a described tree (`--prefix`, `--depth`, `--files`), the capability inventory (`--kind`, `--query`), and an ordered call tree from one handler (`--depth`, `--include-tests`) |
+| Learn | `atlas` / `features` / `processes` / `flow` | the repo as a described tree (`--prefix`, `--depth`, `--files`), the capability inventory (`--kind`, `--query`), every entry point's ordered flow (`processes`: `--kind`, `--query`, `--top`, `--depth`), and an ordered call tree from one handler (`--depth`, `--include-tests`) |
 | Navigate | `read-order` / `map` / `explore` / `task-context` | ranked reading list, bounded architecture overview, intent-to-structure orientation, or one-call mode-scoped task orientation (`--mode understand\|change\|debug`, alias `brief`) |
 | Navigate | `traverse --at <file>:<line>` | bounded walk from one exact definition across selected edge types and directions |
 | Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact (repeat `impact --at` for a partial-success frame batch; `--batch` stabilizes the one-item envelope), file dependency evidence, or diff-scoped tests |
@@ -426,14 +426,14 @@ Once connected, an agent can call `codemap_docs` to learn the tools and workflow
 
 `CODEMAP_MCP_PROFILE=agent` selects exactly the 28-tool surface derived from the taught agent
 workflow (27 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
-today; the default `full` profile remains the explicit 48-tool expert/admin surface. See
+today; the default `full` profile remains the explicit 49-tool expert/admin surface. See
 [MCP tool profiles](docs/mcp.md#tool-profiles) for the measured schema cost and precedence rules.
 
-Tools (48): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+Tools (49): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
 `codemap_file_context`, `codemap_refactor_plan`, `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
 `codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_read_order`,
-`codemap_map`, `codemap_atlas`, `codemap_features`, `codemap_flow`, `codemap_explore`, `codemap_traverse`, `codemap_task_context`, `codemap_path`,
+`codemap_map`, `codemap_atlas`, `codemap_features`, `codemap_processes`, `codemap_flow`, `codemap_explore`, `codemap_traverse`, `codemap_task_context`, `codemap_path`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_grep`, `codemap_source`,
 `codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,

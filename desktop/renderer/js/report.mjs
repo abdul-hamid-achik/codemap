@@ -232,6 +232,7 @@ export const RENDERERS = {
   map: renderMap,
   atlas: renderAtlas,
   features: renderFeatures,
+  processes: renderProcesses,
   flow: renderFlow,
   symlist: renderSymListReport,
   relation: renderRelation,
@@ -653,9 +654,40 @@ function renderExplore(json, ctx) {
           body: h('div.symlist', seeds.map((s) => symRow(s, { onPick: ctx.onSymbol, meta: (r) => [r.signature, r.score ? `score ${Number(r.score).toFixed(3)}` : null].filter(Boolean).join(' · ') }))),
         })
       : null,
+    (json.processes || []).length ? processList(json.processes, ctx) : null,
     contexts.length
       ? h('div.stack', contexts.map((c) => contextCard(c, ctx)))
       : null,
+  ])
+}
+
+// processList renders processes (codemap processes) or the explore subset: one card
+// per entrypoint flow, steps in call order, each tagged with its depth.
+function processList(list, ctx) {
+  return h('div.stack', list.map((p) => card({
+    title: p.id || p.name,
+    sub: [p.kind, p.matched_seeds?.length ? `seeds: ${p.matched_seeds.join(', ')}` : null, p.files ? `${p.files.length} file(s)` : null, p.truncated ? 'truncated' : null].filter(Boolean).join(' · '),
+    actions: [
+      p.entry ? h('button.btn.sm', { type: 'button', onclick: () => ctx.onPrefill?.('flow', { at: `${p.entry.file}:${p.entry.start_line}` }) }, 'Full flow') : null,
+    ],
+    body: h('div.symlist', (p.steps || []).map((s) => symRow(s, { onPick: ctx.onSymbol }))),
+  })))
+}
+
+function renderProcesses(json, ctx) {
+  const list = json.processes || []
+  return h('div.stack', [
+    h('div.row.gap3', [
+      badge(`${fmt.num(list.length)} of ${fmt.num(json.processes_total ?? list.length)} process(es)`, 'accent'),
+      badge(`depth ${json.depth}`, 'plain'),
+      badge(`max ${json.max_steps} steps`, 'plain'),
+      callGraphBadge(json.call_graph),
+    ]),
+    json.indexed === false ? callout('warn', 'Not indexed', 'Run index first.') : null,
+    json.resolution ? callout('warn', 'Call graph', json.resolution) : null,
+    json.stale ? callout('warn', 'Stale index', 'Reindex before treating these flows as current.') : null,
+    json.truncated ? callout('info', 'truncated', 'More processes exist. Raise --top or narrow with --kind/--query.') : null,
+    list.length ? processList(list, ctx) : emptyState({ icon: '\u2192', title: 'No processes', note: 'No entrypoint with a resolved handler matched the filters.' }),
   ])
 }
 

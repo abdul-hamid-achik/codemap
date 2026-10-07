@@ -162,6 +162,18 @@ func renderExplore(rep *app.ExploreReport) {
 			truncStr(disp(seed.FQN, seed.Symbol), 36), seed.File, seed.StartLine, joined)
 	}
 
+	if len(rep.Processes) > 0 {
+		fmt.Printf("\nProcesses (%d):\n", len(rep.Processes))
+		for _, p := range rep.Processes {
+			fmt.Printf("  %s  [seeds: %s]\n", p.ID, strings.Join(p.MatchedSeeds, ", "))
+			var chain []string
+			for _, s := range p.Steps {
+				chain = append(chain, disp(s.FQN, s.Symbol))
+			}
+			fmt.Printf("    %s\n", strings.Join(chain, " -> "))
+		}
+	}
+
 	fmt.Printf("\nContexts (%d):\n", len(rep.Contexts))
 	if len(rep.Contexts) == 0 {
 		fmt.Println("  none — follow an unjoined hit with codemap find or symbol-at")
