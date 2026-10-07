@@ -39,10 +39,33 @@ func lexicalTerms(query string) []string {
 		if len([]rune(lw)) < 3 || lexicalStopwords[lw] || seen[lw] {
 			continue
 		}
+		lw = lexicalStem(lw)
+		if seen[lw] {
+			continue
+		}
 		seen[lw] = true
 		out = append(out, lw)
 	}
 	return out
+}
+
+// lexicalStem strips one common English inflection so a question's wording
+// still matches code spelled differently: "validated" and "validation" both
+// become "validat" (a substring of validate, validator, ValidatedBy). The
+// trigram index matches substrings, so a stem only has to be a prefix of the
+// identifiers it should reach. Stems shorter than four letters keep the word.
+func lexicalStem(w string) string {
+	for _, suf := range []string{"ions", "ion", "ings", "ing", "ed", "es", "s"} {
+		if !strings.HasSuffix(w, suf) {
+			continue
+		}
+		stem := w[:len(w)-len(suf)]
+		if len([]rune(stem)) < 4 || (suf == "s" && strings.HasSuffix(stem, "s")) {
+			continue
+		}
+		return stem
+	}
+	return w
 }
 
 // SyncLexical reconciles nodes_fts with the nodes table in one transaction:
@@ -211,6 +234,7 @@ func (s *Store) LexicalSearch(projectID int64, query string, limit int) ([]Symbo
 		m       SymbolMatch
 		covered int
 		test    bool
+		code    int
 	}
 	out := make([]scored, 0, len(nodes))
 	for _, n := range nodes {
@@ -236,14 +260,20 @@ func (s *Store) LexicalSearch(projectID int64, query string, limit int) ([]Symbo
 		if covered == 0 {
 			continue
 		}
-		out = append(out, scored{m: SymbolMatch{Node: n, MatchedIn: fields[best].name}, covered: covered, test: IsTestNode(n)})
+		out = append(out, scored{
+			m:       SymbolMatch{Node: n, MatchedIn: fields[best].name, Score: float64(covered) / float64(len(terms))},
+			covered: covered, test: IsTestNode(n), code: lexicalKindRank(n.Kind),
+		})
 	}
 	// Stable: ties keep BM25 order from SQL.
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].covered != out[j].covered {
 			return out[i].covered > out[j].covered
 		}
-		return !out[i].test && out[j].test
+		if out[i].test != out[j].test {
+			return !out[i].test
+		}
+		return out[i].code < out[j].code
 	})
 	if len(out) > limit {
 		out = out[:limit]
@@ -253,6 +283,20 @@ func (s *Store) LexicalSearch(projectID int64, query string, limit int) ([]Symbo
 		result[i] = o.m
 	}
 	return result, nil
+}
+
+// lexicalKindRank orders equally-covered matches: behavior (functions,
+// methods, classes) before declarations (types), before data (variables,
+// constants, config keys, selectors) — a question is usually about what code
+// does, and a constant named after the subject is rarely the answer.
+func lexicalKindRank(kind string) int {
+	switch kind {
+	case KindFunction, KindMethod, KindClass, KindTest:
+		return 0
+	case KindType, KindModule:
+		return 1
+	}
+	return 2
 }
 
 // LexicalTerms exposes the lexical floor's query tokenization (content words:

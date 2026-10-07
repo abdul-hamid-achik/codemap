@@ -381,7 +381,7 @@ func lexicalHits(g *graph.Store, pid int64, query string, limit int) ([]Semantic
 		hit := SemanticHit{
 			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
 			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Doc: n.Docstring,
-			MatchedIn: m.MatchedIn,
+			MatchedIn: m.MatchedIn, Score: float32(m.Score),
 		}
 		if n.FilePath != "" {
 			hit.Selector = selectorForNode(n)

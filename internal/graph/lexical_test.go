@@ -9,7 +9,10 @@ import (
 func TestLexicalTerms(t *testing.T) {
 	cases := map[string][]string{
 		"how does signup work":            {"signup"},
-		"where is billing entitlement?":   {"billing", "entitlement"},
+		"where is billing entitlement?":   {"bill", "entitlement"},
+		"how are answers validated":       {"answer", "validat"},
+		"validation of processes":         {"validat", "process"},
+		"access rules":                    {"access", "rule"},
 		"signupUser":                      {"signupuser"},
 		"auth/signup route.ts":            {"auth", "signup", "route"},
 		"Rate limit RATE limit":           {"rate", "limit"},
@@ -260,5 +263,34 @@ func TestLexicalSearchRanksProductionBeforeTests(t *testing.T) {
 	}
 	if got := symbolsOf(res); len(got) != 2 || got[0] != "syncLexicalIndex" {
 		t.Errorf("ranking = %v, want production code first", got)
+	}
+}
+
+// Equal coverage ranks behavior before data, inflections still match, and the
+// score is the fraction of query words matched.
+func TestLexicalSearchPrefersCodeAndStems(t *testing.T) {
+	s := openTest(t)
+	pid, err := s.UpsertProject("p", "/p", "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []Node{
+		{Symbol: "ValidatedBy", FQN: "answers.ValidatedBy", Kind: KindVariable, FilePath: "answers/keys.go"},
+		{Symbol: "validateSurvey", FQN: "survey.validateSurvey", Kind: KindFunction, FilePath: "survey/check.go"},
+	} {
+		n.ProjectID, n.Language, n.StartLine, n.EndLine, n.SourceHash = pid, "go", 1, 2, "h"
+		if _, err := s.AddNode(&n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := s.LexicalSearch(pid, "where is validation", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 || res[0].Node.Symbol != "validateSurvey" {
+		t.Fatalf("want the function first via the stem, got %v", symbolsOf(res))
+	}
+	if res[0].Score != 1 {
+		t.Errorf("score = %v, want 1 (every content word matched)", res[0].Score)
 	}
 }
