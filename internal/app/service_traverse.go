@@ -17,7 +17,7 @@ const (
 
 var supportedTraverseEdges = map[string]bool{
 	graph.EdgeCalls: true, graph.EdgeReferences: true, graph.EdgeImports: true,
-	graph.EdgeImplements: true, graph.EdgeOverrides: true, graph.EdgeDependsOn: true,
+	graph.EdgeExtends: true, graph.EdgeImplements: true, graph.EdgeOverrides: true, graph.EdgeDependsOn: true,
 	graph.EdgeTests: true, graph.EdgeDefines: true,
 	graph.EdgeStyles: true, graph.EdgeReads: true, graph.EdgeWrites: true, graph.EdgeDocuments: true,
 }
@@ -178,7 +178,7 @@ func normalizeTraverseOptions(opts TraverseOptions) (TraverseOptions, error) {
 	if len(opts.EdgeTypes) == 0 {
 		opts.EdgeTypes = []string{
 			graph.EdgeCalls, graph.EdgeReferences, graph.EdgeImports,
-			graph.EdgeImplements, graph.EdgeOverrides, graph.EdgeDependsOn, graph.EdgeTests,
+			graph.EdgeExtends, graph.EdgeImplements, graph.EdgeOverrides, graph.EdgeDependsOn, graph.EdgeTests,
 			graph.EdgeStyles, graph.EdgeReads, graph.EdgeWrites, graph.EdgeDocuments,
 		}
 	}

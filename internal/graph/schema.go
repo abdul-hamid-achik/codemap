@@ -46,6 +46,11 @@ const (
 	EdgeCalls      = "calls"
 	EdgeImports    = "imports"
 	EdgeImplements = "implements"
+	// EdgeExtends: a class/interface → the base it declares (`class A extends B`,
+	// `class A(B)`). EdgeImplements: a class → an interface it declares
+	// (`implements I`) or, under Go --precise, satisfies. EdgeOverrides: a method →
+	// the same-named method of a direct base or implemented interface.
+	EdgeExtends    = "extends"
 	EdgeReferences = "references"
 	EdgeDependsOn  = "depends_on"
 	EdgeTests      = "tests"

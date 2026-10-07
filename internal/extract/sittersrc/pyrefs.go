@@ -38,6 +38,7 @@ func pythonCallRefs(w *pyWalker, root *ts.Node, relPath string) []extract.Refere
 }
 
 type pyRefWalker struct {
+	kind string // "" = calls; extends while resolving class bases
 	w    *pyWalker
 	rel  string
 	out  []extract.Reference
@@ -102,7 +103,22 @@ func (r *pyRefWalker) walkDefinition(def, outer *ts.Node, ctx pyRefCtx) {
 	if s == nil || body == nil {
 		return
 	}
-	r.walk(body, pyRefCtx{scope: s, from: s.fqn, fromLine: line(outer.StartPoint()) + 1})
+	fromLine := line(outer.StartPoint()) + 1
+	if w.typ(def) == "class_definition" {
+		// Bases resolve in the enclosing scope, sourced from the class.
+		if bases := w.field(def, "superclasses"); bases != nil {
+			base := ctx
+			base.from, base.fromLine = s.fqn, fromLine
+			r.kind = extract.RefExtends
+			for i := 0; i < bases.NamedChildCount(); i++ {
+				if b := bases.NamedChild(i); w.typ(b) == "identifier" || w.typ(b) == "attribute" {
+					r.call(b, b, base)
+				}
+			}
+			r.kind = ""
+		}
+	}
+	r.walk(body, pyRefCtx{scope: s, from: s.fqn, fromLine: fromLine})
 }
 
 func (r *pyRefWalker) call(callee, call *ts.Node, ctx pyRefCtx) {
@@ -165,12 +181,16 @@ func (r *pyRefWalker) emit(ctx pyRefCtx, at int, to, importSpec string) {
 	if from == "" {
 		from = r.rel // module-level code: sourced from the file node
 	}
-	key := from + "\x00" + to + "\x00" + importSpec
+	kind := r.kind
+	if kind == "" {
+		kind = extract.RefCalls
+	}
+	key := kind + "\x00" + from + "\x00" + to + "\x00" + importSpec
 	if r.seen[key] {
 		return
 	}
 	r.seen[key] = true
-	ref := extract.Reference{From: from, FromFile: fromFile, FromLine: ctx.fromLine, To: to, Kind: extract.RefCalls, Line: at}
+	ref := extract.Reference{From: from, FromFile: fromFile, FromLine: ctx.fromLine, To: to, Kind: kind, Line: at}
 	if importSpec != "" {
 		ref.ImportSpec = importSpec
 	} else {

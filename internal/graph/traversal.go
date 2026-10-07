@@ -18,6 +18,7 @@ var defaultTraversalEdgeTypes = []string{
 	EdgeCalls,
 	EdgeReferences,
 	EdgeImports,
+	EdgeExtends,
 	EdgeImplements,
 	EdgeOverrides,
 	EdgeDependsOn,

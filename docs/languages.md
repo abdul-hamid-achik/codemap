@@ -54,6 +54,20 @@ are skipped, and a file with syntax errors keeps the symbols of the recovered pa
 To use the servers for symbols as well (the behavior before this backend), set
 `index.structural_backend: lsp` (or `CODEMAP_STRUCTURAL_BACKEND=lsp`).
 
+### Declared inheritance
+
+Classes and interfaces carry their declared bases as graph edges: `extends` (`class A extends B`,
+`interface I extends J`, Python `class A(B)`) and `implements` (`class A implements I`), resolved
+through the same-file and import bindings the call candidates use — so a base from a package
+(`React.Component`) yields no edge. Each method of the subtype that shares a name with a method of
+a direct base or implemented interface gets an `overrides` edge (constructors excluded). For Go,
+`codemap index --precise` adds exact `implements` edges from `go/types` satisfiability (every module
+type against every module interface with at least one method) and the matching method-level
+`overrides`. `codemap context` reports them under `hierarchy` (`extends`, `implements`, `subtypes`,
+`overrides`, `overridden_by`), `traverse --edge-types extends,implements,overrides` walks them, and
+`orphans` no longer lists a method that overrides or implements a base method (it is reached through
+the base). The declared edges are name-provenance candidates; only the Go `--precise` ones are exact.
+
 ### TS/JS name-based edges — what they cover and what they don't
 
 The base (non-`--precise`) TS/JS graph carries four kinds of name-based evidence:

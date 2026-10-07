@@ -43,8 +43,10 @@ Key features:
   tree-sitter binder emulation, `sittersrc/pyrefs.go`) come only from `--precise` via `callHierarchy`;
   Vue SFC script blocks currently produce symbols + `defines` + import edges but no call graph;
   Go callback/handler uses and TS/JS framework wiring are persisted as `references`; Go imports are
-  package-scoped evidence, TS/JS/Vue/Ruby/Lua imports resolve file→file;
-  `implements`/`overrides` remain reserved for planned backends).
+  package-scoped evidence, TS/JS/Vue/Ruby/Lua/Python imports resolve file→file;
+  declared inheritance becomes `extends`/`implements` edges (TS/JS/Python via tree-sitter; Go
+  `implements` from `go/types` under `--precise`) and `overrides` edges (method → same-named method
+  of a direct base; exact for Go). `context` shows them as `hierarchy`; `orphans` skips overriders).
 - **Local semantic search** — under the `local`/`fallback` backend with embeddings enabled,
   node source text is embedded through the configured Ollama-compatible endpoint
   (`http://localhost:11434` and `nomic-embed-text`, 768-dim, by default) into veclite; vector +
@@ -433,7 +435,7 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   marks inflation; `orphans` follows functions wired by value — handlers like cobra `RunE` /
   `mux.HandleFunc(s.h)`, and in TS/JS the tsscan JSX/framework-wiring references — via
   `references` edges that never enter the call graph — but stays
-  interface/reflection-blind and cannot see components passed only as props
+  reflection-blind (methods that override/implement a base are skipped via `overrides` edges) and cannot see components passed only as props
   (`Link={AuthLink}`) or wrapped default exports (`export default memo(Page)`), so its results
   are *candidates*). **The graph-wide
   fix is shipped: `codemap index --precise`** (CLI) / `codemap_index precise:true` (MCP) is the unified

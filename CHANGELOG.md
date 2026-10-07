@@ -8,6 +8,18 @@ releases page is the authoritative history.
 
 ## [Unreleased]
 
+### Added
+
+- **Declared inheritance edges** — `extends` / `implements` edges for TypeScript, JavaScript, and
+  Python classes and interfaces (resolved through same-file and import bindings), derived
+  `overrides` edges from each method to the same-named method of a direct base, and — under Go
+  `index --precise` — exact `implements` (module types × module interfaces, via `go/types`) with
+  method-level `overrides`. `context` gains an additive `hierarchy` block, `traverse` accepts the
+  new `extends` edge type, and `orphans` no longer lists methods that override a base method.
+- **Python call candidates and import edges** — without `--precise`, Python now gets same-file,
+  `self`/`cls`-method, `C.m()`, and imported-binding call candidates plus file→file import edges
+  (relative, absolute, and `src/`-layout), from the tree-sitter binder emulation.
+
 ### Changed
 
 - **TypeScript, JavaScript, and Python index without language servers** — a new built-in

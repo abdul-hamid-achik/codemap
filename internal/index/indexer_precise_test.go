@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -858,4 +859,47 @@ func preciseFileError(res *Result, file string) string {
 		}
 	}
 	return ""
+}
+
+// TestPreciseGoImplementsAndOverrides pins the go/types satisfiability pass:
+// a type satisfying a module interface (through its pointer) gets implements,
+// its methods get overrides to the interface methods, an empty interface is
+// ignored, and a re-run replaces rather than duplicates the edges.
+func TestPreciseGoImplementsAndOverrides(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/impl\n\ngo 1.25\n")
+	writeFile(t, dir, "store/store.go", "package store\n\ntype Store interface {\n\tGet() string\n\tPut(v string)\n}\n\ntype Anything interface{}\n")
+	writeFile(t, dir, "mem/mem.go", "package mem\n\ntype Mem struct{ v string }\n\nfunc (m *Mem) Get() string { return m.v }\n\nfunc (m *Mem) Put(v string) { m.v = v }\n\ntype Half struct{}\n\nfunc (Half) Get() string { return \"\" }\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("impl", dir, "go")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	for run := 0; run < 2; run++ {
+		if _, err := ix.IndexProject(context.Background(), pid, "impl", dir, Options{Precise: true, NoLSP: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodes, _ := g.ProjectNodes(pid)
+	byID := map[int64]graph.Node{}
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	edges, _ := g.ProjectEdges(pid)
+	var got []string
+	for _, e := range edges {
+		if e.EdgeType == graph.EdgeImplements || e.EdgeType == graph.EdgeOverrides {
+			got = append(got, e.EdgeType+" "+byID[e.SourceID].FQN+" -> "+byID[e.TargetID].FQN+" "+e.Provenance)
+		}
+	}
+	sort.Strings(got)
+	want := []string{
+		"implements mem.Mem -> store.Store precise",
+		"overrides mem.Mem.Get -> store.Store.Get precise",
+		"overrides mem.Mem.Put -> store.Store.Put precise",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("go/types implements:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
 }

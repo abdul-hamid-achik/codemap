@@ -90,10 +90,6 @@ type pyDeferred struct {
 	scope *pyScope
 }
 
-func pythonSymbols(lang *ts.Language, src []byte, root *ts.Node) []lsp.DocumentSymbol {
-	return bindPython(lang, src, root).emit(nil)
-}
-
 // bindPython runs the binder emulation over a whole file.
 func bindPython(lang *ts.Language, src []byte, root *ts.Node) *pyWalker {
 	w := &pyWalker{lang: lang, src: src, scopeOf: map[uint32]*pyScope{}}

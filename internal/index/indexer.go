@@ -1368,6 +1368,8 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		// Fold this run's node writes into the lexical index in one bulk pass
 		// (best-effort: LexicalSearch re-syncs before searching anyway).
 		_ = ix.graph.SyncLexical()
+		// Derive method overrides from this run's declared inheritance.
+		_, _ = ix.graph.RecomputeOverrides(projectID)
 		analyzeStart := time.Now()
 		if opts.Reindex || (len(files) > 0 && len(added) == len(files)) {
 			_ = ix.graph.OptimizeStats()
@@ -1595,6 +1597,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	// ANALYZE belongs to whole-graph builds.
 	if len(touchedFiles) > 0 {
 		_ = ix.graph.SyncLexical()
+		_, _ = ix.graph.RecomputeOverrides(projectID) // derived from extends/implements
 		analyzeStart := time.Now()
 		_ = ix.graph.OptimizeStatsLight()
 		res.AnalyzeMs = int(time.Since(analyzeStart).Milliseconds())
@@ -2783,6 +2786,13 @@ func (ix *Indexer) resolvePreciseEdgesWith(tx *sql.Tx, projectID int64, res *Res
 		}
 		upgraded++
 	}
+	if err := writeGoImplementsTx(tx, projectID, pr, posTo); err != nil {
+		res.PreciseNote = "precise implements write failed: " + err.Error()
+		return err
+	}
+	if pr.ImplementsSkipped {
+		res.PreciseNote = strings.TrimPrefix(res.PreciseNote+"; ", "; ") + "implements/overrides skipped: module too large for the satisfiability check"
+	}
 	for file := range pr.CleanFiles {
 		if err := graph.MarkCallGraphResolvedTx(tx, projectID, file, preciseResolverGoTypes); err != nil {
 			res.PreciseNote = "precise coverage mark failed: " + err.Error()
@@ -2947,4 +2957,38 @@ func (ix *Indexer) detectPresentLanguagesForLSP(root string, res *Result) bool {
 		return nil
 	})
 	return found
+}
+
+// writeGoImplementsTx replaces the project's precise Go implements/overrides
+// edges with the go/types answer: type → interface it satisfies, and concrete
+// method → the interface method it implements. Positions join to gosrc nodes
+// (both store the declared name's line); an unmatched end is skipped.
+func writeGoImplementsTx(tx *sql.Tx, projectID int64, pr *typesrc.Result, posTo map[precisePos]int64) error {
+	if _, err := tx.Exec(`
+		DELETE FROM edges
+		WHERE edge_type IN (?, ?) AND provenance = ?
+		  AND source_id IN (SELECT id FROM nodes WHERE project_id = ? AND language = 'go')`,
+		graph.EdgeImplements, graph.EdgeOverrides, graph.ProvPrecise, projectID); err != nil {
+		return err
+	}
+	add := func(kind string, from, to typesrc.Position) error {
+		f, ok1 := posTo[precisePos{from.File, from.Line}]
+		t, ok2 := posTo[precisePos{to.File, to.Line}]
+		if !ok1 || !ok2 || f == t {
+			return nil
+		}
+		_, err := graph.AddEdgeProvTx(tx, f, t, kind, graph.WeightLSP, graph.ProvPrecise)
+		return err
+	}
+	for _, e := range pr.Implements {
+		if err := add(graph.EdgeImplements, e.Type, e.Interface); err != nil {
+			return err
+		}
+	}
+	for _, e := range pr.Overrides {
+		if err := add(graph.EdgeOverrides, e.Method, e.InterfaceMethod); err != nil {
+			return err
+		}
+	}
+	return nil
 }

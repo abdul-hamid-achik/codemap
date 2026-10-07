@@ -1354,11 +1354,14 @@ func (s *Store) Orphans(projectID int64, limit int) ([]Node, error) {
 	// ALWAYS be false positives. These names are conventionally reserved for those
 	// interfaces, so a method with one is effectively never meaningful dead code
 	// (every error type has an Error method) — dropping them keeps the candidate
-	// list signal-rich on real Go code. Custom-interface methods are still listed
-	// (hence "candidates").
+	// list signal-rich on real Go code. A method that overrides or implements a
+	// base method (an `overrides` edge, from declared inheritance) is likewise
+	// reached through dispatch on the base, so it is never listed. Other
+	// custom-interface methods still are (hence "candidates").
 	q := "SELECT " + nodeColsAs("n") + ` FROM nodes n
 		WHERE n.project_id = ? AND n.kind IN (?, ?)
 		AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.target_id = n.id AND e.edge_type IN (?, ?))
+		AND NOT EXISTS (SELECT 1 FROM edges o WHERE o.source_id = n.id AND o.edge_type = 'overrides')
 		AND NOT (n.kind = ? AND n.symbol IN ('main', 'init'))
 		AND NOT (n.kind = ? AND n.symbol IN ('Error', 'String', 'Unwrap', 'MarshalJSON', 'UnmarshalJSON', 'MarshalText', 'UnmarshalText'))
 		ORDER BY n.file_path, n.start_line

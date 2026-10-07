@@ -150,6 +150,7 @@ func (e *Extractor) extract(relPath string, src []byte) (*extract.FileResult, bo
 	}
 	res := lspsrc.FromDocumentSymbols(e.lang, relPath, src, p.syms)
 	res.References = append(res.References, p.refs...)
+	res.References = append(res.References, tsHeritageRefs(relPath, p.heritage, p.tsImports, res.Symbols)...)
 	res.Imports = append(res.Imports, p.imports...)
 	return res, p.clean, nil
 }
@@ -168,7 +169,10 @@ type parsed struct {
 	syms    []lsp.DocumentSymbol
 	refs    []extract.Reference
 	imports []string
-	clean   bool
+	// TS/JS declared bases and import bindings, resolved after symbols exist.
+	heritage  []tsHeritage
+	tsImports map[string]tsImport
+	clean     bool
 }
 
 func (e *Extractor) parse(relPath string, src []byte) (parsed, error) {
@@ -197,7 +201,8 @@ func (e *Extractor) parse(relPath string, src []byte) (parsed, error) {
 		w := bindPython(langs[g], src, root)
 		return parsed{syms: w.emit(nil), refs: pythonCallRefs(w, root, relPath), imports: dedupeStrings(w.imports), clean: clean}, nil
 	}
-	return parsed{syms: tsSymbols(langs[g], src, root, g == grammarJS), clean: clean}, nil
+	hs, imps := collectTSHeritage(langs[g], src, root)
+	return parsed{syms: tsSymbols(langs[g], src, root, g == grammarJS), heritage: hs, tsImports: imps, clean: clean}, nil
 }
 
 // node helpers shared by both emulators.

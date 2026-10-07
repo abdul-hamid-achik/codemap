@@ -599,3 +599,84 @@ func TestTreeSitterPythonCallCandidates(t *testing.T) {
 		t.Errorf("cart.py imports = %v, want [src/shop/pricing.py]", imports)
 	}
 }
+
+// TestTreeSitterInheritanceEdges pins declared inheritance: TS/JS extends and
+// implements (through relative, type-only, and same-file bindings) and Python
+// bases (through imports), plus the derived method overrides — while a base
+// from a package (react) yields no edge.
+func TestTreeSitterInheritanceEdges(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/repo.ts", "export interface Repo {\n  save(): void;\n  load(): void;\n}\n")
+	writeFile(t, dir, "src/base.ts", "export class Base {\n  save() {}\n  describe() {}\n}\n")
+	writeFile(t, dir, "src/user.ts", strings.Join([]string{
+		`import { Base } from "./base";`,
+		`import type { Repo } from "./repo";`,
+		`import React from "react";`,
+		``,
+		`export class UserRepo extends Base implements Repo {`,
+		`  save() {}`,
+		`  load() {}`,
+		`  constructor() { super(); }`,
+		`}`,
+		`class Local {}`,
+		`class Widget extends React.Component {}`,
+		`class Special extends Local {}`,
+		``,
+	}, "\n"))
+	writeFile(t, dir, "py/animals.py", "class Animal:\n    def speak(self):\n        pass\n")
+	writeFile(t, dir, "py/dogs.py", "from .animals import Animal\n\n\nclass Dog(Animal):\n    def speak(self):\n        return 1\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("inh", dir, "typescript")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "inh", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, _ := g.ProjectNodes(pid)
+	byID := map[int64]graph.Node{}
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	edges, _ := g.ProjectEdges(pid)
+	var got []string
+	for _, e := range edges {
+		switch e.EdgeType {
+		case graph.EdgeExtends, graph.EdgeImplements, graph.EdgeOverrides:
+			s, d := byID[e.SourceID], byID[e.TargetID]
+			got = append(got, e.EdgeType+" "+s.FilePath+":"+s.FQN+" -> "+d.FilePath+":"+d.FQN)
+		}
+	}
+	sort.Strings(got)
+	want := []string{
+		"extends py/dogs.py:Dog -> py/animals.py:Animal",
+		"extends src/user.ts:Special -> src/user.ts:Local",
+		"extends src/user.ts:UserRepo -> src/base.ts:Base",
+		"implements src/user.ts:UserRepo -> src/repo.ts:Repo",
+		"overrides py/dogs.py:Dog.speak -> py/animals.py:Animal.speak",
+		"overrides src/user.ts:UserRepo.load -> src/repo.ts:Repo.load",
+		"overrides src/user.ts:UserRepo.save -> src/base.ts:Base.save",
+		"overrides src/user.ts:UserRepo.save -> src/repo.ts:Repo.save",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("inheritance edges:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	// Re-deriving after an edit keeps overrides consistent (no duplicates,
+	// removed methods drop out).
+	writeFile(t, dir, "src/user.ts", strings.Replace(mustRead(t, dir, "src/user.ts"), "  load() {}\n", "", 1))
+	if _, err := ix.IndexProject(context.Background(), pid, "inh", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	n, _ := g.CountEdgesByType(pid, graph.EdgeOverrides)
+	if n != 3 {
+		t.Errorf("overrides after removing load() = %d, want 3", n)
+	}
+}
+
+func mustRead(t *testing.T, dir, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
