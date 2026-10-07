@@ -68,6 +68,8 @@ type ContextReport struct {
 	// MCP consumer can tell an unknown symbol from a symbol with an empty bundle.
 	Code string `json:"code,omitempty"`
 	Hint string `json:"hint,omitempty"`
+	// Budget is present only when max_tokens was requested (see budget.go).
+	Budget *TokenBudget `json:"budget,omitempty"`
 }
 
 // ContextPartialError is one non-fatal failure while assembling a context

@@ -355,10 +355,11 @@ type referencesInput struct {
 }
 
 type impactInput struct {
-	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to analyze; omit when selector is provided"`
-	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
-	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
+	Symbol    string              `json:"symbol,omitempty" jsonschema:"symbol to analyze; omit when selector is provided"`
+	Selector  *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path      string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth     int                 `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
+	MaxTokens int                 `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
 }
 
 type reviewInput struct {
@@ -403,11 +404,12 @@ type featuresInput struct {
 }
 
 type exploreInput struct {
-	Query string `json:"query" jsonschema:"intent or concept to search for before joining hits to exact graph neighborhoods"`
-	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Seeds int    `json:"seeds,omitempty" jsonschema:"maximum semantic/name seeds (default 5, max 10)"`
-	Edges int    `json:"edges,omitempty" jsonschema:"maximum callers/callees/references/tests retained per seed (default 5, max 20)"`
-	Depth int    `json:"depth,omitempty" jsonschema:"maximum blast-radius depth per exact seed (default 2, max 10)"`
+	Query     string `json:"query" jsonschema:"intent or concept to search for before joining hits to exact graph neighborhoods"`
+	Path      string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Seeds     int    `json:"seeds,omitempty" jsonschema:"maximum semantic/name seeds (default 5, max 10)"`
+	Edges     int    `json:"edges,omitempty" jsonschema:"maximum callers/callees/references/tests retained per seed (default 5, max 20)"`
+	Depth     int    `json:"depth,omitempty" jsonschema:"maximum blast-radius depth per exact seed (default 2, max 10)"`
+	MaxTokens int    `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
 }
 
 type traverseInput struct {
@@ -551,11 +553,12 @@ type contextBatchInput struct {
 }
 
 type contextInput struct {
-	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to gather full context for; omit when selector is provided"`
-	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
-	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
-	Brief    bool                `json:"brief,omitempty" jsonschema:"drop each definition's source body, keeping signature/doc/location; sets source_omitted:true so you know to call codemap_source for the one definition you actually need — everything else in the bundle is unchanged"`
+	Symbol    string              `json:"symbol,omitempty" jsonschema:"symbol to gather full context for; omit when selector is provided"`
+	Selector  *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path      string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth     int                 `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
+	Brief     bool                `json:"brief,omitempty" jsonschema:"drop each definition's source body, keeping signature/doc/location; sets source_omitted:true so you know to call codemap_source for the one definition you actually need — everything else in the bundle is unchanged"`
+	MaxTokens int                 `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
 }
 
 type taskContextInput struct {
@@ -563,6 +566,7 @@ type taskContextInput struct {
 	Mode      string               `json:"mode,omitempty" jsonschema:"what the caller plans to do next: understand (orient on unfamiliar code — freshness + explore neighborhoods), change (prepare an edit — contexts + impact drill-downs + related files), debug (trace a failure — caller/callee-emphasized contexts); default understand; review is not a mode — use codemap_review"`
 	Selectors []app.SymbolSelector `json:"selectors,omitempty" jsonschema:"optional exact definitions the caller already holds (e.g. projected from a prior candidates list), deduped and capped at 25; requires mode change or debug"`
 	Path      string               `json:"path,omitempty" jsonschema:"project directory; defaults to the server working directory"`
+	MaxTokens int                  `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
 }
 
 // emptyInput is for tools that take no arguments (e.g. codemap_projects).
@@ -1166,13 +1170,13 @@ func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in i
 	}
 	if in.Selector != nil {
 		rep, err := s.svc.ImpactBySelector(cwdOf(in.Path), *in.Selector, in.Depth)
-		return result(rep, err)
+		return result(rep, withImpactBudget(rep, err, in.MaxTokens))
 	}
 	if in.Symbol == "" {
 		return invalidInputResult("impact needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
-	return result(rep, err)
+	return result(rep, withImpactBudget(rep, err, in.MaxTokens))
 }
 
 func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in reviewInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1234,7 +1238,7 @@ func (s *Server) handleExplore(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return invalidInputResult("explore needs a query", "pass query: a natural-language intent, e.g. \"where is auth validated\""), nil, nil
 	}
 	rep, err := s.svc.Explore(ctx, cwdOf(in.Path), in.Query, app.ExploreOptions{
-		Seeds: in.Seeds, Edges: in.Edges, Depth: in.Depth,
+		Seeds: in.Seeds, Edges: in.Edges, Depth: in.Depth, MaxTokens: in.MaxTokens,
 	})
 	return result(rep, err)
 }
@@ -1274,7 +1278,7 @@ func (s *Server) handleTaskContext(ctx context.Context, _ *sdkmcp.CallToolReques
 		return r, v, nil
 	}
 	rep, err := s.svc.TaskContext(ctx, cwdOf(in.Path), in.Task, app.TaskContextOptions{
-		Mode: in.Mode, Selectors: in.Selectors,
+		Mode: in.Mode, Selectors: in.Selectors, MaxTokens: in.MaxTokens,
 	})
 	return result(rep, err)
 }
@@ -1436,13 +1440,13 @@ func (s *Server) handleContext(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	}
 	if in.Selector != nil {
 		rep, err := s.svc.ContextBySelectorWithContext(ctx, cwdOf(in.Path), *in.Selector, in.Depth, in.Brief)
-		return result(rep, err)
+		return result(rep, withContextBudget(rep, err, in.MaxTokens))
 	}
 	if in.Symbol == "" {
 		return invalidInputResult("context needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.ContextWithContext(ctx, cwdOf(in.Path), in.Symbol, in.Depth, in.Brief)
-	return result(rep, err)
+	return result(rep, withContextBudget(rep, err, in.MaxTokens))
 }
 
 func (s *Server) handleContextBatch(ctx context.Context, _ *sdkmcp.CallToolRequest, in contextBatchInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1578,6 +1582,22 @@ func cwdOf(path string) string {
 		return wd
 	}
 	return "."
+}
+
+// withContextBudget/withImpactBudget apply the optional max_tokens budget to a
+// freshly built report (internal/app owns the trimming); a prior error wins.
+func withContextBudget(rep *app.ContextReport, err error, maxTokens int) error {
+	if err != nil {
+		return err
+	}
+	return app.ApplyContextBudget(rep, maxTokens)
+}
+
+func withImpactBudget(rep *app.ImpactReport, err error, maxTokens int) error {
+	if err != nil {
+		return err
+	}
+	return app.ApplyImpactBudget(rep, maxTokens)
 }
 
 func result(v any, err error) (*sdkmcp.CallToolResult, any, error) {

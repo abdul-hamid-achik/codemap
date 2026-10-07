@@ -23,6 +23,7 @@ type ImpactBatchReport struct {
 	Results   []*ImpactReport `json:"results"`
 	Note      string          `json:"note,omitempty"`
 	Freshness TaskFreshness   `json:"freshness"`
+	Budget    *TokenBudget    `json:"budget,omitempty"` // present only when max_tokens was requested
 }
 
 // ImpactPositions resolves raw source positions and computes impact for every

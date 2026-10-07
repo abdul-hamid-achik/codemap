@@ -35,6 +35,7 @@ exact definition. Source bodies stay omitted; follow a returned selector with
 	cmd.Flags().Int("edges", app.DefaultExploreEdges,
 		fmt.Sprintf("maximum callers/callees/references/tests per seed (1-%d)", app.MaxExploreEdges))
 	cmd.Flags().Int("depth", defaultExploreDepth, "maximum blast-radius depth per seed (1-10)")
+	cmd.Flags().Int("max-tokens", 0, "approximate token budget for the result (compact JSON bytes / 4); trims the lowest-ranked material first and adds a budget object (0 = no budget)")
 	return cmd
 }
 
@@ -76,8 +77,9 @@ func runExplore(cmd *cobra.Command, args []string) error {
 	seeds, _ := cmd.Flags().GetInt("seeds")
 	edges, _ := cmd.Flags().GetInt("edges")
 	depth, _ := cmd.Flags().GetInt("depth")
+	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	rep, err := svc.Explore(cmd.Context(), cwd, strings.Join(args, " "), app.ExploreOptions{
-		Seeds: seeds, Edges: edges, Depth: depth,
+		Seeds: seeds, Edges: edges, Depth: depth, MaxTokens: maxTokens,
 	})
 	if err != nil {
 		return err

@@ -121,6 +121,18 @@
     },
     "note": {
       "type": "string"
+    },
+    "budget": {
+      "type": "object",
+      "description": "Present only when max_tokens was requested: the approximate budget (compact JSON bytes / 4), the final estimate, whether anything was trimmed, and per-list counts of dropped items.",
+      "required": ["max_tokens", "estimated_tokens", "truncated", "dropped"],
+      "properties": {
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "estimated_tokens": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "dropped": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 1 } }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true,

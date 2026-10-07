@@ -38,6 +38,8 @@ partial_errors, *_total); staleness is reported, never acted on.`,
 		"composition to assemble: understand|change|debug (review is codemap review)")
 	cmd.Flags().StringArray("at", nil,
 		"restrict to an exact definition: <file>:<line> (repeatable, up to 25; requires --mode change or debug)")
+	cmd.Flags().Int("max-tokens", 0,
+		"approximate token budget for the result (compact JSON bytes / 4); trims the least important material first and adds a budget object (0 = no budget)")
 	return cmd
 }
 
@@ -54,10 +56,11 @@ func runTaskContext(cmd *cobra.Command, args []string) error {
 	}
 	mode, _ := cmd.Flags().GetString("mode")
 	ats, _ := cmd.Flags().GetStringArray("at")
+	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
 	// Validate the mode/--at combination before resolving positions, so a bad
 	// combination is exit-1 invalid_input rather than an exit-2 miss on a
 	// position the service was going to reject anyway.
-	probe := app.TaskContextOptions{Mode: mode}
+	probe := app.TaskContextOptions{Mode: mode, MaxTokens: maxTokens}
 	if len(ats) > 0 {
 		probe.Selectors = []app.SymbolSelector{{File: "probe"}} // count is all validation needs
 	}
@@ -69,7 +72,7 @@ func runTaskContext(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	rep, err := svc.TaskContext(cmd.Context(), cwd, strings.Join(args, " "),
-		app.TaskContextOptions{Mode: mode, Selectors: selectors})
+		app.TaskContextOptions{Mode: mode, Selectors: selectors, MaxTokens: maxTokens})
 	if err != nil {
 		return err
 	}

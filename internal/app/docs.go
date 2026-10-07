@@ -222,7 +222,10 @@ positions:[{file,line}] as a batch alternative to file/line — a pasted multi-f
 resolves in one call. explore accepts query+seeds+edges+depth; traverse requires its selector and
 accepts direction+edge_types+depth+limit; task-context accepts a task + mode (understand|change|debug)
 + optional selectors (change/debug only) and never interprets the task text. All three MCP tools are
-full-profile only. codemap_docs returns this guide.`},
+full-profile only. context, explore, impact, and task-context accept max_tokens (CLI --max-tokens N): an
+approximate budget for the JSON result (compact JSON bytes / 4) — source bodies are dropped first, then list
+tails, and the result gains a budget object {max_tokens,estimated_tokens,truncated,dropped}.
+codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
 external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a

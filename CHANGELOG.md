@@ -36,6 +36,16 @@ releases page is the authoritative history.
   triggers on the write path; ~+0.1 s per 8k nodes on a full build). Upgraded databases build
   it on first use.
 
+- **Response token budgets** — `codemap_context`, `codemap_explore`, `codemap_impact`, and
+  `codemap_task_context` accept an optional `max_tokens` (CLI: `--max-tokens N` on `context`,
+  `explore`, `impact`, `task-context`). The estimate is `ceil(compact JSON bytes / 4)`. Over
+  budget, reports shrink deterministically, least important first: source bodies, memories and
+  advisory `next`, then list tails (references, callees, callers, tests; blast radius for
+  impact), then trailing explore contexts and seeds. Identity fields (`schema_version`,
+  query/symbol, selectors, `call_graph`/confidence enums, freshness, `partial_errors`, `*_total`)
+  are never removed, and `references_truncated` stays consistent. A budgeted result gains an
+  additive `budget` object `{max_tokens, estimated_tokens, truncated, dropped}`; `schema_version`
+  values are unchanged. Implementation: `internal/app/budget.go`.
 - **`codemap task-context` / `codemap_task_context`** — mode-scoped task orientation in one
   call (CLI alias `brief`; full-profile MCP tool). The task text is used verbatim as the
   retrieval query (intent never interpreted); `--mode understand|change|debug` selects the

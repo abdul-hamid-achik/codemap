@@ -118,7 +118,7 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_callers` | Functions/methods that call a symbol (`precise: true` → language-server resolution; `selector` → one exact definition). Carries a stable `call_graph` enum (`resolved`/`name`/`unresolved`/`none`) |
 | `codemap_callees` | Functions/methods a symbol calls; accepts the same `precise` and exact `selector` inputs. Same `call_graph` enum |
 | `codemap_references` | Places a function/method is used as a value rather than called (callbacks, handlers, registrations — and, for TS/JS, Next.js framework wiring). Accepts an exact `selector`; returns capped source sites with totals plus independent `coverage` and confirmed/candidate confidence. Coverage is partial and name fan-out remains candidate, so an empty result is not proof of no runtime wiring. |
-| `codemap_impact` | Callers + blast radius + covering tests + `test_commands` (copy/paste-ready runner invocations derived from those tests, same derivation as `codemap_review`) (`depth`). `selector` scopes all traversal to one definition. Carries `call_graph` alongside the human `resolution` note — `unresolved` means callers/blast/tests are unknown, not absent (for example, uncovered TS/JS/Python definitions or Vue, whose call graph is not supported yet) |
+| `codemap_impact` | Callers + blast radius + covering tests + `test_commands` (copy/paste-ready runner invocations derived from those tests, same derivation as `codemap_review`) (`depth`). `selector` scopes all traversal to one definition. Carries `call_graph` alongside the human `resolution` note — `unresolved` means callers/blast/tests are unknown, not absent (for example, uncovered TS/JS/Python definitions or Vue, whose call graph is not supported yet). Optional `max_tokens` bounds the payload (see [Response token budgets](#response-token-budgets)) |
 | `codemap_review` | **Diff-scoped impact + test selection** — maps a working/staged/`since` diff to changed symbols, `blast_radius`, `covering_tests`, `test_commands`, aggregate `risk`, confidence, and bounded `next` actions. `analysis_complete` plus total/analyzed/truncated counts and bounded `partial_errors` prevent stale, capped, or partially failed analysis from looking authoritative; structural-source mapping errors include failed symbol lookup, deletion-only hunks, recognized callable/type declaration lines removed in mixed or equal-count hunks, and exact source renames with no mapped symbols. Documentation/assets remain visible in `changed_files` without structural mapping failures. Fresh indexed untracked source files and exact source renames map as whole files. Incomplete analysis forces `risk.level:"unknown"`. Deleted source files are analyzed from retained last-index definitions when available; `deletion_analysis` reports completeness and test actions precede reindexing. |
 | `codemap_dependencies` | Direct inbound dependency evidence for a `file`, grouped and capped by dependent file and calls/references/imports. Every sample carries `confidence`/`confidence_reason`; confirmed/candidate totals, file-vs-package scope, truncation, freshness/`call_graph`, and domain coverage stay explicit. |
 | `codemap_file_impact` | **File-level impact** — returns confidence-aware `dependency_evidence`, blast/tests, and a conservative `delete_verdict`. Only fresh confirmed file-scoped evidence proves `unsafe`; name-fanout candidates, stale snapshots, Go package imports, and missing evidence remain `unknown`. Legacy `safe_to_delete` stays false. |
@@ -133,8 +133,8 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_features` | **Capability inventory** (agent, core, and full profiles) — what the software can do and where each capability lives: `program`, `cli_command`, `rpc_tool`, `http_route`, `api_route`, and `page` features, each with label, invocation, description (from the registration or a docstring), handler with durable `selector` (null for inline handlers), `parent` for nested CLI commands, and a bounded call `footprint` (symbols, files, subsystems, feature-specific tests, `ambiguous_edges`). Go registrations are read from the syntax tree (`confidence: confirmed`); TS/JS and Python are pattern-detected (`candidate`). Inputs: `kind` (comma-separated), `query`, `top` (default 200, max 2000), `depth` (default 3, max 6), `no_footprint`. Ruby, Lua, and GDScript detection is not implemented and `notes` says so. Pass a handler selector to `codemap_flow` or `codemap_context`. |
 | `codemap_flow` | **How one feature works** (agent, core, and full profiles) — a bounded call tree from one entry, given as `symbol` or exact `selector`, in the order the code calls things. Each step carries `file:line`, subsystem, signature, one-line doc, and `confirmed`/`candidate` confidence. Same-name fan-out on a name-based graph is collapsed to the most plausible definition (`alternatives`) or left as an unexpanded `leaf_reason: "ambiguous"` step with candidates; precise edges are never collapsed. Repeats, cycles, and depth or node cuts are explicit. Inputs: `depth` (default 4, max 8), `max_nodes` (default 120, max 1000), `include_tests`. |
 | `codemap_map` | **Architecture overview** (full profile) — bounded source-path subsystems, directed cross-subsystem bridges with edge type/provenance, likely entrypoints, and hubs. Test code is excluded from bridges, subsystem edge counts, and hubs (`tests_excluded: true`). Independent `top_subsystems`/`top_bridges`/`top_hubs`/`top_entrypoints` caps; response carries totals/truncation plus freshness and call-graph honesty. |
-| `codemap_explore` | **Intent to exact neighborhoods** — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (otherwise name search, topped up by a BM25 lexical floor over names, paths, and docs — `search_mode` `name`, `lexical`, or `name+lexical`), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. |
-| `codemap_task_context` | **Mode-scoped task orientation** (full profile) — one call that composes freshness, explore neighbourhoods, brief contexts, impact drill-downs, and related files for a `task`, with `mode` `understand`, `change`, or `debug` (and optional `selectors`) (schema `codemap.task-context.v1`). The task text is the retrieval query verbatim. |
+| `codemap_explore` | **Intent to exact neighborhoods** — accepts `query` plus bounded `seeds`, `edges`, and `depth`; searches semantically when embeddings exist (otherwise name search, topped up by a BM25 lexical floor over names, paths, and docs — `search_mode` `name`, `lexical`, or `name+lexical`), joins usable hits to durable selectors, and returns compact context neighborhoods without source bodies. Limits: seeds 1–10, edges per context 1–20, depth 1–10. Unjoined hits and optional failures remain explicit. Optional `max_tokens` bounds the payload (see [Response token budgets](#response-token-budgets)). |
+| `codemap_task_context` | **Mode-scoped task orientation** (full profile) — one call that composes freshness, explore neighbourhoods, brief contexts, impact drill-downs, and related files for a `task`, with `mode` `understand`, `change`, or `debug` (and optional `selectors`) (schema `codemap.task-context.v1`). The task text is the retrieval query verbatim. Optional `max_tokens` bounds the payload (see [Response token budgets](#response-token-budgets)). |
 | `codemap_traverse` | **Typed heterogeneous graph walk** (full profile) — requires `selector:{file,start_line,fqn,kind}` and never accepts an ambiguous name union. `direction` is `outgoing`, `incoming`, or `both`; `edge_types` is a list drawn from `calls`, `references`, `imports`, `implements`, `overrides`, `depends_on`, `tests`, and `defines`; `depth` is 1–10 and `limit` is 1–500 nodes. Each hop returns durable child/parent selectors, edge provenance, and confirmed/candidate confidence; the report is cycle-safe, bounded, and exposes truncation/domain totals. |
 | `codemap_path` | Shortest call path (`from`, `to`, or paired `from_selector`/`to_selector`), with endpoint-scoped `call_graph`/`resolution` distinguishing disconnected from unresolved. Unique FQNs are exact endpoints too |
 | `codemap_related_files` | Files structurally related to a `file` via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence. Graph-accurate alternative to import-text heuristics |
@@ -143,7 +143,7 @@ server's working directory) and return JSON. Global helpers such as `codemap_pro
 | `codemap_find` | Find symbols by name (offline; no embeddings). In no-Ollama/structure-only degraded mode it tokenizes the query on whitespace/camelCase and matches symbol/FQN or docstring; each hit carries `matched_in` (`"symbol"`, `"fqn"`, or `"docstring"`) explaining the match |
 | `codemap_grep` | Exact text search (`pattern`, `regex`, `ignore_case`, `top`) over indexed file content — each hit resolved to its enclosing symbol (`symbol`/`fqn`/`kind`/`selector`). Offline, no embeddings. Distinct from `codemap_semantic` (meaning) and `codemap_find` (name) |
 | `codemap_source` | Return source code by `symbol`, or exactly one body by `selector`. `brief:true` drops each match's `source` (keeping `signature`/`doc`/location) and sets `source_omitted:true` |
-| `codemap_context` | **Everything about a symbol in one call** — definition (with source), callers, callees, value-reference wiring, covering tests + `test_commands`, blast-radius size, and annotations. `selector` keeps the full bundle on one definition; lists are capped with `*_total` counts (`test_commands` is derived from the full, uncapped test list). Uses the indexed graph only; optional component failures are explicit in `partial_errors`. `brief:true` drops each definition's `source` (keeping `signature`/`doc`/location) and sets `source_omitted:true` — everything else in the bundle is unchanged; follow up with `codemap_source` for the one body you actually need |
+| `codemap_context` | **Everything about a symbol in one call** — definition (with source), callers, callees, value-reference wiring, covering tests + `test_commands`, blast-radius size, and annotations. `selector` keeps the full bundle on one definition; lists are capped with `*_total` counts (`test_commands` is derived from the full, uncapped test list). Uses the indexed graph only; optional component failures are explicit in `partial_errors`. `brief:true` drops each definition's `source` (keeping `signature`/`doc`/location) and sets `source_omitted:true` — everything else in the bundle is unchanged; follow up with `codemap_source` for the one body you actually need. Optional `max_tokens` bounds the payload (see [Response token budgets](#response-token-budgets)) |
 | `codemap_context_batch` | **Context for several symbols in one call** — each symbol's bundle (including its own `test_commands`) plus `combined_blast_radius` and `common_callers` (callers that reach two or more of them — a shared entrypoint/coupling). Build a component's mental model without N round-trips; deduped and capped at 25. Aggregate source bodies are capped at 64 KiB with `source_budget` and per-definition `source_truncations` metadata — or pass `brief:true` to drop every body up front (`source_omitted:true` per definition) instead of spending that budget |
 | `codemap_projects` | List all registered projects and their index sizes |
 | `codemap_docs` | Return the agent guide (`topic`: overview/formats/workflow/commands/annotations/accuracy/ecosystem) so a harness can learn the tool |
@@ -162,6 +162,46 @@ The two an agent reaches for first: **`codemap_context`** bundles everything abo
 **`codemap_status`** reports index *freshness* so the agent reindexes before trusting a stale
 answer. **`codemap_impact`** remains the deep change-analysis query — definition sites, callers,
 the transitive blast radius, and which tests cover those paths, replacing many file reads.
+
+## Response token budgets
+
+`codemap_context`, `codemap_explore`, `codemap_impact`, and `codemap_task_context` accept an
+optional integer `max_tokens`: an approximate token budget for the JSON result (omitted or `0`
+means no budget). The estimate is deterministic and deliberately simple — the compact JSON byte
+length divided by four, rounded up — so it is a proportional bound, not a tokenizer count.
+
+When the report exceeds the budget it is trimmed in a fixed order, least important first, until it
+fits or nothing more can be trimmed:
+
+1. source bodies (`source_omitted:true` is set on the definitions that lost theirs), then recalled
+   memories and advisory `next` actions;
+2. list tails, shrinking from the end so the best-ranked items survive longest: value references,
+   callees, callers, test commands, covering tests (and for `codemap_impact` the blast radius goes
+   before the direct callers and tests);
+3. whole trailing sections: surplus merged definitions, then trailing explore contexts and seeds
+   (the top definition and top seed always stay).
+
+Identity and honesty fields are never removed: `schema_version`, `query`/`symbol`, selectors,
+`call_graph` and confidence enums, freshness, notes, `partial_errors`, and every `*_total` count.
+`references_truncated` is recomputed to match what is left.
+
+A budgeted result carries an additive `budget` object (`schema_version` is unchanged):
+
+```json
+{
+  "budget": {
+    "max_tokens": 800,
+    "estimated_tokens": 790,
+    "truncated": true,
+    "dropped": { "source": 1, "callers": 12, "references": 3 }
+  }
+}
+```
+
+`dropped` counts the items removed per list, summed across nested reports (for example every
+explore context's callers); it is `{}` when nothing was trimmed. If the identity fields alone
+exceed the budget, trimming stops there and `estimated_tokens` stays above `max_tokens`.
+A negative `max_tokens` is an `invalid_input` error.
 
 ## Exact source selectors
 
@@ -198,6 +238,7 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
 - **`partial_errors`** — non-fatal optional-component failures on `context`/`context_batch` (`callers`, `callees`, `references`, `impact`, or `memory_recall`) and on the composed `map`/`explore` orientation reports. Hard prerequisites still fail the tool; otherwise usable sections are returned alongside bounded error entries.
 - **`source_budget` / `source_truncations`** — explicit context-batch body budgeting. The aggregate source limit is 64 KiB; signatures, docs, and locations remain complete when bodies are shortened.
 - **`source_omitted`** — on `codemap_source`/`codemap_context`/`codemap_context_batch`, set per definition when `brief:true` dropped its `source` body. Signature/doc/location stay; call `codemap_source` (without `brief`) for the one definition you actually need the body of. Pass `brief:true` any time a hub symbol's response feels heavy — it's the response-side counterpart to `mcp.profile` (which trims the *tool list*, not individual response bodies).
+- **`budget`** — present on `codemap_context`, `codemap_explore`, `codemap_impact`, and `codemap_task_context` only when `max_tokens` was passed: `{max_tokens, estimated_tokens, truncated, dropped}`. See [Response token budgets](#response-token-budgets).
 - **Structured errors** — MCP failures preserve stable `{code,message,hint}` metadata when the service returns a `CodedError`, while the visible text includes the remediation hint for clients that only render text.
 
 - **`call_graph`** — a stable enum on `codemap_impact`/`codemap_callers`/`codemap_callees`/`codemap_references`/
