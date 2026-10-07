@@ -366,6 +366,9 @@ func (svc *Service) attachTaskImpacts(ctx context.Context, cwd string, rep *Task
 		dcTotal, brTotal, testsTotal := len(imp.DirectCallers), len(imp.BlastRadius), len(imp.Tests)
 		imp.DirectCallers = emptyIfNil(capSlice(imp.DirectCallers, contextListCap))
 		imp.BlastRadius = emptyIfNil(capSlice(imp.BlastRadius, contextListCap))
+		// Buckets duplicate the blast radius; rebuild them from the capped list
+		// (counts stay the true totals) so they cannot outweigh or contradict it.
+		imp.Buckets = capImpactBuckets(imp.Buckets, imp.BlastRadius)
 		imp.Tests = emptyIfNil(capSlice(imp.Tests, contextListCap))
 		rep.Impacts = append(rep.Impacts, TaskImpact{
 			Selector: t.Selector, Symbol: t.Symbol, Impact: imp,

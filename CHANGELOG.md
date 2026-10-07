@@ -37,6 +37,13 @@ releases page is the authoritative history.
 
 ### Added
 
+- **Honest budgets for impact buckets and explore processes** — `blast_radius_total` (additive) on
+  `impact` reports the true blast-radius size even when `--max-tokens` or `task-context` trims the
+  list; `buckets` counts stay true totals while their node lists follow the kept `blast_radius`,
+  and `max_tokens` now also trims `buckets` and explore `processes`. `processes` gains
+  `entrypoints_total`, `evaluated`, and per-process `partial_errors` (additive), lists every
+  definition once per process, and reports `truncated: true` when a `--query` could not inspect
+  every entry point.
 - **Impact depth buckets and confidence filtering** — `codemap impact` / `codemap_impact` add an
   additive `buckets` view (`direct` depth-1 vs `transitive` depth-2+, with counts) next to the
   unchanged flat `blast_radius`, and a per-node `confidence` (`confirmed` when every edge on a

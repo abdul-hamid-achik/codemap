@@ -59,7 +59,8 @@ type ProcessStep struct {
 // Process is one execution flow from a feature entrypoint: the handler and
 // the chain of definitions it reaches, in the order the code calls them.
 // Ambiguous same-name fan-out is collapsed exactly as flow collapses it;
-// unexpanded placeholders and repeats are not listed as steps.
+// unexpanded placeholders and cycle steps are not listed, and every definition
+// appears once, at its first appearance in call order.
 type Process struct {
 	ID         string          `json:"id"` // the feature id (kind:name, #n when a name repeats)
 	Kind       string          `json:"kind"`
@@ -70,24 +71,30 @@ type Process struct {
 	Files      []string        `json:"files"`
 	Truncated  bool            `json:"truncated"` // steps were cut by the node budget or the depth bound
 	CallGraph  string          `json:"call_graph"`
+	// PartialErrors lists unreadable source files whose symbols appear in this
+	// process: their call order fell back to name order, so the step order is
+	// not the order the code calls them.
+	PartialErrors []string `json:"partial_errors,omitempty"`
 }
 
 // ProcessesReport is a bounded, on-demand list of execution flows. Nothing is
 // stored: every call re-reads the graph and the registrations.
 type ProcessesReport struct {
-	SchemaVersion  int       `json:"schema_version"`
-	Project        string    `json:"project"`
-	Indexed        bool      `json:"indexed"`
-	Processes      []Process `json:"processes"`
-	ProcessesTotal int       `json:"processes_total"` // entrypoints with a resolved handler (after --query: matches among those evaluated)
-	Truncated      bool      `json:"truncated"`
-	Depth          int       `json:"depth"`
-	MaxSteps       int       `json:"max_steps"`
-	CallGraph      string    `json:"call_graph"`
-	Resolution     string    `json:"resolution,omitempty"`
-	Stale          bool      `json:"stale"`
-	Notes          []string  `json:"notes"`
-	PartialErrors  []string  `json:"partial_errors"`
+	SchemaVersion    int       `json:"schema_version"`
+	Project          string    `json:"project"`
+	Indexed          bool      `json:"indexed"`
+	Processes        []Process `json:"processes"`
+	ProcessesTotal   int       `json:"processes_total"`   // entrypoints with a resolved handler (after --query: matches among those evaluated)
+	EntrypointsTotal int       `json:"entrypoints_total"` // entrypoints with a resolved handler (before any --query)
+	Evaluated        int       `json:"evaluated"`         // entrypoints a flow was built for; below entrypoints_total, processes beyond that set were not inspected
+	Truncated        bool      `json:"truncated"`         // more processes exist than are listed, or --query could not inspect every entrypoint (see evaluated)
+	Depth            int       `json:"depth"`
+	MaxSteps         int       `json:"max_steps"`
+	CallGraph        string    `json:"call_graph"`
+	Resolution       string    `json:"resolution,omitempty"`
+	Stale            bool      `json:"stale"`
+	Notes            []string  `json:"notes"`
+	PartialErrors    []string  `json:"partial_errors"`
 }
 
 func normalizeProcessesOptions(opts ProcessesOptions) (ProcessesOptions, error) {
@@ -209,6 +216,7 @@ func (e *processEngine) build(f scoredFeature, depth, maxSteps int) (*Process, *
 		CallGraph:  callGraphEnum(e.resolved, callableNodes(e.builder.emittedNodes)),
 	}
 	p.Entry.File = graph.CanonicalStructuralPath(p.Entry.File)
+	p.PartialErrors = cappedPartial(e.builder.partial)
 	seen := map[string]bool{}
 	for _, s := range processSteps(root) {
 		p.Steps = append(p.Steps, processStepOf(s))
@@ -220,19 +228,38 @@ func (e *processEngine) build(f scoredFeature, depth, maxSteps int) (*Process, *
 	return p, root
 }
 
+// cappedPartial copies a builder's per-tree unreadable-file notes, bounded like
+// flow's partial_errors. It returns nil (field omitted) when there are none.
+func cappedPartial(partial []string) []string {
+	if len(partial) == 0 {
+		return nil
+	}
+	out := append([]string(nil), partial...)
+	if len(out) > flowPartialErrCap {
+		out = out[:flowPartialErrCap]
+		out = append(out, fmt.Sprintf("… %d more unreadable files", len(partial)-flowPartialErrCap))
+	}
+	return out
+}
+
 func processStepOf(s *FlowStep) ProcessStep {
 	return ProcessStep{Symbol: s.Symbol, FQN: s.FQN, Kind: s.Kind, File: s.File, StartLine: s.StartLine, Depth: s.Depth}
 }
 
 // processSteps lists the real definitions of a flow tree in call order
-// (preorder over children that are already in call order). Ambiguous
-// placeholders carry no definition and repeats were already listed at their
-// first appearance, so neither becomes a step.
+// (preorder over children that are already in call order), each node once at
+// its first appearance. Ambiguous placeholders carry no definition and cycle
+// steps point back at an ancestor already listed; leaves, depth-cut nodes and
+// repeats can recur on many paths, so identity - not tree position - decides.
+// A repeat whose original was trimmed away is the only remaining appearance of
+// its node and is therefore listed.
 func processSteps(root *FlowStep) []*FlowStep {
 	var out []*FlowStep
+	seen := map[int64]bool{}
 	var walk func(s *FlowStep)
 	walk = func(s *FlowStep) {
-		if s.File != "" && s.repeatTarget == nil {
+		if s.File != "" && !s.Cycle && !seen[s.node.ID] {
+			seen[s.node.ID] = true
 			out = append(out, s)
 		}
 		for _, c := range s.Children {
@@ -274,6 +301,7 @@ func (svc *Service) Processes(cwd string, opts ProcessesOptions) (*ProcessesRepo
 
 	cands := e.entries
 	rep.ProcessesTotal = len(cands)
+	rep.EntrypointsTotal = len(cands)
 	var terms []string
 	if opts.Query != "" {
 		terms = graph.LexicalTerms(opts.Query)
@@ -282,12 +310,17 @@ func (svc *Service) Processes(cwd string, opts ProcessesOptions) (*ProcessesRepo
 		}
 		if len(cands) > processEvalCap {
 			cands = cands[:processEvalCap]
+			// Entrypoints past the cap were never inspected, so a miss among the
+			// matches is not proof of absence: say so structurally, not only in a note.
+			rep.Truncated = true
 			rep.Notes = append(rep.Notes, fmt.Sprintf("--query evaluated the first %d of %d entrypoints; narrow with --kind to inspect the rest", processEvalCap, len(e.entries)))
 		}
 	} else if len(cands) > opts.Top {
 		cands = cands[:opts.Top]
 		rep.Truncated = true
 	}
+
+	rep.Evaluated = len(cands)
 
 	type ranked struct {
 		p     *Process
@@ -323,6 +356,15 @@ func (svc *Service) Processes(cwd string, opts ProcessesOptions) (*ProcessesRepo
 	}
 	for _, r := range built {
 		rep.Processes = append(rep.Processes, *r.p)
+	}
+	partialProcs := 0
+	for _, p := range rep.Processes {
+		if len(p.PartialErrors) > 0 {
+			partialProcs++
+		}
+	}
+	if partialProcs > 0 {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("%d process(es) touch unreadable source files: their step order falls back to name order, not call order (see each process's partial_errors)", partialProcs))
 	}
 
 	rep.CallGraph = callGraphEnum(e.resolved, callableNodes(graphNodes))
@@ -387,13 +429,14 @@ func matchProcess(p *Process, terms []string) (match, inName int) {
 // Steps are the call-order path from the entry to each matched seed (capped,
 // seeds kept), not the process's whole tree — use 'codemap processes' for that.
 type ExploreProcess struct {
-	ID           string          `json:"id"`
-	Kind         string          `json:"kind"`
-	Name         string          `json:"name"`
-	Entry        *SymbolSelector `json:"entry"`
-	MatchedSeeds []string        `json:"matched_seeds"`
-	Steps        []ProcessStep   `json:"steps"`
-	CallGraph    string          `json:"call_graph"`
+	ID            string          `json:"id"`
+	Kind          string          `json:"kind"`
+	Name          string          `json:"name"`
+	Entry         *SymbolSelector `json:"entry"`
+	MatchedSeeds  []string        `json:"matched_seeds"`
+	Steps         []ProcessStep   `json:"steps"`
+	CallGraph     string          `json:"call_graph"`
+	PartialErrors []string        `json:"partial_errors,omitempty"` // unreadable source: step order is name order, not call order
 }
 
 func selectorKey(file string, line int, fqn, kind string) string {
@@ -538,17 +581,22 @@ func (svc *Service) exploreProcesses(ctx context.Context, cwd string, seeds []Ex
 				best = r
 			}
 		}
+		nameSeen := map[string]bool{}
 		for _, s := range seedSteps {
-			matchedNames = append(matchedNames, seedName[s.node.ID])
+			if n := seedName[s.node.ID]; !nameSeen[n] {
+				nameSeen[n] = true
+				matchedNames = append(matchedNames, n)
+			}
 		}
 		ep := ExploreProcess{
 			ID: p.ID, Kind: p.Kind, Name: p.Name, Entry: p.Entry,
 			MatchedSeeds: matchedNames, Steps: []ProcessStep{}, CallGraph: p.CallGraph,
+			PartialErrors: p.PartialErrors,
 		}
 		for _, s := range keep {
 			ep.Steps = append(ep.Steps, processStepOf(s))
 		}
-		found = append(found, scored{ep: ep, matched: len(seedSteps), best: best})
+		found = append(found, scored{ep: ep, matched: len(matchedIDs), best: best})
 	}
 	sort.SliceStable(found, func(i, j int) bool {
 		if found[i].matched != found[j].matched {
