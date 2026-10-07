@@ -2,8 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -73,6 +74,7 @@ type AffectedReport struct {
 	Files            []string       `json:"files"`
 	Tests            []AffectedTest `json:"tests"`
 	Unmapped         []string       `json:"unmapped"`
+	DeletedTests     []string       `json:"deleted_tests,omitempty"` // changed test files that no longer exist (never in Tests)
 	Filter           string         `json:"filter,omitempty"`
 	FilteredOut      int            `json:"filtered_out,omitempty"` // tests dropped by Filter
 	CallGraph        string         `json:"call_graph"`
@@ -90,6 +92,39 @@ func (r *AffectedReport) TestFiles() []string {
 	return out
 }
 
+// ValidateAffectedOpts rejects malformed requests before any index or git work,
+// as invalid_input errors: a depth outside 0..affectedMaxDepth (0 means the
+// default), --since together with --staged, an unsupported source, and a
+// --since ref that is empty or option-like. Whether a well-formed ref exists is
+// only known against a repository and is checked by Affected. The CLI and the
+// MCP handler call it so both surfaces reject the same inputs.
+func ValidateAffectedOpts(opts AffectedOpts) error {
+	if opts.Depth < 0 || opts.Depth > affectedMaxDepth {
+		return coded(CodeInvalidInput, fmt.Sprintf("use a depth between 1 and %d (omit for the default %d)", affectedMaxDepth, affectedDefaultDepth),
+			fmt.Errorf("affected depth must be between 1 and %d, got %d", affectedMaxDepth, opts.Depth))
+	}
+	if opts.Staged && opts.Since != "" {
+		return coded(CodeInvalidInput, "pass either staged or since, not both",
+			fmt.Errorf("staged and since are mutually exclusive"))
+	}
+	switch opts.Source {
+	case "", AffectedSourceFiles, AffectedSourceWorking, AffectedSourceStaged:
+	case AffectedSourceSince:
+		if opts.Since == "" {
+			return coded(CodeInvalidInput, "pass a commit, branch, or tag name",
+				fmt.Errorf("affected source %q requires a non-empty since ref", opts.Source))
+		}
+	default:
+		return coded(CodeInvalidInput, "use files, working, staged, or since",
+			fmt.Errorf("unsupported affected source %q: must be files, working, staged, or since", opts.Source))
+	}
+	if opts.Since != "" && !git.ValidRef(opts.Since) {
+		return coded(CodeInvalidInput, "pass a commit, branch, or tag name",
+			fmt.Errorf("invalid --since ref %q: must be non-empty and must not start with '-'", opts.Since))
+	}
+	return nil
+}
+
 // Affected maps changed files to the test files that should run. It reuses the
 // primitives review and impact already use: git.ChangedFiles for the diff, the
 // indexed symbols of each file, and ImpactBySelector's covering tests (call
@@ -99,16 +134,15 @@ func (r *AffectedReport) TestFiles() []string {
 // weakest confidence among contributing symbols and a note says when coverage is
 // name-based or unresolved.
 func (svc *Service) Affected(cwd string, opts AffectedOpts) (*AffectedReport, error) {
+	if err := ValidateAffectedOpts(opts); err != nil {
+		return nil, err
+	}
 	depth := opts.Depth
-	if depth <= 0 {
+	if depth == 0 {
 		depth = affectedDefaultDepth
 	}
-	if depth > affectedMaxDepth {
-		depth = affectedMaxDepth
-	}
 	source := opts.Source
-	switch source {
-	case "":
+	if source == "" {
 		switch {
 		case opts.Since != "":
 			source = AffectedSourceSince
@@ -119,20 +153,10 @@ func (svc *Service) Affected(cwd string, opts AffectedOpts) (*AffectedReport, er
 		default:
 			source = AffectedSourceFiles
 		}
-	case AffectedSourceFiles, AffectedSourceWorking, AffectedSourceStaged:
-	case AffectedSourceSince:
-		if opts.Since == "" {
-			return nil, fmt.Errorf("affected source %q requires a non-empty since ref", source)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported affected source %q: must be files, working, staged, or since", source)
-	}
-	if source == AffectedSourceSince && !git.ValidRef(opts.Since) {
-		return nil, fmt.Errorf("invalid --since ref %q: must be non-empty and must not start with '-'; pass a commit, branch, or tag name", opts.Since)
 	}
 	filter, err := compileAffectedFilter(opts.Filter)
 	if err != nil {
-		return nil, err
+		return nil, coded(CodeInvalidInput, "pass a valid glob such as '*_test.go' or 'internal/**'", err)
 	}
 
 	pid, name, found, err := svc.project(cwd)
@@ -161,21 +185,53 @@ func (svc *Service) Affected(cwd string, opts AffectedOpts) (*AffectedReport, er
 	}
 
 	// 1) Collect the changed paths: git diff (when asked) plus explicit files.
-	type input struct{ raw, gitRoot string }
+	type input struct {
+		raw, gitRoot string
+		deleted      bool // git reports the file deleted
+	}
 	var inputs []input
+	ctx, cancel := context.WithTimeout(context.Background(), reviewGitTimeout)
+	defer cancel()
+	// The git toplevel, resolved lazily: git-sourced runs need it up front;
+	// explicit/stdin paths only when a relative path exists neither under the
+	// project root nor cwd (git prints repo-root-relative paths).
+	var topLevel string
+	topResolved := false
+	gitTop := func() string {
+		if !topResolved {
+			topResolved = true
+			if root, err := git.RepoRoot(ctx, cwd); err == nil {
+				topLevel = root
+			}
+		}
+		return topLevel
+	}
 	if source != AffectedSourceFiles {
-		ctx, cancel := context.WithTimeout(context.Background(), reviewGitTimeout)
-		defer cancel()
 		root, gerr := git.RepoRoot(ctx, cwd)
 		if gerr != nil {
-			return nil, fmt.Errorf("not a git repository — codemap affected needs git to compute the diff (pass files or --stdin instead): %w", gerr)
+			if errors.Is(gerr, exec.ErrNotFound) {
+				return nil, coded(CodeOperational, "install git, or pass files/--stdin instead",
+					fmt.Errorf("git is required to compute the diff: %w", gerr))
+			}
+			return nil, coded(CodeNotARepo, "run inside a git repository, or pass files/--stdin instead",
+				fmt.Errorf("not a git repository — codemap affected needs git to compute the diff: %w", gerr))
+		}
+		topLevel, topResolved = root, true
+		if source == AffectedSourceSince {
+			if _, rerr := git.ResolveRef(ctx, root, opts.Since); rerr != nil {
+				return nil, coded(CodeInvalidInput, "pass a commit, branch, or tag name that exists in this repository",
+					fmt.Errorf("--since ref %q does not resolve to a commit", opts.Since))
+			}
 		}
 		changed, cerr := git.ChangedFiles(ctx, root, source, opts.Since)
 		if cerr != nil {
+			if errors.Is(cerr, git.ErrInvalidRef) {
+				return nil, coded(CodeInvalidInput, "pass a commit, branch, or tag name", cerr)
+			}
 			return nil, fmt.Errorf("git diff failed: %w", cerr)
 		}
 		for _, cf := range changed {
-			inputs = append(inputs, input{raw: cf.Path, gitRoot: root})
+			inputs = append(inputs, input{raw: cf.Path, gitRoot: root, deleted: cf.Status == "D"})
 		}
 	}
 	for _, f := range opts.Files {
@@ -183,12 +239,16 @@ func (svc *Service) Affected(cwd string, opts AffectedOpts) (*AffectedReport, er
 	}
 
 	seenFile := map[string]bool{}
+	deletedByGit := map[string]bool{}
 	var files []string
 	var outside []string
 	for _, in := range inputs {
-		rel, ok := affectedRel(proj.Path, cwd, in.gitRoot, in.raw)
+		rel, ok := affectedRel(proj.Path, cwd, in.gitRoot, in.raw, gitTop)
 		if rel == "" {
 			continue
+		}
+		if in.deleted && ok {
+			deletedByGit[rel] = true
 		}
 		if seenFile[rel] {
 			continue
@@ -228,7 +288,9 @@ func (svc *Service) Affected(cwd string, opts AffectedOpts) (*AffectedReport, er
 	}
 	for _, rel := range files {
 		isTest := graph.IsTestFilePath(rel)
-		if isTest {
+		if isTest && !outsideSet[rel] {
+			// A deleted file is dropped from the result below, not here, so
+			// covers:/imports: reasons from a stale index get the same treatment.
 			addTest(rel, "changed")
 		}
 		if outsideSet[rel] {
@@ -313,7 +375,23 @@ func (svc *Service) Affected(cwd string, opts AffectedOpts) (*AffectedReport, er
 	if len(imps) > 0 {
 		rep.CallGraph = worstCallGraph(imps)
 	}
+	// analysis_complete is about staleness, caps and failures — not coverage — so
+	// an empty list over an unresolved/absent call graph must say why.
 	switch rep.CallGraph {
+	case CallGraphNone:
+		// Only when a mapped file contributed no covering/import test: a changed
+		// test file selecting itself is not an unexplained empty answer.
+		selectedByAnalysis := false
+		for _, acc := range tests {
+			for r := range acc.reasons {
+				if r != "changed" {
+					selectedByAnalysis = true
+				}
+			}
+		}
+		if len(rep.Files) > len(rep.Unmapped) && !selectedByAnalysis {
+			notes = append(notes, "no call graph covers the changed file(s) (YAML, SQL, Markdown or other declarative formats have none) — an empty test list is not evidence that nothing needs to run; only import edges and text references were consulted")
+		}
 	case CallGraphUnresolved:
 		notes = append(notes, "call graph is unresolved for a changed file (TS/JS/Python without --precise) — tests come from import edges and text references only; run 'codemap index --precise' for exact coverage")
 	case CallGraphName:
@@ -334,6 +412,14 @@ func (svc *Service) Affected(cwd string, opts AffectedOpts) (*AffectedReport, er
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
+		// A test file that git reports deleted or that is gone from disk cannot be
+		// run, whatever reason selected it (a stale index still maps it).
+		if deletedByGit[p] || !fileExists(filepath.Join(proj.Path, filepath.FromSlash(p))) {
+			if filter == nil || filter(p) {
+				rep.DeletedTests = append(rep.DeletedTests, p)
+			}
+			continue
+		}
 		if filter != nil && !filter(p) {
 			rep.FilteredOut++
 			continue
@@ -398,10 +484,14 @@ func (svc *Service) importingTests(g *graph.Store, pid int64, file string, depth
 
 // affectedRel normalizes one changed path to the project-relative, slash form
 // the index stores. gitRoot is non-empty for paths that came from git (relative
-// to the repository root, not the project). ok is false when the path resolves
-// outside the project; rel then carries the cleaned input. An empty rel means
-// the input was blank.
-func affectedRel(projRoot, cwd, gitRoot, raw string) (rel string, ok bool) {
+// to the repository root, not the project). A relative path without gitRoot
+// (an argument or a --stdin line) is looked up under the project root, then
+// cwd, then — because `git diff --name-only` prints repository-root-relative
+// paths — the git toplevel returned by gitTop (nil disables that), accepted only
+// when it lands inside the project. ok is false when the path resolves outside
+// the project; rel then carries the cleaned input. An empty rel means the input
+// was blank.
+func affectedRel(projRoot, cwd, gitRoot, raw string, gitTop func() string) (rel string, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", false
@@ -414,20 +504,47 @@ func affectedRel(projRoot, cwd, gitRoot, raw string) (rel string, ok bool) {
 	case gitRoot != "":
 		abs = filepath.Join(gitRoot, clean)
 	default:
-		abs = filepath.Join(projRoot, clean)
-		if cwd != "" && cwd != projRoot {
-			if _, err := os.Stat(abs); err != nil {
-				if alt := filepath.Join(cwd, clean); fileExists(alt) {
-					abs = alt
-				}
+		abs = resolveRelativeChanged(projRoot, cwd, clean, gitTop)
+	}
+	if r, ok := affectedProjectRel(projRoot, abs); ok {
+		return r, true
+	}
+	return filepath.ToSlash(clean), false
+}
+
+// resolveRelativeChanged picks the absolute path a relative explicit/stdin path
+// most plausibly names: the first of project root, cwd and git toplevel where it
+// exists. When it exists nowhere (a deleted file) a repository-root-relative
+// reading wins only if it lands inside the project, otherwise the project root.
+func resolveRelativeChanged(projRoot, cwd, clean string, gitTop func() string) string {
+	inProj := filepath.Join(projRoot, clean)
+	if fileExists(inProj) {
+		return inProj
+	}
+	if cwd != "" && cwd != projRoot {
+		if alt := filepath.Join(cwd, clean); fileExists(alt) {
+			return alt
+		}
+	}
+	if gitTop != nil {
+		if top := gitTop(); top != "" {
+			fromTop := filepath.Join(top, clean)
+			if _, inside := affectedProjectRel(projRoot, fromTop); inside {
+				return fromTop
 			}
 		}
 	}
+	return inProj
+}
+
+// affectedProjectRel returns abs relative to the project root in slash form, and false
+// when abs is outside it. A symlinked checkout (macOS /var → /private/var) makes
+// git's root and the indexed project path disagree, so resolved forms are also
+// compared.
+func affectedProjectRel(projRoot, abs string) (string, bool) {
 	if r, ok := relUnder(projRoot, abs); ok {
 		return filepath.ToSlash(r), true
 	}
-	// A symlinked checkout (macOS /var → /private/var) makes git's root and the
-	// indexed project path disagree; compare their resolved forms.
 	if rp, err := filepath.EvalSymlinks(projRoot); err == nil {
 		dir, base := filepath.Split(abs)
 		if rd, derr := filepath.EvalSymlinks(filepath.Clean(dir)); derr == nil {
@@ -436,7 +553,7 @@ func affectedRel(projRoot, cwd, gitRoot, raw string) (rel string, ok bool) {
 			}
 		}
 	}
-	return filepath.ToSlash(clean), false
+	return "", false
 }
 
 func relUnder(root, abs string) (string, bool) {

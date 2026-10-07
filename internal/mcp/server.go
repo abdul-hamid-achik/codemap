@@ -374,8 +374,8 @@ type reviewInput struct {
 type affectedInput struct {
 	Path   string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Files  []string `json:"files,omitempty" jsonschema:"changed files, project-relative (absolute paths under the project root are accepted); omit files, since and staged to use the whole working tree"`
-	Since  string   `json:"since,omitempty" jsonschema:"also use every file changed since this git ref (committed + uncommitted)"`
-	Staged bool     `json:"staged,omitempty" jsonschema:"also use only the staged changes (the git index)"`
+	Since  string   `json:"since,omitempty" jsonschema:"also use every file changed since this git ref (committed + uncommitted); mutually exclusive with staged"`
+	Staged bool     `json:"staged,omitempty" jsonschema:"also use only the staged changes (the git index); mutually exclusive with since"`
 	Filter string   `json:"filter,omitempty" jsonschema:"glob restricting the reported test files, e.g. *_test.go or internal/**; a pattern without a slash matches base names"`
 	Depth  int      `json:"depth,omitempty" jsonschema:"max hops for the call-graph and import walks (default 3, max 10)"`
 }
@@ -1237,12 +1237,18 @@ func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in r
 }
 
 func (s *Server) handleAffected(_ context.Context, _ *sdkmcp.CallToolRequest, in affectedInput) (*sdkmcp.CallToolResult, any, error) {
+	opts := app.AffectedOpts{
+		Files: in.Files, Since: in.Since, Staged: in.Staged, Filter: in.Filter, Depth: in.Depth,
+	}
+	// Same validation as the CLI (depth range, since+staged, since syntax),
+	// before the index lookup so a bad call is never masked by "not indexed".
+	if err := app.ValidateAffectedOpts(opts); err != nil {
+		return invalidInputResult(err.Error(), app.HintOf(err)), nil, nil
+	}
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
-	rep, err := s.svc.Affected(cwdOf(in.Path), app.AffectedOpts{
-		Files: in.Files, Since: in.Since, Staged: in.Staged, Filter: in.Filter, Depth: in.Depth,
-	})
+	rep, err := s.svc.Affected(cwdOf(in.Path), opts)
 	return result(rep, err)
 }
 

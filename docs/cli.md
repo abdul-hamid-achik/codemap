@@ -160,7 +160,7 @@ it is, and — for `review` — what your current diff already touched.
 | `codemap dependencies <file>` | Direct inbound call/reference/import evidence grouped by dependent file and edge kind. Every relationship is classified as **confirmed** or **candidate** with a reason (`precise`, `same_package`, `resolved_import`, `name_fanout`, `package_scope`, or `stale_snapshot`); totals and bounded source→target samples preserve that confidence. Coverage remains explicit for calls, references, imports, runtime wiring, and external consumers. Missing evidence never means safe. |
 | `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Returns grouped dependency evidence, coverage, blast radius, tests, and `delete_verdict`. Only fresh, confirmed, file-scoped indexed evidence can prove `unsafe`; name-fanout candidates, stale evidence, and Go's package-scoped imports remain `unknown` for the exact file. Missing evidence never proves safety; legacy `safe_to_delete` stays false. |
 | `codemap review [--since <ref>] [--staged] [--depth N] [--fail-on-risk <low\|medium\|high>] [--fail-on-untested] [--fail-on-uncovered]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, a separate test-coverage `coverage` verdict, `stale`/`resolution`, and stable `call_graph` honesty signals. `--fail-on-risk`/`--fail-on-untested`/`--fail-on-uncovered` gate on that data — see [Gating a commit or script](#gating-a-commit-or-script). |
-| `codemap affected [files...] [--stdin] [--staged] [--since <ref>] [--filter <glob>] [--depth N]` | **Changed files → the test files to run**, without parsing a review report. Selects a test file when it covers a changed symbol through the call graph (`covers:<symbol>`), imports a changed file directly or transitively up to `--depth` hops (`imports:<file>`), or is itself a changed test file (`changed`). Files come from arguments, `--stdin` (newline-separated, e.g. `git diff --name-only`), or git (`--staged`, `--since <ref>`); with none of those it uses the working tree. Paths are project-relative (absolute paths under the root are accepted). Human output is exactly one test path per line on stdout — pipe it to a runner (`codemap affected --stdin \| xargs go test`) — with notes on stderr; `--json` adds `reasons`, `unmapped`, `call_graph` and `analysis_complete`. `--filter` is a glob over the reported test paths. See [`affected`](#affected-changed-files-tests-to-run). |
+| `codemap affected [files...] [--stdin] [--staged] [--since <ref>] [--filter <glob>] [--depth N]` | **Changed files → the test files to run**, without parsing a review report. Selects a test file when it covers a changed symbol through the call graph (`covers:<symbol>`), imports a changed file directly or transitively up to `--depth` hops (`imports:<file>`), or is itself a changed test file (`changed`). Files come from arguments, `--stdin` (newline-separated, e.g. `git diff --name-only`), or git (`--staged`, `--since <ref>`); with none of those it uses the working tree. Paths are project-relative (absolute paths under the root are accepted). Human output is exactly one test path per line on stdout — pipe it to a runner (`codemap affected --stdin \| xargs go test`) — with notes on stderr; `--json` adds `reasons`, `unmapped`, `deleted_tests`, `call_graph` and `analysis_complete`. `--filter` is a glob over the reported test paths. Deleted test files are never listed. See [`affected`](#affected-changed-files-tests-to-run). |
 | `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). Each request accepts at most 256 unique names, 256 bytes per name. |
 | `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. Candidate input is capped at 256 unique names, 256 bytes per name. |
 | `codemap risk <symbol> [--depth N] [--fail-on-risk <low\|medium\|high>]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. `--fail-on-risk` gates on the level — see [Gating a commit or script](#gating-a-commit-or-script). |
@@ -473,12 +473,24 @@ A test file is selected for one of three reasons, all visible under `--json`:
 paths, each with `reasons`), `unmapped` (changed files with no indexed symbols — docs, config,
 unindexed or out-of-project paths), `call_graph` (the weakest confidence among contributing
 symbols: `resolved`/`name`/`unresolved`/`none`), `analysis_complete`, `stale`, and a `note`
-when coverage is name-based or unresolved. `analysis_complete` is false on a stale index, a
-capped or failed analysis, or an unmapped source file; an unmapped README does not count. Changed
-files come from arguments, `--stdin`, `--staged`, or `--since <ref>` (an explicit list is unioned
-with the git diff; an empty `--stdin` list means nothing changed, not the working tree). The
-`codemap_affected` MCP tool (full profile) returns the same JSON. Exit codes follow the usual
-taxonomy: a project that was never indexed is a `not_indexed` failure.
+whenever coverage is name-based, unresolved (TS/JS/Python without `--precise`) or absent (YAML,
+SQL, Markdown: `call_graph: none`), so an empty list is never silent. `analysis_complete` is
+about staleness, caps and failures, not coverage: it is false on a stale index, a capped or
+failed analysis, or an unmapped source file (an unmapped README does not count), and stays true
+when the call graph simply cannot say, which is what the `note` is for. A changed test file
+that no longer exists (deleted in git, or gone from disk) is never in `tests`; it is listed in
+`deleted_tests` instead. Changed files come from arguments, `--stdin`, `--staged`, or
+`--since <ref>` (an explicit list is unioned with the git diff; an empty `--stdin` list means
+nothing changed, not the working tree). A relative path is resolved under the project root,
+then the current directory, then the git toplevel, so `git diff --name-only` output
+(repository-root-relative) works when the project is a subdirectory of the repository; a path
+outside the project is `unmapped`. The `codemap_affected` MCP tool (full profile) returns the
+same JSON.
+
+Exit codes follow the usual taxonomy: a project that was never indexed is a `not_indexed`
+failure; running a git-sourced mode (the default working tree, `--staged`, `--since`) outside a
+git repository is `not_a_repo` (exit 5 under `--json`); a `--depth` outside 1-10, `--staged`
+together with `--since`, or a `--since` ref that does not exist is `invalid_input` (exit 1).
 
 ### Gating a commit or script
 

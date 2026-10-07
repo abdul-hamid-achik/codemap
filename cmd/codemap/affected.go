@@ -45,8 +45,8 @@ func runAffected(cmd *cobra.Command, args []string) error {
 	staged, _ := cmd.Flags().GetBool("staged")
 	filter, _ := cmd.Flags().GetString("filter")
 	depth, _ := cmd.Flags().GetInt("depth")
-	if staged && since != "" {
-		return fmt.Errorf("--staged and --since are mutually exclusive")
+	if err := app.ValidateAffectedOpts(app.AffectedOpts{Since: since, Staged: staged, Depth: depth}); err != nil {
+		return err
 	}
 
 	files := append([]string(nil), args...)

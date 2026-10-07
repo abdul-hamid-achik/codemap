@@ -120,7 +120,71 @@ func TestAffectedCLI(t *testing.T) {
 
 	t.Run("staged and since are exclusive", func(t *testing.T) {
 		res := runCLI(t, bin, runner, env, "affected", "-C", project, "--staged", "--since", "HEAD", "--json")
-		assertCLIEnvelope(t, res, exitOperational, "operational")
+		assertCLIEnvelope(t, res, exitOperational, "invalid_input")
+	})
+
+	t.Run("out-of-range depth is invalid_input", func(t *testing.T) {
+		for _, d := range []string{"11", "-1"} {
+			res := runCLI(t, bin, runner, env, "affected", "-C", project, "a.go", "--depth", d, "--json")
+			assertCLIEnvelope(t, res, exitOperational, "invalid_input")
+		}
+	})
+
+	t.Run("outside a git repository is not_a_repo exit 5", func(t *testing.T) {
+		// project is not a git repository: the working-tree default needs git.
+		res := runCLI(t, bin, runner, env, "affected", "-C", project, "--json")
+		assertCLIEnvelope(t, res, exitNotARepo, "not_a_repo")
+		res = runCLI(t, bin, runner, env, "affected", "-C", project, "--staged", "--json")
+		assertCLIEnvelope(t, res, exitNotARepo, "not_a_repo")
+	})
+
+	t.Run("git repo: bad since ref is invalid_input and deleted tests are not listed", func(t *testing.T) {
+		repo := filepath.Join(root, "gitproj")
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, filepath.Join(repo, "go.mod"), "module example.com/affgit\n\ngo 1.25\n")
+		writeTestFile(t, filepath.Join(repo, "a.go"), "package aff\n\nfunc Run() {}\n")
+		writeTestFile(t, filepath.Join(repo, "a_test.go"), "package aff\n\nimport \"testing\"\n\nfunc TestRun(t *testing.T) { Run() }\n")
+		for _, args := range [][]string{
+			{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"},
+			{"config", "commit.gpgsign", "false"}, {"add", "-A"}, {"commit", "-q", "-m", "init"},
+		} {
+			cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Skipf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		if res := runCLI(t, bin, runner, env, "index", repo, "--no-embed", "--no-lsp", "--cache=false", "--no-tips", "--json"); res.exit != 0 {
+			t.Fatalf("index exit=%d stderr=%s stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+
+		for _, ref := range []string{"no-such-ref-xyz", "--output=x"} {
+			res := runCLI(t, bin, runner, env, "affected", "-C", repo, "--since", ref, "--json")
+			assertCLIEnvelope(t, res, exitOperational, "invalid_input")
+		}
+
+		if out, err := exec.Command("git", "-C", repo, "rm", "-q", "a_test.go").CombinedOutput(); err != nil {
+			t.Fatalf("git rm: %v\n%s", err, out)
+		}
+		res := runCLI(t, bin, runner, env, "affected", "-C", repo, "--json")
+		if res.exit != 0 {
+			t.Fatalf("exit=%d stderr=%s stdout=%s", res.exit, res.stderr, res.stdout)
+		}
+		var rep app.AffectedReport
+		mustJSON(t, res.stdout, &rep)
+		for _, tst := range rep.Tests {
+			if tst.File == "a_test.go" {
+				t.Fatalf("deleted a_test.go must not be listed in tests: %+v", rep.Tests)
+			}
+		}
+		if len(rep.DeletedTests) != 1 || rep.DeletedTests[0] != "a_test.go" {
+			t.Fatalf("deleted_tests = %v", rep.DeletedTests)
+		}
+		res = runCLI(t, bin, runner, env, "affected", "-C", repo)
+		if res.exit != 0 || strings.Contains(res.stdout, "a_test.go") {
+			t.Fatalf("human output must not list the deleted test: exit=%d stdout=%q", res.exit, res.stdout)
+		}
 	})
 
 	t.Run("unindexed project is a not_indexed envelope", func(t *testing.T) {
