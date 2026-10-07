@@ -174,7 +174,7 @@ func init() {
 	reviewCmd.Flags().Bool("staged", false, "review only staged changes (the git index) instead of the whole working tree")
 	reviewCmd.Flags().String("fail-on-risk", "", "after printing the normal report, exit 6 if the aggregate risk level is at or above this threshold (low|medium|high); 'unknown' never trips it")
 	reviewCmd.Flags().Bool("fail-on-untested", false, "after printing the normal report, exit 6 if any changed symbol has no covering test")
-	reviewCmd.Flags().Bool("fail-on-uncovered", false, "after printing the normal report, exit 6 only when coverage.verdict is uncovered or partial with known-uncovered symbols; unknown coverage (unresolved call graph) never trips it")
+	reviewCmd.Flags().Bool("fail-on-uncovered", false, "after printing the normal report, exit 6 only when coverage.verdict is uncovered or partial with known-uncovered symbols; unknown coverage of a complete analysis never trips it, but an incomplete indexed analysis fails closed")
 	affectedCmd.Flags().Bool("stdin", false, "read newline-separated changed paths from stdin (e.g. git diff --name-only)")
 	affectedCmd.Flags().String("since", "", "use the files changed since this git ref (committed + uncommitted)")
 	affectedCmd.Flags().Bool("staged", false, "use only the staged changes (the git index)")

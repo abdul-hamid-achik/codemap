@@ -508,16 +508,19 @@ first-class exit code instead:
   when `coverage.verdict` is `uncovered`, or `partial` with at least one known-uncovered
   symbol. It never trips on `unknown` coverage (an unresolved call graph with no test link)
   or on a `partial` made only of covered and unknown symbols — the honesty rule — so unlike
-  `--fail-on-untested` it is usable on polyglot diffs. It does not fail closed on an
-  incomplete analysis; pair it with `--fail-on-risk`/`--fail-on-untested` if you want that.
-  `--fail-on-untested` itself is unchanged. `review` only; the report's
-  `gate.would_fail_on.uncovered` reproduces it from the JSON.
+  `--fail-on-untested` it is usable on polyglot diffs. Like the other review gates it
+  fails closed (exit **6**) on an indexed Git review with `analysis_complete:false` —
+  truncated at the 200-symbol cap, partial errors, or a stale index — since a subset
+  proves nothing about the whole diff; genuine `unknown` coverage of a *complete*
+  analysis still passes. `--fail-on-untested` itself is unchanged. `review` only; the
+  report's `gate.would_fail_on.uncovered` reproduces the coverage condition from the JSON
+  (combine it with `gate.would_fail_on.incomplete_analysis`).
 
-For `review`, enabling **either** gate also requires a complete analysis. An
+For `review`, enabling **any** gate also requires a complete analysis. An
 indexed Git repository with `analysis_complete:false` exits **6** before policy
 comparison, even though its aggregate risk is honestly `unknown`; otherwise a
 stale or partially mapped diff could pass because the evidence needed to enforce
-the gate is missing. With both flags disabled, the same incomplete report remains
+the gate is missing. With all gate flags disabled, the same incomplete report remains
 reporting-only and exits `0`. Early graceful reports for a non-Git directory or a
 project with no indexed nodes (including `codemap init` without `codemap index`)
 also remain nonblocking and exit `0`.

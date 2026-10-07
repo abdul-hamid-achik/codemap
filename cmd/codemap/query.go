@@ -871,17 +871,22 @@ func reviewGateResult(rep *app.ReviewReport, hasFailOnRisk bool, threshold int, 
 }
 
 // uncoveredGateResult evaluates --fail-on-uncovered against an already-printed
-// ReviewReport. It trips (exit 6) only when coverage.verdict is uncovered or
-// partial and at least one changed symbol is known-uncovered. Unknown coverage
-// — an unresolved call graph with no name-based test link — never trips it, and
-// unlike --fail-on-untested it does not fail closed on an unresolved call graph
-// or an incomplete analysis: it answers one question, "is a changed symbol
-// provably missing a test?".
+// ReviewReport. On a complete analysis it trips (exit 6) only when
+// coverage.verdict is uncovered or partial and at least one changed symbol is
+// known-uncovered. Genuine unknown coverage of a complete analysis — an
+// unresolved call graph with no name-based test link — never trips it (the
+// honesty rule), and unlike --fail-on-untested it does not fail on an
+// unresolved call graph. Like --fail-on-untested and --fail-on-risk, though, it
+// fails closed on a finalized incomplete indexed review (truncated at the
+// symbol cap, partial errors, stale index): a successful subset says nothing
+// about the whole diff. Early non-repository/unindexed degradation stays
+// non-blocking.
 func uncoveredGateResult(rep *app.ReviewReport, enabled bool) error {
 	if !enabled || rep == nil {
 		return nil
 	}
-	if rep.ComputeGate().WouldFailOn.Uncovered {
+	gate := rep.ComputeGate()
+	if gate.WouldFailOn.IncompleteAnalysis || gate.WouldFailOn.Uncovered {
 		return errGate
 	}
 	return nil

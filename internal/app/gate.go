@@ -60,7 +60,8 @@ type ReviewGate struct {
 // ReviewGateWouldFail breaks down the conditions that trip a review gate.
 type ReviewGateWouldFail struct {
 	// IncompleteAnalysis: an indexed repo review that isn't complete fails
-	// closed when ANY review gate is enabled.
+	// closed when ANY review gate (--fail-on-risk, --fail-on-untested,
+	// --fail-on-uncovered) is enabled.
 	IncompleteAnalysis bool `json:"incomplete_analysis"`
 	// Untested: --fail-on-untested would trip (untested symbols present, or
 	// test coverage unresolved on a non-empty diff).
@@ -68,7 +69,8 @@ type ReviewGateWouldFail struct {
 	// Uncovered: --fail-on-uncovered would trip — coverage.verdict is uncovered
 	// or partial AND at least one changed symbol is known-uncovered. Never trips
 	// on unknown coverage (the honesty rule), and unlike Untested it does not
-	// fail on an unresolved call graph.
+	// fail on an unresolved call graph. An incomplete analysis is reported by
+	// IncompleteAnalysis, which --fail-on-uncovered also honours.
 	Uncovered bool `json:"uncovered"`
 	// RiskAtOrAbove: --fail-on-risk would trip at each threshold.
 	RiskAtOrAbove RiskThresholds `json:"risk_at_or_above"`

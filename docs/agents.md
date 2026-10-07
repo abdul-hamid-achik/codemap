@@ -179,7 +179,8 @@ calibrate its confidence:
   diff counts toward `coverage` (only) for the uniquely named symbols its code references, even
   before reindexing; `untested_symbols` and `risk` are unaffected. `unknown` means no
   test link and no usable call graph — never read it as "untested". CLI
-  `--fail-on-uncovered` trips only on `uncovered`/`partial` with known-uncovered symbols.
+  `--fail-on-uncovered` trips only on `uncovered`/`partial` with known-uncovered symbols (and, like
+  the other review gates, fails closed on an incomplete indexed analysis).
 - **`*_total`** — true counts behind a capped list, so you know when to drill with
   `codemap_callers`/`impact` for the full set.
 

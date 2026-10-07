@@ -505,8 +505,9 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   no covered → `uncovered`; no uncovered and no unknown → `covered`; otherwise `partial`. The risk band
   semantics and `--fail-on-untested` are unchanged. `review --fail-on-uncovered` (exit 6) trips only when
   `coverage.UncoveredGateTrips()` (verdict `uncovered`/`partial` with `uncovered_symbols > 0`), never on
-  `unknown` — the honesty rule — and does not fail closed on incomplete analysis;
-  `gate.would_fail_on.uncovered` mirrors it. Schema additions are optional (`coverage`, node
+  `unknown` of a complete analysis — the honesty rule — but, like the other review gates, fails closed
+  (exit 6) on an indexed Git review with `analysis_complete:false` (`uncoveredGateResult`);
+  `gate.would_fail_on.uncovered` mirrors only the coverage condition (pair it with `incomplete_analysis`). Schema additions are optional (`coverage`, node
   `confidence`, `would_fail_on.uncovered`); the golden fixture is regenerated with
   `go test ./internal/app -run TestReviewContractV1 -update-review-contract`.
   `explore` and `traverse` likewise emit `schema_version: 1`; `explore` caps intent seeds and each
