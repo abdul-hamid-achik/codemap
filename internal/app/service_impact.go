@@ -53,6 +53,8 @@ type ImpactReport struct {
 	// post-edit one.
 	TestCommands []string     `json:"test_commands,omitempty"`
 	Next         []NextAction `json:"next,omitempty"`
+	// Budget is present only when max_tokens was requested (see budget.go).
+	Budget *TokenBudget `json:"budget,omitempty"`
 }
 
 // ImpactItemError is an item-level failure in a raw-position impact batch. It

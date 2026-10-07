@@ -506,6 +506,10 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	defer func() { _ = sess.Close() }()
 	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
+	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
+	if err := app.ValidateMaxTokens(maxTokens); err != nil {
+		return err
+	}
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
@@ -542,6 +546,9 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := app.ApplyImpactBatchBudget(rep, maxTokens); err != nil {
+			return err
+		}
 		return renderImpactBatch(cmd, rep)
 	}
 	ats, _ := cmd.Flags().GetStringArray("at")
@@ -555,7 +562,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	}
 	batch, _ := cmd.Flags().GetBool("batch")
 	if len(positions) > 1 || batch {
-		return runImpactBatch(cmd, svc, cwd, positions, depth)
+		return runImpactBatch(cmd, svc, cwd, positions, depth, maxTokens)
 	}
 	var selector *app.SymbolSelector
 	if len(positions) == 1 {
@@ -581,6 +588,9 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		rep, err = svc.Impact(cwd, symbol, depth)
 	}
 	if err != nil {
+		return err
+	}
+	if err := app.ApplyImpactBudget(rep, maxTokens); err != nil {
 		return err
 	}
 	if !rep.Found {
@@ -642,9 +652,12 @@ func runImpact(cmd *cobra.Command, args []string) error {
 
 // runImpactBatch resolves impact for several --at positions in one call,
 // printing the ImpactBatchReport JSON or a human summary.
-func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, positions []app.FilePosition, depth int) error {
+func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, positions []app.FilePosition, depth, maxTokens int) error {
 	rep, err := svc.ImpactPositions(cwd, positions, depth)
 	if err != nil {
+		return err
+	}
+	if err := app.ApplyImpactBatchBudget(rep, maxTokens); err != nil {
 		return err
 	}
 	return renderImpactBatch(cmd, rep)
