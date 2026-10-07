@@ -200,6 +200,21 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **Opt-in parallel `--precise`** — `index.precise_servers` / `CODEMAP_PRECISE_SERVERS` (default 1)
+  forks extra language-server processes that take whole projects (nearest `tsconfig.json`/
+  `jsconfig.json`/`package.json`/`pyproject.toml`) from a shared largest-first queue; an oversized
+  single project is split into fair-share chunks, and a failed fork just means fewer processes. On a
+  1,100-file single project, 2 processes cut the pass from 10.2 s to 7.5 s with an identical graph; on
+  a many-project monorepo each process reloads shared dependencies and there is no gain, hence opt-in.
+
+- **Fewer `--precise` coverage gaps on TS/JS** — the server is handed tree-sitter's emulation of its
+  own documentSymbol tree (one request less per file, no empty-answer race); a declaration whose
+  selection starts at a modifier (`private constructor(`, `export default function`) retries
+  callHierarchy at its name; a call into a nested local closure lands on the indexed callable that
+  contains it instead of failing the whole file; and nodes sharing a start line resolve to the
+  outermost declaration. The tsserver restart budget now resets every run, so a long-lived daemon
+  keeps recovering.
+
 - **`--precise` works on large polyglot monorepos** — on a 4,500-file repo it previously covered 6 of
   3,163 TS/JS files and loaded no Go at all:
   - Go: a repo whose modules live in subdirectories (no root `go.mod`) now loads every module, and

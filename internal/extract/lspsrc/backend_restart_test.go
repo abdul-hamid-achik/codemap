@@ -2,6 +2,8 @@ package lspsrc
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -81,5 +83,124 @@ func TestCallEdgesGivesUpAfterRestartBudget(t *testing.T) {
 	}
 	if down, _ := e.Degraded(); !down {
 		t.Fatal("a dead backend must read as degraded")
+	}
+}
+
+// countingClient records documentSymbol requests.
+type countingClient struct {
+	stubLanguageClient
+	docSymbolCalls int
+}
+
+func (c *countingClient) DocumentSymbols(ctx context.Context, uri string) ([]lsp.DocumentSymbol, error) {
+	c.docSymbolCalls++
+	return c.stubLanguageClient.DocumentSymbols(ctx, uri)
+}
+
+func TestCallEdgesWithSymbolsSkipsDocumentSymbol(t *testing.T) {
+	stub := callableStub()
+	known := stub.syms
+	stub.syms = nil // the server would answer empty — it must not be asked
+	c := &countingClient{stubLanguageClient: stub}
+	e := &Extractor{ctx: context.Background(), lang: "typescript", langID: "typescript", root: t.TempDir(), client: c, health: &serverHealth{}}
+
+	if _, err := e.CallEdgesWithSymbols(context.Background(), "a.ts", known); err != nil {
+		t.Fatal(err)
+	}
+	if c.docSymbolCalls != 0 || len(c.prepared) != 1 {
+		t.Fatalf("documentSymbol calls = %d, prepares = %d; want 0 and 1", c.docSymbolCalls, len(c.prepared))
+	}
+
+	edges, err := e.CallEdgesWithSymbols(context.Background(), "b.ts", []lsp.DocumentSymbol{})
+	if err != nil || edges != nil || c.docSymbolCalls != 0 {
+		t.Fatalf("empty known tree = %v, %v (docSymbol calls %d); want a complete empty answer", edges, err, c.docSymbolCalls)
+	}
+
+	if _, err := e.CallEdgesWithSymbols(context.Background(), "c.ts", nil); err == nil || c.docSymbolCalls == 0 {
+		t.Fatalf("a nil tree must ask the server (and its empty answer stays an error): err=%v calls=%d", err, c.docSymbolCalls)
+	}
+}
+
+func TestNamePositionSkipsModifiers(t *testing.T) {
+	lines := []string{"class A {", "  private constructor(x: number) {}", "}"}
+	s := lsp.DocumentSymbol{Name: "constructor", SelectionRange: lsp.Range{Start: lsp.Position{Line: 1, Character: 2}}}
+	if pos, ok := namePosition(lines, s); !ok || pos.Character != 10 || pos.Line != 1 {
+		t.Fatalf("namePosition = %+v %v, want line 1 col 10", pos, ok)
+	}
+	s.SelectionRange.Start.Character = 10
+	if _, ok := namePosition(lines, s); ok {
+		t.Fatal("a selection already on the name needs no retry")
+	}
+	if _, ok := namePosition(nil, s); ok {
+		t.Fatal("no source, no retry")
+	}
+}
+
+func TestPrepareRetriesAtNameColumn(t *testing.T) {
+	stub := stubLanguageClient{
+		documentSymbols: true, callHierarchy: true,
+		prepareFn: func(pos lsp.Position) ([]lsp.CallHierarchyItem, error) {
+			if pos.Character == 10 {
+				return []lsp.CallHierarchyItem{{Name: "constructor"}}, nil
+			}
+			return nil, nil
+		},
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.ts"), []byte("class A {\n  private constructor() {}\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := &Extractor{ctx: context.Background(), lang: "typescript", langID: "typescript", root: root, client: &stub, health: &serverHealth{}}
+	known := []lsp.DocumentSymbol{{Name: "A", Kind: lsp.SymbolClass, Range: lsp.Range{End: lsp.Position{Line: 2}},
+		Children: []lsp.DocumentSymbol{{Name: "constructor", Kind: lsp.SymbolConstructor,
+			Range: lsp.Range{Start: lsp.Position{Line: 1, Character: 2}, End: lsp.Position{Line: 1, Character: 26}}, SelectionRange: lsp.Range{Start: lsp.Position{Line: 1, Character: 2}}}}}}
+	if _, err := e.CallEdgesWithSymbols(context.Background(), "a.ts", known); err != nil {
+		t.Fatalf("constructor selected at its modifier must prepare at its name: %v", err)
+	}
+}
+
+func TestPropertyArrowNoItemIsCoveredOnlyUnderAPreparedAncestor(t *testing.T) {
+	src := "function outer() {\n  const api = {\n    getLogger: () => log(),\n  };\n}\nconst top = {\n  up: async function () {},\n};\n"
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stub := stubLanguageClient{
+		documentSymbols: true, callHierarchy: true,
+		prepareFn: func(pos lsp.Position) ([]lsp.CallHierarchyItem, error) {
+			if pos.Line == 0 {
+				return []lsp.CallHierarchyItem{{Name: "outer"}}, nil
+			}
+			return nil, nil // property assignments are never call-hierarchy declarations
+		},
+	}
+	e := &Extractor{ctx: context.Background(), lang: "typescript", langID: "typescript", root: root, client: &stub, health: &serverHealth{}}
+	sel := func(line, col int) lsp.Range { return lsp.Range{Start: lsp.Position{Line: line, Character: col}} }
+	getLogger := lsp.DocumentSymbol{Name: "getLogger", Kind: lsp.SymbolMethod, Range: sel(2, 4), SelectionRange: sel(2, 4)}
+	inner := []lsp.DocumentSymbol{{Name: "outer", Kind: lsp.SymbolFunction, Range: lsp.Range{End: lsp.Position{Line: 4}}, SelectionRange: sel(0, 9),
+		Children: []lsp.DocumentSymbol{{Name: "api", Kind: lsp.SymbolVariable, Range: sel(1, 8), SelectionRange: sel(1, 8), Children: []lsp.DocumentSymbol{getLogger}}}}}
+	if _, err := e.CallEdgesWithSymbols(context.Background(), "a.ts", inner); err != nil {
+		t.Fatalf("a property arrow inside a prepared function is covered by it: %v", err)
+	}
+
+	up := lsp.DocumentSymbol{Name: "up", Kind: lsp.SymbolMethod, Range: sel(6, 2), SelectionRange: sel(6, 2)}
+	module := []lsp.DocumentSymbol{{Name: "top", Kind: lsp.SymbolVariable, Range: sel(5, 6), SelectionRange: sel(5, 6), Children: []lsp.DocumentSymbol{up}}}
+	if _, err := e.CallEdgesWithSymbols(context.Background(), "a.ts", module); err == nil {
+		t.Fatal("a module-level property function has no prepared ancestor: it must stay a coverage gap")
+	}
+}
+
+func TestIsPropertyAssignment(t *testing.T) {
+	lines := []string{`  getLogger: () => x,`, `  handler?: () => void;`, `  "quoted": function () {},`, `  up() {}`, `  const f = () => 1`}
+	cases := []struct {
+		line int
+		name string
+		want bool
+	}{{0, "getLogger", true}, {1, "handler", true}, {2, "quoted", true}, {3, "up", false}, {4, "f", false}}
+	for _, c := range cases {
+		s := lsp.DocumentSymbol{Name: c.name, SelectionRange: lsp.Range{Start: lsp.Position{Line: c.line, Character: 2}}}
+		if got := isPropertyAssignment(lines, s); got != c.want {
+			t.Errorf("isPropertyAssignment(%q) = %v, want %v", lines[c.line], got, c.want)
+		}
 	}
 }

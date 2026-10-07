@@ -458,8 +458,14 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   precise edges join their caller by declaration position, never by FQN alone. For the LSP languages,
   `lsp.Client` raises tsserver's heap (`maxTsServerMemory`), detects tsserver's death from
   typescript-language-server's logMessage (`Client.Crashed`) and `Restart`s in place (bounded by
-  `lspsrc.maxBackendRestarts`), retrying the file; callHierarchy targets join on range start and
-  selection (name) line.
+  `lspsrc.maxBackendRestarts`, reset per run), retrying the file; callHierarchy targets join on range
+  start and selection (name) line, a nested local closure joins its enclosing callable, and an
+  object-literal property arrow under a prepared ancestor is not a gap. In tree-sitter mode
+  `sittersrc.Hybrid` hands the server tree-sitter's documentSymbol tree (`CallEdgesWithSymbols`), and
+  `index/precise_pool.go` forks extra server processes (`Hybrid.ForkServer`/`Share`;
+  `index.precise_servers`, opt-in, default 1 — project reloads per process erased the gain on a
+  many-project monorepo) that drain a shared largest-first queue of projects
+  (nearest tsconfig/jsconfig/package.json/pyproject).
   `callers`/`callees --precise` (`precise:true` in MCP) remains the per-query language-server path for a one-off without
   reindexing.
 - **Stable machine contract**: every impact/callers/callees/references/review/context/hotspots/orphans/path/map/traverse report carries a

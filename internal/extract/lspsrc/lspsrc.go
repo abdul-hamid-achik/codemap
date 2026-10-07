@@ -137,6 +137,7 @@ type Extractor struct {
 	langID string // LSP languageId (e.g. "typescript")
 	root   string // project root, to resolve a relative path to a file:// URI
 	cmd    string // server binary that backs this extractor, for degradation reporting
+	args   []string
 	client languageClient
 	health *serverHealth // shared with every Bind()'d extractor on the same connection
 	shared bool          // true for a Bind()'d extractor sharing another's server; it must not close it
@@ -182,7 +183,7 @@ func New(ctx context.Context, lang, langID, root, command string, args ...string
 		_ = client.Close()
 		return nil, fmt.Errorf("%s does not advertise textDocument/documentSymbol", command)
 	}
-	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, cmd: command, client: client, health: &serverHealth{}}, nil
+	return &Extractor{ctx: ctx, lang: lang, langID: langID, root: root, cmd: command, args: args, client: client, health: &serverHealth{}}, nil
 }
 
 // wrapExtractErr turns the bare context-deadline error a stalled language server
@@ -216,7 +217,7 @@ func lspLanguageID(relPath, fallback string) string {
 // (from New) shuts the server down, so Close on a bound extractor is a no-op.
 // It shares the parse-wait breaker too — see serverHealth.
 func (e *Extractor) Bind(lang, langID string) *Extractor {
-	return &Extractor{ctx: e.ctx, lang: lang, langID: langID, root: e.root, cmd: e.cmd, client: e.client, health: e.health, budget: e.budget, shared: true}
+	return &Extractor{ctx: e.ctx, lang: lang, langID: langID, root: e.root, cmd: e.cmd, args: e.args, client: e.client, health: e.health, budget: e.budget, shared: true}
 }
 
 // Degraded reports whether this extractor's language server stopped answering
@@ -249,6 +250,13 @@ func (e *Extractor) BackendRestarts() (int, string) {
 	return 0, e.cmd
 }
 
+// ResetBackendRestarts starts a fresh restart budget for this run.
+func (e *Extractor) ResetBackendRestarts() {
+	if r, ok := e.client.(interface{ ResetRestarts() }); ok {
+		r.ResetRestarts()
+	}
+}
+
 // maxBackendRestarts bounds how often one index run respawns a server whose
 // backend died. tsserver keeps every project it has loaded in memory, so on a
 // monorepo it can run out of heap again later in the run; each restart costs a
@@ -278,6 +286,25 @@ func (e *Extractor) crashErr() error {
 	_, msg := e.BackendCrash()
 	return fmt.Errorf("%s language server backend exited (%s); file skipped", e.lang, msg)
 }
+
+// Fork spawns a fresh process of the same server, initialized at the same
+// root, as a new owner extractor for e's language — the --precise pass runs
+// several in parallel, each over its own files. The caller closes it.
+func (e *Extractor) Fork(ctx context.Context) (*Extractor, error) {
+	if e.cmd == "" {
+		return nil, fmt.Errorf("%s extractor has no server command to fork", e.lang)
+	}
+	return New(ctx, e.lang, e.langID, e.root, e.cmd, e.args...)
+}
+
+// ServerID identifies the server process (shared by Bind()'d extractors).
+func (e *Extractor) ServerID() string { return fmt.Sprintf("%p", e.health) }
+
+// LangID is the LSP languageId this extractor opens documents with.
+func (e *Extractor) LangID() string { return e.langID }
+
+// Root is the project root the server was initialized at.
+func (e *Extractor) Root() string { return e.root }
 
 // Language implements the extractor contract.
 func (e *Extractor) Language() string { return e.lang }
@@ -411,20 +438,29 @@ func FromDocumentSymbols(lang, relPath string, src []byte, syms []lsp.DocumentSy
 // Re-opens the file when it exists on disk (DidOpen buffers from extract
 // are closed, so callHierarchy cannot assume the document is still open).
 func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
+	return e.CallEdgesWithSymbols(ctx, relPath, nil)
+}
+
+// CallEdgesWithSymbols is CallEdges over a documentSymbol tree the caller
+// already has — the tree-sitter emulation of this server's own answer — so
+// the server is asked only for callHierarchy. A nil tree asks the server for
+// documentSymbol as CallEdges does; a non-nil empty tree means the file has
+// no callable to resolve, which is a complete (empty) answer.
+func (e *Extractor) CallEdgesWithSymbols(ctx context.Context, relPath string, known []lsp.DocumentSymbol) ([]extract.CallEdge, error) {
 	if !e.client.SupportsCallHierarchy() {
 		return nil, fmt.Errorf("%s language server does not advertise callHierarchy", e.lang)
 	}
 	if down, _ := e.BackendCrash(); down && !e.restartBackend() {
 		return nil, e.crashErr()
 	}
-	edges, err := e.callEdgesOnce(ctx, relPath)
+	edges, err := e.callEdgesOnce(ctx, relPath, known)
 	if down, _ := e.BackendCrash(); down {
 		// The backend died while answering this file (its project is often the
 		// one that ran it out of memory): retry once on a fresh process.
 		if !e.restartBackend() {
 			return nil, e.crashErr()
 		}
-		edges, err = e.callEdgesOnce(ctx, relPath)
+		edges, err = e.callEdgesOnce(ctx, relPath, known)
 		if down, _ := e.BackendCrash(); down {
 			return nil, e.crashErr()
 		}
@@ -432,26 +468,31 @@ func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.Ca
 	return edges, err
 }
 
-func (e *Extractor) callEdgesOnce(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
+func (e *Extractor) callEdgesOnce(ctx context.Context, relPath string, known []lsp.DocumentSymbol) ([]extract.CallEdge, error) {
 	abs := filepath.Join(e.root, relPath)
 	uri, _ := lsp.URI(abs)
-	var syms []lsp.DocumentSymbol
+	syms := known
 	var err error
+	var lines []string
 	if src, rerr := os.ReadFile(abs); rerr == nil {
+		lines = strings.Split(string(src), "\n")
 		if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
 			return nil, err
 		}
 		defer func() { _ = e.client.DidClose(uri) }()
-		// A freshly opened file can answer empty while the server is still
-		// loading its project — the same race ExtractFile waits out. With
-		// tree-sitter doing extraction, the precise pass is the server's very
-		// first contact with every file, so it must wait too.
-		syms, err = e.documentSymbolsParsed(uri, src)
-	} else {
+		if known == nil {
+			// A freshly opened file can answer empty while the server is still
+			// loading its project — the same race ExtractFile waits out.
+			syms, err = e.documentSymbolsParsed(uri, src)
+		}
+	} else if known == nil {
 		syms, err = e.client.DocumentSymbols(ctx, uri)
 	}
 	if err != nil {
 		return nil, err
+	}
+	if known != nil && len(known) == 0 {
+		return nil, nil // nothing callable: complete, with no edges
 	}
 	if len(syms) == 0 {
 		if down, _ := e.BackendCrash(); down {
@@ -464,13 +505,16 @@ func (e *Extractor) callEdgesOnce(ctx context.Context, relPath string) ([]extrac
 		return nil, fmt.Errorf("%s documentSymbol returned no symbols for %s", e.lang, relPath)
 	}
 	var out []extract.CallEdge
-	if err := e.walkCallEdges(ctx, uri, relPath, "", false, syms, &out); err != nil {
+	if err := e.walkCallEdges(ctx, uri, relPath, "", false, false, syms, lines, &out); err != nil {
 		return nil, wrapExtractErr(e.lang, relPath, err)
 	}
 	return out, nil
 }
 
-func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN string, insideCallable bool, syms []lsp.DocumentSymbol, out *[]extract.CallEdge) error {
+// covered is true when an ancestor's call-hierarchy item was prepared: its
+// outgoing calls include every call in its body that no nested valid
+// declaration claims (TypeScript's collectCallSites stops only at those).
+func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN string, insideCallable, covered bool, syms []lsp.DocumentSymbol, lines []string, out *[]extract.CallEdge) error {
 	for _, s := range syms {
 		class := classifyIndexedSymbol(s, insideCallable, relPath)
 		fqn := parentFQN
@@ -479,8 +523,26 @@ func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN s
 		}
 		if class.callable {
 			items, err := e.client.PrepareCallHierarchy(ctx, uri, s.SelectionRange.Start)
+			if err == nil && len(items) == 0 {
+				// tsserver's selection for a modified declaration starts at the
+				// modifier (`private constructor(`, `export default function`),
+				// where prepareCallHierarchy finds nothing; the name itself works.
+				if pos, ok := namePosition(lines, s); ok {
+					items, err = e.client.PrepareCallHierarchy(ctx, uri, pos)
+				}
+			}
 			if err != nil {
 				return fmt.Errorf("prepare call hierarchy for %s: %w", fqn, err)
+			}
+			if len(items) == 0 && covered && isPropertyAssignment(lines, s) {
+				// `name: () => …` / `name: function () {…}` in an object literal
+				// is never a call-hierarchy declaration: its calls are already in
+				// the prepared ancestor's outgoing calls. Not a coverage gap.
+				childInside := true
+				if err := e.walkCallEdges(ctx, uri, relPath, fqn, childInside, covered, s.Children, lines, out); err != nil {
+					return err
+				}
+				continue
 			}
 			if len(items) == 0 {
 				// A leaf callable still has a call-hierarchy item and zero outgoing
@@ -507,7 +569,7 @@ func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN s
 			}
 		}
 		childInside := insideCallable || class.anonymous || class.callable
-		if err := e.walkCallEdges(ctx, uri, relPath, fqn, childInside, s.Children, out); err != nil {
+		if err := e.walkCallEdges(ctx, uri, relPath, fqn, childInside, covered || class.callable, s.Children, lines, out); err != nil {
 			return err
 		}
 	}
@@ -768,4 +830,46 @@ func extractDocstring(lines []string, startLine int, lang string) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.Join(comments, " "))
+}
+
+// namePosition finds the symbol's own name on its selection line at or after
+// the selection start — a retry position when the selection begins at a
+// modifier. ok is false when the name is not there or is already the start.
+func namePosition(lines []string, s lsp.DocumentSymbol) (lsp.Position, bool) {
+	line := s.SelectionRange.Start.Line
+	if s.Name == "" || line < 0 || line >= len(lines) {
+		return lsp.Position{}, false
+	}
+	text := lines[line]
+	from := s.SelectionRange.Start.Character
+	if from < 0 || from > len(text) {
+		return lsp.Position{}, false
+	}
+	i := strings.Index(text[from:], s.Name)
+	if i <= 0 {
+		return lsp.Position{}, false
+	}
+	return lsp.Position{Line: line, Character: from + i}, true
+}
+
+// isPropertyAssignment reports whether the symbol is declared as an object
+// literal property assignment (`name: value`, optionally `name?:`) — read from
+// the source right after its name on the selection line.
+func isPropertyAssignment(lines []string, s lsp.DocumentSymbol) bool {
+	line := s.SelectionRange.Start.Line
+	if s.Name == "" || line < 0 || line >= len(lines) {
+		return false
+	}
+	text := lines[line]
+	from := s.SelectionRange.Start.Character
+	if from < 0 || from > len(text) {
+		return false
+	}
+	i := strings.Index(text[from:], s.Name)
+	if i < 0 {
+		return false
+	}
+	rest := strings.TrimLeft(text[from+i+len(s.Name):], " \t?")
+	rest = strings.TrimLeft(strings.TrimPrefix(rest, `"`), " \t") // "quoted-key": …
+	return strings.HasPrefix(rest, ":")
 }
