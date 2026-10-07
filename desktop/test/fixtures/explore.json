@@ -237,5 +237,73 @@
     }
    ]
   }
+ ],
+ "processes": [
+  {
+   "id": "cli_command:impact",
+   "kind": "cli_command",
+   "name": "impact",
+   "entry": {
+    "file": "cmd/codemap/query.go",
+    "start_line": 501,
+    "fqn": "main.runImpact",
+    "kind": "function"
+   },
+   "matched_seeds": [
+    "app.Service.Impact"
+   ],
+   "steps": [
+    {
+     "symbol": "runImpact",
+     "fqn": "main.runImpact",
+     "kind": "function",
+     "file": "cmd/codemap/query.go",
+     "start_line": 501,
+     "depth": 0
+    },
+    {
+     "symbol": "Impact",
+     "fqn": "app.Service.Impact",
+     "kind": "method",
+     "file": "internal/app/service_impact.go",
+     "start_line": 69,
+     "depth": 1
+    }
+   ],
+   "call_graph": "name"
+  },
+  {
+   "id": "cli_command:review",
+   "kind": "cli_command",
+   "name": "review",
+   "entry": {
+    "file": "cmd/codemap/query.go",
+    "start_line": 690,
+    "fqn": "main.runReview",
+    "kind": "function"
+   },
+   "matched_seeds": [
+    "app.Service.Review"
+   ],
+   "steps": [
+    {
+     "symbol": "runReview",
+     "fqn": "main.runReview",
+     "kind": "function",
+     "file": "cmd/codemap/query.go",
+     "start_line": 690,
+     "depth": 0
+    },
+    {
+     "symbol": "Review",
+     "fqn": "app.Service.Review",
+     "kind": "method",
+     "file": "internal/app/review.go",
+     "start_line": 123,
+     "depth": 1
+    }
+   ],
+   "call_graph": "name"
+  }
  ]
 }

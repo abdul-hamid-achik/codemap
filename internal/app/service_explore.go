@@ -24,6 +24,9 @@ type ExploreOptions struct {
 	Edges     int
 	Depth     int
 	MaxTokens int // approximate token budget for the JSON result; 0 = none (see budget.go)
+	// Processes bounds the entry-point processes attached to the report (0 = the
+	// default of 3, negative = skip them).
+	Processes int
 }
 
 // ExploreSeed is one semantic/name match promoted to a durable structural
@@ -48,6 +51,7 @@ type ExploreReport struct {
 	Note          string                `json:"note,omitempty"`
 	Seeds         []ExploreSeed         `json:"seeds"`
 	Contexts      []*ContextReport      `json:"contexts"`
+	Processes     []ExploreProcess      `json:"processes"` // entrypoint flows whose steps contain a joined seed; empty without entrypoints
 	NotJoined     int                   `json:"not_joined,omitempty"`
 	PartialErrors []ContextPartialError `json:"partial_errors,omitempty"`
 	Budget        *TokenBudget          `json:"budget,omitempty"` // present only when max_tokens was requested
@@ -87,6 +91,7 @@ func (svc *Service) explore(ctx context.Context, cwd, query string, opts Explore
 		Indexed:       indexed,
 		Seeds:         []ExploreSeed{},
 		Contexts:      []*ContextReport{},
+		Processes:     []ExploreProcess{},
 	}
 	if !indexed {
 		return rep, nil
@@ -167,6 +172,17 @@ func (svc *Service) explore(ctx context.Context, cwd, query string, opts Explore
 			rep.PartialErrors = append(rep.PartialErrors, batch.PartialErrors...)
 		}
 	}
+	if opts.Processes > 0 && len(selectors) > 0 {
+		procs, procErr := svc.exploreProcesses(ctx, cwd, rep.Seeds, opts.Processes)
+		if procErr != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			rep.PartialErrors = append(rep.PartialErrors, ContextPartialError{Component: "processes", Error: boundedErrorText(procErr)})
+		} else if len(procs) > 0 {
+			rep.Processes = procs
+		}
+	}
 	return rep, nil
 }
 
@@ -232,6 +248,12 @@ func normalizeExploreOptions(opts ExploreOptions) (ExploreOptions, error) {
 	}
 	if opts.Depth < 1 || opts.Depth > 10 {
 		return opts, fmt.Errorf("explore depth must be between 1 and 10")
+	}
+	if opts.Processes == 0 {
+		opts.Processes = DefaultExploreProcesses
+	}
+	if opts.Processes > MaxExploreProcesses {
+		return opts, fmt.Errorf("explore processes must be at most %d", MaxExploreProcesses)
 	}
 	return opts, nil
 }

@@ -41,6 +41,20 @@ releases page is the authoritative history.
   on `unknown`; `--fail-on-untested` is unchanged. `gate.would_fail_on.uncovered` mirrors it in the
   report. `schemas/codemap.review.v1.schema.json` gains the optional `coverage`, node `confidence`,
   and `uncovered` properties (additive within v1).
+- **`codemap processes` / `codemap_processes`** — execution flows from every entry point
+  (full MCP profile; desktop Studio panel). For each `features` entry with a resolved handler
+  (CLI command, HTTP route, MCP/RPC tool, page, program) it runs the `flow` builder (same-name
+  ambiguity collapse included) and returns `{id, kind, name, entry selector, steps[{symbol, fqn,
+  kind, file, start_line, depth}], files, truncated, call_graph}`, so "how does signup work" is
+  answered with the route, handler, and service chain in one call. Computed on demand — no
+  schema or stored data — and bounded by `--top` (50), `--depth` (4), and `--max-steps` (40).
+  `--query` keeps processes whose name or steps match the query's content words, using the
+  lexical search floor's tokenization. The full MCP profile grows to 49 tools.
+- **`explore` / `task-context` group seeds by process** — the explore report gains an additive
+  `processes` field (up to 3): entry flows whose steps contain a joined seed, each with
+  `matched_seeds` and the call-order path from the entry to them (capped at 8 steps). Only
+  entrypoints whose handler can reach a seed within the process depth are built; the list is
+  empty when the project has no detected entry points.
 - **Lexical search floor for `explore` / `task-context` without embeddings** — a question such
   as `how does signup work` used to return `not_found` because name search requires every word
   in one symbol. When name search finds nothing or too little, a BM25 floor now drops

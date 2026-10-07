@@ -266,6 +266,7 @@ type flowBuilder struct {
 	ambiguousRefs int
 	rejectedCalls int
 	imports       map[string]flowImportInfo
+	ceiling       int // untrimmed-tree bound; flowBuildCeiling unless a caller needs a cheaper build
 }
 
 type flowFile struct {
@@ -279,6 +280,7 @@ func newFlowBuilder(root string, nodes []graph.Node, edges []graph.Edge, opts Fl
 		out: map[int64][]graph.Edge{}, opts: opts, maxDepth: opts.Depth,
 		files: map[string]*flowFile{}, visited: map[int64]*FlowStep{},
 		omittedTests: map[int64]bool{}, partialSeen: map[string]bool{}, imports: map[string]flowImportInfo{},
+		ceiling: flowBuildCeiling,
 	}
 	for _, n := range nodes {
 		b.nodes[n.ID] = n
@@ -289,6 +291,28 @@ func newFlowBuilder(root string, nodes []graph.Node, edges []graph.Edge, opts Fl
 		}
 	}
 	return b
+}
+
+// reset clears the per-tree state so one builder (its node/edge maps, file
+// cache and import cache are the expensive part) can build many trees.
+func (b *flowBuilder) reset(opts FlowOptions) {
+	b.opts, b.maxDepth = opts, opts.Depth
+	b.visited = map[int64]*FlowStep{}
+	b.total, b.depthCut, b.ceilingHit = 0, false, false
+	b.omittedTests = map[int64]bool{}
+	b.emitted, b.emittedNodes, b.trimmed = 0, nil, false
+	b.ambiguousRefs, b.rejectedCalls = 0, 0
+}
+
+// buildTree runs the tree pipeline for one entry node: build, trim to the node
+// budget, assign ids. It reports whether the node budget or the build ceiling
+// cut the tree.
+func (b *flowBuilder) buildTree(rootNode graph.Node) (root *FlowStep, truncated bool) {
+	root = b.rootStep(rootNode)
+	b.build(root)
+	truncated = b.trim(root)
+	b.finalize(root)
+	return root, truncated
 }
 
 // resolveSymbol maps a name or FQN to definitions, preferring callable kinds.
@@ -851,7 +875,7 @@ func (b *flowBuilder) expand(step *FlowStep, ancestors map[int64]bool) {
 		if ch.offset >= 0 {
 			order++
 		}
-		if b.total >= flowBuildCeiling {
+		if b.total >= b.ceiling {
 			b.ceilingHit = true
 			step.LeafReason = "max_nodes"
 			break
@@ -1040,7 +1064,7 @@ func (b *flowBuilder) notes(rep *FlowReport) []string {
 		notes = append(notes, fmt.Sprintf("tree trimmed to max_nodes=%d (%d steps before trimming); raise max_nodes or lower depth", rep.MaxNodes, rep.StepsTotal))
 	}
 	if b.ceilingHit {
-		notes = append(notes, fmt.Sprintf("tree construction stopped at %d steps; steps_total is a lower bound", flowBuildCeiling))
+		notes = append(notes, fmt.Sprintf("tree construction stopped at %d steps; steps_total is a lower bound", b.ceiling))
 	}
 	if rep.DepthTruncated {
 		notes = append(notes, fmt.Sprintf("steps at depth %d have callees that are not shown (leaf_reason \"depth\"); raise depth to see them", rep.MaxDepth))

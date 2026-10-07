@@ -377,6 +377,23 @@ export const FEATURES = [
     mcp: 'codemap_features',
   },
   {
+    id: 'processes',
+    group: 'search',
+    title: 'Processes',
+    blurb: 'Execution flows from every entry point: route or command, handler, then the service chain it reaches, in call order.',
+    cmd: ['processes'],
+    args: [
+      { kind: 'csv', flag: '--kind', name: 'kind', label: 'Kinds', placeholder: 'http_route,cli_command', hint: 'Only these entry kinds: program, cli_command, rpc_tool, http_route, api_route, page.' },
+      { kind: 'text', flag: '--query', name: 'query', label: 'Query', placeholder: 'how does signup work', hint: 'Keep processes whose name or steps match these content words.' },
+      TOP(50, 200),
+      { kind: 'num', flag: '--depth', name: 'depth', label: 'Depth', def: 4, min: 1, max: 8, hint: 'Maximum call depth per process.' },
+      { kind: 'num', flag: '--max-steps', name: 'max_steps', label: 'Max steps', def: 40, min: 1, max: 200, hint: 'Maximum steps per process.' },
+    ],
+    render: 'processes',
+    primary: 'query',
+    mcp: 'codemap_processes',
+  },
+  {
     id: 'flow',
     group: 'search',
     title: 'Call flow',

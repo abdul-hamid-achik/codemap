@@ -1,0 +1,168 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "indexed": true,
+ "processes": [
+  {
+   "id": "cli_command:review",
+   "kind": "cli_command",
+   "name": "review",
+   "entry": {
+    "file": "cmd/codemap/query.go",
+    "start_line": 690,
+    "fqn": "main.runReview",
+    "kind": "function"
+   },
+   "steps": [
+    {
+     "symbol": "runReview",
+     "fqn": "main.runReview",
+     "kind": "function",
+     "file": "cmd/codemap/query.go",
+     "start_line": 690,
+     "depth": 0
+    },
+    {
+     "symbol": "parseFailOnRiskFlag",
+     "fqn": "main.parseFailOnRiskFlag",
+     "kind": "function",
+     "file": "cmd/codemap/gate.go",
+     "start_line": 28,
+     "depth": 1
+    },
+    {
+     "symbol": "openSession",
+     "fqn": "main.openSession",
+     "kind": "function",
+     "file": "cmd/codemap/main.go",
+     "start_line": 297,
+     "depth": 1
+    },
+    {
+     "symbol": "NewService",
+     "fqn": "app.NewService",
+     "kind": "function",
+     "file": "internal/app/service_core.go",
+     "start_line": 39,
+     "depth": 1
+    },
+    {
+     "symbol": "Review",
+     "fqn": "app.Service.Review",
+     "kind": "method",
+     "file": "internal/app/review.go",
+     "start_line": 123,
+     "depth": 1
+    },
+    {
+     "symbol": "reviewGateResult",
+     "fqn": "main.reviewGateResult",
+     "kind": "function",
+     "file": "cmd/codemap/query.go",
+     "start_line": 814,
+     "depth": 1
+    }
+   ],
+   "steps_total": 143,
+   "files": [
+    "cmd/codemap/query.go",
+    "cmd/codemap/gate.go",
+    "cmd/codemap/main.go",
+    "internal/app/service_core.go",
+    "internal/app/review.go"
+   ],
+   "truncated": true,
+   "call_graph": "name"
+  },
+  {
+   "id": "rpc_tool:codemap_review",
+   "kind": "rpc_tool",
+   "name": "codemap_review",
+   "entry": {
+    "file": "internal/mcp/server.go",
+    "start_line": 1193,
+    "fqn": "mcp.Server.handleReview",
+    "kind": "method"
+   },
+   "steps": [
+    {
+     "symbol": "handleReview",
+     "fqn": "mcp.Server.handleReview",
+     "kind": "method",
+     "file": "internal/mcp/server.go",
+     "start_line": 1193,
+     "depth": 0
+    },
+    {
+     "symbol": "Review",
+     "fqn": "app.Service.Review",
+     "kind": "method",
+     "file": "internal/app/review.go",
+     "start_line": 123,
+     "depth": 1
+    },
+    {
+     "symbol": "resolveProject",
+     "fqn": "app.Service.resolveProject",
+     "kind": "method",
+     "file": "internal/app/service_core.go",
+     "start_line": 324,
+     "depth": 2
+    },
+    {
+     "symbol": "Indexed",
+     "fqn": "app.Service.Indexed",
+     "kind": "method",
+     "file": "internal/app/service_core.go",
+     "start_line": 306,
+     "depth": 2
+    },
+    {
+     "symbol": "ValidRef",
+     "fqn": "git.ValidRef",
+     "kind": "function",
+     "file": "internal/git/ref.go",
+     "start_line": 25,
+     "depth": 2
+    },
+    {
+     "symbol": "cwdOf",
+     "fqn": "mcp.cwdOf",
+     "kind": "function",
+     "file": "internal/mcp/server.go",
+     "start_line": 1598,
+     "depth": 1
+    },
+    {
+     "symbol": "result",
+     "fqn": "mcp.result",
+     "kind": "function",
+     "file": "internal/mcp/server.go",
+     "start_line": 1608,
+     "depth": 1
+    }
+   ],
+   "steps_total": 118,
+   "files": [
+    "internal/mcp/server.go",
+    "internal/app/review.go",
+    "internal/app/service_core.go",
+    "internal/git/ref.go"
+   ],
+   "truncated": true,
+   "call_graph": "name"
+  }
+ ],
+ "processes_total": 2,
+ "truncated": false,
+ "depth": 4,
+ "max_steps": 8,
+ "call_graph": "name",
+ "resolution": "name-based call graph: processes follow name-matched calls, with same-name callees collapsed by call-site syntax and proximity; ambiguous ones are not listed",
+ "stale": true,
+ "notes": [
+  "feature detection not implemented for gdscript (2 files)",
+  "11 entrypoint(s) without a resolved callable handler were skipped"
+ ],
+ "partial_errors": []
+}

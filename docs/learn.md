@@ -131,6 +131,41 @@ Defaults are `--depth 4` and `--max-nodes 120`. Tests are skipped unless you pas
 `--include-tests`. To go from a step to full detail, run
 `codemap context --at <file>:<line>` on it.
 
+### Every entry's flow at once: `processes`
+
+`flow` explains one handler. `processes` runs the same builder from every entry point
+that `features` found (a resolved handler is required) and returns each as an ordered
+list of steps. A question like "how does signup work" is then answered with the route,
+its handler, and the service chain behind it in one call.
+
+```bash
+codemap processes --top 10                      # one process per entry point
+codemap processes --kind http_route,cli_command # only these entry kinds
+codemap processes --query "signup"              # name or steps match the query's words
+codemap processes --depth 3 --max-steps 20      # tighter bounds
+```
+
+```text
+$ codemap processes --kind rpc_tool --query "task context" --top 1 --max-steps 7 --depth 3
+rpc_tool:codemap_task_context  [rpc_tool · 5 steps · 3 files (truncated)]
+  mcp.Server.handleTaskContext             internal/mcp/server.go:1297
+    mcp.Server.notIndexed                    internal/mcp/server.go:1581
+      app.Service.Indexed                      internal/app/service_core.go:306
+      mcp.cwdOf                                internal/mcp/server.go:1598
+    app.Service.TaskContext                  internal/app/service_task_context.go:189
+```
+
+Each process in `--json` has a stable `id` (`kind:name`, the feature id), the entry's
+`selector`, `steps` (`symbol`, `fqn`, `kind`, `file`, `start_line`, `depth`) in call
+order, the unique `files`, `truncated`, and its own `call_graph`. Ambiguous same-name
+placeholders and repeats are not listed as steps. Nothing is stored: processes are
+computed on demand from the graph and the registrations, bounded by `--top` (default 50,
+max 200), `--depth` (default 4, max 8), and `--max-steps` per process (default 40,
+max 200). `--query` uses the same content-word tokenization as the keyword search floor
+(question words such as "how does" are ignored), keeps processes that match at least one
+word anywhere in their name or steps, and ranks the best match first. Run `codemap flow`
+on a process's `entry` for the full annotated tree.
+
 ## 5. Find the entrypoints and hubs: `read-order` and `map`
 
 ```bash
@@ -168,7 +203,11 @@ codemap task-context "how are review gates enforced" --mode understand
 `explore` searches by meaning when embeddings exist (and by name otherwise), joins each hit
 to an exact definition, and returns a bounded neighbourhood of callers, callees,
 references, and tests without source bodies. `task-context --mode understand` wraps that
-with a freshness check in one call. Open one definition with
+with a freshness check in one call. When a seed sits inside an entry point's flow, the
+report also carries `processes` (up to 3): the route or command, its handler, and the
+chain down to the seed, so "how does signup work" shows a call chain and not just
+scattered symbols. The list is empty when the project has no detected entry points or no
+flow reaches a seed. Open one definition with
 `codemap context --at <file>:<line>` or `codemap source --at <file>:<line>`. See the
 [CLI reference](/cli#orientation) for every flag.
 
@@ -193,7 +232,8 @@ become more reliable. `codemap coverage` shows which files have exact edges.
 
 An agent runs the same sequence with the [MCP tools](/mcp):
 
-1. `codemap_features` (optionally with `kind` and `query`) to find the entry points.
+1. `codemap_features` (optionally with `kind` and `query`) to find the entry points, or
+   `codemap_processes` (full profile) for every entry's flow in one call.
 2. `codemap_flow` with the handler's `selector` from step 1 to get the call tree.
 3. `codemap_context` with a step's `selector` to read one definition, its callers,
    tests, and blast radius.

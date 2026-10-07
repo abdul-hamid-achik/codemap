@@ -25,7 +25,7 @@ import (
 )
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
-// (the default, back-compat) registers every tool (48). ProfileCore preserves
+// (the default, back-compat) registers every tool (49). ProfileCore preserves
 // the shipped lean 28-tool contract. ProfileAgent is a separately pinned
 // 28-tool contract containing exactly the tools named by the canonical
 // playbook plus codemap_docs for self-discovery. Core and agent intentionally
@@ -405,6 +405,15 @@ type featuresInput struct {
 	Depth       int    `json:"depth,omitempty" jsonschema:"footprint call-walk depth (default 3, max 6)"`
 }
 
+type processesInput struct {
+	Path     string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Kind     string `json:"kind,omitempty" jsonschema:"only these entrypoint kinds, comma-separated: program, cli_command, rpc_tool, http_route, api_route, page"`
+	Query    string `json:"query,omitempty" jsonschema:"keep processes whose name or steps match these content words (same tokenization as the lexical search floor)"`
+	Top      int    `json:"top,omitempty" jsonschema:"maximum processes to return (default 50, max 200)"`
+	Depth    int    `json:"depth,omitempty" jsonschema:"maximum call depth per process (default 4, max 8)"`
+	MaxSteps int    `json:"max_steps,omitempty" jsonschema:"maximum steps per process (default 40, max 200)"`
+}
+
 type exploreInput struct {
 	Query     string `json:"query" jsonschema:"intent or concept to search for before joining hits to exact graph neighborhoods"`
 	Path      string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
@@ -711,6 +720,12 @@ func (s *Server) register() {
 			Name:        "codemap_features",
 			Description: "Capability inventory: what the software can DO and where each capability lives. Lists user-facing entry surfaces (CLI commands, HTTP routes, MCP/RPC tools, Next.js pages and API routes, programs), each tied to its handler symbol (with a durable selector), the description from the framework registration itself, and a bounded call footprint (symbols, files, subsystems, covering tests). Go registrations are read from the AST (confirmed); TS/JS/Python are pattern-detected (candidate). Filter by kind/query; pass a handler selector to codemap_flow (how it works), codemap_context or codemap_impact to drill in. Returns totals/truncation plus call_graph, resolution, stale, notes, and partial_errors honesty signals.",
 		}, s.handleFeatures)
+	}
+	if s.include("codemap_processes") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_processes",
+			Description: "Execution flows from every entrypoint (full profile): for each CLI command, HTTP route, MCP/RPC tool, page or program with a resolved handler, the chain of definitions it reaches in call order (the flow builder, same-name fan-out collapsed), as {id, kind, name, entry selector, steps[{symbol,fqn,kind,file,start_line,depth}], files, truncated, call_graph}. Computed on demand from the stored graph, nothing persisted; bounded by top/depth/max_steps. Filter by kind and query (content words matched against the name and every step). Use it to answer \"how does signup work\" with the route -> handler -> service chain in one call; pass an entry selector to codemap_flow for the full annotated tree. Returns processes_total/truncation plus call_graph, resolution, stale, notes, and partial_errors honesty signals.",
+		}, s.handleProcesses)
 	}
 	if s.include("codemap_explore") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
@@ -1242,6 +1257,16 @@ func (s *Server) handleFeatures(_ context.Context, _ *sdkmcp.CallToolRequest, in
 	}
 	rep, err := s.svc.Features(cwdOf(in.Path), app.FeaturesOptions{
 		Kinds: []string{in.Kind}, Query: in.Query, Top: in.Top, Depth: in.Depth, NoFootprint: in.NoFootprint,
+	})
+	return result(rep, err)
+}
+
+func (s *Server) handleProcesses(_ context.Context, _ *sdkmcp.CallToolRequest, in processesInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Processes(cwdOf(in.Path), app.ProcessesOptions{
+		Kinds: []string{in.Kind}, Query: in.Query, Top: in.Top, Depth: in.Depth, MaxSteps: in.MaxSteps,
 	})
 	return result(rep, err)
 }

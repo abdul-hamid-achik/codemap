@@ -154,11 +154,16 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      (codemap_atlas is available in the full MCP profile)
   features [--kind K --query Q]      capability inventory: CLI commands, HTTP routes, MCP/RPC tools, pages,
                                      programs — description from the registration, handler selector, footprint
+  processes [--kind K --query Q --top N --depth N]
+                                     execution flows from every entrypoint (route/command -> handler -> service
+                                     chain) as ordered steps; on demand, nothing stored
+                                     (codemap_processes is available in the full MCP profile)
   flow <sym> | --at <file>:<line> [--depth N --max-nodes N]
                                      call tree from one entry in call order: docs, subsystems, confidence;
                                      same-name fan-out collapsed (alternatives) or left ambiguous
   explore <query> [--seeds N --edges N --depth N]
                                      intent search → bounded exact context neighborhoods, no source bodies
+                                     plus the entrypoint processes (route -> handler -> service chain) that contain a seed
                                      (codemap_explore is taught and registered in every MCP profile)
   dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage
   file-impact <file>                 file impact: confidence-aware evidence + coverage + conservative delete verdict
@@ -204,7 +209,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
 callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, secret_impact,
-required_keys, risk, hotspots, orphans, coverage, read_order, map, atlas, features, flow, explore, traverse, task_context, path, related_files, symbols,
+required_keys, risk, hotspots, orphans, coverage, read_order, map, atlas, features, processes, flow, explore, traverse, task_context, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
