@@ -66,6 +66,22 @@ func (h *Hybrid) Degraded() (bool, string) {
 	return false, ""
 }
 
+// BackendRestarts forwards the server's restart count.
+func (h *Hybrid) BackendRestarts() (int, string) {
+	if r, ok := h.lsp.(interface{ BackendRestarts() (int, string) }); ok {
+		return r.BackendRestarts()
+	}
+	return 0, ""
+}
+
+// BackendCrash forwards the server's backend-crash report.
+func (h *Hybrid) BackendCrash() (bool, string) {
+	if c, ok := h.lsp.(interface{ BackendCrash() (bool, string) }); ok {
+		return c.BackendCrash()
+	}
+	return false, ""
+}
+
 // ConcurrentSafe implements the indexer's concurrency marker: server calls
 // are serialized by h.mu.
 func (h *Hybrid) ConcurrentSafe() bool { return true }

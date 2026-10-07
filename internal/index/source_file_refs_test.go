@@ -2,7 +2,9 @@ package index
 
 import (
 	"context"
+	"os/exec"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/abdul-hamid-achik/codemap/internal/config"
@@ -85,5 +87,57 @@ func TestNameCallsStayInLanguageFamily(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("Go call to its own String method missing")
+	}
+}
+
+// Under --precise the go/types edges also keep each main.main apart, across
+// separate modules in a repo with no root go.mod.
+func TestPreciseSameFQNAcrossModules(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "alpha/go.mod", "module example.com/alpha\n\ngo 1.25\n")
+	writeFile(t, dir, "alpha/main.go", "package main\n\nfunc main() {\n\talphaHelper()\n}\n\nfunc alphaHelper() {}\n")
+	writeFile(t, dir, "beta/go.mod", "module example.com/beta\n\ngo 1.25\n")
+	writeFile(t, dir, "beta/main.go", "package main\n\nfunc main() {\n\tbetaHelper()\n}\n\nfunc betaHelper() {}\n")
+
+	g, v := newStores(t)
+	pid, _ := g.UpsertProject("app", dir, "go")
+	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
+	defer func() { _ = ix.Close() }()
+	res, err := ix.IndexProject(context.Background(), pid, "app", dir, Options{Precise: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := callPairs(t, g)
+	want := []string{
+		"alpha/main.go:main -> alpha/main.go:alphaHelper",
+		"beta/main.go:main -> beta/main.go:betaHelper",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls = %v, want %v (precise note: %q)", got, want, res.PreciseNote)
+	}
+	var precise int
+	if err := g.DB().QueryRow(`SELECT COUNT(*) FROM edges WHERE edge_type='calls' AND provenance='precise'`).Scan(&precise); err != nil {
+		t.Fatal(err)
+	}
+	if precise != 2 {
+		t.Fatalf("precise call edges = %d, want 2 (note: %q)", precise, res.PreciseNote)
+	}
+}
+
+// callHierarchy item ranges can start at a long JSDoc block; the callee's name
+// line must still join the indexed declaration.
+func TestLookupPreciseNodeJoinsOnNameLine(t *testing.T) {
+	posTo := map[precisePos]int64{{"a.ts", 480}: 7}
+	if _, ok := lookupPreciseNode(posTo, "a.ts", 473); ok {
+		t.Fatal("a doc-comment start 7 lines up must not join by neighborhood")
+	}
+	if id, ok := lookupPreciseNode(posTo, "a.ts", 473, 480); !ok || id != 7 {
+		t.Fatalf("name line join = %d %v, want 7", id, ok)
+	}
+	if id, ok := lookupPreciseNode(posTo, "a.ts", 479, 0); !ok || id != 7 {
+		t.Fatalf("neighborhood fallback = %d %v, want 7", id, ok)
 	}
 }

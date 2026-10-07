@@ -135,6 +135,22 @@ func runContext(cmd *cobra.Command, args []string) error {
 		tNames = append(tNames, disp(t.FQN, t.Symbol))
 	}
 	line("tests", tNames, rep.TestsTotal)
+	if h := rep.Hierarchy; h != nil {
+		for _, row := range []struct {
+			name  string
+			refs  []app.SymbolRef
+			total int
+		}{
+			{"extends", h.Extends, len(h.Extends)}, {"implements", h.Implements, len(h.Implements)},
+			{"subtypes", h.Subtypes, max(h.SubtypesTotal, len(h.Subtypes))},
+			{"overrides", h.Overrides, len(h.Overrides)},
+			{"overridden by", h.OverriddenBy, max(h.OverriddenByTotal, len(h.OverriddenBy))},
+		} {
+			if len(row.refs) > 0 {
+				line(row.name, refNames(row.refs), row.total)
+			}
+		}
+	}
 
 	fmt.Printf("  %s %d (depth ≤ %d)\n", label("blast radius:"), rep.BlastRadius, rep.BlastDepth)
 	renderAnnotations(rep.Annotations)

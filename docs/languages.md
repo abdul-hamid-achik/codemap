@@ -12,7 +12,7 @@ capabilities, and the JSON contracts keep that distinction visible.
 
 | Language | Symbols and definitions | Relationships | Requirement / limit |
 |---|---|---|---|
-| **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + a buildable module for the precise pass. One-off `callers --precise` / `callees --precise` uses `gopls`. |
+| **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + buildable modules for the precise pass (a repo without a root `go.mod` loads each module under it). One-off `callers --precise` / `callees --precise` uses `gopls`. |
 | **TypeScript + JavaScript** | Built in with a pure-Go tree-sitter parser (TS, TSX, JS/JSX, `.mjs`/`.cjs`), producing the same symbols `typescript-language-server`'s `documentSymbol` would | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, Next.js framework wiring, same-file calls, and calls through imported bindings; arbitrary `obj.method()` calls are not linked, so the graph is partial until `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | None to index. `--precise` needs `node` + `typescript-language-server`. |
 | **Python** | Built in with a pure-Go tree-sitter parser, producing the same symbols `pyright-langserver` would | Name-based candidates for same-file calls, `self`/`cls` methods, and imported bindings, plus file→file import edges; `--precise` (LSP `callHierarchy`) supersedes them per file | None to index. `--precise` needs `node` + `pyright-langserver`. |
 | **Ruby** | Built in with a pure-Go scanner: modules, classes, `def` (incl. `def self.x`, endless defs, `private def`); heredoc-, `=begin`-, and string-safe | Name-based calls plus `require`/`require_relative` imports; no precise pass yet | None — works offline like Go's name-based path. |
@@ -38,6 +38,13 @@ Run `codemap doctor` to see which servers are available. A server missing when `
 it is reported with install guidance (`capability: "precise"` in `tooling.issues`); the
 language's symbols are indexed either way. `--no-lsp` never spawns a server. Semantic retrieval
 is language-agnostic once source-bearing symbols are indexed, and Ollama remains optional.
+
+On large monorepos `typescript-language-server`'s tsserver can run out of memory — typically when
+a root `tsconfig.json` with no `include` puts every file in one project. codemap raises tsserver's
+heap ceiling to 8 GB (`maxTsServerMemory`; a ceiling, not a reservation), and if the backend still
+dies it restarts the server (up to 8 times per run), retries the file it was answering, and notes
+the restart in the `--precise` summary. Long runs of identical per-file errors are grouped by
+cause in the CLI output; `--json` keeps the full list.
 
 ### How TypeScript, JavaScript, and Python are parsed
 

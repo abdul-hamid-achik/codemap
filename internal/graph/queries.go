@@ -1016,6 +1016,9 @@ type SymbolMatch struct {
 	// query's tokens were found in (see SearchSymbols tiering). LexicalSearch
 	// may also report "path" or "signature".
 	MatchedIn string
+	// Score is set by LexicalSearch only: the fraction of the query's content
+	// words this definition matched (0..1].
+	Score float64
 }
 
 // tokenizeSearchQuery splits a search query into terms on whitespace and,

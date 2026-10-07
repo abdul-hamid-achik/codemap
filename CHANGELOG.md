@@ -200,6 +200,22 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **`--precise` works on large polyglot monorepos** — on a 4,500-file repo it previously covered 6 of
+  3,163 TS/JS files and loaded no Go at all:
+  - Go: a repo whose modules live in subdirectories (no root `go.mod`) now loads every module, and
+    precise edges join their caller by declaration position — every `main.main` keeps its own calls.
+  - TS/JS: tsserver ran out of memory loading a root `tsconfig.json` with no `include` and
+    `typescript-language-server` then answered empty for every remaining file. tsserver's heap
+    ceiling is raised to 8 GB, its death is detected, and the server is restarted (bounded) with the
+    file retried; the restart count is reported. callHierarchy targets whose range starts at a long
+    JSDoc block now join on the callee's name line.
+  - The CLI groups floods of identical per-file errors by cause instead of printing thousands of lines.
+- **Lexical seeds rank code and match inflections** — `explore`'s keyword floor stems one inflection
+  ("validated" finds `validate`/`validation`), ranks functions/methods/classes before constants on
+  ties, and prints a real score (the fraction of query words matched) instead of `0.000`.
+- **`context` prints the hierarchy** — extends/implements/subtypes/overrides were only in `--json`;
+  the JSON adds `subtypes_total`/`overridden_by_total` since those lists are capped.
+
 - **Go call edges no longer collapse same-named symbols across packages** — the edge resolver
   looked up a call's source by FQN alone, so every `package main` program's `main.main` (or two
   packages both named `data`) shared one node: one program received every program's calls, the

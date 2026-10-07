@@ -14,6 +14,10 @@ type HierarchyReport struct {
 	Subtypes     []SymbolRef `json:"subtypes,omitempty"`
 	Overrides    []SymbolRef `json:"overrides,omitempty"`
 	OverriddenBy []SymbolRef `json:"overridden_by,omitempty"`
+	// SubtypesTotal / OverriddenByTotal are the true counts; the lists above
+	// are capped at the context list cap.
+	SubtypesTotal     int `json:"subtypes_total,omitempty"`
+	OverriddenByTotal int `json:"overridden_by_total,omitempty"`
 }
 
 func (h *HierarchyReport) empty() bool {
@@ -54,6 +58,7 @@ func (svc *Service) attachHierarchy(cwd string, rep *ContextReport) {
 		}
 	}
 	if !h.empty() {
+		h.SubtypesTotal, h.OverriddenByTotal = len(h.Subtypes), len(h.OverriddenBy)
 		h.Subtypes = capSlice(h.Subtypes, contextListCap)
 		h.OverriddenBy = capSlice(h.OverriddenBy, contextListCap)
 		rep.Hierarchy = h

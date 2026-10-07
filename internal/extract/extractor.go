@@ -137,7 +137,11 @@ type CallEdge struct {
 	FromLine int
 	ToFile   string
 	ToLine   int
-	External bool
+	// ToNameLine is the callee's name line (callHierarchy selectionRange). A
+	// server's item range can start at a leading JSDoc block many lines above
+	// the declaration the graph indexed; the name line still joins it.
+	ToNameLine int
+	External   bool
 }
 
 // CallResolver is an optional extractor capability: resolve a file's outgoing
