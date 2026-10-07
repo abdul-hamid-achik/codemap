@@ -5,8 +5,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
@@ -310,9 +313,7 @@ func printIndexReport(cmd *cobra.Command, rep *app.IndexReport, precise bool) {
 			}
 		}
 	}
-	for _, e := range rep.Errors {
-		fmt.Fprintf(os.Stderr, "  ! %s: %s\n", e.File, e.Err)
-	}
+	printFileErrors(os.Stderr, rep.Errors)
 	for _, f := range rep.Oversized {
 		fmt.Fprintf(os.Stderr, "  ~ %s: skipped — exceeds the effective source-file safety limit (index.max_file_bytes may be lower; the hard cap is never unbounded)\n", f)
 	}
@@ -368,4 +369,60 @@ func formatDuration(ms int) string {
 // already applied. The user gets a single "index then watch" flow.
 func startDaemonAfterIndex(cmd *cobra.Command, root string) error {
 	return startDaemonForeground(cmd, root)
+}
+
+// fileErrorsShown is how many per-file errors print verbatim before the rest
+// are summarized by kind.
+const fileErrorsShown = 10
+
+// printFileErrors lists per-file index errors. A broken language server can
+// fail thousands of files with one cause; past fileErrorsShown the remainder
+// is grouped by message (the file path abstracted away) so the cause stays
+// visible instead of scrolling off. --json always carries the full list.
+func printFileErrors(w io.Writer, errs []index.FileError) {
+	shown := errs
+	if len(shown) > fileErrorsShown {
+		shown = shown[:fileErrorsShown]
+	}
+	for _, e := range shown {
+		_, _ = fmt.Fprintf(w, "  ! %s: %s\n", e.File, e.Err)
+	}
+	rest := errs[len(shown):]
+	if len(rest) == 0 {
+		return
+	}
+	counts := map[string]int{}
+	var kinds []string
+	for _, e := range rest {
+		k := errorKind(e)
+		if counts[k] == 0 {
+			kinds = append(kinds, k)
+		}
+		counts[k]++
+	}
+	sort.SliceStable(kinds, func(i, j int) bool { return counts[kinds[i]] > counts[kinds[j]] })
+	_, _ = fmt.Fprintf(w, "  ! … %d more file error(s) (full list: --json):\n", len(rest))
+	for i, k := range kinds {
+		if i == 3 {
+			_, _ = fmt.Fprintf(w, "      %d other kind(s)\n", len(kinds)-3)
+			break
+		}
+		_, _ = fmt.Fprintf(w, "      %5d × %s\n", counts[k], k)
+	}
+}
+
+var (
+	errKindParens = regexp.MustCompile(`\([^()]{2,}\)`) // not "(s)"
+	errKindNumber = regexp.MustCompile(`\b\d+\b`)
+	errKindSymbol = regexp.MustCompile(`\b(for|of) [^\s(]+ (returned|did|failed)`)
+)
+
+// errorKind abstracts one file error into its cause: the file path, any
+// parenthesized detail (sample positions, server messages), and counts are
+// dropped so the same failure on many files groups as one line.
+func errorKind(e index.FileError) string {
+	k := strings.ReplaceAll(e.Err, e.File, "<file>")
+	k = errKindParens.ReplaceAllString(k, "(…)")
+	k = errKindSymbol.ReplaceAllString(k, "$1 <symbol> $2")
+	return errKindNumber.ReplaceAllString(k, "N")
 }

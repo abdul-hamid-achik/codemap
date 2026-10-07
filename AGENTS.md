@@ -453,7 +453,13 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   what gives those languages a complete call graph (for Go it *replaces* the name-based edges;
   name-based stays the Go/Ruby/Lua
   default). The Go pass degrades
-  per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable.
+  per-package on type errors and wholesale (with a note) when the `go` toolchain/module is unavailable;
+  a repo with no root `go.mod`/`go.work` loads every module under it (`typesrc.moduleRoots`), and
+  precise edges join their caller by declaration position, never by FQN alone. For the LSP languages,
+  `lsp.Client` raises tsserver's heap (`maxTsServerMemory`), detects tsserver's death from
+  typescript-language-server's logMessage (`Client.Crashed`) and `Restart`s in place (bounded by
+  `lspsrc.maxBackendRestarts`), retrying the file; callHierarchy targets join on range start and
+  selection (name) line.
   `callers`/`callees --precise` (`precise:true` in MCP) remains the per-query language-server path for a one-off without
   reindexing.
 - **Stable machine contract**: every impact/callers/callees/references/review/context/hotspots/orphans/path/map/traverse report carries a

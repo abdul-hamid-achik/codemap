@@ -332,7 +332,8 @@ On the codemap repo itself this collapses the `Close`/`Error`
 fan-out (e.g. one `Close` method that name-matching credited with 71 callers drops to its real ~12)
 and turns `hotspots` from name-collision noise into genuine hubs. Requirements and guarantees:
 
-- Needs the `go` toolchain and a buildable module. A package that doesn't type-check keeps its
+- Needs the `go` toolchain and a buildable module. A repo whose modules live in subdirectories (no
+  root `go.mod`) loads each module from its own directory. A package that doesn't type-check keeps its
   name-based edges (per-package degrade); a project with no `go`/`go.mod` falls back wholesale **with
   a note** — never a hard error, and never worse than name-based.
 - Purely additive and opt-in: without `--precise`, indexing is byte-for-byte the fast name-based path.

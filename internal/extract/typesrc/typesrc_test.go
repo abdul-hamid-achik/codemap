@@ -178,3 +178,55 @@ func TestResolveCountsTypeErrorPackages(t *testing.T) {
 		t.Errorf("ErrorPkgs = %d, want 1", res.ErrorPkgs)
 	}
 }
+
+// A monorepo without a root go.mod: each module loads from its own directory,
+// file paths stay root-relative, a module calling a sibling through a replace
+// directive links to the sibling's real file, and a broken module only costs
+// its own packages.
+func TestResolveLoadsEveryModuleUnderRoot(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	root := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("lib/go.mod", "module example.com/lib\n\ngo 1.25\n")
+	write("lib/lib.go", "package lib\n\nfunc Helper() int { return 1 }\n")
+	write("app/go.mod", "module example.com/app\n\ngo 1.25\n\nrequire example.com/lib v0.0.0\n\nreplace example.com/lib => ../lib\n")
+	write("app/main.go", "package main\n\nimport \"example.com/lib\"\n\nfunc main() { _ = lib.Helper(); local() }\n\nfunc local() {}\n")
+	write("broken/go.mod", "this is not a go.mod\n")
+	write("broken/x.go", "package x\n")
+	write("web/node_modules/dep/go.mod", "module dep\n")
+
+	res, err := Resolve(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Available {
+		t.Fatal("Resolve should be available when at least one module loads")
+	}
+	if !res.CleanFiles["app/main.go"] || !res.CleanFiles["lib/lib.go"] {
+		t.Fatalf("clean files = %v, want root-relative app/main.go and lib/lib.go", res.CleanFiles)
+	}
+	got := map[string]PreciseEdge{}
+	for _, e := range edgesFrom(res, "main.main") {
+		got[e.CalleeFQN] = e
+	}
+	if e, ok := got["lib.Helper"]; !ok || e.External || e.CalleeFile != "lib/lib.go" {
+		t.Errorf("cross-module call = %+v (present %v), want internal edge to lib/lib.go", e, ok)
+	}
+	if e, ok := got["main.local"]; !ok || e.CalleeFile != "app/main.go" {
+		t.Errorf("same-module call = %+v (present %v)", e, ok)
+	}
+	if res.ErrorModules != 1 && res.ErrorPkgs == 0 {
+		t.Errorf("broken module should be reported (modules=%d pkgs=%d)", res.ErrorModules, res.ErrorPkgs)
+	}
+}

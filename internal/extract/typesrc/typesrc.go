@@ -14,7 +14,10 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -38,6 +41,11 @@ const LoadMode = packages.NeedName |
 // gosrc's node positions) for a position-keyed join; CalleeFQN is the same-scheme
 // FQN as a fallback. External callees (stdlib/deps) have no codemap node.
 type PreciseEdge struct {
+	// CallerFile/CallerLine locate the caller's declaration (root-relative, the
+	// declared name's line) — the exact source node even when its FQN repeats
+	// across packages (every `package main` has a main.main).
+	CallerFile string
+	CallerLine int
 	CallerFQN  string
 	CalleeFQN  string
 	CalleeFile string
@@ -53,6 +61,9 @@ type Result struct {
 	Edges      []PreciseEdge
 	CleanFiles map[string]bool // root-relative caller files whose package type-checked cleanly
 	ErrorPkgs  int             // packages with type errors (skipped; their name edges kept)
+	// ErrorModules counts modules that failed to load at all (their packages
+	// keep name edges); the other modules still resolve.
+	ErrorModules int
 
 	// Implements / Overrides: which module types satisfy which module
 	// interfaces, and the method-level pairs. ImplementsSkipped is set when the
@@ -62,37 +73,53 @@ type Result struct {
 	ImplementsSkipped bool
 }
 
-// Resolve type-checks the module rooted at root and returns precise call edges for
-// every caller declaration in a cleanly type-checked package. A package with any
-// type error is skipped entirely (its files are absent from CleanFiles), so the
-// caller keeps that package's tolerant name-based edges. Errors loading the module
-// (no `go`, no go.mod) yield Available=false and a nil-safe Result, never a panic.
+// Resolve type-checks every Go module under root and returns precise call edges
+// for every caller declaration in a cleanly type-checked package. A project root
+// with a go.mod or go.work loads as one unit; a monorepo whose modules live in
+// subdirectories (go/, tools/x/, …, no root go.mod) loads each module from its own
+// directory, with file paths still relative to root. A package with any type
+// error is skipped entirely (its files are absent from CleanFiles), so the caller
+// keeps that package's tolerant name-based edges. When no module loads at all (no
+// `go`, no go.mod) the Result has Available=false, never a panic.
 func Resolve(ctx context.Context, root string) (*Result, error) {
 	res := &Result{CleanFiles: map[string]bool{}}
 	fset := token.NewFileSet()
-	cfg := &packages.Config{
-		Mode:    LoadMode,
-		Dir:     root,
-		Context: ctx,
-		Fset:    fset,
-		Tests:   true, // also resolve _test.go callers (codemap indexes test files too)
-	}
-	pkgs, err := packages.Load(cfg, "./...")
-	if err != nil {
-		return res, err // toolchain/module load failed — caller degrades to name edges
+	var pkgs []*packages.Package
+	var firstErr error
+	for _, dir := range moduleRoots(root) {
+		cfg := &packages.Config{
+			Mode:    LoadMode,
+			Dir:     dir,
+			Context: ctx,
+			Fset:    fset,
+			Tests:   true, // also resolve _test.go callers (codemap indexes test files too)
+		}
+		loaded, err := packages.Load(cfg, "./...")
+		if err != nil {
+			if ctx.Err() != nil {
+				return res, ctx.Err()
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			res.ErrorModules++
+			continue // this module degrades to name edges; the others still resolve
+		}
+		pkgs = append(pkgs, loaded...)
 	}
 	if len(pkgs) == 0 {
-		return res, nil
+		return res, firstErr // toolchain/module load failed — caller degrades to name edges
 	}
 	res.Available = true
 
-	// Packages whose *types.Package belongs to the loaded module — a callee in one
-	// of these has a graph node; anything else (stdlib/deps via export data) is
-	// External.
-	inModule := map[*types.Package]bool{}
+	// Packages loaded from the project's own modules — a callee in one of these
+	// has a graph node; anything else (stdlib/deps via export data) is External.
+	// Keyed by import path: each module load has its own *types.Package objects,
+	// and a module importing a sibling (replace ../x) sees it through export data.
+	inModule := map[string]bool{}
 	for _, p := range pkgs {
 		if p.Types != nil {
-			inModule[p.Types] = true
+			inModule[p.Types.Path()] = true
 		}
 	}
 
@@ -125,8 +152,8 @@ func Resolve(ctx context.Context, root string) (*Result, error) {
 				if !ok || fd.Body == nil {
 					continue
 				}
-				callerFQN := declFQN(pkgName, fd)
-				res.Edges = append(res.Edges, callEdges(fset, root, p.TypesInfo, inModule, callerFQN, fd)...)
+				caller := PreciseEdge{CallerFile: rel, CallerLine: fset.Position(fd.Name.Pos()).Line, CallerFQN: declFQN(pkgName, fd)}
+				res.Edges = append(res.Edges, callEdges(fset, root, p.TypesInfo, inModule, caller, fd)...)
 			}
 		}
 	}
@@ -135,7 +162,7 @@ func Resolve(ctx context.Context, root string) (*Result, error) {
 }
 
 // callEdges resolves every call in a function body to its exact callee.
-func callEdges(fset *token.FileSet, root string, info *types.Info, inModule map[*types.Package]bool, callerFQN string, fd *ast.FuncDecl) []PreciseEdge {
+func callEdges(fset *token.FileSet, root string, info *types.Info, inModule map[string]bool, caller PreciseEdge, fd *ast.FuncDecl) []PreciseEdge {
 	var out []PreciseEdge
 	seen := map[string]bool{} // dedup identical (callee) edges within one caller, like gosrc
 	ast.Inspect(fd.Body, func(n ast.Node) bool {
@@ -147,12 +174,17 @@ func callEdges(fset *token.FileSet, root string, info *types.Info, inModule map[
 		if fn == nil || fn.Pkg() == nil {
 			return true // builtin, conversion, or unresolved (func value / dynamic)
 		}
-		external := !inModule[fn.Pkg()]
 		pos := fset.Position(fn.Origin().Pos())
+		calleeFile := relOf(root, pos.Filename)
+		// A project package seen through export data whose position lies outside
+		// the root (a module-cache copy) has no graph node either.
+		external := !inModule[fn.Pkg().Path()] || strings.HasPrefix(calleeFile, "..") || filepath.IsAbs(calleeFile)
 		e := PreciseEdge{
-			CallerFQN:  callerFQN,
+			CallerFile: caller.CallerFile,
+			CallerLine: caller.CallerLine,
+			CallerFQN:  caller.CallerFQN,
 			CalleeFQN:  funcFQN(fn),
-			CalleeFile: relOf(root, pos.Filename),
+			CalleeFile: calleeFile,
 			CalleeLine: pos.Line,
 			External:   external,
 			Interface:  iface,
@@ -257,4 +289,42 @@ func relOf(root, p string) string {
 		return rel
 	}
 	return p
+}
+
+// moduleRoots returns the directories to load: root itself when it carries a
+// go.mod or go.work (a workspace covers its own modules), otherwise every
+// directory below root that has a go.mod, sorted. Vendor, node_modules,
+// testdata, and hidden directories are skipped — they never hold the
+// project's own modules. A root go.mod still loads nested modules separately,
+// since ./... stops at a nested module boundary.
+func moduleRoots(root string) []string {
+	if fileExists(filepath.Join(root, "go.work")) {
+		return []string{root}
+	}
+	var dirs []string
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if p != root && (strings.HasPrefix(name, ".") || name == "vendor" || name == "node_modules" || name == "testdata") {
+				return filepath.SkipDir
+			}
+			if fileExists(filepath.Join(p, "go.mod")) {
+				dirs = append(dirs, p)
+			}
+		}
+		return nil
+	})
+	if len(dirs) == 0 {
+		return []string{root} // no go.mod anywhere: let the loader report why
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }

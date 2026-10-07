@@ -581,13 +581,20 @@ func noteDegradedServers(res *Result, extractors map[string]extract.Extractor) {
 	}
 	byBinary := map[string]*degradation{}
 	var order []string
+	reported := map[string]bool{} // called after extraction AND after --precise
+	for _, iss := range res.ServerIssues {
+		if iss.Code == tooling.CodeStoppedResponding {
+			reported[iss.Binary] = true
+		}
+	}
+	crashMsg := map[string]string{}
 	for lang, ext := range extractors {
 		d, ok := ext.(interface{ Degraded() (bool, string) })
 		if !ok {
 			continue
 		}
 		down, binary := d.Degraded()
-		if !down {
+		if !down || reported[binary] {
 			continue
 		}
 		if byBinary[binary] == nil {
@@ -595,18 +602,29 @@ func noteDegradedServers(res *Result, extractors map[string]extract.Extractor) {
 			order = append(order, binary)
 		}
 		byBinary[binary].langs = append(byBinary[binary].langs, lang)
+		if c, ok := ext.(interface{ BackendCrash() (bool, string) }); ok {
+			if crashed, msg := c.BackendCrash(); crashed {
+				crashMsg[binary] = msg
+			}
+		}
 	}
 	sort.Strings(order)
 	for _, binary := range order {
 		d := byBinary[binary]
 		sort.Strings(d.langs) // map iteration order must not leak into the report
+		detail := "Re-run the index; if it recurs, the server is likely being churned by files that are not really source — " +
+			"exclude build output (index.exclude_extra, e.g. \"**/dist/\", \"**/out/\") so far fewer documents pass through it."
+		if msg := crashMsg[binary]; msg != "" {
+			detail = "Its backend exited mid-run (" + msg + ") — usually out of memory loading a very large project " +
+				"(e.g. a root tsconfig.json with no \"include\", which puts every file in one project). Files after the crash " +
+				"have no precise call graph; narrow that tsconfig or exclude its directories and re-run."
+		}
 		res.ServerIssues = append(res.ServerIssues, tooling.Issue{
 			Code:      tooling.CodeStoppedResponding,
 			Severity:  "warning",
 			Binary:    binary,
 			Languages: d.langs,
-			Detail: "Re-run the index; if it recurs, the server is likely being churned by files that are not really source — " +
-				"exclude build output (index.exclude_extra, e.g. \"**/dist/\", \"**/out/\") so far fewer documents pass through it.",
+			Detail:    detail,
 		})
 	}
 }
@@ -1328,6 +1346,9 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 			return res, err
 		}
 		res.PreciseMs = int(time.Since(preciseStart).Milliseconds())
+		// In tree-sitter mode the precise pass is the server's first real work,
+		// so a server that dies does so here, after the extraction check.
+		noteDegradedServers(res, ix.extractors)
 	}
 
 	// Pass 4: embed all collected nodes in large concurrent batches.
@@ -1582,6 +1603,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			return res, err
 		}
 		res.PreciseMs = int(time.Since(start).Milliseconds())
+		noteDegradedServers(res, ix.extractors)
 	}
 	if err := ix.embedAndStore(ctx, projectName, embedAcc, opts, res); err != nil {
 		return res, err
@@ -2394,17 +2416,27 @@ type precisePos struct {
 // lookupPreciseNode resolves a callHierarchy position to an indexed node ID.
 // callHierarchy often lands on a doc-comment line while documentSymbol uses the
 // declaration line; try a small neighborhood before treating the join as failed.
-func lookupPreciseNode(posTo map[precisePos]int64, file string, line int) (int64, bool) {
-	if id, ok := posTo[precisePos{file, line}]; ok {
-		return id, true
+// Several candidate lines (range start, then name line) are tried exactly
+// before any neighborhood, so a long JSDoc above the callee still joins on its
+// name line instead of guessing near the comment.
+func lookupPreciseNode(posTo map[precisePos]int64, file string, lines ...int) (int64, bool) {
+	for _, line := range lines {
+		if id, ok := posTo[precisePos{file, line}]; ok && line > 0 {
+			return id, true
+		}
 	}
-	for _, d := range []int{-1, 1, -2, 2} {
-		adj := line + d
-		if adj < 1 {
+	for _, line := range lines {
+		if line < 1 {
 			continue
 		}
-		if id, ok := posTo[precisePos{file, adj}]; ok {
-			return id, true
+		for _, d := range []int{-1, 1, -2, 2} {
+			adj := line + d
+			if adj < 1 {
+				continue
+			}
+			if id, ok := posTo[precisePos{file, adj}]; ok {
+				return id, true
+			}
 		}
 	}
 	return 0, false
@@ -2544,6 +2576,7 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 		}
 		_ = eg.Wait()
 	}
+	noteBackendRestarts(res, resolvers)
 
 	reportPhase(opts, "writing precise edges…", 0, len(files))
 	// Phase 2: apply each file's gathered edges to the single transaction
@@ -2603,7 +2636,7 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 				}
 				continue
 			}
-			to, ok := lookupPreciseNode(posTo, e.ToFile, e.ToLine)
+			to, ok := lookupPreciseNode(posTo, e.ToFile, e.ToLine, e.ToNameLine)
 			if !ok {
 				joinFailures++
 				skipped++
@@ -2679,6 +2712,32 @@ func appendPreciseFileError(res *Result, file string, err error) {
 	res.Errors = append(res.Errors, FileError{File: file, Err: "precise: " + err.Error()})
 }
 
+// noteBackendRestarts records servers that were respawned during the precise
+// pass after their backend died (tsserver out of memory on a monorepo): the
+// pass kept going, but a restart is worth knowing about. Resolvers bound to one
+// process report the same count, so each binary is counted once.
+func noteBackendRestarts(res *Result, resolvers map[string]extract.CallResolver) {
+	type restarter interface {
+		BackendRestarts() (int, string)
+	}
+	byBinary := map[string]int{}
+	for _, r := range resolvers {
+		if rr, ok := r.(restarter); ok {
+			if n, binary := rr.BackendRestarts(); n > 0 && n > byBinary[binary] {
+				byBinary[binary] = n
+			}
+		}
+	}
+	binaries := make([]string, 0, len(byBinary))
+	for b := range byBinary {
+		binaries = append(binaries, b)
+	}
+	sort.Strings(binaries)
+	for _, b := range binaries {
+		appendPreciseNote(res, fmt.Sprintf("restarted %s %d time(s) after its backend exited (usually out of memory on a large project)", filepath.Base(b), byBinary[b]))
+	}
+}
+
 func appendPreciseNote(res *Result, note string) {
 	if res.PreciseNote == "" {
 		res.PreciseNote = note
@@ -2707,6 +2766,14 @@ func (ix *Indexer) resolvePreciseEdgesFromIndex(ctx context.Context, projectID i
 	}
 	if pr.ErrorPkgs > 0 {
 		res.PreciseNote = fmt.Sprintf("precise skipped for %d package(s) with type errors; kept name-based edges for those packages", pr.ErrorPkgs)
+	}
+	if pr.ErrorModules > 0 {
+		note := fmt.Sprintf("%d Go module(s) failed to load; kept name-based edges for their packages", pr.ErrorModules)
+		if res.PreciseNote == "" {
+			res.PreciseNote = "precise: " + note
+		} else {
+			res.PreciseNote += "; " + note
+		}
 	}
 	tx, err := ix.graph.BeginTx(ctx)
 	if err != nil {
@@ -2781,10 +2848,14 @@ func (ix *Indexer) resolvePreciseEdgesWith(tx *sql.Tx, projectID int64, res *Res
 		if e.External {
 			continue // stdlib/dep callee — no codemap node to point at
 		}
-		from, ok := fqnTo[e.CallerFQN]
+		// The caller's own position first: its FQN alone collapses every
+		// `package main`'s main.main onto one node.
+		from, ok := posTo[precisePos{e.CallerFile, e.CallerLine}]
 		if !ok {
-			skipped++
-			continue
+			if from, ok = fqnTo[e.CallerFQN]; !ok {
+				skipped++
+				continue
+			}
 		}
 		to, ok := posTo[precisePos{e.CalleeFile, e.CalleeLine}]
 		if !ok {

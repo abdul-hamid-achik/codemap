@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -137,23 +139,65 @@ type initializeResult struct {
 
 // Client is a headless LSP client over one language-server connection.
 type Client struct {
+	connMu       sync.RWMutex // guards conn/cmd/stderrBuf across Restart
 	conn         *conn
 	cmd          *exec.Cmd
 	ready        chan struct{} // signalled when a $/progress "end" arrives
 	stderrBuf    *cappedBuffer // last 8KB of the server's stderr; surfaced on connection-close errors
 	capabilities serverCapabilities
+	name         string // the spawned binary, which selects initializationOptions
+	args         []string
+	spawnCtx     context.Context // Spawn's context: a restarted process lives as long
+	root         string          // the initialize root, reused by Restart
+
+	mu       sync.Mutex
+	crashed  string // non-empty once the server reported its backend died
+	gen      int    // connection generation; a stale connection's messages are ignored
+	restarts int
 }
 
 func newClient(r io.Reader, w io.Writer, closer func() error) *Client {
 	c := &Client{ready: make(chan struct{}, 8)}
-	c.conn = newConn(r, w, closer, c.handle)
+	c.conn = newConn(r, w, closer, c.handlerFor(0))
 	return c
+}
+
+// connection returns the live connection (Restart swaps it).
+func (c *Client) connection() *conn {
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
+	return c.conn
+}
+
+// handlerFor binds server→client messages to one connection generation, so
+// the dying process's last words cannot mark its replacement crashed.
+func (c *Client) handlerFor(gen int) func(string, json.RawMessage) (any, error) {
+	return func(method string, params json.RawMessage) (any, error) {
+		c.mu.Lock()
+		current := c.gen == gen
+		c.mu.Unlock()
+		if !current {
+			return nil, nil
+		}
+		return c.handle(method, params)
+	}
 }
 
 // handle replies to server→client requests so the server doesn't stall, and
 // watches $/progress so callers can wait for the server to finish loading.
 func (c *Client) handle(method string, params json.RawMessage) (any, error) {
 	switch method {
+	case "window/logMessage", "window/showMessage":
+		var m struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(params, &m) == nil && backendExited(m.Message) {
+			c.mu.Lock()
+			if c.crashed == "" {
+				c.crashed = m.Message
+			}
+			c.mu.Unlock()
+		}
 	case "workspace/configuration":
 		return []any{map[string]any{}}, nil
 	case "$/progress":
@@ -185,8 +229,101 @@ func (c *Client) WaitReady(ctx context.Context, timeout time.Duration) {
 	}
 }
 
+// backendExited recognizes typescript-language-server's report that its
+// tsserver child died ("[tsserver] Exited. Code: null. Signal: SIGABRT" — in
+// practice node running out of heap on a huge tsconfig project). The LSP
+// process stays up and answers every later request with empty results, so
+// without this signal a dead backend reads as "no symbols" for every file.
+func backendExited(msg string) bool {
+	return strings.Contains(msg, "[tsserver] Exited")
+}
+
+// Crashed reports whether the server's backend died (see backendExited), with
+// the server's own message. Requests after a crash return empty results.
+func (c *Client) Crashed() (bool, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.crashed != "", c.crashed
+}
+
+// tsServerMaxMemoryMB raises tsserver's heap ceiling from node's default. A
+// monorepo whose root tsconfig.json has no "include" puts every .ts file in one
+// project; loading it aborted tsserver with SIGABRT at the default heap and
+// left typescript-language-server answering empty for the rest of the run. It
+// is a ceiling, not a reservation — small projects use what they always did.
+const tsServerMaxMemoryMB = 8192
+
+// initializationOptions returns server-specific initialize options. Only
+// typescript-language-server gets any: other servers may reject unknown keys.
+func initializationOptions(name string) map[string]any {
+	if strings.TrimSuffix(filepath.Base(name), ".cmd") == "typescript-language-server" {
+		return map[string]any{"maxTsServerMemory": tsServerMaxMemoryMB}
+	}
+	return nil
+}
+
 // Spawn starts a language-server subprocess and wires a client to its stdio.
 func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
+	p, err := startProcess(ctx, name, args...)
+	if err != nil {
+		return nil, err
+	}
+	cl := newClient(p.stdout, p.stdin, p.closer)
+	cl.cmd = p.cmd
+	cl.name = name
+	cl.args = args
+	cl.spawnCtx = ctx
+	cl.stderrBuf = p.stderr
+	return cl, nil
+}
+
+// Restarts reports how many times Restart replaced the server process.
+func (c *Client) Restarts() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.restarts
+}
+
+// Restart replaces the server process with a fresh one initialized at the same
+// root — the recovery for a backend that died mid-run (see Crashed). The
+// Client value stays the same, so every extractor bound to it (one
+// typescript-language-server serves TS and JS) sees the new process. Callers
+// must not have requests in flight: the old connection is closed.
+func (c *Client) Restart(ctx context.Context) error {
+	if c.name == "" {
+		return fmt.Errorf("language server was not spawned by codemap; cannot restart it")
+	}
+	p, err := startProcess(c.spawnCtx, c.name, c.args...)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.gen++
+	gen := c.gen
+	c.crashed = ""
+	c.restarts++
+	c.mu.Unlock()
+	c.connMu.Lock()
+	old := c.conn
+	c.conn = newConn(p.stdout, p.stdin, p.closer, c.handlerFor(gen))
+	c.cmd, c.stderrBuf = p.cmd, p.stderr
+	c.connMu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	return c.Initialize(ctx, c.root)
+}
+
+type process struct {
+	stdout io.Reader
+	stdin  io.Writer
+	closer func() error
+	cmd    *exec.Cmd
+	stderr *cappedBuffer
+}
+
+// startProcess launches the server binary with piped stdio.
+func startProcess(ctx context.Context, name string, args ...string) (*process, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -219,10 +356,7 @@ func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
 		})
 		return nil
 	}
-	cl := newClient(stdout, stdin, closer)
-	cl.cmd = cmd
-	cl.stderrBuf = stderrBuf
-	return cl, nil
+	return &process{stdout: stdout, stdin: stdin, closer: closer, cmd: cmd, stderr: stderrBuf}, nil
 }
 
 // URI converts a filesystem path to a percent-encoded file:// URI
@@ -234,6 +368,7 @@ func URI(path string) (string, error) {
 
 // Initialize performs the initialize/initialized handshake rooted at rootPath.
 func (c *Client) Initialize(ctx context.Context, rootPath string) error {
+	c.root = rootPath
 	params := map[string]any{
 		"processId": os.Getpid(), // P1-03 (B31): real PID so the language server's parent-watchdog can kill orphans on codemap SIGKILL
 		"rootUri":   func() string { u, _ := URI(rootPath); return u }(),
@@ -250,7 +385,10 @@ func (c *Client) Initialize(ctx context.Context, rootPath string) error {
 			},
 		},
 	}
-	raw, err := c.conn.Call(ctx, "initialize", params)
+	if opts := initializationOptions(c.name); opts != nil {
+		params["initializationOptions"] = opts
+	}
+	raw, err := c.connection().Call(ctx, "initialize", params)
 	if err != nil {
 		return err
 	}
@@ -259,7 +397,7 @@ func (c *Client) Initialize(ctx context.Context, rootPath string) error {
 		return fmt.Errorf("decode initialize capabilities: %w", err)
 	}
 	c.capabilities = result.Capabilities
-	return c.conn.Notify("initialized", map[string]any{})
+	return c.connection().Notify("initialized", map[string]any{})
 }
 
 // SupportsDocumentSymbols reports whether the server advertised the structural
@@ -283,7 +421,7 @@ func (c *Client) SupportsReferences() bool {
 
 // DidOpen tells the server about a document's content.
 func (c *Client) DidOpen(uri, languageID, text string) error {
-	return c.conn.Notify("textDocument/didOpen", map[string]any{
+	return c.connection().Notify("textDocument/didOpen", map[string]any{
 		"textDocument": map[string]any{
 			"uri":        uri,
 			"languageId": languageID,
@@ -297,14 +435,14 @@ func (c *Client) DidOpen(uri, languageID, text string) error {
 // must close after each extract — leaving thousands of buffers open stalls
 // typescript-language-server to near-zero throughput.
 func (c *Client) DidClose(uri string) error {
-	return c.conn.Notify("textDocument/didClose", map[string]any{
+	return c.connection().Notify("textDocument/didClose", map[string]any{
 		"textDocument": map[string]any{"uri": uri},
 	})
 }
 
 // DocumentSymbols returns the symbols declared in a document.
 func (c *Client) DocumentSymbols(ctx context.Context, uri string) ([]DocumentSymbol, error) {
-	raw, err := c.conn.Call(ctx, "textDocument/documentSymbol", map[string]any{
+	raw, err := c.connection().Call(ctx, "textDocument/documentSymbol", map[string]any{
 		"textDocument": map[string]any{"uri": uri},
 	})
 	if err != nil {
@@ -458,7 +596,7 @@ func validateRange(r Range, where string) error {
 
 // References returns all references to the symbol at a position.
 func (c *Client) References(ctx context.Context, uri string, pos Position, includeDecl bool) ([]Location, error) {
-	raw, err := c.conn.Call(ctx, "textDocument/references", map[string]any{
+	raw, err := c.connection().Call(ctx, "textDocument/references", map[string]any{
 		"textDocument": map[string]any{"uri": uri},
 		"position":     pos,
 		"context":      map[string]any{"includeDeclaration": includeDecl},
@@ -478,7 +616,7 @@ func (c *Client) References(ctx context.Context, uri string, pos Position, inclu
 
 // PrepareCallHierarchy returns the call-hierarchy item(s) at a position.
 func (c *Client) PrepareCallHierarchy(ctx context.Context, uri string, pos Position) ([]CallHierarchyItem, error) {
-	raw, err := c.conn.Call(ctx, "textDocument/prepareCallHierarchy", map[string]any{
+	raw, err := c.connection().Call(ctx, "textDocument/prepareCallHierarchy", map[string]any{
 		"textDocument": map[string]any{"uri": uri},
 		"position":     pos,
 	})
@@ -497,7 +635,7 @@ func (c *Client) PrepareCallHierarchy(ctx context.Context, uri string, pos Posit
 
 // IncomingCalls returns the callers of a prepared call-hierarchy item.
 func (c *Client) IncomingCalls(ctx context.Context, item CallHierarchyItem) ([]CallHierarchyIncomingCall, error) {
-	raw, err := c.conn.Call(ctx, "callHierarchy/incomingCalls", map[string]any{"item": item})
+	raw, err := c.connection().Call(ctx, "callHierarchy/incomingCalls", map[string]any{"item": item})
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +651,7 @@ func (c *Client) IncomingCalls(ctx context.Context, item CallHierarchyItem) ([]C
 
 // OutgoingCalls returns the callees of a prepared call-hierarchy item.
 func (c *Client) OutgoingCalls(ctx context.Context, item CallHierarchyItem) ([]CallHierarchyOutgoingCall, error) {
-	raw, err := c.conn.Call(ctx, "callHierarchy/outgoingCalls", map[string]any{"item": item})
+	raw, err := c.connection().Call(ctx, "callHierarchy/outgoingCalls", map[string]any{"item": item})
 	if err != nil {
 		return nil, err
 	}
@@ -531,20 +669,20 @@ func isNull(raw json.RawMessage) bool { return len(raw) == 0 || string(raw) == "
 
 // Shutdown asks the server to shut down.
 func (c *Client) Shutdown(ctx context.Context) error {
-	_, err := c.conn.Call(ctx, "shutdown", nil)
+	_, err := c.connection().Call(ctx, "shutdown", nil)
 	return err
 }
 
 // Exit notifies the server to exit and closes the connection.
 func (c *Client) Exit() error {
-	_ = c.conn.Notify("exit", nil)
-	return c.conn.Close()
+	_ = c.connection().Notify("exit", nil)
+	return c.connection().Close()
 }
 
 // Close terminates the connection (and the subprocess, if any).
 func (c *Client) Close() error {
-	if c.conn != nil {
-		return c.conn.Close()
+	if cn := c.connection(); cn != nil {
+		return cn.Close()
 	}
 	return nil
 }

@@ -111,6 +111,16 @@ func (h *serverHealth) exhausted() {
 	}
 }
 
+// reset gives a restarted server process a clean record.
+func (h *serverHealth) reset() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.streak, h.tripped = 0, false
+}
+
 func (h *serverHealth) degraded() bool {
 	if h == nil {
 		return false
@@ -213,7 +223,61 @@ func (e *Extractor) Bind(lang, langID string) *Extractor {
 // documentSymbol part-way through a run (the parse-wait breaker tripped), and
 // the binary it was driving. Files extracted after that point carry no symbols,
 // so the indexer must surface this rather than report a complete graph.
-func (e *Extractor) Degraded() (bool, string) { return e.health.degraded(), e.cmd }
+func (e *Extractor) Degraded() (bool, string) {
+	if down, _ := e.BackendCrash(); down {
+		return true, e.cmd
+	}
+	return e.health.degraded(), e.cmd
+}
+
+// BackendCrash reports whether the server's backend process died mid-run
+// (typescript-language-server's tsserver, typically out of memory), with the
+// server's message. Every request after it answers empty.
+func (e *Extractor) BackendCrash() (bool, string) {
+	if c, ok := e.client.(interface{ Crashed() (bool, string) }); ok {
+		return c.Crashed()
+	}
+	return false, ""
+}
+
+// BackendRestarts reports how often this run respawned the server process
+// after its backend died, and the binary.
+func (e *Extractor) BackendRestarts() (int, string) {
+	if r, ok := e.client.(interface{ Restarts() int }); ok {
+		return r.Restarts(), e.cmd
+	}
+	return 0, e.cmd
+}
+
+// maxBackendRestarts bounds how often one index run respawns a server whose
+// backend died. tsserver keeps every project it has loaded in memory, so on a
+// monorepo it can run out of heap again later in the run; each restart costs a
+// fresh project load, and a project that kills it every time must not loop.
+const maxBackendRestarts = 8
+
+// restartBackend replaces a crashed server process (shared by every extractor
+// bound to it) and reports whether a fresh one is ready.
+func (e *Extractor) restartBackend() bool {
+	r, ok := e.client.(interface {
+		Restart(context.Context) error
+		Restarts() int
+	})
+	if !ok || r.Restarts() >= maxBackendRestarts {
+		return false
+	}
+	if err := r.Restart(e.ctx); err != nil {
+		return false
+	}
+	e.health.reset()
+	return true
+}
+
+// crashErr is the per-file error once the backend is gone: one message for
+// every remaining file, so the index summary groups them into a single cause.
+func (e *Extractor) crashErr() error {
+	_, msg := e.BackendCrash()
+	return fmt.Errorf("%s language server backend exited (%s); file skipped", e.lang, msg)
+}
 
 // Language implements the extractor contract.
 func (e *Extractor) Language() string { return e.lang }
@@ -241,6 +305,9 @@ func (e *Extractor) documentSymbolsParsed(uri string, src []byte) ([]lsp.Documen
 	// same empty result for ~10s of sleeping. See parseWaitGiveUpStreak.
 	if !e.health.retryAllowed() {
 		return syms, nil
+	}
+	if down, _ := e.BackendCrash(); down {
+		return syms, nil // nothing left to wait for
 	}
 	deadline := time.Now().Add(e.parseBudget())
 	for backoff := 40 * time.Millisecond; time.Now().Before(deadline); {
@@ -347,19 +414,49 @@ func (e *Extractor) CallEdges(ctx context.Context, relPath string) ([]extract.Ca
 	if !e.client.SupportsCallHierarchy() {
 		return nil, fmt.Errorf("%s language server does not advertise callHierarchy", e.lang)
 	}
+	if down, _ := e.BackendCrash(); down && !e.restartBackend() {
+		return nil, e.crashErr()
+	}
+	edges, err := e.callEdgesOnce(ctx, relPath)
+	if down, _ := e.BackendCrash(); down {
+		// The backend died while answering this file (its project is often the
+		// one that ran it out of memory): retry once on a fresh process.
+		if !e.restartBackend() {
+			return nil, e.crashErr()
+		}
+		edges, err = e.callEdgesOnce(ctx, relPath)
+		if down, _ := e.BackendCrash(); down {
+			return nil, e.crashErr()
+		}
+	}
+	return edges, err
+}
+
+func (e *Extractor) callEdgesOnce(ctx context.Context, relPath string) ([]extract.CallEdge, error) {
 	abs := filepath.Join(e.root, relPath)
 	uri, _ := lsp.URI(abs)
+	var syms []lsp.DocumentSymbol
+	var err error
 	if src, rerr := os.ReadFile(abs); rerr == nil {
 		if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
 			return nil, err
 		}
 		defer func() { _ = e.client.DidClose(uri) }()
+		// A freshly opened file can answer empty while the server is still
+		// loading its project — the same race ExtractFile waits out. With
+		// tree-sitter doing extraction, the precise pass is the server's very
+		// first contact with every file, so it must wait too.
+		syms, err = e.documentSymbolsParsed(uri, src)
+	} else {
+		syms, err = e.client.DocumentSymbols(ctx, uri)
 	}
-	syms, err := e.client.DocumentSymbols(ctx, uri)
 	if err != nil {
 		return nil, err
 	}
 	if len(syms) == 0 {
+		if down, _ := e.BackendCrash(); down {
+			return nil, e.crashErr()
+		}
 		// A successful callable leaf still appears here and prepares one hierarchy
 		// item with zero outgoing calls. An empty documentSymbol response cannot
 		// prove that definitions observed during extraction were analyzed, so keep
@@ -399,12 +496,13 @@ func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN s
 			for _, c := range calls {
 				file, external := e.relOf(c.To.URI)
 				*out = append(*out, extract.CallEdge{
-					FromFQN:  fqn,
-					FromFile: relPath,
-					FromLine: s.Range.Start.Line + 1, // 1-based, matches caller node StartLine
-					ToFile:   file,
-					ToLine:   c.To.Range.Start.Line + 1, // 1-based, matches node StartLine
-					External: external,
+					FromFQN:    fqn,
+					FromFile:   relPath,
+					FromLine:   s.Range.Start.Line + 1, // 1-based, matches caller node StartLine
+					ToFile:     file,
+					ToLine:     c.To.Range.Start.Line + 1, // 1-based, matches node StartLine
+					ToNameLine: c.To.SelectionRange.Start.Line + 1,
+					External:   external,
 				})
 			}
 		}
