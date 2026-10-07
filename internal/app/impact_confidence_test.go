@@ -246,8 +246,9 @@ func TestReviewCoverageUncoveredAndPartial(t *testing.T) {
 	}
 }
 
-// A test file written in the same diff, after the last index, must count as
-// covering the changed symbol it references (work item #1).
+// A test file written in the same diff, after the last index, counts toward the
+// coverage verdict of the changed symbol it references (work item #1) — but ONLY
+// toward that verdict: untested_symbols and --fail-on-untested are unchanged.
 func TestReviewDiffTestFileCoversChangedSymbol(t *testing.T) {
 	svc, proj := reviewRepo(t)
 	writeRepoFile(t, proj, "lonely.go", "package app\n\nfunc Lonely() {}\n")
@@ -263,26 +264,17 @@ func TestReviewDiffTestFileCoversChangedSymbol(t *testing.T) {
 	if !hasSymbol(rep.ChangedSymbols, "Lonely") {
 		t.Fatalf("Lonely not among changed symbols: %+v", rep.ChangedSymbols)
 	}
-	var found bool
-	for _, tn := range rep.CoveringTests {
-		if tn.File == "lonely_test.go" {
-			found = true
-			if !tn.Heuristic || tn.Confidence != ConfidenceCandidate {
-				t.Errorf("diff-linked test must be a heuristic candidate, got %+v", tn)
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("lonely_test.go missing from covering tests: %+v", rep.CoveringTests)
-	}
-	if hasSymbol(rep.UntestedSymbols, "Lonely") {
-		t.Errorf("Lonely is covered by a test in the same diff, untested = %+v", rep.UntestedSymbols)
+	if !hasSymbol(rep.UntestedSymbols, "Lonely") {
+		t.Errorf("a same-diff text link must not clear untested_symbols: %+v", rep.UntestedSymbols)
 	}
 	if rep.Coverage == nil || rep.Coverage.Verdict != CoverageCovered || rep.Coverage.CoveredSymbols != 1 {
 		t.Errorf("coverage = %+v, want covered", rep.Coverage)
 	}
 	if rep.Gate.WouldFailOn.Uncovered {
 		t.Error("covered diff must not trip the uncovered gate")
+	}
+	if !rep.Gate.WouldFailOn.Untested {
+		t.Error("--fail-on-untested must be unchanged by the same-diff link")
 	}
 }
 

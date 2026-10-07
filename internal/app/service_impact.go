@@ -26,8 +26,9 @@ type ImpactNode struct {
 	// to the symbol's name (not via the call graph) — see heuristicTestCoverage.
 	Heuristic bool `json:"heuristic,omitempty"`
 	// Confidence is "confirmed" when a shortest path from the analyzed symbol to
-	// this node uses only precise edges or same-file edges, else "candidate"
-	// (name-based cross-file fan-out). Heuristic covering tests are always
+	// this node uses only precise edges or same-file name edges whose target
+	// symbol is unique in its file, else "candidate" (name-based cross-file or
+	// same-file fan-out over same-named definitions). Heuristic covering tests are always
 	// candidates. Absent on nodes not produced by an impact traversal.
 	Confidence string `json:"confidence,omitempty"`
 }
@@ -212,6 +213,12 @@ type ImpactReport struct {
 	Next         []NextAction `json:"next,omitempty"`
 	// Budget is present only when max_tokens was requested (see budget.go).
 	Budget *TokenBudget `json:"budget,omitempty"`
+
+	// diffTests are test files of the diff under review that reference this
+	// symbol by name (see withDiffTests). They are never serialized and never
+	// touch Tests/Untested: they feed only the review coverage verdict, so
+	// untested_symbols, risk, and --fail-on-untested stay call-graph/index based.
+	diffTests []ImpactNode
 }
 
 // ImpactItemError is an item-level failure in a raw-position impact batch. It

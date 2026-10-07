@@ -52,3 +52,50 @@ func TestBlastRadiusConfirmedPaths(t *testing.T) {
 		}
 	}
 }
+
+// TestBlastRadiusSameFileNameFanoutIsCandidate pins the honesty rule for
+// same-file name edges: a name-based call to Close links to EVERY same-named
+// method, including ones in the caller's own file, so the edge is confirmed only
+// when the target's symbol is unique within its file.
+func TestBlastRadiusSameFileNameFanoutIsCandidate(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "go")
+	mk := func(file, sym, fqn string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: file, Symbol: sym, FQN: fqn, Kind: KindMethod, Language: "go", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	aClose := mk("pkg/a.go", "Close", "pkg.A.Close")
+	bClose := mk("pkg/a.go", "Close", "pkg.B.Close")
+	shutdown := mk("pkg/a.go", "Shutdown", "pkg.W.Shutdown")
+	// w.a.Close() resolved by name: links to every same-named method.
+	for _, tgt := range []int64{aClose, bClose} {
+		if _, err := s.AddEdgeProv(shutdown, tgt, EdgeCalls, 1, ProvName); err != nil {
+			t.Fatal(err)
+		}
+	}
+	br, err := s.BlastRadiusFromNode(pid, bClose, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(br) != 1 || br[0].Node.Symbol != "Shutdown" {
+		t.Fatalf("blast radius = %+v, want only Shutdown", br)
+	}
+	if br[0].Confirmed {
+		t.Fatalf("same-file name fan-out over two Close methods must stay candidate")
+	}
+
+	// A precise edge to the same ambiguous target stays confirmed.
+	if _, err := s.AddEdgeProv(shutdown, bClose, EdgeCalls, 1, ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+	br, err = s.BlastRadiusFromNode(pid, bClose, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(br) != 1 || !br[0].Confirmed {
+		t.Fatalf("precise edge must stay confirmed: %+v", br)
+	}
+}

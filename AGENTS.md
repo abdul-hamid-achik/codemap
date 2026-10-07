@@ -495,14 +495,19 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   `{verdict: covered|partial|uncovered|unknown, covered_symbols, uncovered_symbols, unknown_symbols}`
   (`internal/app/review_coverage.go`), separate from `risk` and absent when no non-test symbol is
   assessed. Per symbol: covered = any test (call graph, heuristic, or a changed/new test file in the same
-  diff that references the symbol by name — Go requires the same directory); uncovered = usable call
+  diff whose code — comments and string literals stripped by a small per-language lexer
+  (`stripCommentsAndStrings`, Go/TS/JS/Python/Ruby/Lua) — references the symbol by name; Go requires the
+  same directory, and a name with more than one definition in the project is never linked this way). The
+  same-diff link feeds the coverage verdict ONLY (`ImpactReport.diffTests`, unexported): it never touches
+  `tests`/`untested`, `untested_symbols`, the risk untested factor, or `--fail-on-untested`; uncovered = usable call
   graph (`resolved`/`name`) and no test; unknown = no test link and unresolved/`none` call graph, or the
   symbol was never analyzed. Test symbols are skipped. Verdict: no covered+uncovered → `unknown`;
   no covered → `uncovered`; no uncovered and no unknown → `covered`; otherwise `partial`. The risk band
   semantics and `--fail-on-untested` are unchanged. `review --fail-on-uncovered` (exit 6) trips only when
   `coverage.UncoveredGateTrips()` (verdict `uncovered`/`partial` with `uncovered_symbols > 0`), never on
-  `unknown` — the honesty rule — and does not fail closed on incomplete analysis;
-  `gate.would_fail_on.uncovered` mirrors it. Schema additions are optional (`coverage`, node
+  `unknown` of a complete analysis — the honesty rule — but, like the other review gates, fails closed
+  (exit 6) on an indexed Git review with `analysis_complete:false` (`uncoveredGateResult`);
+  `gate.would_fail_on.uncovered` mirrors only the coverage condition (pair it with `incomplete_analysis`). Schema additions are optional (`coverage`, node
   `confidence`, `would_fail_on.uncovered`); the golden fixture is regenerated with
   `go test ./internal/app -run TestReviewContractV1 -update-review-contract`.
   `explore` and `traverse` likewise emit `schema_version: 1`; `explore` caps intent seeds and each

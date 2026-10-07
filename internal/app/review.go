@@ -252,8 +252,9 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err 
 	}
 	// Union the diff's own changed/new test files into the covering-test
 	// heuristic: the usual post-edit flow reviews BEFORE reindexing, so a test
-	// written alongside the fix is invisible to the indexed scans.
-	analyze = withDiffTests(analyze, loadDiffTestFiles(root, changed))
+	// written alongside the fix is invisible to the indexed scans. Those links
+	// feed the coverage verdict only (never untested/risk/--fail-on-untested).
+	analyze = withDiffTests(analyze, loadDiffTestFiles(root, changed), svc.definitionCounter(cwd))
 	imps := analyzeReviewImpacts(rep, rep.ChangedSymbols, analyze)
 	// Fold the per-symbol resolution + risk signals into one diff-scoped band.
 	// call_graph is the worst (least-confident) across changed symbols — a

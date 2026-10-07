@@ -169,15 +169,18 @@ calibrate its confidence:
 - **`untested` / `heuristic`** — a symbol has no covering tests, or a test was matched
   by name-scan rather than the call graph (flag it, don't trust it blindly).
 - **`confidence` / `buckets` / `min_confidence` on `codemap_impact`** — each blast-radius and test
-  node is `confirmed` (every edge on a shortest path is precise or same-file) or `candidate`
-  (name-based cross-file fan-out). `buckets.direct` is the depth-1 slice; on a name-based hub
+  node is `confirmed` (every edge on a shortest path is precise, or a same-file name edge to a
+  symbol that is unique in its file) or `candidate` (name-based fan-out, cross-file or over
+  same-named definitions in one file). `buckets.direct` is the depth-1 slice; on a name-based hub
   pass `min_confidence:"confirmed"` to drop candidates instead of grep-verifying them (the
   response says how many it hid under `filtered.candidate`).
 - **`coverage` on `codemap_review`** — `verdict` covered/partial/uncovered/unknown with
   covered/uncovered/unknown symbol counts, separate from `risk`. A test file changed in the same
-  diff counts as covering the symbols it references, even before reindexing. `unknown` means no
+  diff counts toward `coverage` (only) for the uniquely named symbols its code references, even
+  before reindexing; `untested_symbols` and `risk` are unaffected. `unknown` means no
   test link and no usable call graph — never read it as "untested". CLI
-  `--fail-on-uncovered` trips only on `uncovered`/`partial` with known-uncovered symbols.
+  `--fail-on-uncovered` trips only on `uncovered`/`partial` with known-uncovered symbols (and, like
+  the other review gates, fails closed on an incomplete indexed analysis).
 - **`*_total`** — true counts behind a capped list, so you know when to drill with
   `codemap_callers`/`impact` for the full set.
 

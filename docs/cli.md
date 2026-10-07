@@ -362,9 +362,10 @@ On a name-based index a hub name like `Update` fans out to every same-named meth
   `blast_radius`, the `direct`/`transitive` lists are rebuilt from the kept prefix only, and
   `blast_radius_total` reports the true size.
 - `confidence` on every blast-radius and test node — `confirmed` when a shortest path from the
-  symbol to that node uses only precise edges (an `index --precise` pass) or same-file edges,
-  otherwise `candidate` (cross-file name-based fan-out; heuristic covering tests are always
-  candidates).
+  symbol to that node uses only precise edges (an `index --precise` pass) or same-file name
+  edges whose target symbol is unique in its file, otherwise `candidate` (cross-file name-based
+  fan-out, same-file fan-out over several same-named methods; heuristic covering tests are
+  always candidates).
 - `--min-confidence confirmed` (MCP `min_confidence`) — drops candidate nodes from
   `blast_radius`, `buckets`, `tests`, `direct_callers`, and `test_commands`, and reports how many
   distinct candidate nodes it removed as `filtered: {"candidate": N}` (with `min_confidence`
@@ -443,8 +444,10 @@ symbol whose call graph is unavailable.
 band: `{verdict, covered_symbols, uncovered_symbols, unknown_symbols}` with `verdict` one of
 `covered`, `partial`, `uncovered`, or `unknown`. Per changed symbol, *covered* means a call-graph
 path, a heuristic name match, or a test file **in the same diff** reaches it (a changed or new test
-file that references the symbol by name counts even before reindexing; for Go it must live in the
-symbol's directory); *uncovered* means the call graph is usable (`resolved`/`name`) and no test was
+file whose code, comments and string literals excluded, references the symbol by name counts even
+before reindexing; for Go it must live in the symbol's directory, and a name shared by several
+definitions is never linked this way). A same-diff link counts toward this verdict only: it never
+removes a symbol from `untested_symbols` and never changes `risk` or `--fail-on-untested`; *uncovered* means the call graph is usable (`resolved`/`name`) and no test was
 found; *unknown* means no test link was found and the call graph cannot say (TS/JS/Python without
 `--precise`, declarative formats), or the symbol was never analyzed (truncated or failed).
 Test symbols are the coverage, not its subject, so they are skipped. The block is absent when the
@@ -520,16 +523,19 @@ first-class exit code instead:
   when `coverage.verdict` is `uncovered`, or `partial` with at least one known-uncovered
   symbol. It never trips on `unknown` coverage (an unresolved call graph with no test link)
   or on a `partial` made only of covered and unknown symbols — the honesty rule — so unlike
-  `--fail-on-untested` it is usable on polyglot diffs. It does not fail closed on an
-  incomplete analysis; pair it with `--fail-on-risk`/`--fail-on-untested` if you want that.
-  `--fail-on-untested` itself is unchanged. `review` only; the report's
-  `gate.would_fail_on.uncovered` reproduces it from the JSON.
+  `--fail-on-untested` it is usable on polyglot diffs. Like the other review gates it
+  fails closed (exit **6**) on an indexed Git review with `analysis_complete:false` —
+  truncated at the 200-symbol cap, partial errors, or a stale index — since a subset
+  proves nothing about the whole diff; genuine `unknown` coverage of a *complete*
+  analysis still passes. `--fail-on-untested` itself is unchanged. `review` only; the
+  report's `gate.would_fail_on.uncovered` reproduces the coverage condition from the JSON
+  (combine it with `gate.would_fail_on.incomplete_analysis`).
 
-For `review`, enabling **either** gate also requires a complete analysis. An
+For `review`, enabling **any** gate also requires a complete analysis. An
 indexed Git repository with `analysis_complete:false` exits **6** before policy
 comparison, even though its aggregate risk is honestly `unknown`; otherwise a
 stale or partially mapped diff could pass because the evidence needed to enforce
-the gate is missing. With both flags disabled, the same incomplete report remains
+the gate is missing. With all gate flags disabled, the same incomplete report remains
 reporting-only and exits `0`. Early graceful reports for a non-Git directory or a
 project with no indexed nodes (including `codemap init` without `codemap index`)
 also remain nonblocking and exit `0`.

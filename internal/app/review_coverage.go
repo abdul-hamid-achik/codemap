@@ -1,13 +1,6 @@
 package app
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-
-	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
@@ -26,7 +19,8 @@ const (
 // keeps three honest states per symbol:
 //
 //   - covered:   a call-graph path, a heuristic name match, or a test file in the
-//     same diff reaches the symbol
+//     same diff reaches the symbol (the same-diff link counts toward this verdict
+//     ONLY — never toward untested_symbols, risk, or --fail-on-untested)
 //   - uncovered: the call graph is usable (resolved or name-based) and found no
 //     test, heuristic or otherwise
 //   - unknown:   no test link was found AND the call graph cannot say (TS/JS/Python
@@ -45,7 +39,7 @@ type ReviewCoverage struct {
 // unknown from its impact report (after any same-diff test linkage).
 func classifyImpactCoverage(imp *ImpactReport) string {
 	switch {
-	case len(imp.Tests) > 0:
+	case len(imp.Tests) > 0 || len(imp.diffTests) > 0:
 		return CoverageCovered
 	case impactRiskUnknown(imp) || imp.CallGraph == CallGraphNone || imp.CallGraph == CallGraphUnresolved:
 		return CoverageUnknown
@@ -122,99 +116,4 @@ func (c *ReviewCoverage) UncoveredGateTrips() bool {
 		return false
 	}
 	return c.Verdict == CoverageUncovered || c.Verdict == CoveragePartial
-}
-
-// diffTestFile is a test file touched by the diff under review, with its content
-// loaded once so every changed symbol can be matched against it.
-type diffTestFile struct {
-	path    string
-	content []byte
-}
-
-// loadDiffTestFiles reads the changed or untracked test files of the diff (not
-// deleted ones) from the working tree. These may be missing from the index —
-// the common post-edit flow reviews before reindexing — so the indexed
-// heuristic scan alone cannot see a brand-new test.
-func loadDiffTestFiles(root string, changed []git.ChangedFile) []diffTestFile {
-	var out []diffTestFile
-	for _, cf := range changed {
-		if cf.Status == "D" || !isTestFilePath(cf.Path) {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(root, cf.Path))
-		if err != nil {
-			continue
-		}
-		out = append(out, diffTestFile{path: cf.Path, content: b})
-	}
-	return out
-}
-
-// diffTestCoverage links a changed symbol to the diff's own test files: a
-// changed/new test file that references the symbol by bare name (word
-// boundary) counts as covering it. Same-name false positives are bounded by
-// requiring, for a Go symbol, that the test file lives in the symbol's
-// directory (same package, including the _test external package).
-func diffTestCoverage(files []diffTestFile, sym SymbolRef) []ImpactNode {
-	name := sym.Symbol
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
-	if name == "" || len(files) == 0 {
-		return nil
-	}
-	re, err := regexp.Compile(`\b` + regexp.QuoteMeta(name) + `\b`)
-	if err != nil {
-		return nil
-	}
-	goSym := strings.EqualFold(filepath.Ext(sym.File), ".go")
-	var out []ImpactNode
-	for _, f := range files {
-		if goSym && (!strings.EqualFold(filepath.Ext(f.path), ".go") || filepath.Dir(f.path) != filepath.Dir(sym.File)) {
-			continue
-		}
-		if !re.Match(f.content) {
-			continue
-		}
-		out = append(out, ImpactNode{
-			Symbol: filepath.Base(f.path), FQN: f.path, Kind: graph.KindTest,
-			File: f.path, StartLine: 1, Heuristic: true, Confidence: ConfidenceCandidate,
-		})
-	}
-	return out
-}
-
-// withDiffTests wraps a per-symbol impact analyzer so the diff's own test files
-// count as covering tests for the changed symbols they reference. The union is
-// additive: tests already found by the call graph or the indexed heuristic are
-// kept, and a test file already present is not duplicated.
-func withDiffTests(analyze func(SymbolRef) (*ImpactReport, error), files []diffTestFile) func(SymbolRef) (*ImpactReport, error) {
-	if len(files) == 0 {
-		return analyze
-	}
-	return func(s SymbolRef) (*ImpactReport, error) {
-		imp, err := analyze(s)
-		if err != nil || imp == nil || !imp.Found {
-			return imp, err
-		}
-		have := map[string]bool{}
-		for _, t := range imp.Tests {
-			have[t.File] = true
-		}
-		var added int
-		for _, t := range diffTestCoverage(files, s) {
-			if have[t.File] {
-				continue
-			}
-			have[t.File] = true
-			imp.Tests = append(imp.Tests, t)
-			added++
-		}
-		if added > 0 {
-			imp.Untested = false
-			imp.TestCommands = testCommands(imp.Tests)
-			imp.Note = joinNote(imp.Note, fmt.Sprintf("%d covering test file(s) found in the same diff referencing %q — not confirmed via the call graph", added, s.Symbol))
-		}
-		return imp, nil
-	}
 }
