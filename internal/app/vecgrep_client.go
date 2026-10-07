@@ -141,9 +141,11 @@ func runVecgrepJSONWithLimits(ctx context.Context, bin, cwd string, timeout time
 	defer cancel()
 
 	stdout := &cappedCommandOutput{limit: maxOutput, cancel: cancel}
+	stderr := &cappedCommandOutput{limit: vecgrepMaxStderrBytes} // truncated, never cancels
 	cmd := exec.CommandContext(runCtx, bin, args...)
 	cmd.Dir = cwd
 	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.WaitDelay = vecgrepCommandWaitDelay
 	err := cmd.Run()
 	if stdout.exceeded() {
@@ -158,9 +160,33 @@ func runVecgrepJSONWithLimits(ctx context.Context, bin, cwd string, timeout time
 		if runErr := runCtx.Err(); runErr != nil {
 			return nil, runErr
 		}
+		if msg := stderrSummary(stderr.bytes()); msg != "" {
+			// vecgrep explains its own failures ("index not built … run
+			// 'vecgrep index'"); a bare "exit status 1" hides the fix.
+			return nil, fmt.Errorf("%w: %s", err, msg)
+		}
 		return nil, err
 	}
 	return stdout.bytes(), nil
+}
+
+// vecgrepMaxStderrBytes bounds the stderr kept for error messages.
+const vecgrepMaxStderrBytes = 4096
+
+// stderrSummary returns the first non-empty stderr line without vecgrep's
+// "Error: " prefix, capped for a one-line error message.
+func stderrSummary(b []byte) string {
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "Error:"))
+		if line == "" {
+			continue
+		}
+		if len(line) > 300 {
+			line = line[:300] + "…"
+		}
+		return line
+	}
+	return ""
 }
 
 // cappedCommandOutput retains only the first limit bytes and cancels the child
@@ -189,7 +215,7 @@ func (w *cappedCommandOutput) Write(p []byte) (int, error) {
 		w.overflow = true
 	}
 	w.mu.Unlock()
-	if overflowed {
+	if overflowed && w.cancel != nil {
 		w.cancel()
 	}
 	return len(p), nil

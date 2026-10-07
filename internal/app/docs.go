@@ -339,8 +339,9 @@ codemap ⇄ vecgrep uses versioned one-hop CLI contracts, never shared packages 
 stores. semantic.backend=fallback keeps compatibility: local vectors win and an
 absent local index may fall back silently to vecgrep. semantic.backend=local never
 delegates. semantic.backend=vecgrep makes the sibling the sole retrieval owner,
-skips codemap vector writes, and surfaces unavailable/exec/JSON adapter failures;
-zero hits remain a real empty answer. codemap_semantic maps usable vecgrep hits
+skips codemap vector writes, and surfaces unavailable/exec/JSON adapter failures
+(semantic returns the error; explore/task_context fall back to name+lexical seeds
+with owner_error and a note); zero hits remain a real empty answer. codemap_semantic maps usable vecgrep hits
 onto the graph; codemap_context surfaces project-scoped memories; and codemap_status
 reports sibling indexes. In the other direction, 'codemap structural-manifest --json'
 provides a source-free identity/freshness preflight before 'codemap export-symbols --json'

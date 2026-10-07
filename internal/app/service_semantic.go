@@ -57,12 +57,16 @@ func enrichHitAnnotations(g *graph.Store, projectID int64, hits []SemanticHit) {
 
 // SemanticReport is returned by Semantic / FindSymbols / Search.
 type SemanticReport struct {
-	Query   string        `json:"query"`
-	Project string        `json:"project"`
-	Mode    string        `json:"mode"`             // "semantic", "vecgrep", "name", "lexical", "name+lexical", or "none"
-	Fusion  string        `json:"fusion,omitempty"` // hybrid-search weighting used: "identifier", "natural_language", or "balanced" (empty when no fusion happened, e.g. a pure-vector fallback)
-	Note    string        `json:"note,omitempty"`   // why there are no results, when applicable
-	Hits    []SemanticHit `json:"hits"`
+	Query   string `json:"query"`
+	Project string `json:"project"`
+	Mode    string `json:"mode"`             // "semantic", "vecgrep", "name", "lexical", "name+lexical", or "none"
+	Fusion  string `json:"fusion,omitempty"` // hybrid-search weighting used: "identifier", "natural_language", or "balanced" (empty when no fusion happened, e.g. a pure-vector fallback)
+	Note    string `json:"note,omitempty"`   // why there are no results, when applicable
+	// OwnerError is set by Search when the explicitly configured semantic owner
+	// (semantic.backend: vecgrep) failed and the hits come from the name/lexical
+	// floor instead. Semantic itself never degrades: it returns the error.
+	OwnerError string        `json:"owner_error,omitempty"`
+	Hits       []SemanticHit `json:"hits"`
 }
 
 // recordQueryUsage is the learning-from-use write: every successful search
@@ -286,12 +290,25 @@ func (svc *Service) Search(ctx context.Context, cwd, query string, topK int) (*S
 	}
 	// Search is the convenience semantic→name floor used by Explore and the
 	// studio. Preserve that degradation for local/fallback mode, including an
-	// unavailable embedder. An explicitly selected vecgrep owner is different:
-	// its execution/contract errors are observable by design and must not be
-	// hidden behind a name match from a different retrieval path.
+	// unavailable embedder. An explicitly selected vecgrep owner that FAILS
+	// (not one that answered with zero hits) degrades too — an orientation
+	// query must not die because a sibling index is missing — but never
+	// silently: OwnerError and the note carry the owner's own error.
+	var ownerErr error
 	if err != nil && explicitVecgrep {
-		return nil, err
+		ownerErr = err
 	}
+	rep, err = svc.nameAndLexical(cwd, query, topK)
+	if err == nil && ownerErr != nil {
+		rep.OwnerError = ownerErr.Error()
+		rep.Note = "semantic owner vecgrep failed (" + ownerErr.Error() + ") — showing name/keyword matches instead"
+	}
+	return rep, err
+}
+
+// nameAndLexical is the offline floor: exact name matches, topped up with
+// lexical (BM25) matches.
+func (svc *Service) nameAndLexical(cwd, query string, topK int) (*SemanticReport, error) {
 	names, err := svc.FindSymbols(cwd, query, topK)
 	if err != nil || len(names.Hits) >= topK {
 		return names, err

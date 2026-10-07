@@ -1825,6 +1825,9 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	// TS/JS call candidates that name an imported binding resolve through the
 	// project's import resolver here, while this file's import context is at hand.
 	fr.References = ix.bindImportRefs(ft, fr.References)
+	for i := range fr.References {
+		fr.References[i].SourceFile = ft.rel
+	}
 
 	// Extraction succeeded: clear vectors for the prior node generation before
 	// atomically replacing its graph nodes below. Delaying this until after parse
@@ -2205,6 +2208,16 @@ func resolveEdgesTx(tx *sql.Tx, projectID int64, refs []extract.Reference, ni *n
 			continue
 		}
 		from, ok := ni.fqnTo[ref.From]
+		if ref.SourceFile != "" && ref.From != ref.SourceFile {
+			// fqnTo keeps one node per FQN; the reference's own file names the
+			// right one when the FQN repeats (every Go `main.main`).
+			if scope == nil {
+				scope = buildFileScopeIndex(ni)
+			}
+			if ids := pickByLine(scope[ref.SourceFile][ref.From], ref.FromLine, byID); len(ids) > 0 {
+				from, ok = ids[0], true
+			}
+		}
 		if !ok {
 			continue
 		}
@@ -2256,11 +2269,16 @@ func resolveEdgesTx(tx *sql.Tx, projectID int64, refs []extract.Reference, ni *n
 			candidates = append(append([]int64{}, candidates...), relationAliases[ref.To]...)
 		}
 		if ref.Kind == extract.RefCalls || ref.Kind == extract.RefReferences {
-			// A query or heading can share a function's name without being code.
+			// A query or heading can share a function's name without being code,
+			// and a Go `x.String()` never calls a TypeScript method.
+			fam := languageFamily(byID[from].Language)
 			code := make([]int64, 0, len(candidates))
 			for _, id := range candidates {
 				switch byID[id].Language {
 				case "sql", "yaml", "markdown":
+					continue
+				}
+				if f := languageFamily(byID[id].Language); fam != "" && f != "" && f != fam {
 					continue
 				}
 				code = append(code, id)
@@ -2805,6 +2823,19 @@ func (ix *Indexer) resolvePreciseEdgesWith(tx *sql.Tx, projectID int64, res *Res
 		res.PreciseNote = "precise pass completed; no in-module call edges found (leaf project, or all calls external/dynamic)"
 	}
 	return nil
+}
+
+// languageFamily groups languages whose code can call each other: TS, JS and
+// Vue script blocks share one runtime; every other code language stands alone.
+// "" means unknown — never used to drop a candidate.
+func languageFamily(lang string) string {
+	switch lang {
+	case "typescript", "javascript", "vue":
+		return "js"
+	case "go", "python", "ruby", "lua":
+		return lang
+	}
+	return ""
 }
 
 func samePackage(ids []int64, dirOf map[int64]string, dir string) []int64 {

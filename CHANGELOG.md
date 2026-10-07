@@ -200,6 +200,19 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **Go call edges no longer collapse same-named symbols across packages** — the edge resolver
+  looked up a call's source by FQN alone, so every `package main` program's `main.main` (or two
+  packages both named `data`) shared one node: one program received every program's calls, the
+  others read as calling nothing, and the same-package filter then used the wrong directory. The
+  source now resolves inside the file the reference came from.
+- **Name-based calls stay inside their language family** — a Go `x.String()` could link to a
+  TypeScript `String` method (one real monorepo carried ~133k such cross-language edges, 43% of
+  its graph). Candidates are now limited to the caller's family (Go, TS/JS/Vue, Python, Ruby, Lua).
+- **A failing vecgrep owner no longer kills `explore`** — with `semantic.backend: vecgrep` and no
+  vecgrep index, `explore`/`task-context` failed with a bare "exit status 1". vecgrep's own stderr
+  message is now part of the error, and orientation commands fall back to name+keyword seeds with
+  the failure in `owner_error` and the note; `semantic` itself still returns the error.
+
 - **Codemap Studio Run/Stop buttons and packaged binary detection** — the generic feature panel's
   Run and Stop buttons had no click handlers (only Enter in a field ran a command); Run now runs
   and Stop cancels any run by its feature id. The packaged app probed `codemap version` from
