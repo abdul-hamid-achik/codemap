@@ -19,24 +19,6 @@ releases page is the authoritative history.
 - **Python call candidates and import edges** — without `--precise`, Python now gets same-file,
   `self`/`cls`-method, `C.m()`, and imported-binding call candidates plus file→file import edges
   (relative, absolute, and `src/`-layout), from the tree-sitter binder emulation.
-
-### Changed
-
-- **TypeScript, JavaScript, and Python index without language servers** — a new built-in
-  backend (`internal/extract/sittersrc`) parses them with a pure-Go tree-sitter runtime
-  (gotreesitter, no CGO) and reproduces the symbol trees `typescript-language-server` and
-  `pyright-langserver` return, quirks included, through the same normalization the LSP path
-  uses. The graph is unchanged (100% symbol parity against the live servers on several real
-  repositories), indexing is several times faster on TypeScript-heavy repos (a 1,100-file one: 19.5 s →
-  2.5 s), and Vue script blocks and `--no-lsp` now index too. Language servers are spawned only
-  for `--precise`, attached to the tree-sitter backend so a precise run produces the same symbols
-  and the same precise edges as before; a missing server is reported with
-  `capability: "precise"` instead of skipped files. `index.structural_backend: lsp`
-  (`CODEMAP_STRUCTURAL_BACKEND=lsp`) restores the previous behavior. Release binaries embed only
-  the four grammars via `grammar_subset` build tags (+~6 MB).
-
-### Added
-
 - **Honest budgets for impact buckets and explore processes** — `blast_radius_total` (additive) on
   `impact` reports the true blast-radius size even when `--max-tokens` or `task-context` trims the
   list; `buckets` counts stay true totals while their node lists follow the kept `blast_radius`,
@@ -179,6 +161,19 @@ releases page is the authoritative history.
   `npm run dist:mac|dist:linux|dist:win` in `desktop/`.
 
 ### Changed
+
+- **TypeScript, JavaScript, and Python index without language servers** — a new built-in
+  backend (`internal/extract/sittersrc`) parses them with a pure-Go tree-sitter runtime
+  (gotreesitter, no CGO) and reproduces the symbol trees `typescript-language-server` and
+  `pyright-langserver` return, quirks included, through the same normalization the LSP path
+  uses. The graph is unchanged (100% symbol parity against the live servers on several real
+  repositories), indexing is several times faster on TypeScript-heavy repos (a 1,100-file one: 19.5 s →
+  2.5 s), and Vue script blocks and `--no-lsp` now index too. Language servers are spawned only
+  for `--precise`, attached to the tree-sitter backend so a precise run produces the same symbols
+  and the same precise edges as before; a missing server is reported with
+  `capability: "precise"` instead of skipped files. `index.structural_backend: lsp`
+  (`CODEMAP_STRUCTURAL_BACKEND=lsp`) restores the previous behavior. Release binaries embed only
+  the four grammars via `grammar_subset` build tags (+~6 MB).
 
 - **Ranking ignores test code by default** — `read-order`, `hotspots`, and the hubs in `map`
   no longer count calls from tests or rank symbols defined in test files and directories, and
