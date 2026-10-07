@@ -103,6 +103,11 @@ type ReviewReport struct {
 	// absent for complete zero-symbol and early graceful reports; finalized
 	// incomplete reports carry level unknown even when no symbol maps safely.
 	Risk *ReviewRisk `json:"risk,omitempty"`
+	// Coverage is the test-coverage verdict, separate from Risk: per changed
+	// symbol it is covered, uncovered (usable call graph found no test) or
+	// unknown (no test link and no usable call graph). Absent when the diff has
+	// no non-test symbol to assess. --fail-on-uncovered gates on this block.
+	Coverage *ReviewCoverage `json:"coverage,omitempty"`
 	// DeletionAnalysis is present only when the diff deletes files. It lets a
 	// harness distinguish a deletion whose prior definitions were analyzed from
 	// one whose nodes were already pruned from the index.
@@ -245,6 +250,11 @@ func (svc *Service) Review(cwd string, opts ReviewOpts) (rep *ReviewReport, err 
 			}, opts.Depth)
 		}
 	}
+	// Union the diff's own changed/new test files into the covering-test
+	// heuristic: the usual post-edit flow reviews BEFORE reindexing, so a test
+	// written alongside the fix is invisible to the indexed scans. Those links
+	// feed the coverage verdict only (never untested/risk/--fail-on-untested).
+	analyze = withDiffTests(analyze, loadDiffTestFiles(root, changed), svc.definitionCounter(cwd))
 	imps := analyzeReviewImpacts(rep, rep.ChangedSymbols, analyze)
 	// Fold the per-symbol resolution + risk signals into one diff-scoped band.
 	// call_graph is the worst (least-confident) across changed symbols — a
@@ -316,7 +326,7 @@ func (rep *ReviewReport) addPartialError(partial ReviewPartialError) {
 // makes partial-failure behavior deterministic and directly testable without
 // weakening Service's concrete package boundaries.
 func analyzeReviewImpacts(rep *ReviewReport, symbols []SymbolRef, analyze func(SymbolRef) (*ImpactReport, error)) []*ImpactReport {
-	seenBlast, seenTest := map[string]bool{}, map[string]bool{}
+	seenBlast, seenTest := map[string]int{}, map[string]int{} // key -> index in the union slice
 	imps := make([]*ImpactReport, 0, len(symbols))
 	for _, s := range symbols {
 		imp, err := analyze(s)
@@ -350,18 +360,23 @@ func analyzeReviewImpacts(rep *ReviewReport, symbols []SymbolRef, analyze func(S
 		if imp.Resolution != "" && rep.Resolution == "" {
 			rep.Resolution = imp.Resolution
 		}
-		for _, b := range imp.BlastRadius {
-			if key := symKey(b.FQN, b.File, b.StartLine); !seenBlast[key] {
-				seenBlast[key] = true
-				rep.BlastRadius = append(rep.BlastRadius, b)
+		// A node reached through several changed symbols keeps its first position
+		// but is confirmed if ANY path to it is confirmed.
+		unionNodes := func(dst *[]ImpactNode, seen map[string]int, nodes []ImpactNode) {
+			for _, n := range nodes {
+				key := symKey(n.FQN, n.File, n.StartLine)
+				if i, ok := seen[key]; ok {
+					if n.Confidence == ConfidenceConfirmed {
+						(*dst)[i].Confidence = ConfidenceConfirmed
+					}
+					continue
+				}
+				seen[key] = len(*dst)
+				*dst = append(*dst, n)
 			}
 		}
-		for _, tn := range imp.Tests {
-			if key := symKey(tn.FQN, tn.File, tn.StartLine); !seenTest[key] {
-				seenTest[key] = true
-				rep.CoveringTests = append(rep.CoveringTests, tn)
-			}
-		}
+		unionNodes(&rep.BlastRadius, seenBlast, imp.BlastRadius)
+		unionNodes(&rep.CoveringTests, seenTest, imp.Tests)
 		if imp.Untested && imp.Resolution == "" {
 			rep.UntestedSymbols = append(rep.UntestedSymbols, s)
 		}
@@ -377,6 +392,7 @@ func finalizeReviewAnalysis(rep *ReviewReport, imps []*ImpactReport) {
 		rep.CallGraph = worstCallGraph(imps)
 		rep.Risk = aggregateReviewRisk(imps)
 	}
+	rep.Coverage = computeReviewCoverage(rep, imps)
 	rep.AnalysisComplete = !rep.Stale && rep.TruncatedSymbols == 0 && len(rep.PartialErrors) == 0 && rep.PartialErrorsTruncated == 0
 	if rep.DeletionAnalysis != nil && !rep.DeletionAnalysis.Complete {
 		rep.AnalysisComplete = false

@@ -455,29 +455,35 @@ func sigOf(refs []SymbolRef) string {
 func TestIndexNonGoWarns(t *testing.T) {
 	isolate(t)
 	proj := t.TempDir()
-	// A project with only recognized non-Go source (no Go files).
-	if err := os.WriteFile(filepath.Join(proj, "app.ts"), []byte("export function a() {}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(proj, "main.py"), []byte("def a():\n    pass\n"), 0o644); err != nil {
-		t.Fatal(err)
+	// TypeScript and Python index with the built-in tree-sitter backend even
+	// under --no-lsp; Rust and Java are recognized but have no backend yet.
+	for name, body := range map[string]string{
+		"app.ts":    "export function a() {}\n",
+		"main.py":   "def a():\n    pass\n",
+		"lib.rs":    "fn a() {}\n",
+		"Main.java": "class Main {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(proj, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	sess, err := Open("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sess.Close()
-	// NoLSP so the result is deterministic regardless of which language servers are
-	// installed: with typescript-language-server on PATH the .ts file would index.
 	rep, err := NewService(sess).Index(context.Background(), proj, index.Options{NoLSP: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.FilesScanned != 0 || rep.Nodes != 0 {
-		t.Errorf("expected nothing indexed for a non-Go project (NoLSP), got %d files / %d nodes", rep.FilesScanned, rep.Nodes)
+	if rep.FilesScanned != 2 || rep.Nodes == 0 {
+		t.Errorf("expected app.ts + main.py indexed without language servers, got %d files / %d nodes", rep.FilesScanned, rep.Nodes)
 	}
-	if !strings.Contains(rep.Warning, "typescript") || !strings.Contains(rep.Warning, "python") {
+	if !strings.Contains(rep.Warning, "rust") || !strings.Contains(rep.Warning, "java") {
 		t.Errorf("expected a warning naming the skipped languages, got %q", rep.Warning)
+	}
+	if strings.Contains(rep.Warning, "typescript") || strings.Contains(rep.Warning, "python") {
+		t.Errorf("typescript/python are indexed and must not be reported as skipped: %q", rep.Warning)
 	}
 }
 

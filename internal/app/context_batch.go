@@ -53,6 +53,7 @@ type ContextBatchReport struct {
 	SourceBudget        ContextSourceBudget       `json:"source_budget"`
 	SourceTruncations   []ContextSourceTruncation `json:"source_truncations,omitempty"`
 	Note                string                    `json:"note,omitempty"`
+	Budget              *TokenBudget              `json:"budget,omitempty"` // present only when max_tokens was requested
 }
 
 // contextBatchItem is one unit of context_batch work — either a plain name

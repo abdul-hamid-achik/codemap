@@ -53,6 +53,13 @@ type Result struct {
 	Edges      []PreciseEdge
 	CleanFiles map[string]bool // root-relative caller files whose package type-checked cleanly
 	ErrorPkgs  int             // packages with type errors (skipped; their name edges kept)
+
+	// Implements / Overrides: which module types satisfy which module
+	// interfaces, and the method-level pairs. ImplementsSkipped is set when the
+	// module is too large for the satisfiability matrix (maxImplementsChecks).
+	Implements        []ImplementsEdge
+	Overrides         []OverrideEdge
+	ImplementsSkipped bool
 }
 
 // Resolve type-checks the module rooted at root and returns precise call edges for
@@ -123,6 +130,7 @@ func Resolve(ctx context.Context, root string) (*Result, error) {
 			}
 		}
 	}
+	res.Implements, res.Overrides, res.ImplementsSkipped = implementsEdges(fset, root, pkgs)
 	return res, nil
 }
 

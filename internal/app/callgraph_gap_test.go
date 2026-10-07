@@ -7,7 +7,7 @@ import (
 
 // TestCallGraphGapWording pins that user-facing notes stay truthful now that
 // TS/JS/Vue carry partial name-based call candidates: they say "partial" (and
-// what is covered), Python still says "not available", and the machine
+// what is covered), Python too (adding self/cls methods), and the machine
 // classification (noNameBasedCallLang → call_graph "unresolved") is unchanged.
 func TestCallGraphGapWording(t *testing.T) {
 	for _, lang := range []string{"typescript", "javascript", "vue"} {
@@ -23,7 +23,14 @@ func TestCallGraphGapWording(t *testing.T) {
 		}
 	}
 	head, state := callGraphGap("python")
-	if !strings.Contains(head, "not available for python") || !strings.Contains(state, "unresolved") {
-		t.Errorf("python wording = %q / %q, want the not-available wording", head, state)
+	if !strings.Contains(head, "partial") || !strings.Contains(head, "self/cls methods") || strings.Contains(state, "unresolved (not absent)") {
+		t.Errorf("python wording = %q / %q, want the partial-candidates wording", head, state)
+	}
+	if !noNameBasedCallLang("python") {
+		t.Error("python must keep the unresolved call_graph classification")
+	}
+	head, _ = callGraphGap("ruby")
+	if !strings.Contains(head, "not available for ruby") {
+		t.Errorf("a language without candidates keeps the not-available wording, got %q", head)
 	}
 }

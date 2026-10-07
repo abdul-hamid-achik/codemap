@@ -15,10 +15,12 @@ brew install abdul-hamid-achik/tap/codemap
 go install github.com/abdul-hamid-achik/codemap/cmd/codemap@latest
 ```
 
-Go, Ruby, Lua, GDScript, SQL, YAML, Markdown, HTML, and stylesheets have built-in
-backends. TypeScript, JavaScript, and Vue need `typescript-language-server`;
-Python needs `pyright-langserver`. Run `codemap doctor` and consult the
-[language matrix](/languages) for exact capabilities and missing tools.
+Go, TypeScript, JavaScript, Python, Vue script blocks, Ruby, Lua, GDScript, SQL,
+YAML, Markdown, HTML, and stylesheets all have built-in backends — no language
+server is needed to index. `typescript-language-server` and `pyright-langserver`
+are optional: they power the exact `--precise` call graph for TS/JS and Python.
+Run `codemap doctor` and consult the [language matrix](/languages) for exact
+capabilities.
 
 ## 2. Index one repository
 

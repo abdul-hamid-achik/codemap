@@ -37,10 +37,11 @@ instead of dozens of file reads.
   (name-based by default for Go, exact via `go/types` with `--precise`) and **defines** edges
   (file → symbol). Test coverage is derived by walking the call graph to test nodes. The graph is
   stored in pure-Go SQLite and remains queryable offline. **Go**, **Ruby**, **Lua**, **GDScript**, and **CSS/HTML** use
-  built-in pure-Go backends with language-specific relationships and no server needed.
-  With the listed language server installed, **TypeScript + JavaScript** and **Python** provide
-  symbols + structure and a **precise call graph** under `--precise`; one
-  `typescript-language-server` resolves calls across the `.ts`↔`.js` boundary. Base (non-precise)
+  built-in pure-Go backends with language-specific relationships and no server needed, and so do
+  **TypeScript + JavaScript** and **Python**: a pure-Go tree-sitter parser extracts the same symbols
+  their language servers would, with no server installed. With the server installed, `--precise`
+  adds a **precise call graph**; one `typescript-language-server` resolves calls across the
+  `.ts`↔`.js` boundary. Base (non-precise)
   TS/JS indexing additionally extracts name-based **import edges**, high-precision **call candidates** (same-file calls and calls through imported bindings), **JSX component-usage edges**
   (`<Foo/>` in `.tsx`/`.jsx` — rendering *is* invocation for a function component, so React
   codebases no longer read as disconnected), and **Next.js framework-wiring references** (App
@@ -135,18 +136,18 @@ language-agnostic once symbols are indexed. A precise call graph
 | Language | How | Extensions | Call graph |
 |---|---|---|---|
 | **Go** | stdlib `go/parser` (pure Go, always) · `--precise` adds exact edges via in-process `go/types` | `.go` | name-based by default; exact via `--precise` |
-| **TypeScript / JavaScript** | `typescript-language-server` (one server, JSX/TSX-aware, resolves across the `.ts`↔`.js` boundary) + a name-based scan for imports, JSX component usage, and Next.js framework wiring | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | name-based JSX, import, framework, same-file call, and imported-binding edges by default (partial); complete calls via `--precise` |
-| **Python** | `pyright-langserver` | `.py` `.pyw` `.pyi` | `--precise` only |
+| **TypeScript / JavaScript** | built-in pure-Go tree-sitter parser (TS, TSX, JS/JSX) · `--precise` drives `typescript-language-server` `callHierarchy` (one server, resolves across the `.ts`↔`.js` boundary) · plus a name-based scan for imports, JSX component usage, and Next.js framework wiring | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | name-based JSX, import, framework, same-file call, and imported-binding edges by default (partial); complete calls via `--precise` |
+| **Python** | built-in pure-Go tree-sitter parser · `--precise` drives `pyright-langserver` | `.py` `.pyw` `.pyi` | name-based same-file, self/cls-method, and imported-binding candidates (partial); complete via `--precise` |
 | **Ruby** | built-in pure-Go scanner (modules/classes/defs incl. `def self.x`, endless defs, `private def`; heredoc-, `=begin`-, and string-safe) | `.rb` | name-based (calls + `require`/`require_relative` imports) |
 | **Lua** | built-in pure-Go scanner (`function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe) | `.lua` | name-based (calls + `require` imports) |
-| **Vue SFC** | `typescript-language-server` via `vuesrc` — `<script>`/`<script setup>` block content is extracted and routed to the TS/JS delegate; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
+| **Vue SFC** | `vuesrc` — `<script>`/`<script setup>` block content is extracted and parsed by the TS/JS backend; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
 | **CSS / SCSS / Sass / Less** | built-in pure-Go scanner — selector nodes per class/id token, SCSS/Less nesting flattened, at-rule- and interpolation-safe; `className`/`class=` references from TSX/JSX and HTML resolve to selectors as `styles` edges | `.css` `.scss` `.sass` `.less` | `styles` + import edges (no call graph — not applicable) |
 | **HTML** | HTML tokenizer — static class/id references, embedded style selectors, and local asset links | `.html` | `styles` + import edges |
 | **SQL / sqlc** | Offline declarations and query references; configured sqlc Go mapping | `.sql` | `reads`, `writes`, `depends_on`; no calls |
 | **YAML** | Key paths and explicit Task/Compose/workflow dependencies | `.yaml` `.yml` | `depends_on`; no calls |
 | **Markdown** | CommonMark sections and local links | `.md` `.markdown` | `documents`; no calls |
 
-> Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is delegated to the same `typescript-language-server` connection that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed. A project with only `.vue` files (no plain `.ts`/`.js`) spawns the server itself to serve the script blocks.
+> Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is parsed by the same backend that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed.
 
 The language servers auto-enable when installed — run [`codemap doctor`](docs/cli.md) to see which are
 detected, or `--no-lsp` to skip. The next waves are tracked honestly at **T0 recognized**:
@@ -295,7 +296,7 @@ complete set.
 | Navigate | `symbols` / `symbol-at <file>:<line>` / `find` | outline a file, resolve a position, or find symbols by name |
 | Navigate | `source` | print a symbol's source code |
 | Navigate | `context` | **one call, everything about a symbol**: definition, callers, callees, value references, tests, blast radius |
-| Learn | `atlas` / `features` / `flow` | the repo as a described tree (`--prefix`, `--depth`, `--files`), the capability inventory (`--kind`, `--query`), and an ordered call tree from one handler (`--depth`, `--include-tests`) |
+| Learn | `atlas` / `features` / `processes` / `flow` | the repo as a described tree (`--prefix`, `--depth`, `--files`), the capability inventory (`--kind`, `--query`), every entry point's ordered flow (`processes`: `--kind`, `--query`, `--top`, `--depth`), and an ordered call tree from one handler (`--depth`, `--include-tests`) |
 | Navigate | `read-order` / `map` / `explore` / `task-context` | ranked reading list, bounded architecture overview, intent-to-structure orientation, or one-call mode-scoped task orientation (`--mode understand\|change\|debug`, alias `brief`) |
 | Navigate | `traverse --at <file>:<line>` | bounded walk from one exact definition across selected edge types and directions |
 | Analyze | `impact` / `dependencies` / `file-impact` / `review` | exact symbol impact (repeat `impact --at` for a partial-success frame batch; `--batch` stabilizes the one-item envelope), file dependency evidence, or diff-scoped tests |
@@ -348,12 +349,14 @@ JSX creates nothing), and Next.js framework-wiring references. Like all name-bas
 are *candidate* edges (same over-match contract as Go selector calls) — but a React codebase no
 longer reads as disconnected. Base indexing also links same-file calls (`f()`, `new C()`, `await f()`, `this.m()`) and calls through
 imported bindings (named, default, and namespace imports, `require`). Arbitrary `obj.method()` calls
-are not linked, and Python has no base-level call edges, so uncovered definitions stay `unresolved`.
+are not linked (Python gets the same kind of candidates — same-file calls, `self`/`cls` methods,
+imported bindings), so uncovered definitions stay `unresolved`.
 `index --precise` drives `typescript-language-server` `callHierarchy`; files it resolves gain
 exact edges that supersede the candidates per file, while any uncovered definition remains
 explicitly `unresolved`. The same
 `callers`/`callees`/`impact`/`hotspots`/`path` queries then use that indexed coverage with no flag of their own.
-Needs `typescript-language-server` on `PATH`.
+The precise pass needs `typescript-language-server` (Python: `pyright-langserver`) on `PATH`; plain
+indexing needs neither.
 
 For a one-off exact answer *without* reindexing, `callers`/`callees` also accept `--precise`
 (`callHierarchy` through the language server), which degrades to the indexed graph with a note
@@ -424,14 +427,14 @@ Once connected, an agent can call `codemap_docs` to learn the tools and workflow
 
 `CODEMAP_MCP_PROFILE=agent` selects exactly the 28-tool surface derived from the taught agent
 workflow (27 named tools plus `codemap_docs`). The compatible `core` profile has the same inventory
-today; the default `full` profile remains the explicit 48-tool expert/admin surface. See
+today; the default `full` profile remains the explicit 50-tool expert/admin surface. See
 [MCP tool profiles](docs/mcp.md#tool-profiles) for the measured schema cost and precedence rules.
 
-Tools (48): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
+Tools (50): `codemap_init`, `codemap_index`, `codemap_status`, `codemap_doctor`, `codemap_semantic`,
 `codemap_callers`, `codemap_callees`, `codemap_references`, `codemap_impact`, `codemap_file_impact`,
-`codemap_file_context`, `codemap_refactor_plan`, `codemap_dependencies`, `codemap_review`, `codemap_secret_impact`, `codemap_required_keys`,
+`codemap_file_context`, `codemap_refactor_plan`, `codemap_dependencies`, `codemap_review`, `codemap_affected`, `codemap_secret_impact`, `codemap_required_keys`,
 `codemap_risk`, `codemap_hotspots`, `codemap_orphans`, `codemap_coverage`, `codemap_read_order`,
-`codemap_map`, `codemap_atlas`, `codemap_features`, `codemap_flow`, `codemap_explore`, `codemap_traverse`, `codemap_task_context`, `codemap_path`,
+`codemap_map`, `codemap_atlas`, `codemap_features`, `codemap_processes`, `codemap_flow`, `codemap_explore`, `codemap_traverse`, `codemap_task_context`, `codemap_path`,
 `codemap_related_files`, `codemap_symbols`, `codemap_symbol_at`, `codemap_find`, `codemap_grep`, `codemap_source`,
 `codemap_context`, `codemap_context_batch`, `codemap_projects`, `codemap_docs`, `codemap_annotate`,
 `codemap_annotations`, `codemap_unannotate`, `codemap_branch_status`, `codemap_branch_switch`,

@@ -4,7 +4,7 @@ intent: |
     `CODEMAP_MCP_PROFILE=agent|core|full` gates which MCP tools `codemap serve`
     registers: `agent` is exactly the 27 tools named by the canonical taught
     workflow plus codemap_docs (28); `core` preserves its compatible 28-tool
-    inventory; `full` is the back-compat superset (48).
+    inventory; `full` is the back-compat superset (50).
     This drives three real MCP handshakes over stdio — one per profile — and
     counts tools/list, confirming agent/core are strictly smaller than full,
     all counts are exact, admin tools (codemap_annotate) are agent/core-excluded
@@ -76,10 +76,10 @@ outcomes:
         screen:
             contains: "full serve exit: 0"
     - id: full_count_exact
-      description: profile=full registers exactly 48 tools
+      description: profile=full registers exactly 50 tools
       verify:
         screen:
-            contains: "FULL_COUNT: 48"
+            contains: "FULL_COUNT: 50"
     - id: core_instructions_note
       description: the server instructions mention the trimmed profile under core
       verify:
@@ -130,4 +130,4 @@ outcomes:
       verify:
         screen:
             contains: "BAD_PROFILE_NO_TRAILING_PERIOD"
-contractHash: sha256:6f8a4adbe6481785b34fe78a7e6354b33850ddd41aa24d43bee388bdfa657d16
+contractHash: sha256:a0558f3b5921aff5a9376cb13d7e6dd389161352038af48e909d32d157b21b0e

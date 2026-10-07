@@ -37,6 +37,10 @@ const (
 	RefReads     = "reads"
 	RefWrites    = "writes"
 	RefDocuments = "documents"
+	// Declared inheritance: a class or interface naming its base (extends) or a
+	// class naming an interface it implements. Never part of the call graph.
+	RefExtends    = "extends"
+	RefImplements = "implements"
 )
 
 // Symbol is a code entity discovered in a file.

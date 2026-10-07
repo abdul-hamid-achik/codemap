@@ -127,6 +127,17 @@ func scopedCallableKind(kind string) bool {
 	return false
 }
 
+// scopedTargetKind reports whether a node kind can be the target of a
+// file-scoped reference of refKind: callables for calls, types for declared
+// inheritance (a class, an interface/enum, or a TS type alias — a variable).
+func scopedTargetKind(refKind, nodeKind string) bool {
+	switch refKind {
+	case extract.RefExtends, extract.RefImplements:
+		return nodeKind == graph.KindClass || nodeKind == graph.KindType || nodeKind == graph.KindVariable
+	}
+	return scopedCallableKind(nodeKind)
+}
+
 // resolveScopedRef writes the edge(s) for one reference whose source and/or
 // target is scoped to a file (see extract.Reference.FromFile / ToFile). The
 // source is the first node of that FQN in FromFile (or the file node when From
@@ -159,7 +170,7 @@ func resolveScopedRef(tx *sql.Tx, ref extract.Reference, ni *nodeIndex, byID map
 	}
 	count := 0
 	for _, to := range pickByLine(scope[ref.ToFile][ref.To], ref.ToLine, byID) {
-		if to == from || !scopedCallableKind(byID[to].Kind) {
+		if to == from || !scopedTargetKind(ref.Kind, byID[to].Kind) {
 			continue
 		}
 		if _, err := graph.AddEdgeProvTx(tx, from, to, ref.Kind, graph.WeightTreeSitter, graph.ProvName); err != nil {

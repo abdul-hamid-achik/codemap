@@ -25,7 +25,7 @@ import (
 )
 
 // Profile selects which subset of MCP tools NewServer registers. ProfileFull
-// (the default, back-compat) registers every tool (48). ProfileCore preserves
+// (the default, back-compat) registers every tool (50). ProfileCore preserves
 // the shipped lean 28-tool contract. ProfileAgent is a separately pinned
 // 28-tool contract containing exactly the tools named by the canonical
 // playbook plus codemap_docs for self-discovery. Core and agent intentionally
@@ -321,7 +321,7 @@ type indexInput struct {
 	Reindex      bool     `json:"reindex,omitempty" jsonschema:"wipe and rebuild the whole index"`
 	NoEmbed      bool     `json:"no_embed,omitempty" jsonschema:"skip semantic embeddings (structure only)"`
 	Precise      bool     `json:"precise,omitempty" jsonschema:"resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via language-server callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph"`
-	NoLSP        bool     `json:"no_lsp,omitempty" jsonschema:"skip language-server extraction (index only the built-in Go/Ruby/Lua/CSS/HTML backends)"`
+	NoLSP        bool     `json:"no_lsp,omitempty" jsonschema:"never spawn language servers (TS/JS/Python still index via tree-sitter; their precise call graph needs the servers)"`
 	ExcludeExtra []string `json:"exclude_extra,omitempty" jsonschema:"extra path globs to skip, appended to the configured excludes (bare name = any depth, slash = root-anchored, **/ = any depth)"`
 }
 
@@ -355,10 +355,13 @@ type referencesInput struct {
 }
 
 type impactInput struct {
-	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to analyze; omit when selector is provided"`
-	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
-	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
+	Symbol    string              `json:"symbol,omitempty" jsonschema:"symbol to analyze; omit when selector is provided"`
+	Selector  *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path      string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth     int                 `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
+	MaxTokens int                 `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
+	// MinConfidence "confirmed" drops name-based candidate nodes (cross-file, not precise) from blast_radius, buckets, tests and direct_callers.
+	MinConfidence string `json:"min_confidence,omitempty" jsonschema:"confirmed|candidate: with confirmed, drop name-based candidate nodes from blast_radius/buckets/tests/direct_callers and report the dropped count under filtered (default candidate: keep everything)"`
 }
 
 type reviewInput struct {
@@ -366,6 +369,15 @@ type reviewInput struct {
 	Since  string `json:"since,omitempty" jsonschema:"review everything changed since this git ref (committed + uncommitted); omit to review the whole working tree"`
 	Staged bool   `json:"staged,omitempty" jsonschema:"review only staged changes (the git index) instead of the working tree"`
 	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for each changed symbol's blast radius (default 3)"`
+}
+
+type affectedInput struct {
+	Path   string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Files  []string `json:"files,omitempty" jsonschema:"changed files, project-relative (absolute paths under the project root are accepted); omit files, since and staged to use the whole working tree"`
+	Since  string   `json:"since,omitempty" jsonschema:"also use every file changed since this git ref (committed + uncommitted); mutually exclusive with staged"`
+	Staged bool     `json:"staged,omitempty" jsonschema:"also use only the staged changes (the git index); mutually exclusive with since"`
+	Filter string   `json:"filter,omitempty" jsonschema:"glob restricting the reported test files, e.g. *_test.go or internal/**; a pattern without a slash matches base names"`
+	Depth  int      `json:"depth,omitempty" jsonschema:"max hops for the call-graph and import walks (default 3, max 10)"`
 }
 
 type atlasInput struct {
@@ -402,12 +414,22 @@ type featuresInput struct {
 	Depth       int    `json:"depth,omitempty" jsonschema:"footprint call-walk depth (default 3, max 6)"`
 }
 
+type processesInput struct {
+	Path     string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Kind     string `json:"kind,omitempty" jsonschema:"only these entrypoint kinds, comma-separated: program, cli_command, rpc_tool, http_route, api_route, page"`
+	Query    string `json:"query,omitempty" jsonschema:"keep processes whose name or steps match these content words (same tokenization as the lexical search floor)"`
+	Top      int    `json:"top,omitempty" jsonschema:"maximum processes to return (default 50, max 200)"`
+	Depth    int    `json:"depth,omitempty" jsonschema:"maximum call depth per process (default 4, max 8)"`
+	MaxSteps int    `json:"max_steps,omitempty" jsonschema:"maximum steps per process (default 40, max 200)"`
+}
+
 type exploreInput struct {
-	Query string `json:"query" jsonschema:"intent or concept to search for before joining hits to exact graph neighborhoods"`
-	Path  string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Seeds int    `json:"seeds,omitempty" jsonschema:"maximum semantic/name seeds (default 5, max 10)"`
-	Edges int    `json:"edges,omitempty" jsonschema:"maximum callers/callees/references/tests retained per seed (default 5, max 20)"`
-	Depth int    `json:"depth,omitempty" jsonschema:"maximum blast-radius depth per exact seed (default 2, max 10)"`
+	Query     string `json:"query" jsonschema:"intent or concept to search for before joining hits to exact graph neighborhoods"`
+	Path      string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Seeds     int    `json:"seeds,omitempty" jsonschema:"maximum semantic/name seeds (default 5, max 10)"`
+	Edges     int    `json:"edges,omitempty" jsonschema:"maximum callers/callees/references/tests retained per seed (default 5, max 20)"`
+	Depth     int    `json:"depth,omitempty" jsonschema:"maximum blast-radius depth per exact seed (default 2, max 10)"`
+	MaxTokens int    `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
 }
 
 type traverseInput struct {
@@ -551,11 +573,12 @@ type contextBatchInput struct {
 }
 
 type contextInput struct {
-	Symbol   string              `json:"symbol,omitempty" jsonschema:"symbol to gather full context for; omit when selector is provided"`
-	Selector *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
-	Path     string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
-	Depth    int                 `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
-	Brief    bool                `json:"brief,omitempty" jsonschema:"drop each definition's source body, keeping signature/doc/location; sets source_omitted:true so you know to call codemap_source for the one definition you actually need — everything else in the bundle is unchanged"`
+	Symbol    string              `json:"symbol,omitempty" jsonschema:"symbol to gather full context for; omit when selector is provided"`
+	Selector  *app.SymbolSelector `json:"selector,omitempty" jsonschema:"exact definition selector projected from file/start_line/fqn/kind; takes precedence over symbol"`
+	Path      string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Depth     int                 `json:"depth,omitempty" jsonschema:"max hops for the blast-radius count (default 3)"`
+	Brief     bool                `json:"brief,omitempty" jsonschema:"drop each definition's source body, keeping signature/doc/location; sets source_omitted:true so you know to call codemap_source for the one definition you actually need — everything else in the bundle is unchanged"`
+	MaxTokens int                 `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
 }
 
 type taskContextInput struct {
@@ -563,6 +586,7 @@ type taskContextInput struct {
 	Mode      string               `json:"mode,omitempty" jsonschema:"what the caller plans to do next: understand (orient on unfamiliar code — freshness + explore neighborhoods), change (prepare an edit — contexts + impact drill-downs + related files), debug (trace a failure — caller/callee-emphasized contexts); default understand; review is not a mode — use codemap_review"`
 	Selectors []app.SymbolSelector `json:"selectors,omitempty" jsonschema:"optional exact definitions the caller already holds (e.g. projected from a prior candidates list), deduped and capped at 25; requires mode change or debug"`
 	Path      string               `json:"path,omitempty" jsonschema:"project directory; defaults to the server working directory"`
+	MaxTokens int                  `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
 }
 
 // emptyInput is for tools that take no arguments (e.g. codemap_projects).
@@ -682,6 +706,12 @@ func (s *Server) register() {
 			Description: "Diff-scoped impact + regression test selection — the query to run AFTER editing. Maps your git diff (whole working tree by default; staged=true for the index; since=<ref> for everything since a branch point) to the symbols it touches, then returns their union blast_radius, the covering_tests to run (regression test selection), the changed symbols that are untested or are hotspots (many callers), plus stale/resolution honesty signals. Answers 'what did I just affect, and what should I run?' in one call instead of chaining diff parsing + per-symbol codemap_impact. Degrades to a plain changed-file list with a note when the project isn't indexed or isn't a git repo.",
 		}, s.handleReview)
 	}
+	if s.include("codemap_affected") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_affected",
+			Description: "Changed files → the test files to run, in a shape CI and hooks can consume directly. Give files (project-relative), and/or since=<ref> / staged=true to take the git diff (no inputs = the whole working tree). Returns tests: sorted unique test file paths, each with reasons (covers:<symbol> via the call graph, imports:<file> for test files importing a changed file transitively, changed for a changed test file), unmapped (changed files with no indexed symbols), call_graph (weakest confidence among contributing symbols), analysis_complete and a note when coverage is name-based or unresolved. filter is a glob over the reported test paths. Lighter than codemap_review when you only need the test list. Available in the full MCP profile.",
+		}, s.handleAffected)
+	}
 	if s.include("codemap_atlas") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_atlas",
@@ -706,10 +736,16 @@ func (s *Server) register() {
 			Description: "Capability inventory: what the software can DO and where each capability lives. Lists user-facing entry surfaces (CLI commands, HTTP routes, MCP/RPC tools, Next.js pages and API routes, programs), each tied to its handler symbol (with a durable selector), the description from the framework registration itself, and a bounded call footprint (symbols, files, subsystems, covering tests). Go registrations are read from the AST (confirmed); TS/JS/Python are pattern-detected (candidate). Filter by kind/query; pass a handler selector to codemap_flow (how it works), codemap_context or codemap_impact to drill in. Returns totals/truncation plus call_graph, resolution, stale, notes, and partial_errors honesty signals.",
 		}, s.handleFeatures)
 	}
+	if s.include("codemap_processes") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_processes",
+			Description: "Execution flows from every entrypoint (full profile): for each CLI command, HTTP route, MCP/RPC tool, page or program with a resolved handler, the chain of definitions it reaches in call order (the flow builder, same-name fan-out collapsed), as {id, kind, name, entry selector, steps[{symbol,fqn,kind,file,start_line,depth}], files, truncated, call_graph}. Computed on demand from the stored graph, nothing persisted; bounded by top/depth/max_steps. Filter by kind and query (content words matched against the name and every step). Use it to answer \"how does signup work\" with the route -> handler -> service chain in one call; pass an entry selector to codemap_flow for the full annotated tree. Returns processes_total/truncation plus call_graph, resolution, stale, notes, and partial_errors honesty signals.",
+		}, s.handleProcesses)
+	}
 	if s.include("codemap_explore") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_explore",
-			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source. For raw ranked hits without neighborhoods, use codemap_semantic.",
+			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name plus BM25 lexical fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source. For raw ranked hits without neighborhoods, use codemap_semantic.",
 		}, s.handleExplore)
 	}
 	if s.include("codemap_task_context") {
@@ -1161,18 +1197,32 @@ func (s *Server) handleReferences(_ context.Context, _ *sdkmcp.CallToolRequest, 
 }
 
 func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in impactInput) (*sdkmcp.CallToolResult, any, error) {
+	if _, err := app.ParseMinConfidence(in.MinConfidence); err != nil {
+		return invalidInputResult(err.Error(), "pass min_confidence: confirmed or candidate"), nil, nil
+	}
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
 	if in.Selector != nil {
 		rep, err := s.svc.ImpactBySelector(cwdOf(in.Path), *in.Selector, in.Depth)
-		return result(rep, err)
+		rep = filteredImpact(rep, in.MinConfidence)
+		return result(rep, withImpactBudget(rep, err, in.MaxTokens))
 	}
 	if in.Symbol == "" {
 		return invalidInputResult("impact needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
-	return result(rep, err)
+	rep = filteredImpact(rep, in.MinConfidence)
+	return result(rep, withImpactBudget(rep, err, in.MaxTokens))
+}
+
+// filteredImpact applies the already-validated min_confidence filter; a nil
+// report (service error) passes through untouched.
+func filteredImpact(rep *app.ImpactReport, minConfidence string) *app.ImpactReport {
+	if rep != nil {
+		_ = rep.ApplyMinConfidence(minConfidence) // validated by the caller
+	}
+	return rep
 }
 
 func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in reviewInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1183,6 +1233,22 @@ func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in r
 		mode = "since"
 	}
 	rep, err := s.svc.Review(cwdOf(in.Path), app.ReviewOpts{Mode: mode, Since: in.Since, Depth: in.Depth})
+	return result(rep, err)
+}
+
+func (s *Server) handleAffected(_ context.Context, _ *sdkmcp.CallToolRequest, in affectedInput) (*sdkmcp.CallToolResult, any, error) {
+	opts := app.AffectedOpts{
+		Files: in.Files, Since: in.Since, Staged: in.Staged, Filter: in.Filter, Depth: in.Depth,
+	}
+	// Same validation as the CLI (depth range, since+staged, since syntax),
+	// before the index lookup so a bad call is never masked by "not indexed".
+	if err := app.ValidateAffectedOpts(opts); err != nil {
+		return invalidInputResult(err.Error(), app.HintOf(err)), nil, nil
+	}
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Affected(cwdOf(in.Path), opts)
 	return result(rep, err)
 }
 
@@ -1226,6 +1292,16 @@ func (s *Server) handleFeatures(_ context.Context, _ *sdkmcp.CallToolRequest, in
 	return result(rep, err)
 }
 
+func (s *Server) handleProcesses(_ context.Context, _ *sdkmcp.CallToolRequest, in processesInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Processes(cwdOf(in.Path), app.ProcessesOptions{
+		Kinds: []string{in.Kind}, Query: in.Query, Top: in.Top, Depth: in.Depth, MaxSteps: in.MaxSteps,
+	})
+	return result(rep, err)
+}
+
 func (s *Server) handleExplore(ctx context.Context, _ *sdkmcp.CallToolRequest, in exploreInput) (*sdkmcp.CallToolResult, any, error) {
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
@@ -1234,7 +1310,7 @@ func (s *Server) handleExplore(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		return invalidInputResult("explore needs a query", "pass query: a natural-language intent, e.g. \"where is auth validated\""), nil, nil
 	}
 	rep, err := s.svc.Explore(ctx, cwdOf(in.Path), in.Query, app.ExploreOptions{
-		Seeds: in.Seeds, Edges: in.Edges, Depth: in.Depth,
+		Seeds: in.Seeds, Edges: in.Edges, Depth: in.Depth, MaxTokens: in.MaxTokens,
 	})
 	return result(rep, err)
 }
@@ -1274,7 +1350,7 @@ func (s *Server) handleTaskContext(ctx context.Context, _ *sdkmcp.CallToolReques
 		return r, v, nil
 	}
 	rep, err := s.svc.TaskContext(ctx, cwdOf(in.Path), in.Task, app.TaskContextOptions{
-		Mode: in.Mode, Selectors: in.Selectors,
+		Mode: in.Mode, Selectors: in.Selectors, MaxTokens: in.MaxTokens,
 	})
 	return result(rep, err)
 }
@@ -1436,13 +1512,13 @@ func (s *Server) handleContext(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	}
 	if in.Selector != nil {
 		rep, err := s.svc.ContextBySelectorWithContext(ctx, cwdOf(in.Path), *in.Selector, in.Depth, in.Brief)
-		return result(rep, err)
+		return result(rep, withContextBudget(rep, err, in.MaxTokens))
 	}
 	if in.Symbol == "" {
 		return invalidInputResult("context needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.ContextWithContext(ctx, cwdOf(in.Path), in.Symbol, in.Depth, in.Brief)
-	return result(rep, err)
+	return result(rep, withContextBudget(rep, err, in.MaxTokens))
 }
 
 func (s *Server) handleContextBatch(ctx context.Context, _ *sdkmcp.CallToolRequest, in contextBatchInput) (*sdkmcp.CallToolResult, any, error) {
@@ -1578,6 +1654,22 @@ func cwdOf(path string) string {
 		return wd
 	}
 	return "."
+}
+
+// withContextBudget/withImpactBudget apply the optional max_tokens budget to a
+// freshly built report (internal/app owns the trimming); a prior error wins.
+func withContextBudget(rep *app.ContextReport, err error, maxTokens int) error {
+	if err != nil {
+		return err
+	}
+	return app.ApplyContextBudget(rep, maxTokens)
+}
+
+func withImpactBudget(rep *app.ImpactReport, err error, maxTokens int) error {
+	if err != nil {
+		return err
+	}
+	return app.ApplyImpactBudget(rep, maxTokens)
 }
 
 func result(v any, err error) (*sdkmcp.CallToolResult, any, error) {

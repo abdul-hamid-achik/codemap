@@ -62,7 +62,9 @@ for (const arch of arches) {
     `-X ${MODULE}/internal/version.Commit=${commit}`,
     `-X ${MODULE}/internal/version.Date=${date}`,
   ].join(' ')
-  execFileSync('go', ['build', '-trimpath', '-ldflags', ldflags, '-o', out, './cmd/codemap'], {
+  // Embed only the tree-sitter grammars codemap parses (see Taskfile GOTAGS).
+  const tags = 'grammar_subset,grammar_subset_typescript,grammar_subset_tsx,grammar_subset_javascript,grammar_subset_python'
+  execFileSync('go', ['build', '-trimpath', '-tags', tags, '-ldflags', ldflags, '-o', out, './cmd/codemap'], {
     cwd: repoRoot,
     stdio: 'inherit',
     // Release binaries are pure Go (CGO_ENABLED=0), so every target

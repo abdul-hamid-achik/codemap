@@ -11,6 +11,11 @@ vars:
     sh: git rev-parse --short HEAD 2>/dev/null || echo none
   BUILD_TIME:
     sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  # Embed only the tree-sitter grammars codemap parses (sittersrc). Without
+  # these tags gotreesitter embeds all ~200 grammars (+~20 MB); the binary
+  # still works, just bigger. Keep in sync with .goreleaser.yaml and
+  # desktop/scripts/stage-binary.mjs.
+  GOTAGS: grammar_subset,grammar_subset_typescript,grammar_subset_tsx,grammar_subset_javascript,grammar_subset_python
   LDFLAGS: >-
     -s -w
     -X {{.MODULE}}/internal/version.Version={{.VERSION}}
@@ -120,6 +125,9 @@ tasks:
     desc: Run unit tests
     cmds:
       - go test ./...
+      # The release grammar subset must still carry every grammar sittersrc
+      # parses: a dropped tag would only fail at runtime.
+      - go test -tags {{.GOTAGS}} -run TestGrammarSubsetLoadsEveryGrammar ./internal/extract/sittersrc
 
   race:
     desc: Run tests with the race detector
@@ -153,17 +161,17 @@ tasks:
   build:
     desc: Build the codemap binary to ./bin
     cmds:
-      - go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN}}
+      - go build -tags {{.GOTAGS}} -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN}}
 
   release:
     desc: Build an optimized, trimmed binary
     cmds:
-      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN}}
+      - go build -trimpath -tags {{.GOTAGS}} -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN}}
 
   install:
     desc: go install codemap to GOPATH/bin
     cmds:
-      - go install -ldflags "{{.LDFLAGS}}" {{.MAIN}}
+      - go install -tags {{.GOTAGS}} -ldflags "{{.LDFLAGS}}" {{.MAIN}}
 
   run:
     desc: Build and run (pass args via CLI_ARGS="...")

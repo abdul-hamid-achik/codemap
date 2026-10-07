@@ -31,6 +31,10 @@ func runContext(cmd *cobra.Command, args []string) error {
 	cwd := targetDir(cmd)
 	depth, _ := cmd.Flags().GetInt("depth")
 	brief, _ := cmd.Flags().GetBool("brief")
+	maxTokens, _ := cmd.Flags().GetInt("max-tokens")
+	if err := app.ValidateMaxTokens(maxTokens); err != nil {
+		return err
+	}
 	svc := app.NewService(sess)
 	if ok, err := requireIndexed(cmd, svc); err != nil || !ok {
 		return err
@@ -47,7 +51,7 @@ func runContext(cmd *cobra.Command, args []string) error {
 	// Batch when there are several inputs (multiple symbols, or multiple --at
 	// selectors) — one call covers them all plus their shared callers (D11).
 	if len(args) > 1 || len(selectors) > 1 {
-		return runContextBatch(cmd, svc, cwd, args, selectors, depth, brief)
+		return runContextBatch(cmd, svc, cwd, args, selectors, depth, brief, maxTokens)
 	}
 	var rep *app.ContextReport
 	if len(selectors) == 1 {
@@ -56,6 +60,9 @@ func runContext(cmd *cobra.Command, args []string) error {
 		rep, err = svc.ContextWithContext(cmd.Context(), cwd, args[0], depth, brief)
 	}
 	if err != nil {
+		return err
+	}
+	if err := app.ApplyContextBudget(rep, maxTokens); err != nil {
 		return err
 	}
 	if !rep.Found {
@@ -142,9 +149,12 @@ func runContext(cmd *cobra.Command, args []string) error {
 
 // runContextBatch renders the one-call bundle for several symbols plus the callers
 // they share (likely shared entrypoints / coupling). --json carries the full batch.
-func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, selectors []app.SymbolSelector, depth int, brief bool) error {
+func runContextBatch(cmd *cobra.Command, svc *app.Service, cwd string, symbols []string, selectors []app.SymbolSelector, depth int, brief bool, maxTokens int) error {
 	rep, err := svc.ContextBatchWithContext(cmd.Context(), cwd, symbols, selectors, depth, brief)
 	if err != nil {
+		return err
+	}
+	if err := app.ApplyContextBatchBudget(rep, maxTokens); err != nil {
 		return err
 	}
 	if len(rep.Results) > 0 && len(rep.NotFound) == len(rep.Results) {

@@ -142,7 +142,7 @@ func init() {
 	indexCmd.Flags().Bool("reindex", false, "wipe and rebuild the whole project index")
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
 	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph")
-	indexCmd.Flags().Bool("no-lsp", false, "skip language-server-backed extraction (e.g. TypeScript via typescript-language-server)")
+	indexCmd.Flags().Bool("no-lsp", false, "never spawn language servers (TS/JS/Python still index via the built-in tree-sitter parser; their --precise call graph needs the servers)")
 	indexCmd.Flags().Bool("watch", false, "after indexing, start the daemon to keep the index fresh automatically (same as 'codemap daemon start')")
 	indexCmd.Flags().String("via-vault", "", "re-run indexing inside `tvault run -p <project>` so registry creds (GOPRIVATE/NPM_TOKEN/…) reach the language servers")
 	indexCmd.Flags().Bool("cache", true, "save/restore the index to/from the fcheap stash vault (best-effort; auto-restore before --reindex, auto-save after index)")
@@ -166,12 +166,20 @@ func init() {
 	impactCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	impactCmd.Flags().StringArray("at", nil, "resolve the symbol from a position (repeatable for batch): <file>:<line> — pass several to batch impact across multiple frames")
 	impactCmd.Flags().StringArray("selector", nil, "durable source selector as JSON (repeatable); preserves file, fqn, kind and start_line across reindex")
+	impactCmd.Flags().Int("max-tokens", 0, "approximate token budget for the result (compact JSON bytes / 4); trims the least important material first and adds a budget object (0 = no budget)")
 	impactCmd.Flags().Bool("batch", false, "always return the stable batch envelope, including for one --at; position misses are item-level results")
+	impactCmd.Flags().String("min-confidence", "", "confirmed|candidate: with 'confirmed', drop name-based candidate nodes (cross-file, not precise) from blast_radius, buckets, tests and direct_callers and report the dropped count under filtered; default keeps everything")
 	reviewCmd.Flags().Int("depth", 3, "max hops for each changed symbol's blast radius")
 	reviewCmd.Flags().String("since", "", "review everything changed since this git ref (committed + uncommitted)")
 	reviewCmd.Flags().Bool("staged", false, "review only staged changes (the git index) instead of the whole working tree")
 	reviewCmd.Flags().String("fail-on-risk", "", "after printing the normal report, exit 6 if the aggregate risk level is at or above this threshold (low|medium|high); 'unknown' never trips it")
 	reviewCmd.Flags().Bool("fail-on-untested", false, "after printing the normal report, exit 6 if any changed symbol has no covering test")
+	reviewCmd.Flags().Bool("fail-on-uncovered", false, "after printing the normal report, exit 6 only when coverage.verdict is uncovered or partial with known-uncovered symbols; unknown coverage of a complete analysis never trips it, but an incomplete indexed analysis fails closed")
+	affectedCmd.Flags().Bool("stdin", false, "read newline-separated changed paths from stdin (e.g. git diff --name-only)")
+	affectedCmd.Flags().String("since", "", "use the files changed since this git ref (committed + uncommitted)")
+	affectedCmd.Flags().Bool("staged", false, "use only the staged changes (the git index)")
+	affectedCmd.Flags().String("filter", "", "only report test files matching this glob (e.g. '*_test.go', 'internal/**')")
+	affectedCmd.Flags().Int("depth", 3, "max hops for the call-graph and import walks")
 	readOrderCmd.Flags().Int("top", 20, "maximum entries to rank")
 	fileImpactCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
 	fileContextCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
@@ -187,6 +195,7 @@ func init() {
 	requiredKeysCmd.Flags().String("prefix", "", "with --via-vault, restrict candidates to this prefix")
 	contextCmd.Flags().Int("depth", 3, "max hops for the blast-radius count")
 	contextCmd.Flags().StringArray("at", nil, "select definition(s) by source position (repeatable): <file>:<line> — pass several to batch exact definitions")
+	contextCmd.Flags().Int("max-tokens", 0, "approximate token budget for the result (compact JSON bytes / 4); trims source bodies first, then list tails, and adds a budget object (0 = no budget)")
 	contextCmd.Flags().Bool("brief", false, "drop each definition's source body, keeping signature/doc/location (source_omitted:true) — cheaper first look at a hub symbol; follow up with 'codemap source' for the body you actually need")
 	refactorPlanCmd.Flags().Int("depth", 3, "max hops for the blast radius")
 	refactorPlanCmd.Flags().String("at", "", "select one definition by source position instead of a name: <file>:<line>")
@@ -223,7 +232,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd, serveCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd,
-		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, taskContextCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, affectedCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, taskContextCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, inconsistenciesCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured
@@ -353,7 +362,7 @@ func preciseTips(languages map[string]int, goAvailable bool) []string {
 		tips = append(tips, "Go call edges are name-based; add --precise to resolve them exactly (eliminates same-named over-matching)")
 	}
 	// TS/JS carry a PARTIAL name-based call graph (tsscan: same-file calls and
-	// imported bindings); Python still has none. Say exactly that.
+	// imported bindings); Python likewise plus self/cls methods. Say exactly that.
 	var partial []string
 	for _, l := range []string{"typescript", "javascript"} {
 		if languages[l] > 0 {
@@ -364,7 +373,7 @@ func preciseTips(languages map[string]int, goAvailable bool) []string {
 		tips = append(tips, strings.Join(partial, "/")+" call edges are name-based candidates (same-file calls and imported bindings only) — add --precise for a complete call graph (callers/impact/hotspots/path)")
 	}
 	if languages["python"] > 0 {
-		tips = append(tips, "no call graph for python yet — add --precise for callers/impact/hotspots/path")
+		tips = append(tips, "python call edges are name-based candidates (same-file calls, self/cls methods, imported bindings) — add --precise for a complete call graph (callers/impact/hotspots/path)")
 	}
 	return tips
 }

@@ -1,5 +1,5 @@
 ---
-description: Current codemap language capabilities, required language servers, and the roadmap for adding new backends.
+description: Current codemap language capabilities, the optional language servers behind --precise, and the roadmap for adding new backends.
 ---
 
 # Language support
@@ -13,19 +13,20 @@ capabilities, and the JSON contracts keep that distinction visible.
 | Language | Symbols and definitions | Relationships | Requirement / limit |
 |---|---|---|---|
 | **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + a buildable module for the precise pass. One-off `callers --precise` / `callees --precise` uses `gopls`. |
-| **TypeScript + JavaScript** | `documentSymbol` through one shared `typescript-language-server` process, including TSX/JSX and cross-language projects | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, Next.js framework wiring, same-file calls, and calls through imported bindings; arbitrary `obj.method()` calls are not linked, so the graph is partial until `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | `node` + `typescript-language-server`. The name-based scan rides on LSP symbol extraction, so it also needs the server. |
-| **Python** | `documentSymbol` through `pyright-langserver` | No name-based edges; `--precise` uses LSP `callHierarchy` | `node` + `pyright-langserver`. |
+| **TypeScript + JavaScript** | Built in with a pure-Go tree-sitter parser (TS, TSX, JS/JSX, `.mjs`/`.cjs`), producing the same symbols `typescript-language-server`'s `documentSymbol` would | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, Next.js framework wiring, same-file calls, and calls through imported bindings; arbitrary `obj.method()` calls are not linked, so the graph is partial until `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | None to index. `--precise` needs `node` + `typescript-language-server`. |
+| **Python** | Built in with a pure-Go tree-sitter parser, producing the same symbols `pyright-langserver` would | Name-based candidates for same-file calls, `self`/`cls` methods, and imported bindings, plus file→file import edges; `--precise` (LSP `callHierarchy`) supersedes them per file | None to index. `--precise` needs `node` + `pyright-langserver`. |
 | **Ruby** | Built in with a pure-Go scanner: modules, classes, `def` (incl. `def self.x`, endless defs, `private def`); heredoc-, `=begin`-, and string-safe | Name-based calls plus `require`/`require_relative` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **Lua** | Built in with a pure-Go scanner: `function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe | Name-based calls plus `require` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **GDScript** | Built in with a pure-Go scanner: `class_name`, inner classes, functions, signals, enums, variables, and constants; comment-safe | Name-based calls plus `preload`/`load` imports; no precise pass yet | None — works offline like Go's name-based path. Godot Engine `.gd` files. |
-| **Vue SFC** | `<script>` and `<script setup>` blocks are routed to the TypeScript/JavaScript server; source lines map back to the `.vue` file | Not available yet for calls; Vue emits symbols, `defines` edges, and import edges | `node` + `typescript-language-server`. Template and style blocks are not indexed. |
+| **Vue SFC** | `<script>` and `<script setup>` blocks are parsed by the TypeScript/JavaScript backend; source lines map back to the `.vue` file | Not available yet for calls; Vue emits symbols, `defines` edges, and import edges | None. Template and style blocks are not indexed. |
 | **CSS / SCSS / Sass / Less** | Built in with a pure-Go scanner: one selector node per distinct class/id token per file, SCSS/Less nesting flattened via `&`-substitution, transparent at-rule frames (`@media`/`@supports`/`@layer`), interpolation-safe | `styles` edges from `class=`/`id=` in HTML and `className` in TSX/JSX (string literals, `cn()`/`clsx()` expressions, template statics) resolve to selector nodes; `@import`/`@use`/`@forward` become import edges (Sass partials and index files resolved) | None — pure Go, works offline. CSS-in-JS, CSS Modules member access, and cascade/specificity remain outside coverage. |
 | **HTML** | Static class/id references and selectors in embedded `<style>` blocks | `styles` references plus local stylesheet/script import edges | Offline. Template expressions, external URLs, and script bodies are not analyzed as HTML. |
 | **SQL / sqlc** | Tables, views, named queries, and anonymous statements | Candidate `reads`/`writes` edges; configured sqlc Go methods link to queries with `depends_on` | Offline lexical extraction. No dynamic SQL, live schema, or column lineage. |
 | **YAML** | Mapping keys with escaped, stable key paths | Explicit Task, Compose, and GitHub Actions dependencies | Offline. Aliases and templates are not evaluated. |
 | **Markdown** | Headings and sections; one document node for heading-free files | Local `documents` links into indexed files and Markdown headings | Offline CommonMark. Fenced examples stay documentation; no MDX execution or external fetching. |
 
-Install the optional language servers you need:
+Language servers are optional: install them for the exact `--precise` call graph (and
+`gopls` for one-off Go `callers`/`callees --precise`):
 
 ```bash
 npm install --global typescript typescript-language-server
@@ -33,9 +34,39 @@ npm install --global pyright
 go install golang.org/x/tools/gopls@latest
 ```
 
-Run `codemap doctor` to see which servers are available. Missing LSP-language servers are
-reported with install guidance; `--no-lsp` deliberately skips those backends. Semantic retrieval
+Run `codemap doctor` to see which servers are available. A server missing when `--precise` needs
+it is reported with install guidance (`capability: "precise"` in `tooling.issues`); the
+language's symbols are indexed either way. `--no-lsp` never spawns a server. Semantic retrieval
 is language-agnostic once source-bearing symbols are indexed, and Ollama remains optional.
+
+### How TypeScript, JavaScript, and Python are parsed
+
+The built-in backend parses with [gotreesitter](https://github.com/odvcencio/gotreesitter), a
+pure-Go tree-sitter runtime (no CGO), and reproduces the symbol trees the language servers
+return — TypeScript's navigation tree and pyright's symbol scopes, quirks included (an arrow
+function assigned to a `const` is a variable; `self.x = …` in a method declares a class
+member). Indexing therefore needs no server and is several times faster on TypeScript-heavy
+repositories (about 8× end to end on a 1,100-file one), and graphs built either way are
+interchangeable: `--precise` joins the server's
+`callHierarchy` answers to the same symbol positions. Files over 1 MB (usually minified bundles)
+are skipped, and a file with syntax errors keeps the symbols of the recovered parse.
+
+To use the servers for symbols as well (the behavior before this backend), set
+`index.structural_backend: lsp` (or `CODEMAP_STRUCTURAL_BACKEND=lsp`).
+
+### Declared inheritance
+
+Classes and interfaces carry their declared bases as graph edges: `extends` (`class A extends B`,
+`interface I extends J`, Python `class A(B)`) and `implements` (`class A implements I`), resolved
+through the same-file and import bindings the call candidates use — so a base from a package
+(`React.Component`) yields no edge. Each method of the subtype that shares a name with a method of
+a direct base or implemented interface gets an `overrides` edge (constructors excluded). For Go,
+`codemap index --precise` adds exact `implements` edges from `go/types` satisfiability (every module
+type against every module interface with at least one method) and the matching method-level
+`overrides`. `codemap context` reports them under `hierarchy` (`extends`, `implements`, `subtypes`,
+`overrides`, `overridden_by`), `traverse --edge-types extends,implements,overrides` walks them, and
+`orphans` no longer lists a method that overrides or implements a base method (it is reached through
+the base). The declared edges are name-provenance candidates; only the Go `--precise` ones are exact.
 
 ### TS/JS name-based edges — what they cover and what they don't
 
@@ -67,7 +98,11 @@ JSX-rendered by name and can still appear as an orphan; a **wrapped default expo
 name-resolvable; and calls that are neither same-file nor through an imported binding
 (`obj.method()`, dynamic dispatch, callbacks resolved at runtime) have no name-based edges, so
 `call_graph` stays `unresolved` (a partial graph) for uncovered TS/JS and `--precise` remains the
-only source for complete calls. Python has no base-level call edges.
+only source for complete calls. Python's base graph carries the analogous candidates — calls to
+same-file definitions (scope-aware: parameters, locals, lambda parameters and comprehension
+targets shadow), `self.m()` / `cls.m()` to the enclosing class, `C.m()` on a same-file class,
+and calls through `from m import f` / `import pkg.mod as m` bindings (relative, absolute, and
+`src/`-layout imports) — plus file→file import edges.
 
 ## Support ladder
 
@@ -166,9 +201,10 @@ container-aware extraction or parser structure more than compiler call graphs.
 Ship useful T1/T2 support with honest `unavailable` call coverage rather than
 manufacturing name-based calls.
 
-Tree-sitter is a planned optional structure fallback, not part of current builds. If shipped, it
-will require a separate release/toolchain story and will not be presented as a source of
-compiler-precise relations.
+Tree-sitter ships as a pure-Go runtime (no CGO) and already backs TypeScript, JavaScript, and
+Python symbols. It is the natural structure source for the languages above too, but each needs
+an authoritative reference to match (a compiler or language server) and the gates below; it is
+never presented as a source of compiler-precise relations.
 
 ## Required gates for every language
 

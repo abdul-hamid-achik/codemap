@@ -148,6 +148,9 @@
     "risk": {
       "$ref": "#/$defs/risk"
     },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
     "deletion_analysis": {
       "$ref": "#/$defs/deletion_analysis"
     },
@@ -191,6 +194,10 @@
             },
             "untested": {
               "type": "boolean"
+            },
+            "uncovered": {
+              "type": "boolean",
+              "description": "--fail-on-uncovered would trip: coverage.verdict is uncovered or partial with known-uncovered symbols. Never true for unknown coverage."
             },
             "risk_at_or_above": {
               "type": "object",
@@ -334,6 +341,11 @@
         "heuristic": {
           "type": "boolean",
           "const": true
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["confirmed", "candidate"],
+          "description": "confirmed: every edge on a shortest path is precise or same-file; candidate: name-based fan-out or a heuristic test link."
         }
       },
       "additionalProperties": true
@@ -379,6 +391,30 @@
         },
         "complete": {
           "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "coverage": {
+      "type": "object",
+      "description": "Test-coverage verdict, separate from the structural risk band. unknown means coverage cannot be determined (unresolved call graph and no name-based test link) and is never evidence of missing tests.",
+      "required": ["verdict", "covered_symbols", "uncovered_symbols", "unknown_symbols"],
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["covered", "partial", "uncovered", "unknown"]
+        },
+        "covered_symbols": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncovered_symbols": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unknown_symbols": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": true

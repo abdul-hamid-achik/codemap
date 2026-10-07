@@ -10,6 +10,86 @@ releases page is the authoritative history.
 
 ### Added
 
+- **Declared inheritance edges** — `extends` / `implements` edges for TypeScript, JavaScript, and
+  Python classes and interfaces (resolved through same-file and import bindings), derived
+  `overrides` edges from each method to the same-named method of a direct base, and — under Go
+  `index --precise` — exact `implements` (module types × module interfaces, via `go/types`) with
+  method-level `overrides`. `context` gains an additive `hierarchy` block, `traverse` accepts the
+  new `extends` edge type, and `orphans` no longer lists methods that override a base method.
+- **Python call candidates and import edges** — without `--precise`, Python now gets same-file,
+  `self`/`cls`-method, `C.m()`, and imported-binding call candidates plus file→file import edges
+  (relative, absolute, and `src/`-layout), from the tree-sitter binder emulation.
+- **Honest budgets for impact buckets and explore processes** — `blast_radius_total` (additive) on
+  `impact` reports the true blast-radius size even when `--max-tokens` or `task-context` trims the
+  list; `buckets` counts stay true totals while their node lists follow the kept `blast_radius`,
+  and `max_tokens` now also trims `buckets` and explore `processes`. `processes` gains
+  `entrypoints_total`, `evaluated`, and per-process `partial_errors` (additive), lists every
+  definition once per process, and reports `truncated: true` when a `--query` could not inspect
+  every entry point.
+- **Impact depth buckets and confidence filtering** — `codemap impact` / `codemap_impact` add an
+  additive `buckets` view (`direct` depth-1 vs `transitive` depth-2+, with counts) next to the
+  unchanged flat `blast_radius`, and a per-node `confidence` (`confirmed` when every edge on a
+  shortest path is precise or same-file, else `candidate`). New `--min-confidence confirmed|candidate`
+  (MCP `min_confidence`) drops candidate nodes from `blast_radius`/`buckets`/`tests`/`direct_callers`
+  and reports `filtered: {"candidate": N}`; the default is unchanged. Review `blast_radius` and
+  `covering_tests` nodes carry the same `confidence`.
+- **Review coverage verdict separate from risk** — `codemap review` / `codemap_review` add an
+  optional `coverage` block (`verdict` covered|partial|uncovered|unknown, `covered_symbols`,
+  `uncovered_symbols`, `unknown_symbols`); `unknown` means no test link and no usable call graph and
+  is never evidence of missing tests. The risk band is unchanged. A test file changed or added in the
+  same diff that references a changed symbol by name now counts as covering it (before reindexing).
+  New `--fail-on-uncovered` exits 6 only on `uncovered`/`partial` with known-uncovered symbols, never
+  on `unknown`; `--fail-on-untested` is unchanged. `gate.would_fail_on.uncovered` mirrors it in the
+  report. `schemas/codemap.review.v1.schema.json` gains the optional `coverage`, node `confidence`,
+  and `uncovered` properties (additive within v1).
+- **`codemap processes` / `codemap_processes`** — execution flows from every entry point
+  (full MCP profile; desktop Studio panel). For each `features` entry with a resolved handler
+  (CLI command, HTTP route, MCP/RPC tool, page, program) it runs the `flow` builder (same-name
+  ambiguity collapse included) and returns `{id, kind, name, entry selector, steps[{symbol, fqn,
+  kind, file, start_line, depth}], files, truncated, call_graph}`, so "how does signup work" is
+  answered with the route, handler, and service chain in one call. Computed on demand — no
+  schema or stored data — and bounded by `--top` (50), `--depth` (4), and `--max-steps` (40).
+  `--query` keeps processes whose name or steps match the query's content words, using the
+  lexical search floor's tokenization. The full MCP profile grows to 49 tools.
+- **`explore` / `task-context` group seeds by process** — the explore report gains an additive
+  `processes` field (up to 3): entry flows whose steps contain a joined seed, each with
+  `matched_seeds` and the call-order path from the entry to them (capped at 8 steps). Only
+  entrypoints whose handler can reach a seed within the process depth are built; the list is
+  empty when the project has no detected entry points.
+- **Lexical search floor for `explore` / `task-context` without embeddings** — a question such
+  as `how does signup work` used to return `not_found` because name search requires every word
+  in one symbol. When name search finds nothing or too little, a BM25 floor now drops
+  question words/stopwords and ranks definitions over symbol names, FQNs, file paths,
+  docstrings, and signatures (case-insensitive substring via an FTS5 trigram index; broader
+  word coverage first, production code before tests). `search_mode` reports `lexical` or
+  `name+lexical`; `matched_in` may be `path` or `signature`. Graph schema v10 adds the
+  contentless `nodes_fts` index, reconciled in one bulk pass after each index run (no per-row
+  triggers on the write path; ~+0.1 s per 8k nodes on a full build). Upgraded databases build
+  it on first use.
+
+- **Response token budgets** — `codemap_context`, `codemap_explore`, `codemap_impact`, and
+  `codemap_task_context` accept an optional `max_tokens` (CLI: `--max-tokens N` on `context`,
+  `explore`, `impact`, `task-context`). The estimate is `ceil(compact JSON bytes / 4)`. Over
+  budget, reports shrink deterministically, least important first: source bodies, memories and
+  advisory `next`, then list tails (references, callees, callers, tests; blast radius for
+  impact), then trailing explore contexts and seeds. Identity fields (`schema_version`,
+  query/symbol, selectors, `call_graph`/confidence enums, freshness, `partial_errors`, `*_total`)
+  are never removed, and `references_truncated` stays consistent. A budgeted result gains an
+  additive `budget` object `{max_tokens, estimated_tokens, truncated, dropped}`; `schema_version`
+  values are unchanged. Implementation: `internal/app/budget.go`.
+- **`codemap affected` / `codemap_affected`** — changed files → the test files to run, for CI
+  and pre-commit hooks that do not want to parse a review report. A test file is selected when
+  it covers a changed symbol through the call graph (`covers:<symbol>`), imports a changed file
+  directly or transitively up to `--depth` hops (`imports:<file>`, file-scoped imports only —
+  Go imports are package-scoped), or is itself a changed test (`changed`). Changed files come
+  from arguments, `--stdin` (e.g. `git diff --name-only`), `--staged`, or `--since <ref>`
+  (default: the working tree); `--filter <glob>` restricts the reported tests. Human output is
+  one test path per line on stdout (notes on stderr) so it pipes into a runner; `--json` emits
+  `schema_version: 1` with `files`, `tests` (+`reasons`), `unmapped`, `call_graph` (weakest
+  confidence among contributing symbols), `analysis_complete`, `stale` and a `note` when
+  coverage is name-based or unresolved. The MCP tool is full-profile only (49 tools; agent/core
+  stay at 28, so the `full` schema cost is now 54,859 characters), and Codemap Studio gets an
+  "Affected tests" panel.
 - **`codemap task-context` / `codemap_task_context`** — mode-scoped task orientation in one
   call (CLI alias `brief`; full-profile MCP tool). The task text is used verbatim as the
   retrieval query (intent never interpreted); `--mode understand|change|debug` selects the
@@ -81,6 +161,19 @@ releases page is the authoritative history.
   `npm run dist:mac|dist:linux|dist:win` in `desktop/`.
 
 ### Changed
+
+- **TypeScript, JavaScript, and Python index without language servers** — a new built-in
+  backend (`internal/extract/sittersrc`) parses them with a pure-Go tree-sitter runtime
+  (gotreesitter, no CGO) and reproduces the symbol trees `typescript-language-server` and
+  `pyright-langserver` return, quirks included, through the same normalization the LSP path
+  uses. The graph is unchanged (100% symbol parity against the live servers on several real
+  repositories), indexing is several times faster on TypeScript-heavy repos (a 1,100-file one: 19.5 s →
+  2.5 s), and Vue script blocks and `--no-lsp` now index too. Language servers are spawned only
+  for `--precise`, attached to the tree-sitter backend so a precise run produces the same symbols
+  and the same precise edges as before; a missing server is reported with
+  `capability: "precise"` instead of skipped files. `index.structural_backend: lsp`
+  (`CODEMAP_STRUCTURAL_BACKEND=lsp`) restores the previous behavior. Release binaries embed only
+  the four grammars via `grammar_subset` build tags (+~6 MB).
 
 - **Ranking ignores test code by default** — `read-order`, `hotspots`, and the hubs in `map`
   no longer count calls from tests or rank symbols defined in test files and directories, and

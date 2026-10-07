@@ -1,4 +1,4 @@
----
+| `codemap doctor` | Check the environment — go toolchain, gopls, the optional language servers behind `--precise` (TS/JS via `typescript-language-server`, Python via `pyright-langserver`), Ollama embeddings,---
 description: Complete codemap CLI reference for indexing, navigation, impact analysis, search, caching, and automation.
 ---
 
@@ -77,7 +77,7 @@ calls, where it's registered, and how it connects to another symbol.
 | `codemap symbol-at <file>:<line> [<file>:<line>...]` | Resolve one or more positions to their enclosing symbols (FQN, kind, range, reusable selector). Multiple positions are batched in one call; at most the first 25 are resolved and an over-limit response includes a note. The `indexed` field in `--json` distinguishes an unindexed project (`indexed:false`) from a real miss (`indexed:true`, `resolution:none`). `callers`, `callees`, `source`, `context`, `impact`, and `risk` also accept `--at` to select one exact definition. |
 | `codemap related-files <file>` | Files related to a file via the call/test graph — its callers', callees', and covering-test files, each with a reason (`caller`/`callee`/`test`) and confidence |
 | `codemap source <symbol> [--brief]` | Print source for matching definitions; use `--at <file>:<line>` for exactly one. `--brief` drops each match's body (keeping signature/doc/location) and sets `source_omitted:true` in `--json` — a cheaper first look at a hub definition |
-| `codemap context <symbol> [<symbol>...] [--depth N] [--brief]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, value-reference wiring, covering tests + runnable `test_commands`, blast-radius size, and pinned annotations. Uses the indexed graph only (never launches a language server implicitly); unresolved relationships stay explicit. Replaces separate `source`/`callers`/`callees`/`references`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling) — each result carries its own `test_commands`. Batch source bodies share a 64 KiB budget disclosed by `source_budget`/`source_truncations`; optional component failures appear in `partial_errors` without discarding usable context. `--brief` drops every definition's source body (keeping signature/doc/location, `source_omitted:true`) — the token-diet follow-up for a hub symbol whose context feels heavy; everything else in the bundle is unchanged. |
+| `codemap context <symbol> [<symbol>...] [--depth N] [--brief] [--max-tokens N]` | **One call, everything about a symbol** — definition (signature + doc + source), callers, callees, value-reference wiring, covering tests + runnable `test_commands`, blast-radius size, and pinned annotations. Uses the indexed graph only (never launches a language server implicitly); unresolved relationships stay explicit. Replaces separate `source`/`callers`/`callees`/`references`/`impact` calls; the `codemap_context` MCP tool returns the same JSON. **Pass several symbols** for a batch with `combined_blast_radius` and `common_callers` (shared entrypoints/coupling) — each result carries its own `test_commands`. Batch source bodies share a 64 KiB budget disclosed by `source_budget`/`source_truncations`; optional component failures appear in `partial_errors` without discarding usable context. `--brief` drops every definition's source body (keeping signature/doc/location, `source_omitted:true`) — the token-diet follow-up for a hub symbol whose context feels heavy; everything else in the bundle is unchanged. `--max-tokens N` bounds the result to roughly N tokens (compact JSON bytes / 4): source bodies go first, then list tails, and the result gains a `budget` object (`max_tokens`, `estimated_tokens`, `truncated`, `dropped`); identity fields, selectors, `call_graph`, and `*_total` counts are never trimmed. `0` (default) means no budget. The same flag exists on `impact`, `explore`, and `task-context`. JSON adds `hierarchy` (extends, implements, subtypes, overrides, overridden_by) when the symbol takes part in declared inheritance. |
 
 The fast default uses the indexed graph (name-based resolution; same-named methods can over-match,
 e.g. `callers Close` lists callers of every `Close`). **The best fix is to reindex once with
@@ -89,7 +89,8 @@ failures remain `name`/`unresolved`. (TypeScript and JavaScript get name-based c
 JSX component usage, imports, Next.js framework wiring, and high-precision calls: same-file calls
 (`f()`, `new C()`, `await f()`, `this.m()`) and calls through imported bindings (named, default, and
 namespace imports and `require`, resolved through relative paths, `@/`/`~/` aliases, and workspace
-packages). Arbitrary `obj.method()` calls are not linked, and Python has no base-level call edges, so
+packages). Arbitrary `obj.method()` calls are not linked (Python carries the same kind of candidates:
+same-file calls, `self`/`cls` methods, imported bindings), so
 `--precise` is what gives covered files a complete call graph, superseding the candidates per file.) Vue SFCs currently provide script-block
 symbols, `defines`, and import edges only; precise indexing does not add Vue call edges yet. For a one-off exact answer without
 reindexing, `callers`/`callees` accept `--precise`; it degrades to the indexed graph with a note
@@ -124,8 +125,9 @@ order, with real output. `read-order` and `map` (in [Analysis](#analysis)) and `
 |---|---|
 | `codemap atlas [--prefix <dir>] [--depth N] [--files] [--max-nodes N] [--key-symbols N]` | **The repo as a described tree.** Per directory (and per file with `--files`): files, symbols, lines, tests, roles (`source`, `tests`, `docs`, `config`, `entrypoint`, `examples`, `bench`, `generated`, `vendor`), a `summary` with its `summary_source`, key symbols with durable selectors, inbound/outbound/internal coupling, and top neighbouring directories. Summaries are extracted from the project's own text (README first paragraph, Go package doc, Python module docstring, leading file comment, Markdown), never generated. `--prefix` zooms into a directory, `--depth` (default 2, max 8) sets how many levels to expand, `--max-nodes` (default 1500, max 20000) bounds the tree, `--key-symbols` (default 5, max 20) sets symbols per node. JSON is `schema_version: 1` with `call_graph`, `stale`, `truncated`, and `partial_errors`. MCP counterpart `codemap_atlas` is full-profile only. |
 | `codemap features [--kind <csv>] [--query <text>] [--top N] [--depth N] [--no-footprint]` | **What the software can do.** Lists entry surfaces of kind `program`, `cli_command`, `rpc_tool`, `http_route`, `api_route`, and `page`. Each has a label, invocation, description (from the registration, such as a cobra `Short` or MCP `Description`, or a docstring), handler with durable selector (null for inline handlers), parent for nested CLI commands, and a bounded call footprint: symbols, files, subsystems, feature-specific tests, `ambiguous_edges`. Go registrations are read from the syntax tree (`confidence: confirmed`); TS/JS and Python are pattern-detected (`candidate`). `--kind` is a comma-separated list, `--query` filters by substring over label, description, handler, and file, `--top` defaults to 200, `--depth` (default 3, max 6) sets the footprint walk, and `--no-footprint` skips it. Ruby, Lua, and GDScript detection is not implemented; `notes` says so. MCP counterpart `codemap_features` is in the `agent`, `core`, and `full` profiles. |
+| `codemap processes [--kind <csv>] [--query <text>] [--top N] [--depth N] [--max-steps N]` | **How every entry point works.** Runs the `flow` builder from each `features` entry with a resolved handler and returns one process per entry: `id` (`kind:name`), `kind`, `name`, the entry `selector`, `steps` (`symbol`, `fqn`, `kind`, `file`, `start_line`, `depth`) in call order, unique `files`, `truncated`, and a per-process `call_graph`. Same-name fan-out is collapsed as in `flow`; ambiguous placeholders and cycle steps are not steps, and each definition appears once, at its first appearance in call order. A `partial_errors` list on a process names unreadable source files its symbols live in (step order is then name order, not call order). The report carries `entrypoints_total` (entry points with a resolved handler), `evaluated` (how many had a flow built), `processes_total`, and `truncated`; a `--query` can only inspect the first 300 entry points, in which case `evaluated` is below `entrypoints_total` and `truncated` is true (narrow with `--kind`). Computed on demand, nothing is stored. `--top` defaults to 50 (max 200), `--depth` to 4 (max 8), `--max-steps` to 40 (max 200). `--query` keeps processes whose name or steps match the query's content words (the keyword search floor's tokenization), best match first. MCP counterpart `codemap_processes` is in the `full` profile only. |
 | `codemap flow <symbol> [--depth N] [--max-nodes N] [--include-tests]` | **How one feature works.** A call tree from one entry (a handler, a cobra `RunE`, any function) in the order the code calls things, each step with `file:line`, subsystem, signature, one-line doc, and `confirmed`/`candidate` confidence. On a name-based graph, same-name fan-out is collapsed to the most plausible definition (`alternatives`) or left as an unexpanded `ambiguous` step with candidates; precise edges are never collapsed. Repeats, cycles, and depth or node cuts are explicit (`leaf_reason`). Select the entry with a name or FQN, or with `--at <file>:<line>`. `--depth` defaults to 4 (max 8), `--max-nodes` to 120 (max 1000); tests are skipped unless `--include-tests`. MCP counterpart `codemap_flow` takes `symbol` or `selector` and is in the `agent`, `core`, and `full` profiles. |
-| `codemap task-context <task> [--mode understand\|change\|debug] [--at <file>:<line>]` | One-call, mode-scoped orientation for a concrete task (alias `brief`): freshness, explore neighbourhoods, and for `change`/`debug` contexts, impact drill-downs, and related files. The task text is used verbatim as the retrieval query. Default mode is `understand`; `--at` is repeatable and requires `change` or `debug`. MCP counterpart `codemap_task_context` is full-profile only. |
+| `codemap task-context <task> [--mode understand\|change\|debug] [--at <file>:<line>] [--max-tokens N]` | One-call, mode-scoped orientation for a concrete task (alias `brief`): freshness, explore neighbourhoods, and for `change`/`debug` contexts, impact drill-downs, and related files. The task text is used verbatim as the retrieval query. Default mode is `understand`; `--at` is repeatable and requires `change` or `debug`. `--max-tokens N` trims the least important material first and adds a `budget` object (see `codemap context`). MCP counterpart `codemap_task_context` is full-profile only. |
 
 ```text
 $ codemap atlas --prefix internal --depth 1
@@ -154,10 +156,11 @@ it is, and — for `review` — what your current diff already touched.
 
 | Command | Description |
 |---|---|
-| `codemap impact <symbol> [--depth N]` | Definition sites, direct callers, blast radius, covering tests, and copy/paste-ready `test_commands`. `--at file:line` selects one definition; repeat `--at` to analyze up to 25 positions in one ordered, partial-success batch. A missed frame carries item-level `error.code:"symbol_not_found"`. Add `--batch` to force the stable batch envelope for one position. |
+| `codemap impact <symbol> [--depth N] [--min-confidence confirmed\|candidate] [--max-tokens N]` | Definition sites, direct callers, blast radius, covering tests, and copy/paste-ready `test_commands`. JSON adds `buckets` (the blast radius grouped into `direct` depth-1 and `transitive` depth-2+ nodes; the counts are always the true totals), `blast_radius_total` (the true blast-radius size, unchanged by trimming), and a per-node `confidence`; `--min-confidence confirmed` drops name-based candidates — see [Confidence-filtered impact](#confidence-filtered-impact). `--at file:line` selects one definition; repeat `--at` to analyze up to 25 positions in one ordered, partial-success batch. A missed frame carries item-level `error.code:"symbol_not_found"`. Add `--batch` to force the stable batch envelope for one position. `--max-tokens N` bounds the result (the `buckets` node lists go first, then the blast radius; buckets only ever list nodes still present in `blast_radius`, and `budget.dropped` counts them) and adds a `budget` object (see `codemap context`). |
 | `codemap dependencies <file>` | Direct inbound call/reference/import evidence grouped by dependent file and edge kind. Every relationship is classified as **confirmed** or **candidate** with a reason (`precise`, `same_package`, `resolved_import`, `name_fanout`, `package_scope`, or `stale_snapshot`); totals and bounded source→target samples preserve that confidence. Coverage remains explicit for calls, references, imports, runtime wiring, and external consumers. Missing evidence never means safe. |
 | `codemap file-impact <file> [--depth N]` | **File-level impact** — "what happens if I change or delete this file?" Returns grouped dependency evidence, coverage, blast radius, tests, and `delete_verdict`. Only fresh, confirmed, file-scoped indexed evidence can prove `unsafe`; name-fanout candidates, stale evidence, and Go's package-scoped imports remain `unknown` for the exact file. Missing evidence never proves safety; legacy `safe_to_delete` stays false. |
-| `codemap review [--since <ref>] [--staged] [--depth N] [--fail-on-risk <low\|medium\|high>] [--fail-on-untested]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, `stale`/`resolution`, and stable `call_graph` honesty signals. `--fail-on-risk`/`--fail-on-untested` gate on that data — see [Gating a commit or script](#gating-a-commit-or-script). |
+| `codemap review [--since <ref>] [--staged] [--depth N] [--fail-on-risk <low\|medium\|high>] [--fail-on-untested] [--fail-on-uncovered]` | **Diff-scoped impact + test selection** — the command to run *after* editing. Maps your git diff (whole working tree by default; `--staged` for the index; `--since <ref>` for everything since a branch point) to the symbols it touches, then reports their union blast radius, the **tests to run** (regression test selection), and the changed symbols that are *untested* or are *hotspots* (many callers). Deleted files are analyzed from definitions retained in the last index; run the selected tests before reindexing removes that evidence. Carries aggregate `risk`, a separate test-coverage `coverage` verdict, `stale`/`resolution`, and stable `call_graph` honesty signals. `--fail-on-risk`/`--fail-on-untested`/`--fail-on-uncovered` gate on that data — see [Gating a commit or script](#gating-a-commit-or-script). |
+| `codemap affected [files...] [--stdin] [--staged] [--since <ref>] [--filter <glob>] [--depth N]` | **Changed files → the test files to run**, without parsing a review report. Selects a test file when it covers a changed symbol through the call graph (`covers:<symbol>`), imports a changed file directly or transitively up to `--depth` hops (`imports:<file>`), or is itself a changed test file (`changed`). Files come from arguments, `--stdin` (newline-separated, e.g. `git diff --name-only`), or git (`--staged`, `--since <ref>`); with none of those it uses the working tree. Paths are project-relative (absolute paths under the root are accepted). Human output is exactly one test path per line on stdout — pipe it to a runner (`codemap affected --stdin \| xargs go test`) — with notes on stderr; `--json` adds `reasons`, `unmapped`, `deleted_tests`, `call_graph` and `analysis_complete`. `--filter` is a glob over the reported test paths. Deleted test files are never listed. See [`affected`](#affected-changed-files-tests-to-run). |
 | `codemap secret-impact [<KEY>...] [--via-vault <project>]` | **Rotation blast radius** for secret keys: which symbols read each key (`os.Getenv`/`process.env`/`os.environ`), the transitive callers affected, and covering tests (`untested:true` warns you're rotating a key no test reaches). Operates on key *names* only — never reads or returns values. `--via-vault` fetches the names from [tinyvault](/ecosystem). Each request accepts at most 256 unique names, 256 bytes per name. |
 | `codemap required-keys <entrypoint> [--via-vault <project>]` | **Least-privilege key set**: which candidate keys an entrypoint's transitive call tree actually reads — pipe to `tvault seal`/`export` to grant only what a code path needs. One key per line. Candidate input is capped at 256 unique names, 256 bytes per name. |
 | `codemap risk <symbol> [--depth N] [--fail-on-risk <low\|medium\|high>]` | **Change-risk score** — "how careful should I be changing this?" in one number (0..1) + level (unknown/low/medium/high). Combines untested coverage, fan-in (direct callers), cross-package spread, and name ambiguity into a saturating score, with the factors behind it. If the call graph is unavailable, the level is `unknown` rather than a misleading `low`. Use `--at file:line` for one definition. `--fail-on-risk` gates on the level — see [Gating a commit or script](#gating-a-commit-or-script). |
@@ -177,7 +180,7 @@ name fragment, or by literal text.
 | Command | Description |
 |---|---|
 | `codemap semantic <query> [--top N] [--backend fallback\|local\|vecgrep] [--fusion auto\|balanced]` | Meaning-based search across the indexed graph (alias: `codemap search`); the backend flag explicitly selects the semantic owner |
-| `codemap explore <query> [--seeds N] [--edges N] [--depth N]` | **Intent to structure** — finds semantic/name seeds, joins each usable hit to an exact durable selector, then returns bounded caller/callee/reference/test neighborhoods without source bodies. Seeds are 1–10 (default 5), edges per neighborhood are 1–20 (default 5), and depth is 1–10 (default 2). MCP counterpart `codemap_explore` is registered in every profile. |
+| `codemap explore <query> [--seeds N] [--edges N] [--depth N] [--max-tokens N]` | **Intent to structure** — finds semantic/name seeds, joins each usable hit to an exact durable selector, then returns bounded caller/callee/reference/test neighborhoods without source bodies. Seeds are 1–10 (default 5), edges per neighborhood are 1–20 (default 5), and depth is 1–10 (default 2). `--max-tokens N` trims context lists, then `processes`, then the lowest-ranked contexts and seeds (a process never names a dropped seed in `matched_seeds`) and adds a `budget` object (see `codemap context`). MCP counterpart `codemap_explore` is registered in every profile. The report also carries `processes` (up to 3): entry-point flows (route or command, handler, service chain) whose steps contain a joined seed, each with `matched_seeds` and the call-order path to them capped at 8 steps; empty when the project has no detected entry points or no flow reaches a seed. `task-context` embeds it with the rest of the explore report. |
 | `codemap find <query> [--top N]` | Find symbols by name, with signatures (offline; no embeddings needed) |
 | `codemap grep <pattern> [--regex] [-i] [--top N]` | Exact text search over indexed file content, each hit resolved to its enclosing symbol (offline, no embeddings) |
 
@@ -202,6 +205,15 @@ name match). Each hit carries `matched_in` (`"symbol"`, `"fqn"`, or `"docstring"
 matched. It's still substring/keyword matching, not meaning search: it won't find a conceptually related
 symbol that shares no words with the query — for that, embed the index (`codemap index`, with Ollama
 running) and use `codemap semantic`.
+
+**`codemap explore` / `codemap task-context` without embeddings**: their search requires no vectors.
+When name search finds nothing (a question like `how does signup work` has no symbol containing every
+word) or fewer hits than requested, a lexical floor fills the rest: it drops question words and
+stopwords, then ranks definitions by BM25 over symbol names, FQNs, file paths, docstrings, and
+signatures, preferring definitions that match more of the remaining words. Matching is
+case-insensitive substring (trigram), so `signup` reaches `signupUser` and
+`app/api/auth/signup/route.ts`. The JSON `search_mode` is `lexical` when only that floor answered and
+`name+lexical` when exact name matches lead; `matched_in` may then also be `"path"` or `"signature"`.
 
 `codemap grep` searches only the **indexed file set** — the files codemap extracted structure from
 (same excludes as `codemap index`) — not every byte in the repo; a config/YAML/README file with no
@@ -229,7 +241,7 @@ check what's installed.
 
 | Command | Description |
 |---|---|
-| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile agent\|core\|full` selects the [tool profile](/mcp#tool-profiles): `agent` is exactly 27 taught workflow tools plus `codemap_docs` (28 total), `core` preserves the compatible 28-tool surface, and default `full` exposes all 48. Same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting. |
+| `codemap serve` | Run the [MCP server](/mcp) over stdio. `--profile agent\|core\|full` selects the [tool profile](/mcp#tool-profiles): `agent` is exactly 27 taught workflow tools plus `codemap_docs` (28 total), `core` preserves the compatible 28-tool surface, and default `full` exposes all 50. Same file < env (`CODEMAP_MCP_PROFILE`) < flag precedence as every other setting. |
 | `codemap version` | Print version information |
 
 ## Agent harness setup
@@ -339,6 +351,27 @@ blast-radius nodes and the first covering tests, with a `… (N more)` line. `--
 always carries the complete set. (The README shows the same command run on codemap
 itself.)
 
+#### Confidence-filtered impact
+
+On a name-based index a hub name like `Update` fans out to every same-named method, so the flat
+`blast_radius` can be mostly noise. `--json` therefore adds, without touching the flat list:
+
+- `buckets` — `{direct, transitive, direct_count, transitive_count}`: the same `blast_radius`
+  nodes split at depth 1 vs depth 2+, so the direct callers can be read first. The counts are
+  always the true totals; when `--max-tokens` (or `task-context`'s 25-item cap) trims
+  `blast_radius`, the `direct`/`transitive` lists are rebuilt from the kept prefix only, and
+  `blast_radius_total` reports the true size.
+- `confidence` on every blast-radius and test node — `confirmed` when a shortest path from the
+  symbol to that node uses only precise edges (an `index --precise` pass) or same-file name
+  edges whose target symbol is unique in its file, otherwise `candidate` (cross-file name-based
+  fan-out, same-file fan-out over several same-named methods; heuristic covering tests are
+  always candidates).
+- `--min-confidence confirmed` (MCP `min_confidence`) — drops candidate nodes from
+  `blast_radius`, `buckets`, `tests`, `direct_callers`, and `test_commands`, and reports how many
+  distinct candidate nodes it removed as `filtered: {"candidate": N}` (with `min_confidence`
+  echoed). `candidate`, or leaving it unset, is the default and changes nothing. `untested` keeps
+  its call-graph meaning — it is computed before filtering.
+
 ### `review` — the post-edit query
 
 Where `impact` starts from a *symbol*, `review` starts from your *diff*. After editing
@@ -367,7 +400,7 @@ agent can execute the selected regressions without deriving runner syntax. The
 `schemas/codemap.review.v1.schema.json`. Canonical keys are snake_case:
 `{schema_version, changed_symbols, analysis_complete, total_symbols, analyzed_symbols,
 truncated_symbols, partial_errors, blast_radius, covering_tests, test_commands,
-untested_symbols, hotspots, stale, resolution, call_graph, risk, next}`. Version 1 permits
+untested_symbols, hotspots, stale, resolution, call_graph, risk, coverage, next}`. Version 1 permits
 additive optional properties but does not rename or repurpose existing fields. The command
 degrades gracefully (a plain changed-file list with a note) when the project isn't indexed or
 isn't a git repo; hard-failure error envelopes are separate from the success schema.
@@ -407,13 +440,71 @@ zero-symbol diff and early no-repository/no-index degradation; a finalized incom
 review emits `unknown` even when no symbol could be mapped safely. `unknown` also covers a changed
 symbol whose call graph is unavailable.
 
+**`coverage`** on `review` is the test-coverage verdict, kept apart from the structural `risk`
+band: `{verdict, covered_symbols, uncovered_symbols, unknown_symbols}` with `verdict` one of
+`covered`, `partial`, `uncovered`, or `unknown`. Per changed symbol, *covered* means a call-graph
+path, a heuristic name match, or a test file **in the same diff** reaches it (a changed or new test
+file whose code, comments and string literals excluded, references the symbol by name counts even
+before reindexing; for Go it must live in the symbol's directory, and a name shared by several
+definitions is never linked this way). A same-diff link counts toward this verdict only: it never
+removes a symbol from `untested_symbols` and never changes `risk` or `--fail-on-untested`; *uncovered* means the call graph is usable (`resolved`/`name`) and no test was
+found; *unknown* means no test link was found and the call graph cannot say (TS/JS/Python without
+`--precise`, declarative formats), or the symbol was never analyzed (truncated or failed).
+Test symbols are the coverage, not its subject, so they are skipped. The block is absent when the
+diff maps no non-test symbol. `unknown` is never evidence of missing tests.
+
+### `affected` — changed files → tests to run
+
+When all a hook or CI job wants is "which test files should I run?", `affected` skips the
+review report. Feed it paths and it prints test files, one per line:
+
+```
+$ git diff --name-only main | codemap affected --stdin
+internal/app/review_test.go
+cmd/codemap/gate_test.go
+$ codemap affected --staged --filter '*_test.go' | xargs go test
+```
+
+A test file is selected for one of three reasons, all visible under `--json`:
+
+- `covers:<symbol>` — it holds a test that reaches a changed symbol through the call graph
+  (within `--depth`, default 3), including codemap's heuristic text-reference scan for languages
+  without a call graph.
+- `imports:<file>` — it imports a changed file, directly or through up to `--depth` hops of
+  non-test files. Go imports are package-scoped and cannot prove one exact file is needed, so Go
+  coverage comes from call edges only.
+- `changed` — the changed file is itself a test file.
+
+`--json` returns `schema_version: 1` with `files` (normalized input), `tests` (sorted unique
+paths, each with `reasons`), `unmapped` (changed files with no indexed symbols — docs, config,
+unindexed or out-of-project paths), `call_graph` (the weakest confidence among contributing
+symbols: `resolved`/`name`/`unresolved`/`none`), `analysis_complete`, `stale`, and a `note`
+whenever coverage is name-based, unresolved (TS/JS/Python without `--precise`) or absent (YAML,
+SQL, Markdown: `call_graph: none`), so an empty list is never silent. `analysis_complete` is
+about staleness, caps and failures, not coverage: it is false on a stale index, a capped or
+failed analysis, or an unmapped source file (an unmapped README does not count), and stays true
+when the call graph simply cannot say, which is what the `note` is for. A changed test file
+that no longer exists (deleted in git, or gone from disk) is never in `tests`; it is listed in
+`deleted_tests` instead. Changed files come from arguments, `--stdin`, `--staged`, or
+`--since <ref>` (an explicit list is unioned with the git diff; an empty `--stdin` list means
+nothing changed, not the working tree). A relative path is resolved under the project root,
+then the current directory, then the git toplevel, so `git diff --name-only` output
+(repository-root-relative) works when the project is a subdirectory of the repository; a path
+outside the project is `unmapped`. The `codemap_affected` MCP tool (full profile) returns the
+same JSON.
+
+Exit codes follow the usual taxonomy: a project that was never indexed is a `not_indexed`
+failure; running a git-sourced mode (the default working tree, `--staged`, `--since`) outside a
+git repository is `not_a_repo` (exit 5 under `--json`); a `--depth` outside 1-10, `--staged`
+together with `--since`, or a `--since` ref that does not exist is `invalid_input` (exit 1).
+
 ### Gating a commit or script
 
 `codemap review` and `codemap risk` compute a risk level and an untested-symbols
 list either way, but historically always exited `0` — a caller wanting to block
 on "this diff touches untested high-risk code" had to hand-roll the check
 against `--json` output (exactly what the [GitHub Action](/ci) did before it
-grew `fail-on-untested`/`fail-on-risk` inputs). Two flags turn that into a
+grew `fail-on-untested`/`fail-on-risk` inputs). Three flags turn that into a
 first-class exit code instead:
 
 - `--fail-on-risk <low|medium|high>` — after printing the normal output
@@ -428,12 +519,23 @@ first-class exit code instead:
   `unresolved`/`none` call graph and test coverage therefore cannot be established.
   An empty list is not proof of coverage when relationships are unknown. `review`
   only (there is no untested-*symbols* list on `risk`, which reports one symbol at a time).
+- `--fail-on-uncovered` — after printing the normal output (unchanged), exit **6** only
+  when `coverage.verdict` is `uncovered`, or `partial` with at least one known-uncovered
+  symbol. It never trips on `unknown` coverage (an unresolved call graph with no test link)
+  or on a `partial` made only of covered and unknown symbols — the honesty rule — so unlike
+  `--fail-on-untested` it is usable on polyglot diffs. Like the other review gates it
+  fails closed (exit **6**) on an indexed Git review with `analysis_complete:false` —
+  truncated at the 200-symbol cap, partial errors, or a stale index — since a subset
+  proves nothing about the whole diff; genuine `unknown` coverage of a *complete*
+  analysis still passes. `--fail-on-untested` itself is unchanged. `review` only; the
+  report's `gate.would_fail_on.uncovered` reproduces the coverage condition from the JSON
+  (combine it with `gate.would_fail_on.incomplete_analysis`).
 
-For `review`, enabling **either** gate also requires a complete analysis. An
+For `review`, enabling **any** gate also requires a complete analysis. An
 indexed Git repository with `analysis_complete:false` exits **6** before policy
 comparison, even though its aggregate risk is honestly `unknown`; otherwise a
 stale or partially mapped diff could pass because the evidence needed to enforce
-the gate is missing. With both flags disabled, the same incomplete report remains
+the gate is missing. With all gate flags disabled, the same incomplete report remains
 reporting-only and exits `0`. Early graceful reports for a non-Git directory or a
 project with no indexed nodes (including `codemap init` without `codemap index`)
 also remain nonblocking and exit `0`.

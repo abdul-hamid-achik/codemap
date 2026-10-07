@@ -53,6 +53,7 @@ type ContextReport struct {
 	Resolution           string               `json:"resolution,omitempty"`            // human sentence set when the call graph is unresolved (TS/JS/Python without --precise) — callers/callees/tests/blast are unavailable, not absent
 	CallGraph            string               `json:"call_graph"`                      // stable machine enum: resolved|name|unresolved|none (carried from the bundled Impact)
 	Annotations          []graph.Annotation   `json:"annotations,omitempty"`           // pinned notes/data on the symbol
+	Hierarchy            *HierarchyReport     `json:"hierarchy,omitempty"`             // declared inheritance: extends/implements/subtypes/overrides (absent when none)
 	// Memories are TRANSIENT agent notes recalled by meaning from vecgrep's global
 	// memory store, scoped to this project via codemap's project_key (G2) — distinct
 	// from Annotations (codemap's own durable, symbol-pinned layer). Empty when
@@ -68,6 +69,8 @@ type ContextReport struct {
 	// MCP consumer can tell an unknown symbol from a symbol with an empty bundle.
 	Code string `json:"code,omitempty"`
 	Hint string `json:"hint,omitempty"`
+	// Budget is present only when max_tokens was requested (see budget.go).
+	Budget *TokenBudget `json:"budget,omitempty"`
 }
 
 // ContextPartialError is one non-fatal failure while assembling a context
@@ -231,6 +234,7 @@ func (svc *Service) contextForTarget(ctx, memoryCtx context.Context, cwd, symbol
 		return nil, nil, err
 	}
 	applyContextReferences(rep, refs, refsErr)
+	svc.attachHierarchy(cwd, rep)
 
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

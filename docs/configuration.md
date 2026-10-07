@@ -29,8 +29,9 @@ to a path inside the repo if you want a repo-local index too.
 7. Built-in defaults
 
 Most config-file settings are reachable all three ways — config file, env var, and flag —
-with the flag winning when explicitly set. Four knobs are exceptions: `daemon.embed_cache_size`
-is file + flag only (no env var), `index.extract_concurrency` is file + env only (no flag),
+with the flag winning when explicitly set. Five knobs are exceptions: `daemon.embed_cache_size`
+is file + flag only (no env var), `index.extract_concurrency` and `index.structural_backend` are
+file + env only (no flag),
 `semantic.fusion_weights.*` (the per-profile weight floats) is file-only (no env var, no flag) —
 `semantic.backend` and `semantic.fusion` are reachable all three ways — and
 `embedding.api_key` is file + env only (**no flag, deliberately**): flag values show up in
@@ -56,7 +57,8 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_EXCLUDE_EXTRA` | `index.exclude_extra` (comma-separated; appended) |
 | `CODEMAP_EMBED_BATCH_SIZE` | `index.embed_batch_size` |
 | `CODEMAP_EMBED_CONCURRENCY` | `index.embed_concurrency` |
-| `CODEMAP_EXTRACT_CONCURRENCY` | `index.extract_concurrency` (parallel Go extraction workers; LSP stays serial; no flag) |
+| `CODEMAP_EXTRACT_CONCURRENCY` | `index.extract_concurrency` (parallel extraction workers for the built-in backends; LSP stays serial; no flag) |
+| `CODEMAP_STRUCTURAL_BACKEND` | `index.structural_backend` (`tree-sitter` default, or `lsp`; no flag) |
 | `CODEMAP_EMBED_MAX_CHARS` | `index.embed_max_chars` |
 | `CODEMAP_VECGREP_ENABLED` | `vecgrep.enabled` |
 | `CODEMAP_VECGREP_BIN` | `vecgrep.bin` |
@@ -129,7 +131,8 @@ index:
     - "**/testdata"
   embed_batch_size: 64    # node texts per request (0 = default 64)
   embed_concurrency: 4    # concurrent requests (0 = default 4)
-  extract_concurrency: 4 # parallel Go (go/parser) extraction workers; LSP indexing is always serial per server
+  extract_concurrency: 4 # parallel extraction workers for the built-in backends (Go, TS/JS/Python tree-sitter, …); a language server is always serial
+  structural_backend: tree-sitter # TS/JS/Python symbols: built-in tree-sitter (servers only for --precise), or "lsp" to drive typescript-language-server/pyright for every index
   embed_max_chars: 0      # cap per-node embed text (0 = no cap); lower = faster, less body recall
 daemon:                   # background indexer (codemap daemon)
   debounce_ms: 500        # coalesce edit bursts (0 = default 500)

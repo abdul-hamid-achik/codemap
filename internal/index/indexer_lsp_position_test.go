@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
@@ -54,7 +53,7 @@ func TestLSPPreciseEdgesJoinBothEndsByPosition(t *testing.T) {
 
 	g, _ := newStores(t)
 	pid, _ := g.UpsertProject("duplicates", dir, "typescript")
-	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	ix := New(g, nil, nil, lspModeConfig())
 	ix.Register(duplicateFQNCallResolver{})
 	if _, err := ix.IndexProject(context.Background(), pid, "duplicates", dir, Options{Precise: true}); err != nil {
 		t.Fatal(err)

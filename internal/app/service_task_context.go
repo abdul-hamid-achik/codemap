@@ -46,6 +46,7 @@ type TaskContextOptions struct {
 	Mode      string           // understand|change|debug; "" → understand
 	Selectors []SymbolSelector // change/debug only; exact definitions the caller already holds
 	Depth     int              // contexts/impact depth; <= 0 → 3 (the Context default)
+	MaxTokens int              // approximate token budget for the JSON result; 0 = none (see budget.go)
 }
 
 // TaskFreshness is the always-assemble-and-flag freshness header. Checked is
@@ -110,6 +111,7 @@ type TaskContextReport struct {
 	PartialErrorsTruncated int                   `json:"partial_errors_truncated,omitempty"`
 	Next                   []NextAction          `json:"next,omitempty"` // max 2, advisory only
 	Note                   string                `json:"note,omitempty"`
+	Budget                 *TokenBudget          `json:"budget,omitempty"` // present only when max_tokens was requested
 }
 
 // addPartialError appends one bounded component failure up to the payload cap,
@@ -160,6 +162,9 @@ func ValidateTaskContext(task string, opts TaskContextOptions) error {
 			"pass mode understand, change, or debug",
 			fmt.Errorf("unknown mode %q", mode))
 	}
+	if err := ValidateMaxTokens(opts.MaxTokens); err != nil {
+		return err
+	}
 	if mode == TaskModeUnderstand && len(opts.Selectors) > 0 {
 		return coded(CodeInvalidInput,
 			"pass mode change or debug when supplying selectors",
@@ -187,6 +192,15 @@ func attachTaskFreshness(rep *TaskContextReport, st *index.Staleness, serr error
 // in-process sidecar can vary between calls. Sections degrade independently
 // into partial_errors; only cancellation and storage failures abort the call.
 func (svc *Service) TaskContext(ctx context.Context, cwd, task string, opts TaskContextOptions) (*TaskContextReport, error) {
+	rep, err := svc.taskContext(ctx, cwd, task, opts)
+	if err != nil {
+		return nil, err
+	}
+	applyTaskContextBudget(rep, opts.MaxTokens)
+	return rep, nil
+}
+
+func (svc *Service) taskContext(ctx context.Context, cwd, task string, opts TaskContextOptions) (*TaskContextReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -352,6 +366,9 @@ func (svc *Service) attachTaskImpacts(ctx context.Context, cwd string, rep *Task
 		dcTotal, brTotal, testsTotal := len(imp.DirectCallers), len(imp.BlastRadius), len(imp.Tests)
 		imp.DirectCallers = emptyIfNil(capSlice(imp.DirectCallers, contextListCap))
 		imp.BlastRadius = emptyIfNil(capSlice(imp.BlastRadius, contextListCap))
+		// Buckets duplicate the blast radius; rebuild them from the capped list
+		// (counts stay the true totals) so they cannot outweigh or contradict it.
+		imp.Buckets = capImpactBuckets(imp.Buckets, imp.BlastRadius)
 		imp.Tests = emptyIfNil(capSlice(imp.Tests, contextListCap))
 		rep.Impacts = append(rep.Impacts, TaskImpact{
 			Selector: t.Selector, Symbol: t.Symbol, Impact: imp,

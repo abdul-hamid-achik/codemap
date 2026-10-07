@@ -136,7 +136,12 @@ func resolvePythonImport(fromRel, spec string, idx *importIndex) string {
 		}
 		base = joinSlash(dir, rest)
 	}
-	return lookupPyFile(idx, strings.Trim(base, "/"))
+	base = strings.Trim(base, "/")
+	if f := lookupPyFile(idx, base); f != "" || dots > 0 {
+		return f
+	}
+	// The src/ layout: an absolute import of a package that lives under src/.
+	return lookupPyFile(idx, joinSlash("src", base))
 }
 
 func lookupPyFile(idx *importIndex, base string) string {

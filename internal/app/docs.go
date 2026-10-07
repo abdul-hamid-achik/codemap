@@ -15,9 +15,11 @@ graph. Use the CLI for terminal workflows or 'codemap serve' for stdio MCP.
 Both call the same services. Stored-graph queries work offline; embeddings are optional.
 
 Start: codemap init; codemap index --no-embed; codemap docs workflow.
-Go, Ruby, Lua, GDScript, SQL, YAML, Markdown, HTML and stylesheets have built-in
-backends. TypeScript/JavaScript/Vue use typescript-language-server; Python uses
-pyright-langserver. --precise resolves Go/TS/JS/Python calls where supported.
+Go, TypeScript, JavaScript, Python, Vue script blocks, Ruby, Lua, GDScript, SQL,
+YAML, Markdown, HTML and stylesheets have built-in backends (TS/JS/Python via
+tree-sitter) — no language server is needed to index. --precise resolves exact
+calls: in-process go/types for Go, typescript-language-server (TS/JS) and
+pyright-langserver (Python) when installed.
 
 Use context/impact for functions, dependencies/traverse for non-call relations,
 and source with a durable selector for one exact definition. SQL reads/writes,
@@ -110,9 +112,10 @@ before the reindex that prunes them. (A registered-but-never-indexed project
 reports indexed:false — codemap_index first.)
 
 After codemap_index: if the result has degraded:true (or tooling.issues is
-non-empty), do NOT treat the graph as complete for the skipped languages —
-common on TS/JS/Python when a language server is missing or an asdf/mise shim
-dies under the project pin (code lsp_version_manager_gap). Follow
+non-empty), do NOT treat the graph as complete for the affected languages. An
+issue with capability:"precise" means symbols were indexed but the --precise
+call graph is missing (a language server is absent, or an asdf/mise shim dies
+under the project pin — code lsp_version_manager_gap). Follow
 tooling.issues[].agent_fix steps, re-run index, and check languages.* counts
 (a TS repo that only indexed html/css is a failed setup, not a partial win).
 Doctor probes (under the project root) exercise servers the same way index
@@ -143,6 +146,8 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests + runnable test_commands
                                        repeat --at for a <=25 partial-success frame batch; --batch stabilizes a one-item envelope
   review [--since R] [--staged]      diff-scoped: changed/deleted symbols, blast radius, tests to run, risk band
+  affected [files...] [--stdin|--staged|--since R] [--filter G]  changed files -> test files to run, one per line (--json: reasons)
+                                     (codemap_affected is available in the full MCP profile)
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
   map [--top-subsystems N ...]       architecture overview: subsystems, directed bridges, entrypoints, hubs
                                      (codemap_map is available in the full MCP profile)
@@ -151,11 +156,16 @@ you don't need a separate find/symbols round-trip to build that selector.`},
                                      (codemap_atlas is available in the full MCP profile)
   features [--kind K --query Q]      capability inventory: CLI commands, HTTP routes, MCP/RPC tools, pages,
                                      programs — description from the registration, handler selector, footprint
+  processes [--kind K --query Q --top N --depth N]
+                                     execution flows from every entrypoint (route/command -> handler -> service
+                                     chain) as ordered steps; on demand, nothing stored
+                                     (codemap_processes is available in the full MCP profile)
   flow <sym> | --at <file>:<line> [--depth N --max-nodes N]
                                      call tree from one entry in call order: docs, subsystems, confidence;
                                      same-name fan-out collapsed (alternatives) or left ambiguous
   explore <query> [--seeds N --edges N --depth N]
                                      intent search → bounded exact context neighborhoods, no source bodies
+                                     plus the entrypoint processes (route -> handler -> service chain) that contain a seed
                                      (codemap_explore is taught and registered in every MCP profile)
   dependencies <file>                bounded inbound evidence + confirmed/candidate totals + domain coverage
   file-impact <file>                 file impact: confidence-aware evidence + coverage + conservative delete verdict
@@ -200,8 +210,8 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   serve [--profile agent|core|full]  run MCP: exact taught / compatible lean / expert surface
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
-callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, secret_impact,
-required_keys, risk, hotspots, orphans, coverage, read_order, map, atlas, features, flow, explore, traverse, task_context, path, related_files, symbols,
+callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, affected, secret_impact,
+required_keys, risk, hotspots, orphans, coverage, read_order, map, atlas, features, processes, flow, explore, traverse, task_context, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,
 cache_list, cache_drop). MCP text payloads use compact JSON to save response tokens.
@@ -219,7 +229,10 @@ positions:[{file,line}] as a batch alternative to file/line — a pasted multi-f
 resolves in one call. explore accepts query+seeds+edges+depth; traverse requires its selector and
 accepts direction+edge_types+depth+limit; task-context accepts a task + mode (understand|change|debug)
 + optional selectors (change/debug only) and never interprets the task text. All three MCP tools are
-full-profile only. codemap_docs returns this guide.`},
+full-profile only. context, explore, impact, and task-context accept max_tokens (CLI --max-tokens N): an
+approximate budget for the JSON result (compact JSON bytes / 4) — source bodies are dropped first, then list
+tails, and the result gains a budget object {max_tokens,estimated_tokens,truncated,dropped}.
+codemap_docs returns this guide.`},
 
 	{"annotations", `Annotations are the harness's knowledge layer over the graph: pin notes and
 external data (DB rows from mongosh/postgres, vidtrace/vecgrep findings, …) to a
@@ -266,7 +279,8 @@ wiring, and plain calls to same-file definitions and imported bindings (arbitrar
 obj.method() calls are not linked) — so the graph is partial until --precise, and
 impact/callers/callees on an uncovered TS/JS/Python symbol return a "resolution" note and
 call_graph:"unresolved", NOT a confidently-empty result or untested:true; missing
-callers/tests are unresolved, not absent. Python has no base-level call edges. Ruby and Lua carry name-based call edges from their built-in
+callers/tests are unresolved, not absent. Python base call edges are candidates (same-file,
+self/cls methods, imported bindings). Ruby and Lua carry name-based call edges from their built-in
 backends and classify as "name".) Every impact/callers/callees/review/
 context/hotspots/orphans/path report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
 so a consumer can switch on confidence (resolved→high, name→medium, unresolved/none→low) instead of

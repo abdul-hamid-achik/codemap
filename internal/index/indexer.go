@@ -39,6 +39,7 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/extract/luasrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/mdsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/rubysrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/sittersrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/sqlsrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/typesrc"
 	"github.com/abdul-hamid-achik/codemap/internal/extract/vuesrc"
@@ -64,8 +65,9 @@ type Options struct {
 	// with exact ones for cleanly type-checked packages. Requires the `go`
 	// toolchain and a buildable module; degrades to name-based otherwise.
 	Precise bool
-	// NoLSP disables auto-registration of language-server-backed extractors
-	// (TypeScript, …). Indexing then covers only the built-in Go backend.
+	// NoLSP never spawns a language server. With the default tree-sitter
+	// backend TS/JS/Python still index (only their --precise call edges need a
+	// server); in "lsp" structural mode those languages are then skipped.
 	NoLSP bool
 	// ExcludeExtra appends per-call skip globs to the configured excludes
 	// (cfg.Exclude + cfg.ExcludeExtra) for this run only — e.g. extra paths an
@@ -329,8 +331,7 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 		// real install under ~/.asdf/installs is unwrapped to that binary.
 		pr := tooling.Probe(ctx, spec.Cmd, root)
 		if !pr.OK {
-			iss := classifyLSPProbe(spec.Cmd, root, langs, pr)
-			noteServerIssue(res, iss)
+			noteServerIssue(res, ix.scopeIssue(classifyLSPProbe(spec.Cmd, root, langs, pr)))
 			continue
 		}
 		cmd := pr.Path
@@ -342,13 +343,13 @@ func (ix *Indexer) registerLSP(ctx context.Context, root string, present map[str
 		// TS and JS, each routed with its own languageId.
 		owner, err := lspsrc.New(ctx, want[0].Lang, want[0].LangID, root, cmd, spec.Args...)
 		if err != nil {
-			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, cmd, root, langs, err, ""))
+			noteServerIssue(res, ix.scopeIssue(tooling.ClassifySpawnError(spec.Cmd, cmd, root, langs, err, "")))
 			continue
 		}
-		ix.Register(owner)
+		ix.registerServer(owner)
 		ix.closers = append(ix.closers, owner) // only the owner closes the server
 		for _, lb := range want[1:] {
-			ix.Register(owner.Bind(lb.Lang, lb.LangID))
+			ix.registerServer(owner.Bind(lb.Lang, lb.LangID))
 		}
 		registered = true
 	}
@@ -411,10 +412,10 @@ func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result, pr
 			noteServerIssue(res, tooling.ClassifySpawnError(spec.Cmd, cmd, root, []string{"vue"}, err, ""))
 			return false
 		}
-		ix.Register(owner)
+		ix.registerServer(owner)
 		ix.closers = append(ix.closers, owner)
 		for _, lb := range spec.Langs[1:] {
-			ix.Register(owner.Bind(lb.Lang, lb.LangID))
+			ix.registerServer(owner.Bind(lb.Lang, lb.LangID))
 		}
 		ts = ix.extractors["typescript"]
 		js = ix.extractors["javascript"]
@@ -441,11 +442,32 @@ func (ix *Indexer) registerVue(ctx context.Context, root string, res *Result, pr
 	return true
 }
 
-// bindOther binds an additional codemap language onto the SAME language-server
-// connection e already uses, via lspsrc.Extractor.Bind. Returns nil if e isn't
-// an *lspsrc.Extractor (defensive — every current registration of "typescript"/
-// "javascript" is, but this degrades gracefully rather than panicking if that
-// ever changes).
+// presentLanguages counts the languages a --precise run may need servers for:
+// the files tree-sitter serves plus the recognized-but-unsupported ones. Files
+// routed to any other backend are left to it.
+func presentLanguages(files []fileTask, unsupported map[string]int) map[string]int {
+	present := make(map[string]int, len(unsupported)+4)
+	for lang, n := range unsupported {
+		present[lang] = n
+	}
+	for _, f := range files {
+		switch f.ext.(type) {
+		case *sittersrc.Extractor, *sittersrc.Hybrid:
+			present[f.lang]++
+		}
+	}
+	return present
+}
+
+// scopeIssue marks a server failure as precise-only when the tree-sitter
+// backend indexes the languages regardless.
+func (ix *Indexer) scopeIssue(iss tooling.Issue) tooling.Issue {
+	if ix.cfg.UsesTreeSitter() {
+		iss.Capability = tooling.CapabilityPrecise
+	}
+	return iss
+}
+
 func classifyLSPProbe(bin, cwd string, langs []string, pr tooling.ProbeResult) tooling.Issue {
 	if pr.Path == "" {
 		return tooling.ClassifyNotFound(bin, cwd, langs)
@@ -453,6 +475,11 @@ func classifyLSPProbe(bin, cwd string, langs []string, pr tooling.ProbeResult) t
 	return tooling.ClassifyProbeFailure(bin, cwd, langs, pr)
 }
 
+// bindOther binds an additional codemap language onto the SAME language-server
+// connection e already uses, via lspsrc.Extractor.Bind. Returns nil if e isn't
+// an *lspsrc.Extractor (defensive — every current registration of "typescript"/
+// "javascript" is, but this degrades gracefully rather than panicking if that
+// ever changes).
 func bindOther(e extract.Extractor, lang, langID string) extract.Extractor {
 	if le, ok := e.(*lspsrc.Extractor); ok {
 		return le.Bind(lang, langID)
@@ -639,10 +666,12 @@ func (ix *Indexer) Close() error {
 }
 
 // New returns an indexer with the default pure-Go backends registered:
-// go/parser for Go, and the line-scanner backends for Ruby, Lua,
-// CSS/SCSS/Sass/Less selectors, and HTML class references. LSP-backed
-// languages (TypeScript/JavaScript/Python, plus Vue delegation) are registered
-// per project by registerLSP when their files are present.
+// go/parser for Go, tree-sitter for TypeScript/JavaScript/Python (unless
+// index.structural_backend is "lsp"), and the line-scanner backends for Ruby,
+// Lua, CSS/SCSS/Sass/Less selectors, and HTML class references. Language
+// servers are spawned per project by registerLSP: for --precise in the
+// default mode (wrapping the tree-sitter extractors), or for every index in
+// "lsp" mode.
 func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.IndexConfig) *Indexer {
 	ix := &Indexer{
 		graph:      g,
@@ -663,7 +692,38 @@ func New(g *graph.Store, vec *vector.Store, emb embed.Provider, cfg config.Index
 	ix.Register(sqlsrc.New())
 	ix.Register(yamlsrc.New())
 	ix.Register(mdsrc.New())
+	if cfg.UsesTreeSitter() {
+		for _, lang := range sittersrc.Languages {
+			if e, err := sittersrc.New(lang); err == nil {
+				ix.Register(e)
+			}
+		}
+	}
 	return ix
+}
+
+// registerServer registers a language-server extractor. Where the tree-sitter
+// backend already serves its language, the server is attached to it instead
+// (sittersrc.Hybrid): structure stays tree-sitter, the server adds
+// callHierarchy edges for --precise and a fallback for files that fail to
+// parse cleanly.
+func (ix *Indexer) registerServer(e extract.Extractor) {
+	switch cur := ix.extractors[e.Language()].(type) {
+	case *sittersrc.Extractor:
+		ix.Register(sittersrc.WithServer(cur, e))
+		return
+	case *sittersrc.Hybrid:
+		ix.Register(sittersrc.WithServer(cur.Extractor, e))
+		return
+	case nil:
+		ix.Register(e)
+		return
+	}
+	if !ix.cfg.UsesTreeSitter() {
+		ix.Register(e) // lsp mode: the server owns the language
+	}
+	// Otherwise another backend was registered for this language on purpose;
+	// a server spawned for --precise must not displace it.
 }
 
 // Register adds (or replaces) the extractor for a language.
@@ -689,6 +749,9 @@ type fileTask struct {
 // server over stdio. Those files stay at one in-flight request; cheap
 // pure-Go backends share the extract-concurrency pool.
 func usesLanguageServer(ft fileTask) bool {
+	if cs, ok := ft.ext.(interface{ ConcurrentSafe() bool }); ok && cs.ConcurrentSafe() {
+		return false // tree-sitter (and its server hybrid) parse in parallel
+	}
 	switch ft.ext.(type) {
 	case *lspsrc.Extractor, *vuesrc.Extractor:
 		return true
@@ -1007,7 +1070,25 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// to route their files to the new extractor. Skipped entirely under --no-lsp,
 	// and now also skipped when the run has no work for a server's languages
 	// (lspWorkPending) — no drift, no new files, no forced paths, no precise.
-	if !opts.NoLSP {
+	if ix.cfg.UsesTreeSitter() {
+		// TypeScript/JavaScript/Python parse in-process (tree-sitter). A
+		// language server is spawned only to resolve --precise call edges;
+		// Vue binds its script blocks to the tree-sitter extractors.
+		registered := false
+		if opts.Precise && !opts.NoLSP {
+			lspStart := time.Now()
+			reportPhase(opts, "starting language servers for --precise…", 0, 0)
+			registered = ix.registerLSP(ctx, root, presentLanguages(files, unsupported), res, projectID, opts)
+			res.LspMs = int(time.Since(lspStart).Milliseconds())
+		} else if unsupported["vue"] > 0 {
+			registered = ix.registerVue(ctx, root, res, projectID, opts)
+		}
+		if registered {
+			if files, unsupported, err = ix.walk(root); err != nil {
+				return nil, err
+			}
+		}
+	} else if !opts.NoLSP {
 		lspStart := time.Now()
 		reportPhase(opts, "starting language servers…", 0, 0)
 		if ix.registerLSP(ctx, root, unsupported, res, projectID, opts) {
@@ -1284,6 +1365,11 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// for whole-graph builds (--reindex, first index); scoped incrementals
 	// take the cheap PRAGMA optimize refresh instead.
 	if len(touched) > 0 || res.FilesDeleted > 0 {
+		// Fold this run's node writes into the lexical index in one bulk pass
+		// (best-effort: LexicalSearch re-syncs before searching anyway).
+		_ = ix.graph.SyncLexical()
+		// Derive method overrides from this run's declared inheritance.
+		_, _ = ix.graph.RecomputeOverrides(projectID)
 		analyzeStart := time.Now()
 		if opts.Reindex || (len(files) > 0 && len(added) == len(files)) {
 			_ = ix.graph.OptimizeStats()
@@ -1510,6 +1596,8 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	// scoped, so it always takes the cheap PRAGMA optimize refresh; a full
 	// ANALYZE belongs to whole-graph builds.
 	if len(touchedFiles) > 0 {
+		_ = ix.graph.SyncLexical()
+		_, _ = ix.graph.RecomputeOverrides(projectID) // derived from extends/implements
 		analyzeStart := time.Now()
 		_ = ix.graph.OptimizeStatsLight()
 		res.AnalyzeMs = int(time.Since(analyzeStart).Milliseconds())
@@ -2698,6 +2786,13 @@ func (ix *Indexer) resolvePreciseEdgesWith(tx *sql.Tx, projectID int64, res *Res
 		}
 		upgraded++
 	}
+	if err := writeGoImplementsTx(tx, projectID, pr, posTo); err != nil {
+		res.PreciseNote = "precise implements write failed: " + err.Error()
+		return err
+	}
+	if pr.ImplementsSkipped {
+		res.PreciseNote = strings.TrimPrefix(res.PreciseNote+"; ", "; ") + "implements/overrides skipped: module too large for the satisfiability check"
+	}
 	for file := range pr.CleanFiles {
 		if err := graph.MarkCallGraphResolvedTx(tx, projectID, file, preciseResolverGoTypes); err != nil {
 			res.PreciseNote = "precise coverage mark failed: " + err.Error()
@@ -2796,9 +2891,19 @@ func isGenerated(src []byte) bool {
 // IndexProject, lifted into a public method so the daemon (which builds
 // its own indexer and never calls IndexProject after the first index) can
 // reuse it.
-func (ix *Indexer) RegisterLSPForProject(ctx context.Context, root string) (map[string]string, error) {
+func (ix *Indexer) RegisterLSPForProject(ctx context.Context, root string, precise bool) (map[string]string, error) {
 	res := &Result{}
 	if !ix.detectPresentLanguagesForLSP(root, res) {
+		return res.MissingServers, nil
+	}
+	if ix.cfg.UsesTreeSitter() {
+		// Tree-sitter already serves TS/JS/Python; a daemon needs servers only
+		// to keep --precise call edges current. Vue just binds its delegates.
+		if precise {
+			ix.registerLSP(ctx, root, res.Unsupported, res, 0, Options{Reindex: true, Precise: true})
+		} else if res.Unsupported["vue"] > 0 {
+			ix.registerVue(ctx, root, res, 0, Options{Reindex: true})
+		}
 		return res.MissingServers, nil
 	}
 	// The daemon path always spawns: its servers must be up for FUTURE watcher
@@ -2852,4 +2957,38 @@ func (ix *Indexer) detectPresentLanguagesForLSP(root string, res *Result) bool {
 		return nil
 	})
 	return found
+}
+
+// writeGoImplementsTx replaces the project's precise Go implements/overrides
+// edges with the go/types answer: type → interface it satisfies, and concrete
+// method → the interface method it implements. Positions join to gosrc nodes
+// (both store the declared name's line); an unmatched end is skipped.
+func writeGoImplementsTx(tx *sql.Tx, projectID int64, pr *typesrc.Result, posTo map[precisePos]int64) error {
+	if _, err := tx.Exec(`
+		DELETE FROM edges
+		WHERE edge_type IN (?, ?) AND provenance = ?
+		  AND source_id IN (SELECT id FROM nodes WHERE project_id = ? AND language = 'go')`,
+		graph.EdgeImplements, graph.EdgeOverrides, graph.ProvPrecise, projectID); err != nil {
+		return err
+	}
+	add := func(kind string, from, to typesrc.Position) error {
+		f, ok1 := posTo[precisePos{from.File, from.Line}]
+		t, ok2 := posTo[precisePos{to.File, to.Line}]
+		if !ok1 || !ok2 || f == t {
+			return nil
+		}
+		_, err := graph.AddEdgeProvTx(tx, f, t, kind, graph.WeightLSP, graph.ProvPrecise)
+		return err
+	}
+	for _, e := range pr.Implements {
+		if err := add(graph.EdgeImplements, e.Type, e.Interface); err != nil {
+			return err
+		}
+	}
+	for _, e := range pr.Overrides {
+		if err := add(graph.EdgeOverrides, e.Method, e.InterfaceMethod); err != nil {
+			return err
+		}
+	}
+	return nil
 }

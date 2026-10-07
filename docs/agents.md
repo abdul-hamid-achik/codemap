@@ -58,7 +58,7 @@ to paste.
 
 Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
 [MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
-*all* servers combined; every other harness above stays on the full 48-tool default.
+*all* servers combined; every other harness above stays on the full 50-tool default.
 For a manually configured harness, choose `CODEMAP_MCP_PROFILE=agent` to bind its
 surface exactly to this page's taught loop. `agent` and the backwards-compatible
 `core` profile both contain 28 tools today; `full` is the explicit expert/admin
@@ -92,9 +92,9 @@ whether to trust what it returned — full tool descriptions live in the
 | **Understand** — read it in full | `codemap_flow` (how a handler works, as an ordered call tree) / `codemap_context` (one symbol) / `codemap_context_batch` (several) / `codemap_file_context` (one-call orientation on a whole file) | `call_graph` — trust level; `alternatives`/`leaf_reason:"ambiguous"` on `flow` steps; `candidates` if the name is ambiguous, re-query with `candidates[i].selector` |
 | **Gate** — how careful, and is this even current? | `codemap_risk` (change-risk score) alongside `codemap_impact` / `codemap_file_impact` for the blast surface | `stale` — an index that's drifted since last run makes every other signal provisional |
 | **Edit** — make the change | informed by the tools above; codemap has no write path | — |
-| **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` — the diff's changed symbols, blast radius, and the tests to run |
+| **Verify** — did it land, what do I run | `codemap_review` | `call_graph` + aggregate `risk` + `coverage.verdict` — the diff's changed symbols, blast radius, and the tests to run; gate on `coverage` (not `risk`) to ask "is anything provably untested?" |
 
-On an unfamiliar repo the first moves are `codemap_read_order` or `codemap_features` to find an entry point, then `codemap_flow` on its handler selector, then `codemap_context` on any step; the CLI equivalent is walked through in [Learn a codebase](/learn).
+On an unfamiliar repo the first moves are `codemap_read_order` or `codemap_features` to find an entry point, then `codemap_flow` on its handler selector, then `codemap_context` on any step; on the full profile `codemap_processes` returns every entry point's ordered flow in one call, and `codemap_explore` attaches the matching entry flows (`processes`) to its seeds; the CLI equivalent is walked through in [Learn a codebase](/learn).
 
 Deeper tools plug into the same stages on demand: `codemap_dependencies` and
 `codemap_references` sharpen **Locate**/**Gate** with confirmed-vs-candidate file and
@@ -111,7 +111,7 @@ after every change — those two bookend the loop.
 `full` profile additionally exposes two bounded orientation tools outside the lean taught loop:
 `codemap_map` surveys subsystems and `codemap_traverse` walks selected relation types from a
 required durable selector (`direction`/`edge_types`/`depth`/`limit`). Those two are intentionally
-not registered in the current 28-tool `agent` or `core` profiles. The third full-profile orientation tool, `codemap_atlas`, returns the repository as a described directory tree; `codemap_task_context` composes one mode-scoped orientation bundle.
+not registered in the current 28-tool `agent` or `core` profiles. The third full-profile orientation tool, `codemap_atlas`, returns the repository as a described directory tree; `codemap_task_context` composes one mode-scoped orientation bundle. `codemap_affected` (also full-profile only) turns a list of changed files, or a git diff, into just the test files to run.
 
 ## Honesty signals — why an agent can trust the answers
 
@@ -168,6 +168,19 @@ calibrate its confidence:
   `CODEMAP_SEMANTIC_FUSION=balanced`).
 - **`untested` / `heuristic`** — a symbol has no covering tests, or a test was matched
   by name-scan rather than the call graph (flag it, don't trust it blindly).
+- **`confidence` / `buckets` / `min_confidence` on `codemap_impact`** — each blast-radius and test
+  node is `confirmed` (every edge on a shortest path is precise, or a same-file name edge to a
+  symbol that is unique in its file) or `candidate` (name-based fan-out, cross-file or over
+  same-named definitions in one file). `buckets.direct` is the depth-1 slice; on a name-based hub
+  pass `min_confidence:"confirmed"` to drop candidates instead of grep-verifying them (the
+  response says how many it hid under `filtered.candidate`).
+- **`coverage` on `codemap_review`** — `verdict` covered/partial/uncovered/unknown with
+  covered/uncovered/unknown symbol counts, separate from `risk`. A test file changed in the same
+  diff counts toward `coverage` (only) for the uniquely named symbols its code references, even
+  before reindexing; `untested_symbols` and `risk` are unaffected. `unknown` means no
+  test link and no usable call graph — never read it as "untested". CLI
+  `--fail-on-uncovered` trips only on `uncovered`/`partial` with known-uncovered symbols (and, like
+  the other review gates, fails closed on an incomplete indexed analysis).
 - **`*_total`** — true counts behind a capped list, so you know when to drill with
   `codemap_callers`/`impact` for the full set.
 
@@ -175,8 +188,8 @@ calibrate its confidence:
 
 The Go, Ruby, and Lua graphs start name-based from built-in pure-Go backends; base TS/JS carries
 name-based JSX component-usage, import, Next.js framework-wiring, same-file call, and
-imported-binding call edges (arbitrary `obj.method()` calls are not linked, and Python has no
-base-level call edges). For complete TypeScript/JavaScript/Python calls — and for
+imported-binding call edges, and base Python carries same-file, `self`/`cls`-method, and
+imported-binding call candidates (arbitrary `obj.method()` calls are not linked in either). For complete TypeScript/JavaScript/Python calls — and for
 exact Go method resolution — run `codemap index --precise` (go/types + language-server
 `callHierarchy`). Precise coverage is tracked per file: a query is `resolved` only when every
 matched definition file completed the pass; partial failures remain `name`/`unresolved`, and

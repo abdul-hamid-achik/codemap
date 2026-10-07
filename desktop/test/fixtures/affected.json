@@ -1,0 +1,33 @@
+{
+ "schema_version": 1,
+ "project": "codemap",
+ "source": "files",
+ "depth": 3,
+ "indexed": true,
+ "files": [
+  "README.md",
+  "internal/app/review.go"
+ ],
+ "tests": [
+  {
+   "file": "cmd/codemap/cli_integration_test.go",
+   "reasons": [
+    "covers:app.symbolTouched"
+   ]
+  },
+  {
+   "file": "internal/app/review_test.go",
+   "reasons": [
+    "covers:app.Service.Review",
+    "covers:app.mapReviewChangedFiles"
+   ]
+  }
+ ],
+ "unmapped": [
+  "README.md"
+ ],
+ "call_graph": "name",
+ "analysis_complete": true,
+ "stale": false,
+ "note": "covering tests come from name-based call edges and may over- or under-select; 'codemap index --precise' makes them exact; 1 changed file(s) have no indexed symbols (docs, config, unindexed or outside the project) — nothing could be selected for them"
+}

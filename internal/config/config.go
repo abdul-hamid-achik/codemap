@@ -149,6 +149,12 @@ type IndexConfig struct {
 	// default). Embedding cost is ~linear in tokens, so a cap (e.g. 512) trades some
 	// long-body recall for a faster reindex; docstring+signature are kept first.
 	EmbedMaxChars int `yaml:"embed_max_chars"`
+	// StructuralBackend picks how TypeScript, JavaScript, and Python symbols are
+	// found: "tree-sitter" (the default — a built-in pure-Go parser, no
+	// language server needed; servers are spawned only for --precise) or "lsp"
+	// (the previous behavior: every index drives typescript-language-server and
+	// pyright for symbols). Both produce the same graph; "lsp" is a fallback.
+	StructuralBackend string `yaml:"structural_backend"`
 }
 
 // DefaultConfig returns the built-in defaults (lowest precedence).
@@ -166,6 +172,7 @@ func DefaultConfig() *Config {
 			EmbedBatchSize:     64,
 			EmbedConcurrency:   4,
 			ExtractConcurrency: 4,
+			StructuralBackend:  StructuralTreeSitter,
 			// P1-11 (B66): bare names like "env" matched any segment at any depth,
 			// silently excluding real Go subpackages like go/build or internal/env
 			// (the stdlib itself ships a "go/build" package, and "internal/env" is
@@ -290,6 +297,11 @@ func (c *Config) Validate() error {
 		// supported (default)
 	default:
 		return fmt.Errorf("embedding provider %q is not implemented; only \"ollama\" is supported; set it to \"ollama\" or remove the provider field", c.Embedding.Provider)
+	}
+	switch c.Index.StructuralBackend {
+	case "", StructuralTreeSitter, StructuralLSP:
+	default:
+		return fmt.Errorf("index.structural_backend %q is not a valid value; use tree-sitter or lsp", c.Index.StructuralBackend)
 	}
 	switch c.Embedding.Distance {
 	case "cosine", "dot", "euclidean", "":
@@ -497,6 +509,9 @@ func applyEnv(cfg *Config) error {
 	} else if set {
 		cfg.Index.ExtractConcurrency = n
 	}
+	if v, ok := os.LookupEnv("CODEMAP_STRUCTURAL_BACKEND"); ok && strings.TrimSpace(v) != "" {
+		cfg.Index.StructuralBackend = strings.TrimSpace(v)
+	}
 	if n, set, err := envInt("CODEMAP_EMBED_MAX_CHARS"); err != nil {
 		return err
 	} else if set {
@@ -577,3 +592,14 @@ func Save(cfg *Config, path string) error {
 	}
 	return os.WriteFile(path, data, 0o644)
 }
+
+// Structural backends for TypeScript, JavaScript, and Python (see
+// IndexConfig.StructuralBackend).
+const (
+	StructuralTreeSitter = "tree-sitter"
+	StructuralLSP        = "lsp"
+)
+
+// UsesTreeSitter reports whether TS/JS/Python symbols come from the built-in
+// tree-sitter backend (the default) rather than language servers.
+func (c IndexConfig) UsesTreeSitter() bool { return c.StructuralBackend != StructuralLSP }

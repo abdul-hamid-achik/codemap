@@ -13,6 +13,8 @@ import (
 	"github.com/abdul-hamid-achik/codemap/internal/config"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/lspsrc"
+	"github.com/abdul-hamid-achik/codemap/internal/extract/sittersrc"
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 	"github.com/abdul-hamid-achik/codemap/internal/vector"
 )
@@ -927,27 +929,48 @@ func TestIndexerRegisterLSPForProject(t *testing.T) {
 	if _, err := exec.LookPath("typescript-language-server"); err != nil {
 		t.Skip("typescript-language-server not installed")
 	}
-	g, v := newStores(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.ts"), []byte("export const a = 1;\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
+	// Default (tree-sitter) mode: TypeScript is served from New on; a daemon
+	// spawns the server only for --precise, attaching it to tree-sitter.
+	g, v := newStores(t)
 	ix := New(g, v, fakeEmbedder{dims: 4}, config.DefaultConfig().Index)
-	// Pre-fix: the indexer had no typescript extractor registered.
-	if _, ok := ix.extractors["typescript"]; ok {
-		t.Skip("unexpected: typescript already registered (test fixture stale?)")
+	if _, ok := ix.extractors["typescript"].(*sittersrc.Extractor); !ok {
+		t.Fatalf("default indexer should serve typescript with tree-sitter, got %T", ix.extractors["typescript"])
 	}
-	missing, err := ix.RegisterLSPForProject(context.Background(), dir)
+	if missing, err := ix.RegisterLSPForProject(context.Background(), dir, false); err != nil || len(missing) != 0 {
+		t.Fatalf("non-precise registration = (%v, %v), want no server and no issues", missing, err)
+	}
+	if _, ok := ix.extractors["typescript"].(*sittersrc.Extractor); !ok {
+		t.Fatalf("non-precise daemon must not spawn a server, got %T", ix.extractors["typescript"])
+	}
+	missing, err := ix.RegisterLSPForProject(context.Background(), dir, true)
+	t.Cleanup(func() { _ = ix.Close() })
+	if err != nil || len(missing) != 0 {
+		t.Fatalf("precise registration = (%v, %v)", missing, err)
+	}
+	if _, ok := ix.extractors["typescript"].(*sittersrc.Hybrid); !ok {
+		t.Errorf("precise registration should attach the server to tree-sitter, got %T", ix.extractors["typescript"])
+	}
+
+	// "lsp" mode keeps the previous behavior: the daemon registers the server.
+	cfg := config.DefaultConfig().Index
+	cfg.StructuralBackend = config.StructuralLSP
+	g2, v2 := newStores(t)
+	ix2 := New(g2, v2, fakeEmbedder{dims: 4}, cfg)
+	if _, ok := ix2.extractors["typescript"]; ok {
+		t.Fatal("lsp mode must not pre-register typescript")
+	}
+	missing, err = ix2.RegisterLSPForProject(context.Background(), dir, false)
+	t.Cleanup(func() { _ = ix2.Close() })
 	if err != nil {
 		t.Fatal(err)
 	}
-	// After the call, typescript + vue extractors are wired.
-	if _, ok := ix.extractors["typescript"]; !ok {
-		t.Errorf("RegisterLSPForProject did not register a typescript extractor: missing=%+v", missing)
-	}
-	// A .ts-only project with the TS server on PATH has no missing servers.
-	if len(missing) != 0 {
-		t.Errorf("expected no missing servers, got %+v", missing)
+	if _, ok := ix2.extractors["typescript"].(*lspsrc.Extractor); !ok {
+		t.Errorf("lsp mode did not register a typescript server extractor: missing=%+v", missing)
 	}
 }
 

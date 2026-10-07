@@ -69,6 +69,24 @@ func New(ts, js extract.Extractor) *Extractor {
 // Language implements extract.Extractor.
 func (e *Extractor) Language() string { return "vue" }
 
+// ConcurrentSafe reports whether every delegate may be called concurrently
+// (true for the tree-sitter backend, false for a raw language-server
+// connection), so the indexer can parallelize .vue files when it is safe.
+func (e *Extractor) ConcurrentSafe() bool {
+	has := false
+	for _, d := range []extract.Extractor{e.ts, e.js} {
+		if d == nil {
+			continue
+		}
+		cs, ok := d.(interface{ ConcurrentSafe() bool })
+		if !ok || !cs.ConcurrentSafe() {
+			return false
+		}
+		has = true
+	}
+	return has
+}
+
 // scriptBlock is one <script>/<script setup> block located in a .vue file.
 type scriptBlock struct {
 	setup     bool

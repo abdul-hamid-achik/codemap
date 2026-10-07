@@ -232,6 +232,7 @@ export const RENDERERS = {
   map: renderMap,
   atlas: renderAtlas,
   features: renderFeatures,
+  processes: renderProcesses,
   flow: renderFlow,
   symlist: renderSymListReport,
   relation: renderRelation,
@@ -240,6 +241,7 @@ export const RENDERERS = {
   traverse: renderTraverse,
   dependencies: renderDependencies,
   related: renderRelated,
+  affected: renderAffected,
   impact: renderImpact,
   fileimpact: renderFileImpact,
   filecontext: renderFileContext,
@@ -653,9 +655,40 @@ function renderExplore(json, ctx) {
           body: h('div.symlist', seeds.map((s) => symRow(s, { onPick: ctx.onSymbol, meta: (r) => [r.signature, r.score ? `score ${Number(r.score).toFixed(3)}` : null].filter(Boolean).join(' · ') }))),
         })
       : null,
+    (json.processes || []).length ? processList(json.processes, ctx) : null,
     contexts.length
       ? h('div.stack', contexts.map((c) => contextCard(c, ctx)))
       : null,
+  ])
+}
+
+// processList renders processes (codemap processes) or the explore subset: one card
+// per entrypoint flow, steps in call order, each tagged with its depth.
+function processList(list, ctx) {
+  return h('div.stack', list.map((p) => card({
+    title: p.id || p.name,
+    sub: [p.kind, p.matched_seeds?.length ? `seeds: ${p.matched_seeds.join(', ')}` : null, p.files ? `${p.files.length} file(s)` : null, p.truncated ? 'truncated' : null].filter(Boolean).join(' · '),
+    actions: [
+      p.entry ? h('button.btn.sm', { type: 'button', onclick: () => ctx.onPrefill?.('flow', { at: `${p.entry.file}:${p.entry.start_line}` }) }, 'Full flow') : null,
+    ],
+    body: h('div.symlist', (p.steps || []).map((s) => symRow(s, { onPick: ctx.onSymbol }))),
+  })))
+}
+
+function renderProcesses(json, ctx) {
+  const list = json.processes || []
+  return h('div.stack', [
+    h('div.row.gap3', [
+      badge(`${fmt.num(list.length)} of ${fmt.num(json.processes_total ?? list.length)} process(es)`, 'accent'),
+      badge(`depth ${json.depth}`, 'plain'),
+      badge(`max ${json.max_steps} steps`, 'plain'),
+      callGraphBadge(json.call_graph),
+    ]),
+    json.indexed === false ? callout('warn', 'Not indexed', 'Run index first.') : null,
+    json.resolution ? callout('warn', 'Call graph', json.resolution) : null,
+    json.stale ? callout('warn', 'Stale index', 'Reindex before treating these flows as current.') : null,
+    json.truncated ? callout('info', 'truncated', 'More processes exist. Raise --top or narrow with --kind/--query.') : null,
+    list.length ? processList(list, ctx) : emptyState({ icon: '\u2192', title: 'No processes', note: 'No entrypoint with a resolved handler matched the filters.' }),
   ])
 }
 
@@ -1025,6 +1058,45 @@ function renderDependencies(json, ctx) {
             { dense: true, onRow: (r) => (r.from_file || r.from) && ctx.onFile?.(r.from_file || r.from) },
           ),
         })
+      : null,
+  ])
+}
+
+function renderAffected(json, ctx) {
+  const tests = json.tests || []
+  const unmapped = json.unmapped || []
+  return h('div.stack', [
+    h('div.row.gap3', [
+      badge(`source: ${json.source || 'files'}${json.since ? ` ${json.since}` : ''}`, 'accent'),
+      badge(`${tests.length} test file(s)`, tests.length ? 'ok' : 'plain'),
+      json.indexed === false ? badge('not indexed', 'warn') : null,
+      boolBadge('analysis complete', json.analysis_complete, { okWhen: true }),
+      json.stale ? staleBadge(true) : null,
+      callGraphBadge(json.call_graph),
+    ]),
+    countsRow([
+      ['changed files', (json.files || []).length],
+      ['unmapped', unmapped.length],
+      ['filtered out', json.filtered_out],
+      ['depth', json.depth],
+    ]),
+    json.note ? callout('warn', 'Note', json.note) : null,
+    tests.length
+      ? table(
+          [
+            { key: 'file', label: 'Test file', cls: 'code', render: (r) => shortPath(r.file) },
+            {
+              key: 'reasons',
+              label: 'Why it runs',
+              render: (r) => h('div.pill-list', [...(r.reasons || []).map((x) => badge(x, x === 'changed' ? 'accent' : x.startsWith('imports:') ? 'plain' : 'ok')), r.reasons_truncated ? badge(`+${r.reasons_truncated} more`, 'plain') : null]),
+            },
+          ],
+          tests,
+          { onRow: (r) => ctx.onFile?.(r.file) },
+        )
+      : emptyState({ title: 'No affected tests', note: 'Nothing indexed maps from these files to a test file.' }),
+    unmapped.length
+      ? card({ title: 'Unmapped files', body: h('div.pill-list', unmapped.map((f) => codeInline(f))), tight: true })
       : null,
   ])
 }
