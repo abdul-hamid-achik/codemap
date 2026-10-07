@@ -143,6 +143,8 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   impact <sym> [--depth N|--at]       definition, callers, transitive blast radius, covering tests + runnable test_commands
                                        repeat --at for a <=25 partial-success frame batch; --batch stabilizes a one-item envelope
   review [--since R] [--staged]      diff-scoped: changed/deleted symbols, blast radius, tests to run, risk band
+  affected [files...] [--stdin|--staged|--since R] [--filter G]  changed files -> test files to run, one per line (--json: reasons)
+                                     (codemap_affected is available in the full MCP profile)
   read-order [query] [--top N]       where to start reading: entrypoints + load-bearing hubs, ranked
   map [--top-subsystems N ...]       architecture overview: subsystems, directed bridges, entrypoints, hubs
                                      (codemap_map is available in the full MCP profile)
@@ -200,7 +202,7 @@ you don't need a separate find/symbols round-trip to build that selector.`},
   serve [--profile agent|core|full]  run MCP: exact taught / compatible lean / expert surface
 
 MCP tools mirror these as codemap_<name> (init, index, status, doctor, semantic,
-callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, secret_impact,
+callers, callees, references, impact, file_impact, file_context, refactor_plan, dependencies, review, affected, secret_impact,
 required_keys, risk, hotspots, orphans, coverage, read_order, map, atlas, features, flow, explore, traverse, task_context, path, related_files, symbols,
 symbol_at, find, grep, source, context, context_batch, projects, docs, annotate,
 annotations, unannotate, branch_status, branch_switch, cache_save, cache_restore,

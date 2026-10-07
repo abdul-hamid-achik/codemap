@@ -58,7 +58,7 @@ to paste.
 
 Cursor's generated `mcpServers.codemap` entry also sets `CODEMAP_MCP_PROFILE=core` — see
 [MCP tool profiles](/mcp#tool-profiles) — because Cursor caps total MCP tools at ~40 across
-*all* servers combined; every other harness above stays on the full 48-tool default.
+*all* servers combined; every other harness above stays on the full 49-tool default.
 For a manually configured harness, choose `CODEMAP_MCP_PROFILE=agent` to bind its
 surface exactly to this page's taught loop. `agent` and the backwards-compatible
 `core` profile both contain 28 tools today; `full` is the explicit expert/admin
@@ -111,7 +111,7 @@ after every change — those two bookend the loop.
 `full` profile additionally exposes two bounded orientation tools outside the lean taught loop:
 `codemap_map` surveys subsystems and `codemap_traverse` walks selected relation types from a
 required durable selector (`direction`/`edge_types`/`depth`/`limit`). Those two are intentionally
-not registered in the current 28-tool `agent` or `core` profiles. The third full-profile orientation tool, `codemap_atlas`, returns the repository as a described directory tree; `codemap_task_context` composes one mode-scoped orientation bundle.
+not registered in the current 28-tool `agent` or `core` profiles. The third full-profile orientation tool, `codemap_atlas`, returns the repository as a described directory tree; `codemap_task_context` composes one mode-scoped orientation bundle. `codemap_affected` (also full-profile only) turns a list of changed files, or a git diff, into just the test files to run.
 
 ## Honesty signals — why an agent can trust the answers
 

@@ -368,6 +368,15 @@ type reviewInput struct {
 	Depth  int    `json:"depth,omitempty" jsonschema:"max hops for each changed symbol's blast radius (default 3)"`
 }
 
+type affectedInput struct {
+	Path   string   `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
+	Files  []string `json:"files,omitempty" jsonschema:"changed files, project-relative (absolute paths under the project root are accepted); omit files, since and staged to use the whole working tree"`
+	Since  string   `json:"since,omitempty" jsonschema:"also use every file changed since this git ref (committed + uncommitted)"`
+	Staged bool     `json:"staged,omitempty" jsonschema:"also use only the staged changes (the git index)"`
+	Filter string   `json:"filter,omitempty" jsonschema:"glob restricting the reported test files, e.g. *_test.go or internal/**; a pattern without a slash matches base names"`
+	Depth  int      `json:"depth,omitempty" jsonschema:"max hops for the call-graph and import walks (default 3, max 10)"`
+}
+
 type atlasInput struct {
 	Path       string `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Prefix     string `json:"prefix,omitempty" jsonschema:"project-relative directory to zoom into (default: project root); unknown prefix is a not_found error"`
@@ -681,6 +690,12 @@ func (s *Server) register() {
 			Name:        "codemap_review",
 			Description: "Diff-scoped impact + regression test selection — the query to run AFTER editing. Maps your git diff (whole working tree by default; staged=true for the index; since=<ref> for everything since a branch point) to the symbols it touches, then returns their union blast_radius, the covering_tests to run (regression test selection), the changed symbols that are untested or are hotspots (many callers), plus stale/resolution honesty signals. Answers 'what did I just affect, and what should I run?' in one call instead of chaining diff parsing + per-symbol codemap_impact. Degrades to a plain changed-file list with a note when the project isn't indexed or isn't a git repo.",
 		}, s.handleReview)
+	}
+	if s.include("codemap_affected") {
+		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
+			Name:        "codemap_affected",
+			Description: "Changed files → the test files to run, in a shape CI and hooks can consume directly. Give files (project-relative), and/or since=<ref> / staged=true to take the git diff (no inputs = the whole working tree). Returns tests: sorted unique test file paths, each with reasons (covers:<symbol> via the call graph, imports:<file> for test files importing a changed file transitively, changed for a changed test file), unmapped (changed files with no indexed symbols), call_graph (weakest confidence among contributing symbols), analysis_complete and a note when coverage is name-based or unresolved. filter is a glob over the reported test paths. Lighter than codemap_review when you only need the test list. Available in the full MCP profile.",
+		}, s.handleAffected)
 	}
 	if s.include("codemap_atlas") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
@@ -1183,6 +1198,16 @@ func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in r
 		mode = "since"
 	}
 	rep, err := s.svc.Review(cwdOf(in.Path), app.ReviewOpts{Mode: mode, Since: in.Since, Depth: in.Depth})
+	return result(rep, err)
+}
+
+func (s *Server) handleAffected(_ context.Context, _ *sdkmcp.CallToolRequest, in affectedInput) (*sdkmcp.CallToolResult, any, error) {
+	if r, v, stop := s.notIndexed(in.Path); stop {
+		return r, v, nil
+	}
+	rep, err := s.svc.Affected(cwdOf(in.Path), app.AffectedOpts{
+		Files: in.Files, Since: in.Since, Staged: in.Staged, Filter: in.Filter, Depth: in.Depth,
+	})
 	return result(rep, err)
 }
 

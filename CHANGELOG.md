@@ -10,6 +10,19 @@ releases page is the authoritative history.
 
 ### Added
 
+- **`codemap affected` / `codemap_affected`** — changed files → the test files to run, for CI
+  and pre-commit hooks that do not want to parse a review report. A test file is selected when
+  it covers a changed symbol through the call graph (`covers:<symbol>`), imports a changed file
+  directly or transitively up to `--depth` hops (`imports:<file>`, file-scoped imports only —
+  Go imports are package-scoped), or is itself a changed test (`changed`). Changed files come
+  from arguments, `--stdin` (e.g. `git diff --name-only`), `--staged`, or `--since <ref>`
+  (default: the working tree); `--filter <glob>` restricts the reported tests. Human output is
+  one test path per line on stdout (notes on stderr) so it pipes into a runner; `--json` emits
+  `schema_version: 1` with `files`, `tests` (+`reasons`), `unmapped`, `call_graph` (weakest
+  confidence among contributing symbols), `analysis_complete`, `stale` and a `note` when
+  coverage is name-based or unresolved. The MCP tool is full-profile only (49 tools; agent/core
+  stay at 28, so the `full` schema cost is now 54,859 characters), and Codemap Studio gets an
+  "Affected tests" panel.
 - **`codemap task-context` / `codemap_task_context`** — mode-scoped task orientation in one
   call (CLI alias `brief`; full-profile MCP tool). The task text is used verbatim as the
   retrieval query (intent never interpreted); `--mode understand|change|debug` selects the

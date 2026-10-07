@@ -172,6 +172,11 @@ func init() {
 	reviewCmd.Flags().Bool("staged", false, "review only staged changes (the git index) instead of the whole working tree")
 	reviewCmd.Flags().String("fail-on-risk", "", "after printing the normal report, exit 6 if the aggregate risk level is at or above this threshold (low|medium|high); 'unknown' never trips it")
 	reviewCmd.Flags().Bool("fail-on-untested", false, "after printing the normal report, exit 6 if any changed symbol has no covering test")
+	affectedCmd.Flags().Bool("stdin", false, "read newline-separated changed paths from stdin (e.g. git diff --name-only)")
+	affectedCmd.Flags().String("since", "", "use the files changed since this git ref (committed + uncommitted)")
+	affectedCmd.Flags().Bool("staged", false, "use only the staged changes (the git index)")
+	affectedCmd.Flags().String("filter", "", "only report test files matching this glob (e.g. '*_test.go', 'internal/**')")
+	affectedCmd.Flags().Int("depth", 3, "max hops for the call-graph and import walks")
 	readOrderCmd.Flags().Int("top", 20, "maximum entries to rank")
 	fileImpactCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
 	fileContextCmd.Flags().Int("depth", 3, "max hops for the file's blast radius")
@@ -223,7 +228,7 @@ func init() {
 	registerConfigFlags(rootCmd, indexCmd, daemonStartCmd, semanticCmd, serveCmd)
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd,
-		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, taskContextCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
+		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, affectedCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, taskContextCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
 		annotateCmd, annotationsCmd, inconsistenciesCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured
