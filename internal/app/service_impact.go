@@ -188,6 +188,12 @@ type ImpactReport struct {
 	Next         []NextAction `json:"next,omitempty"`
 	// Budget is present only when max_tokens was requested (see budget.go).
 	Budget *TokenBudget `json:"budget,omitempty"`
+
+	// diffTests are test files of the diff under review that reference this
+	// symbol by name (see withDiffTests). They are never serialized and never
+	// touch Tests/Untested: they feed only the review coverage verdict, so
+	// untested_symbols, risk, and --fail-on-untested stay call-graph/index based.
+	diffTests []ImpactNode
 }
 
 // ImpactItemError is an item-level failure in a raw-position impact batch. It

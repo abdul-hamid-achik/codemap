@@ -495,7 +495,11 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   `{verdict: covered|partial|uncovered|unknown, covered_symbols, uncovered_symbols, unknown_symbols}`
   (`internal/app/review_coverage.go`), separate from `risk` and absent when no non-test symbol is
   assessed. Per symbol: covered = any test (call graph, heuristic, or a changed/new test file in the same
-  diff that references the symbol by name — Go requires the same directory); uncovered = usable call
+  diff whose code — comments and string literals stripped by a small per-language lexer
+  (`stripCommentsAndStrings`, Go/TS/JS/Python/Ruby/Lua) — references the symbol by name; Go requires the
+  same directory, and a name with more than one definition in the project is never linked this way). The
+  same-diff link feeds the coverage verdict ONLY (`ImpactReport.diffTests`, unexported): it never touches
+  `tests`/`untested`, `untested_symbols`, the risk untested factor, or `--fail-on-untested`; uncovered = usable call
   graph (`resolved`/`name`) and no test; unknown = no test link and unresolved/`none` call graph, or the
   symbol was never analyzed. Test symbols are skipped. Verdict: no covered+uncovered → `unknown`;
   no covered → `uncovered`; no uncovered and no unknown → `covered`; otherwise `partial`. The risk band

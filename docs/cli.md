@@ -441,8 +441,10 @@ symbol whose call graph is unavailable.
 band: `{verdict, covered_symbols, uncovered_symbols, unknown_symbols}` with `verdict` one of
 `covered`, `partial`, `uncovered`, or `unknown`. Per changed symbol, *covered* means a call-graph
 path, a heuristic name match, or a test file **in the same diff** reaches it (a changed or new test
-file that references the symbol by name counts even before reindexing; for Go it must live in the
-symbol's directory); *uncovered* means the call graph is usable (`resolved`/`name`) and no test was
+file whose code, comments and string literals excluded, references the symbol by name counts even
+before reindexing; for Go it must live in the symbol's directory, and a name shared by several
+definitions is never linked this way). A same-diff link counts toward this verdict only: it never
+removes a symbol from `untested_symbols` and never changes `risk` or `--fail-on-untested`; *uncovered* means the call graph is usable (`resolved`/`name`) and no test was
 found; *unknown* means no test link was found and the call graph cannot say (TS/JS/Python without
 `--precise`, declarative formats), or the symbol was never analyzed (truncated or failed).
 Test symbols are the coverage, not its subject, so they are skipped. The block is absent when the

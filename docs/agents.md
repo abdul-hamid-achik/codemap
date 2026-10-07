@@ -176,7 +176,8 @@ calibrate its confidence:
   response says how many it hid under `filtered.candidate`).
 - **`coverage` on `codemap_review`** — `verdict` covered/partial/uncovered/unknown with
   covered/uncovered/unknown symbol counts, separate from `risk`. A test file changed in the same
-  diff counts as covering the symbols it references, even before reindexing. `unknown` means no
+  diff counts toward `coverage` (only) for the uniquely named symbols its code references, even
+  before reindexing; `untested_symbols` and `risk` are unaffected. `unknown` means no
   test link and no usable call graph — never read it as "untested". CLI
   `--fail-on-uncovered` trips only on `uncovered`/`partial` with known-uncovered symbols.
 - **`*_total`** — true counts behind a capped list, so you know when to drill with
