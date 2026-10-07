@@ -359,9 +359,10 @@ On a name-based index a hub name like `Update` fans out to every same-named meth
 - `buckets` — `{direct, transitive, direct_count, transitive_count}`: the same `blast_radius`
   nodes split at depth 1 vs depth 2+, so the direct callers can be read first.
 - `confidence` on every blast-radius and test node — `confirmed` when a shortest path from the
-  symbol to that node uses only precise edges (an `index --precise` pass) or same-file edges,
-  otherwise `candidate` (cross-file name-based fan-out; heuristic covering tests are always
-  candidates).
+  symbol to that node uses only precise edges (an `index --precise` pass) or same-file name
+  edges whose target symbol is unique in its file, otherwise `candidate` (cross-file name-based
+  fan-out, same-file fan-out over several same-named methods; heuristic covering tests are
+  always candidates).
 - `--min-confidence confirmed` (MCP `min_confidence`) — drops candidate nodes from
   `blast_radius`, `buckets`, `tests`, `direct_callers`, and `test_commands`, and reports how many
   distinct candidate nodes it removed as `filtered: {"candidate": N}` (with `min_confidence`

@@ -26,8 +26,9 @@ type ImpactNode struct {
 	// to the symbol's name (not via the call graph) — see heuristicTestCoverage.
 	Heuristic bool `json:"heuristic,omitempty"`
 	// Confidence is "confirmed" when a shortest path from the analyzed symbol to
-	// this node uses only precise edges or same-file edges, else "candidate"
-	// (name-based cross-file fan-out). Heuristic covering tests are always
+	// this node uses only precise edges or same-file name edges whose target
+	// symbol is unique in its file, else "candidate" (name-based cross-file or
+	// same-file fan-out over same-named definitions). Heuristic covering tests are always
 	// candidates. Absent on nodes not produced by an impact traversal.
 	Confidence string `json:"confidence,omitempty"`
 }

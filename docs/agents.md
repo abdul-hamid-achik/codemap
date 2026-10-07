@@ -169,8 +169,9 @@ calibrate its confidence:
 - **`untested` / `heuristic`** — a symbol has no covering tests, or a test was matched
   by name-scan rather than the call graph (flag it, don't trust it blindly).
 - **`confidence` / `buckets` / `min_confidence` on `codemap_impact`** — each blast-radius and test
-  node is `confirmed` (every edge on a shortest path is precise or same-file) or `candidate`
-  (name-based cross-file fan-out). `buckets.direct` is the depth-1 slice; on a name-based hub
+  node is `confirmed` (every edge on a shortest path is precise, or a same-file name edge to a
+  symbol that is unique in its file) or `candidate` (name-based fan-out, cross-file or over
+  same-named definitions in one file). `buckets.direct` is the depth-1 slice; on a name-based hub
   pass `min_confidence:"confirmed"` to drop candidates instead of grep-verifying them (the
   response says how many it hid under `filtered.candidate`).
 - **`coverage` on `codemap_review`** — `verdict` covered/partial/uncovered/unknown with

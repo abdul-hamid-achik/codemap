@@ -16,8 +16,10 @@ type NodeDepth struct {
 	Depth int
 	// Confirmed is true when at least one shortest path from the query node to
 	// this node is made only of confirmed call edges: precise-provenance edges
-	// or edges between two nodes of the same file (file-scoped, never a
-	// cross-file name match). Any other node is a name-based candidate.
+	// or name-based edges between two nodes of the same file whose target symbol
+	// is unique among that file's nodes (never a cross-file name match, and never
+	// same-file fan-out over several same-named methods). Any other node is a
+	// name-based candidate.
 	Confirmed bool
 }
 
@@ -47,8 +49,9 @@ func (s *Store) scanIDs(query string, args ...any) ([]int64, error) {
 const inChunkSize = 500
 
 // callerEdge is one incoming `calls` edge reaching a target, with whether the
-// edge itself is confirmed (precise provenance, or caller and callee in the same
-// file) rather than a name-based cross-file match.
+// edge itself is confirmed (precise provenance, or a name-based edge between two
+// nodes of the same file whose target symbol is unique in that file) rather than
+// a name-based cross-file match or same-file fan-out over same-named definitions.
 type callerEdge struct {
 	source    int64
 	target    int64
@@ -83,7 +86,8 @@ func (s *Store) callerEdgesBatch(targets []int64) ([]callerEdge, error) {
 		}
 		args = append(args, EdgeCalls)
 		rows, err := s.db.Query(
-			"SELECT e.source_id, e.target_id, (e.provenance = ? OR (src.file_path <> '' AND src.file_path = tgt.file_path)) "+
+			"SELECT e.source_id, e.target_id, (e.provenance = ? OR (src.file_path <> '' AND src.file_path = tgt.file_path AND "+
+				"(SELECT COUNT(*) FROM nodes sib WHERE sib.project_id = tgt.project_id AND sib.file_path = tgt.file_path AND sib.symbol = tgt.symbol) = 1)) "+
 				"FROM edges e JOIN nodes src ON src.id = e.source_id JOIN nodes tgt ON tgt.id = e.target_id "+
 				"WHERE e.target_id IN ("+strings.Join(ph, ",")+") AND e.edge_type=?",
 			args...)
