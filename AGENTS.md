@@ -353,10 +353,15 @@ task install         # go install ./cmd/codemap
 ### Storage
 - Graph: `modernc.org/sqlite` (pure Go), WAL mode, transaction-batched writes,
   `synchronous=NORMAL`, `SetMaxOpenConns(1)`. Tables: `nodes`, `edges`,
-  `projects`, `index_state`, `call_graph_coverage`, `annotations` (schema v6). The
+  `projects`, `index_state`, `call_graph_coverage`, `annotations`, … plus the
+  contentless FTS5 `nodes_fts` lexical index (schema v10). The
   `edges.provenance` column records whether an edge is name-based or precise;
   `call_graph_coverage` records successful precise resolution per file, including
   leaf files with zero call edges (see `design-rationale.md` "Storage" in the vault).
+  `nodes_fts` is never maintained on the node write path (per-row FTS5 upkeep
+  cost ~14x the extract phase): `Store.SyncLexical` reconciles it in one pass after
+  each index run, relying on AUTOINCREMENT ids (new = above the highest indexed id)
+  and on node text never being updated in place (deletions = anti-join).
 - Vectors: `github.com/abdul-hamid-achik/veclite` (≥ v0.22.0). One collection (`codemap`),
   one vector space in v0.1. Put **filterable** fields (`project`, `path`, `lang`, `kind`,
   `node_id`) in the veclite **Payload**; put the **searchable** source text in **Content**

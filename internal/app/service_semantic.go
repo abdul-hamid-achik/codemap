@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
@@ -19,7 +20,7 @@ type SemanticHit struct {
 	Signature   string             `json:"signature,omitempty"`
 	Doc         string             `json:"doc,omitempty"`
 	Selector    *SymbolSelector    `json:"selector,omitempty"`    // ready durable selector for chaining into context/source/impact (grep/symbol_at already carry one)
-	MatchedIn   string             `json:"matched_in,omitempty"`  // "symbol"|"fqn"|"docstring" — no-embeddings fallback only (FindSymbols)
+	MatchedIn   string             `json:"matched_in,omitempty"`  // "symbol"|"fqn"|"docstring" (+ "path"|"signature" in lexical mode) — no-embeddings fallbacks only
 	Annotations []graph.Annotation `json:"annotations,omitempty"` // notes/data pinned to this symbol
 }
 
@@ -58,7 +59,7 @@ func enrichHitAnnotations(g *graph.Store, projectID int64, hits []SemanticHit) {
 type SemanticReport struct {
 	Query   string        `json:"query"`
 	Project string        `json:"project"`
-	Mode    string        `json:"mode"`             // "semantic", "vecgrep", "name", or "none"
+	Mode    string        `json:"mode"`             // "semantic", "vecgrep", "name", "lexical", "name+lexical", or "none"
 	Fusion  string        `json:"fusion,omitempty"` // hybrid-search weighting used: "identifier", "natural_language", or "balanced" (empty when no fusion happened, e.g. a pure-vector fallback)
 	Note    string        `json:"note,omitempty"`   // why there are no results, when applicable
 	Hits    []SemanticHit `json:"hits"`
@@ -291,5 +292,84 @@ func (svc *Service) Search(ctx context.Context, cwd, query string, topK int) (*S
 	if err != nil && explicitVecgrep {
 		return nil, err
 	}
-	return svc.FindSymbols(cwd, query, topK)
+	names, err := svc.FindSymbols(cwd, query, topK)
+	if err != nil || len(names.Hits) >= topK {
+		return names, err
+	}
+	// Name search requires every word in one field, so a question ("how does
+	// signup work") finds nothing or almost nothing. The lexical floor ORs its
+	// content words over names, paths, and docs with BM25 and fills the rest.
+	return svc.topUpLexical(cwd, names, topK)
+}
+
+// topUpLexical appends lexical (BM25) hits not already in names until topK.
+// The mode says which floors contributed: "lexical" alone, or "name+lexical"
+// when exact name matches lead and lexical matches follow.
+func (svc *Service) topUpLexical(cwd string, names *SemanticReport, topK int) (*SemanticReport, error) {
+	pid, _, found, err := svc.project(cwd)
+	if err != nil || !found {
+		return names, err
+	}
+	g, err := svc.s.Graph()
+	if err != nil {
+		return nil, err
+	}
+	lex, err := lexicalHits(g, pid, names.Query, topK)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(names.Hits))
+	for _, h := range names.Hits {
+		seen[h.File+"\x00"+strconv.Itoa(h.StartLine)+"\x00"+h.Symbol] = true
+	}
+	var added []SemanticHit
+	for _, h := range lex {
+		if len(names.Hits)+len(added) >= topK {
+			break
+		}
+		key := h.File + "\x00" + strconv.Itoa(h.StartLine) + "\x00" + h.Symbol
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		added = append(added, h)
+	}
+	if len(added) == 0 {
+		return names, nil
+	}
+	enrichHitAnnotations(g, pid, added)
+	svc.recordQueryUsage(pid, added)
+	rep := *names
+	if len(names.Hits) == 0 {
+		rep.Mode = "lexical"
+		rep.Note = "no embeddings and no exact name match — ranked by keyword match (BM25) over symbol names, paths, and docs"
+	} else {
+		rep.Mode = "name+lexical"
+		rep.Note = "no embeddings — exact name matches first, then keyword matches (BM25) over symbol names, paths, and docs"
+	}
+	rep.Hits = append(append([]SemanticHit{}, names.Hits...), added...)
+	return &rep, nil
+}
+
+// lexicalHits runs the BM25 floor (graph.LexicalSearch) and shapes its matches
+// like every other search hit.
+func lexicalHits(g *graph.Store, pid int64, query string, limit int) ([]SemanticHit, error) {
+	matches, err := g.LexicalSearch(pid, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]SemanticHit, 0, len(matches))
+	for _, m := range matches {
+		n := m.Node
+		hit := SemanticHit{
+			Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind, File: n.FilePath,
+			StartLine: n.StartLine, EndLine: n.EndLine, Signature: n.Signature, Doc: n.Docstring,
+			MatchedIn: m.MatchedIn,
+		}
+		if n.FilePath != "" {
+			hit.Selector = selectorForNode(n)
+		}
+		hits = append(hits, hit)
+	}
+	return hits, nil
 }

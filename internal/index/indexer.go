@@ -1365,6 +1365,9 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// for whole-graph builds (--reindex, first index); scoped incrementals
 	// take the cheap PRAGMA optimize refresh instead.
 	if len(touched) > 0 || res.FilesDeleted > 0 {
+		// Fold this run's node writes into the lexical index in one bulk pass
+		// (best-effort: LexicalSearch re-syncs before searching anyway).
+		_ = ix.graph.SyncLexical()
 		analyzeStart := time.Now()
 		if opts.Reindex || (len(files) > 0 && len(added) == len(files)) {
 			_ = ix.graph.OptimizeStats()
@@ -1591,6 +1594,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	// scoped, so it always takes the cheap PRAGMA optimize refresh; a full
 	// ANALYZE belongs to whole-graph builds.
 	if len(touchedFiles) > 0 {
+		_ = ix.graph.SyncLexical()
 		analyzeStart := time.Now()
 		_ = ix.graph.OptimizeStatsLight()
 		res.AnalyzeMs = int(time.Since(analyzeStart).Milliseconds())

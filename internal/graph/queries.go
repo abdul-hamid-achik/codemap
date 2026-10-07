@@ -974,7 +974,8 @@ func (s *Store) CallableFileLangs(projectID int64) ([]Node, error) {
 type SymbolMatch struct {
 	Node Node
 	// MatchedIn is "symbol", "fqn", or "docstring" — whichever field the
-	// query's tokens were found in (see SearchSymbols tiering).
+	// query's tokens were found in (see SearchSymbols tiering). LexicalSearch
+	// may also report "path" or "signature".
 	MatchedIn string
 }
 

@@ -709,7 +709,7 @@ func (s *Server) register() {
 	if s.include("codemap_explore") {
 		sdkmcp.AddTool(s.srv, &sdkmcp.Tool{
 			Name:        "codemap_explore",
-			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source. For raw ranked hits without neighborhoods, use codemap_semantic.",
+			Description: "Intent-to-structure orientation (full profile): semantic search when embeddings are available, name plus BM25 lexical fallback otherwise, then exact durable selectors plus bounded source-light context neighborhoods for each joined seed. Independent seeds/edges/depth caps; source bodies are omitted so an agent can choose one returned selector before calling codemap_context or codemap_source. For raw ranked hits without neighborhoods, use codemap_semantic.",
 		}, s.handleExplore)
 	}
 	if s.include("codemap_task_context") {
