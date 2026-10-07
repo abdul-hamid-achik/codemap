@@ -46,6 +46,13 @@ dies it restarts the server (up to 8 times per run), retries the file it was ans
 the restart in the `--precise` summary. Long runs of identical per-file errors are grouped by
 cause in the CLI output; `--json` keeps the full list.
 
+A language server answers one call-hierarchy request at a time. `index.precise_servers` (or
+`CODEMAP_PRECISE_SERVERS`) lets the `--precise` pass run several server processes in parallel; each
+takes whole projects — files grouped by their nearest `tsconfig.json`, `jsconfig.json`,
+`package.json`, `pyproject.toml`, or `pyrightconfig.json` — from a shared queue. It is off by default:
+on a large single project two or three processes cut the pass by roughly a quarter, but on a monorepo
+of many projects that share dependencies each process reloads them, and the gain disappears.
+
 ### How TypeScript, JavaScript, and Python are parsed
 
 The built-in backend parses with [gotreesitter](https://github.com/odvcencio/gotreesitter), a

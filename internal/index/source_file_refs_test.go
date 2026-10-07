@@ -141,3 +141,36 @@ func TestLookupPreciseNodeJoinsOnNameLine(t *testing.T) {
 		t.Fatalf("neighborhood fallback = %d %v, want 7", id, ok)
 	}
 }
+
+func TestSamePositionWinnersKeepsTheOuterDeclaration(t *testing.T) {
+	outer := graph.Node{ID: 1, FilePath: "a.ts", StartLine: 306, EndLine: 319}
+	inner := graph.Node{ID: 2, FilePath: "a.ts", StartLine: 306, EndLine: 306}
+	twinA := graph.Node{ID: 3, FilePath: "a.ts", StartLine: 400, EndLine: 400}
+	twinB := graph.Node{ID: 4, FilePath: "a.ts", StartLine: 400, EndLine: 400}
+	got := samePositionWinners(map[precisePos][]graph.Node{
+		{"a.ts", 306}: {inner, outer},
+		{"a.ts", 400}: {twinA, twinB},
+	})
+	if got[precisePos{"a.ts", 306}] != 1 {
+		t.Fatalf("outer declaration must win line 306: %v", got)
+	}
+	if _, ok := got[precisePos{"a.ts", 400}]; ok {
+		t.Fatalf("two same-width declarations on one line stay ambiguous: %v", got)
+	}
+}
+
+func TestEnclosingCallablePicksInnermost(t *testing.T) {
+	spans := []graph.Node{
+		{ID: 1, StartLine: 10, EndLine: 100},
+		{ID: 2, StartLine: 20, EndLine: 40},
+	}
+	if id, ok := enclosingCallable(spans, 25); !ok || id != 2 {
+		t.Fatalf("enclosingCallable(25) = %d %v, want 2", id, ok)
+	}
+	if id, ok := enclosingCallable(spans, 50); !ok || id != 1 {
+		t.Fatalf("enclosingCallable(50) = %d %v, want 1", id, ok)
+	}
+	if _, ok := enclosingCallable(spans, 5); ok {
+		t.Fatal("a line outside every span has no owner")
+	}
+}

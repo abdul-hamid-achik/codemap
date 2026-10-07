@@ -2407,6 +2407,50 @@ func (s *stylesScope) files(file string) (map[string]bool, error) {
 	return set, nil
 }
 
+// samePositionWinners maps each declaration position to its node. Nodes that
+// start on the same line resolve to the outermost one when exactly one has the
+// widest span (`const f = (…) =>` and its nested `f.[]` element), since that is
+// the declaration a callHierarchy item names; equal-width ones (two
+// declarations on one line) stay ambiguous and are dropped, never mis-routed.
+func samePositionWinners(atPos map[precisePos][]graph.Node) map[precisePos]int64 {
+	out := make(map[precisePos]int64, len(atPos))
+	for key, nodes := range atPos {
+		if len(nodes) == 1 {
+			out[key] = nodes[0].ID
+			continue
+		}
+		best, tie := nodes[0], false
+		for _, n := range nodes[1:] {
+			switch {
+			case n.EndLine > best.EndLine:
+				best, tie = n, false
+			case n.EndLine == best.EndLine:
+				tie = true
+			}
+		}
+		if !tie {
+			out[key] = best.ID
+		}
+	}
+	return out
+}
+
+// enclosingCallable returns the innermost indexed callable whose span covers
+// line — the owner of a nested local function that has no node of its own.
+func enclosingCallable(spans []graph.Node, line int) (int64, bool) {
+	var best graph.Node
+	found := false
+	for _, n := range spans {
+		if n.StartLine > line || n.EndLine < line {
+			continue
+		}
+		if !found || n.EndLine-n.StartLine < best.EndLine-best.StartLine {
+			best, found = n, true
+		}
+	}
+	return best.ID, found
+}
+
 // precisePos keys a node by its declaration position for the precise callee join.
 type precisePos struct {
 	file string
@@ -2497,6 +2541,9 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 	for lang, e := range ix.extractors {
 		if cr, ok := e.(extract.CallResolver); ok {
 			resolvers[lang] = cr
+			if r, ok := e.(interface{ ResetBackendRestarts() }); ok {
+				r.ResetBackendRestarts() // a fresh budget per run (daemon servers live long)
+			}
 		}
 	}
 	if len(resolvers) == 0 {
@@ -2505,8 +2552,8 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 	// Build an exact declaration-position index, scoped to LSP-language nodes.
 	// FQN alone is not an identity here: legal flat documentSymbol responses may
 	// produce the same unqualified FQN in several files.
-	posTo := make(map[precisePos]int64, len(ni.nodes))
-	posCollide := map[precisePos]bool{}
+	atPos := map[precisePos][]graph.Node{}
+	spans := map[string][]graph.Node{} // file → callable spans, for enclosingCallable
 	filesByLang := map[string]map[string]bool{}
 	for _, n := range ni.nodes {
 		if _, isLSP := resolvers[n.Language]; !isLSP {
@@ -2520,15 +2567,12 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 			continue // a file node shares line 1 with the first symbol; never a call target
 		}
 		key := precisePos{n.FilePath, n.StartLine}
-		if _, dup := posTo[key]; dup {
-			posCollide[key] = true
-		} else {
-			posTo[key] = n.ID
+		atPos[key] = append(atPos[key], n)
+		if scopedCallableKind(n.Kind) {
+			spans[n.FilePath] = append(spans[n.FilePath], n)
 		}
 	}
-	for k := range posCollide {
-		delete(posTo, k) // ambiguous (same-line decls) — drop, don't mis-route
-	}
+	posTo := samePositionWinners(atPos)
 
 	type preciseFile struct {
 		lang string
@@ -2551,32 +2595,62 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 
 	// Phase 1: gather callHierarchy edges for every file. Concurrent CallEdges
 	// on a single stdio LSP connection can deadlock typescript-language-server /
-	// pyright (idle server, blocked clients) — cap at 1 in-flight request per
-	// process. Progress ticks so the CLI bar does not sit on a blank
-	// "precise call graph…" for multi-thousand-file monorepos.
+	// pyright (idle server, blocked clients) — so each server PROCESS keeps one
+	// request in flight, and a big pass runs several processes in parallel
+	// (planPreciseWorkers), each over its own projects' files. Progress ticks so
+	// the CLI bar does not sit on a blank "precise call graph…" for
+	// multi-thousand-file monorepos.
 	type fileCallEdges struct {
 		edges []extract.CallEdge
 		err   error
 	}
 	gathered := make([]fileCallEdges, len(files))
 	reportPhase(opts, "precise call hierarchy…", 0, len(files))
+	var workers []*preciseWorker
 	if len(files) > 0 {
+		langs := make([]string, len(files))
+		for i, f := range files {
+			langs[i] = f.lang
+		}
+		var closers []io.Closer
+		workers, closers = ix.planPreciseWorkers(ctx, root, langs, func(i int) string { return files[i].file }, resolvers)
+		defer func() {
+			for _, c := range closers {
+				_ = c.Close()
+			}
+		}()
 		eg, gctx := errgroup.WithContext(ctx)
-		eg.SetLimit(1)
 		var done int64
-		for i, current := range files {
-			i, current := i, current
+		for _, w := range workers {
+			w := w
 			eg.Go(func() error {
-				edges, cErr := resolvers[current.lang].CallEdges(gctx, current.file)
-				gathered[i] = fileCallEdges{edges: edges, err: cErr}
-				n := int(atomic.AddInt64(&done, 1))
-				reportPhase(opts, "precise call hierarchy…", n, len(files))
+				for group, ok := w.next(); ok; group, ok = w.next() {
+					for _, i := range group {
+						current := files[i]
+						edges, cErr := w.resolvers[current.lang].CallEdges(gctx, current.file)
+						gathered[i] = fileCallEdges{edges: edges, err: cErr}
+						n := int(atomic.AddInt64(&done, 1))
+						reportPhase(opts, "precise call hierarchy…", n, len(files))
+					}
+				}
 				return nil
 			})
 		}
 		_ = eg.Wait()
+		if len(closers) > 0 {
+			appendPreciseNote(res, fmt.Sprintf("forked %d extra language-server process(es) for parallel call hierarchy", len(closers)))
+		}
+		for _, w := range workers[1:] {
+			forked := map[string]extract.Extractor{}
+			for lang, r := range w.resolvers {
+				if e, ok := r.(extract.Extractor); ok {
+					forked[lang] = e
+				}
+			}
+			noteDegradedServers(res, forked)
+		}
 	}
-	noteBackendRestarts(res, resolvers)
+	noteBackendRestarts(res, workers)
 
 	reportPhase(opts, "writing precise edges…", 0, len(files))
 	// Phase 2: apply each file's gathered edges to the single transaction
@@ -2637,6 +2711,18 @@ func (ix *Indexer) resolveLSPCallEdgesWith(ctx context.Context, tx *sql.Tx, proj
 				continue
 			}
 			to, ok := lookupPreciseNode(posTo, e.ToFile, e.ToLine, e.ToNameLine)
+			if !ok {
+				// A local closure (`const check = () => …` inside a function) is not
+				// a graph node: the call lands on the indexed callable containing
+				// it, and a call into the caller's own closure is no edge at all.
+				line := e.ToNameLine
+				if line <= 0 {
+					line = e.ToLine
+				}
+				if id, found := enclosingCallable(spans[e.ToFile], line); found {
+					to, ok = id, true
+				}
+			}
 			if !ok {
 				joinFailures++
 				skipped++
@@ -2716,16 +2802,27 @@ func appendPreciseFileError(res *Result, file string, err error) {
 // pass after their backend died (tsserver out of memory on a monorepo): the
 // pass kept going, but a restart is worth knowing about. Resolvers bound to one
 // process report the same count, so each binary is counted once.
-func noteBackendRestarts(res *Result, resolvers map[string]extract.CallResolver) {
+func noteBackendRestarts(res *Result, workers []*preciseWorker) {
 	type restarter interface {
 		BackendRestarts() (int, string)
 	}
 	byBinary := map[string]int{}
-	for _, r := range resolvers {
-		if rr, ok := r.(restarter); ok {
-			if n, binary := rr.BackendRestarts(); n > 0 && n > byBinary[binary] {
-				byBinary[binary] = n
+	for _, w := range workers {
+		perProcess := map[string]int{} // languages of one worker share its process
+		for _, r := range w.resolvers {
+			if rr, ok := r.(restarter); ok {
+				if n, binary := rr.BackendRestarts(); n > perProcess[binary] {
+					perProcess[binary] = n
+				}
 			}
+		}
+		for b, n := range perProcess {
+			byBinary[b] += n
+		}
+	}
+	for b, n := range byBinary {
+		if n == 0 {
+			delete(byBinary, b)
 		}
 	}
 	binaries := make([]string, 0, len(byBinary))

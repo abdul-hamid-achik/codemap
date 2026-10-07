@@ -277,11 +277,20 @@ func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
 	return cl, nil
 }
 
-// Restarts reports how many times Restart replaced the server process.
+// Restarts reports how many times Restart replaced the server process since
+// the last ResetRestarts.
 func (c *Client) Restarts() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.restarts
+}
+
+// ResetRestarts starts a new restart budget — once per index run, so a
+// long-lived daemon server is not cut off by crashes from earlier runs.
+func (c *Client) ResetRestarts() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.restarts = 0
 }
 
 // Restart replaces the server process with a fresh one initialized at the same

@@ -97,3 +97,11 @@ func TestInitializationOptionsOnlyForTypeScriptServer(t *testing.T) {
 		}
 	}
 }
+
+func TestResetRestartsStartsANewBudget(t *testing.T) {
+	c := &Client{restarts: 5}
+	c.ResetRestarts()
+	if c.Restarts() != 0 {
+		t.Fatalf("Restarts = %d after reset", c.Restarts())
+	}
+}

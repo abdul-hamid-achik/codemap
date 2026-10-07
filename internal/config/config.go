@@ -155,6 +155,12 @@ type IndexConfig struct {
 	// (the previous behavior: every index drives typescript-language-server and
 	// pyright for symbols). Both produce the same graph; "lsp" is a fallback.
 	StructuralBackend string `yaml:"structural_backend"`
+	// PreciseServers is how many language-server processes the --precise pass
+	// may run in parallel per server kind (typescript-language-server, pyright).
+	// Processes take whole projects (nearest tsconfig/jsconfig/package.json)
+	// from a shared queue. 0 or 1 = one process (the default). More helps a big
+	// single project; each process can use up to tsserver's 8 GB heap ceiling.
+	PreciseServers int `yaml:"precise_servers"`
 }
 
 // DefaultConfig returns the built-in defaults (lowest precedence).
@@ -319,6 +325,7 @@ func (c *Config) Validate() error {
 		{name: "index.embed_batch_size", value: c.Index.EmbedBatchSize, zeroMeaning: "0 = use the default"},
 		{name: "index.embed_concurrency", value: c.Index.EmbedConcurrency, zeroMeaning: "0 = use the default"},
 		{name: "index.extract_concurrency", value: c.Index.ExtractConcurrency, zeroMeaning: "0 = use the default"},
+		{name: "index.precise_servers", value: c.Index.PreciseServers, zeroMeaning: "0 = auto"},
 		{name: "index.embed_max_chars", value: c.Index.EmbedMaxChars, zeroMeaning: "0 = no text cap"},
 		{name: "daemon.debounce_ms", value: c.Daemon.DebounceMS, zeroMeaning: "0 = use the default"},
 		{name: "daemon.idle_timeout_min", value: c.Daemon.IdleTimeoutMin, zeroMeaning: "0 = never shut down for idleness"},
@@ -508,6 +515,11 @@ func applyEnv(cfg *Config) error {
 		return err
 	} else if set {
 		cfg.Index.ExtractConcurrency = n
+	}
+	if n, set, err := envInt("CODEMAP_PRECISE_SERVERS"); err != nil {
+		return err
+	} else if set {
+		cfg.Index.PreciseServers = n
 	}
 	if v, ok := os.LookupEnv("CODEMAP_STRUCTURAL_BACKEND"); ok && strings.TrimSpace(v) != "" {
 		cfg.Index.StructuralBackend = strings.TrimSpace(v)
