@@ -499,6 +499,10 @@ func relationPreciseRequested(cmd *cobra.Command) bool {
 }
 
 func runImpact(cmd *cobra.Command, args []string) error {
+	minConfidence, _ := cmd.Flags().GetString("min-confidence")
+	if _, err := app.ParseMinConfidence(minConfidence); err != nil {
+		return err
+	}
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
@@ -546,6 +550,9 @@ func runImpact(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := rep.ApplyMinConfidence(minConfidence); err != nil {
+			return err
+		}
 		if err := app.ApplyImpactBatchBudget(rep, maxTokens); err != nil {
 			return err
 		}
@@ -562,7 +569,7 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	}
 	batch, _ := cmd.Flags().GetBool("batch")
 	if len(positions) > 1 || batch {
-		return runImpactBatch(cmd, svc, cwd, positions, depth, maxTokens)
+		return runImpactBatch(cmd, svc, cwd, positions, depth, maxTokens, minConfidence)
 	}
 	var selector *app.SymbolSelector
 	if len(positions) == 1 {
@@ -590,6 +597,9 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := rep.ApplyMinConfidence(minConfidence); err != nil {
+		return err
+	}
 	if err := app.ApplyImpactBudget(rep, maxTokens); err != nil {
 		return err
 	}
@@ -614,6 +624,12 @@ func runImpact(cmd *cobra.Command, args []string) error {
 	renderCandidates(rep.Candidates)
 	fmt.Printf("  direct callers: %d\n", len(rep.DirectCallers))
 	fmt.Printf("  blast radius:   %d (depth ≤ %d)\n", len(rep.BlastRadius), depth)
+	if rep.Buckets != nil {
+		fmt.Printf("    direct: %d  transitive: %d\n", rep.Buckets.DirectCount, rep.Buckets.TransitiveCount)
+	}
+	if rep.Filtered != nil {
+		fmt.Printf("  filtered:       %d name-based candidate node(s) hidden (--min-confidence %s)\n", rep.Filtered.Candidate, rep.MinConfidence)
+	}
 	fmt.Printf("  tests covering: %d\n", len(rep.Tests))
 	if rep.Resolution != "" {
 		fmt.Println("  ⚠ " + rep.Resolution)
@@ -652,9 +668,12 @@ func runImpact(cmd *cobra.Command, args []string) error {
 
 // runImpactBatch resolves impact for several --at positions in one call,
 // printing the ImpactBatchReport JSON or a human summary.
-func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, positions []app.FilePosition, depth, maxTokens int) error {
+func runImpactBatch(cmd *cobra.Command, svc *app.Service, cwd string, positions []app.FilePosition, depth, maxTokens int, minConfidence string) error {
 	rep, err := svc.ImpactPositions(cwd, positions, depth)
 	if err != nil {
+		return err
+	}
+	if err := rep.ApplyMinConfidence(minConfidence); err != nil {
 		return err
 	}
 	if err := app.ApplyImpactBatchBudget(rep, maxTokens); err != nil {
@@ -708,6 +727,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	failOnUntested, _ := cmd.Flags().GetBool("fail-on-untested")
+	failOnUncovered, _ := cmd.Flags().GetBool("fail-on-uncovered")
 	sess, err := openSession(cmd)
 	if err != nil {
 		return err
@@ -730,7 +750,12 @@ func runReview(cmd *cobra.Command, args []string) error {
 	// reviewGate is called AFTER every point below that prints the normal
 	// (unchanged) output, human or --json, so a tripped --fail-on-risk/
 	// --fail-on-untested threshold only changes the exit code.
-	reviewGate := func() error { return reviewGateResult(rep, hasFailOnRisk, failOnRiskThreshold, failOnUntested) }
+	reviewGate := func() error {
+		if err := reviewGateResult(rep, hasFailOnRisk, failOnRiskThreshold, failOnUntested); err != nil {
+			return err
+		}
+		return uncoveredGateResult(rep, failOnUncovered)
+	}
 	if jsonOut(cmd) {
 		if err := printJSON(rep); err != nil {
 			return err
@@ -768,6 +793,10 @@ func runReview(cmd *cobra.Command, args []string) error {
 	if rep.Risk != nil {
 		icon, label := riskBadge(rep.Risk.Level)
 		fmt.Printf("  risk:            %s %s (%.2f)\n", icon, label, rep.Risk.Score)
+	}
+	if rep.Coverage != nil {
+		fmt.Printf("  coverage:        %s (%d covered, %d uncovered, %d unknown)\n",
+			rep.Coverage.Verdict, rep.Coverage.CoveredSymbols, rep.Coverage.UncoveredSymbols, rep.Coverage.UnknownSymbols)
 	}
 	if rep.Resolution != "" {
 		fmt.Println("  ⚠ " + rep.Resolution)
@@ -836,6 +865,23 @@ func reviewGateResult(rep *app.ReviewReport, hasFailOnRisk bool, threshold int, 
 		return errGate
 	}
 	if failOnUntested && gate.WouldFailOn.Untested {
+		return errGate
+	}
+	return nil
+}
+
+// uncoveredGateResult evaluates --fail-on-uncovered against an already-printed
+// ReviewReport. It trips (exit 6) only when coverage.verdict is uncovered or
+// partial and at least one changed symbol is known-uncovered. Unknown coverage
+// — an unresolved call graph with no name-based test link — never trips it, and
+// unlike --fail-on-untested it does not fail closed on an unresolved call graph
+// or an incomplete analysis: it answers one question, "is a changed symbol
+// provably missing a test?".
+func uncoveredGateResult(rep *app.ReviewReport, enabled bool) error {
+	if !enabled || rep == nil {
+		return nil
+	}
+	if rep.ComputeGate().WouldFailOn.Uncovered {
 		return errGate
 	}
 	return nil

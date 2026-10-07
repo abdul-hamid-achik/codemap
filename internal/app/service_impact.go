@@ -25,22 +25,154 @@ type ImpactNode struct {
 	// Heuristic marks a covering test found by scanning test files for a reference
 	// to the symbol's name (not via the call graph) — see heuristicTestCoverage.
 	Heuristic bool `json:"heuristic,omitempty"`
+	// Confidence is "confirmed" when a shortest path from the analyzed symbol to
+	// this node uses only precise edges or same-file edges, else "candidate"
+	// (name-based cross-file fan-out). Heuristic covering tests are always
+	// candidates. Absent on nodes not produced by an impact traversal.
+	Confidence string `json:"confidence,omitempty"`
+}
+
+// Impact node confidence values (additive field; see ImpactNode.Confidence).
+const (
+	ConfidenceConfirmed = "confirmed"
+	ConfidenceCandidate = "candidate"
+)
+
+// ImpactBuckets groups the flat blast radius by hop distance so a reader can
+// act on the direct callers first without re-slicing by depth. The element shape
+// is the same ImpactNode used by blast_radius; the flat list is unchanged.
+type ImpactBuckets struct {
+	Direct          []ImpactNode `json:"direct"`     // depth 1
+	Transitive      []ImpactNode `json:"transitive"` // depth >= 2
+	DirectCount     int          `json:"direct_count"`
+	TransitiveCount int          `json:"transitive_count"`
+}
+
+// ImpactFiltered counts what a min_confidence filter removed.
+type ImpactFiltered struct {
+	Candidate int `json:"candidate"`
+}
+
+func confidenceLabel(confirmed bool) string {
+	if confirmed {
+		return ConfidenceConfirmed
+	}
+	return ConfidenceCandidate
+}
+
+// buildImpactBuckets splits a blast radius into direct (depth 1) and transitive
+// (depth >= 2) buckets. Both slices are non-nil so JSON emits [] not null.
+func buildImpactBuckets(radius []ImpactNode) *ImpactBuckets {
+	b := &ImpactBuckets{Direct: []ImpactNode{}, Transitive: []ImpactNode{}}
+	for _, n := range radius {
+		if n.Depth <= 1 {
+			b.Direct = append(b.Direct, n)
+		} else {
+			b.Transitive = append(b.Transitive, n)
+		}
+	}
+	b.DirectCount, b.TransitiveCount = len(b.Direct), len(b.Transitive)
+	return b
+}
+
+// ParseMinConfidence validates a min_confidence input. "" and "candidate" keep
+// everything (the default); "confirmed" drops name-based candidates. Anything
+// else is an input error.
+func ParseMinConfidence(v string) (string, error) {
+	switch v {
+	case "", ConfidenceCandidate:
+		return ConfidenceCandidate, nil
+	case ConfidenceConfirmed:
+		return ConfidenceConfirmed, nil
+	default:
+		return "", fmt.Errorf("invalid min_confidence %q: must be confirmed or candidate", v)
+	}
+}
+
+// ApplyMinConfidence filters candidate nodes out of blast_radius, buckets,
+// covering tests and direct_callers when min is "confirmed", and records how many
+// distinct candidate nodes were dropped in Filtered. "candidate" (or empty) is a
+// no-op, so the default response is unchanged. Untested keeps its call-graph
+// meaning (whether ANY test was found before filtering).
+func (r *ImpactReport) ApplyMinConfidence(min string) error {
+	min, err := ParseMinConfidence(min)
+	if err != nil {
+		return err
+	}
+	if r == nil || min != ConfidenceConfirmed || !r.Found {
+		return nil
+	}
+	dropped := map[string]bool{}
+	keepNodes := func(in []ImpactNode) []ImpactNode {
+		out := make([]ImpactNode, 0, len(in))
+		for _, n := range in {
+			if n.Confidence == ConfidenceCandidate {
+				dropped[symKey(n.FQN, n.File, n.StartLine)] = true
+				continue
+			}
+			out = append(out, n)
+		}
+		return out
+	}
+	// Direct callers are exactly the depth-1 blast nodes; keep only the ones that
+	// survived so the three views stay consistent.
+	keptDirect := map[string]bool{}
+	r.BlastRadius = keepNodes(r.BlastRadius)
+	for _, n := range r.BlastRadius {
+		if n.Depth <= 1 {
+			keptDirect[symKey(n.FQN, n.File, n.StartLine)] = true
+		}
+	}
+	r.Tests = keepNodes(r.Tests)
+	callers := make([]SymbolRef, 0, len(r.DirectCallers))
+	for _, c := range r.DirectCallers {
+		if keptDirect[symKey(c.FQN, c.File, c.StartLine)] {
+			callers = append(callers, c)
+		}
+	}
+	r.DirectCallers = callers
+	r.Buckets = buildImpactBuckets(r.BlastRadius)
+	r.TestCommands = testCommands(r.Tests)
+	r.MinConfidence = ConfidenceConfirmed
+	r.Filtered = &ImpactFiltered{Candidate: len(dropped)}
+	return nil
+}
+
+// ApplyMinConfidence applies the filter to every item of a batch.
+func (b *ImpactBatchReport) ApplyMinConfidence(min string) error {
+	if _, err := ParseMinConfidence(min); err != nil {
+		return err
+	}
+	if b == nil {
+		return nil
+	}
+	for _, r := range b.Results {
+		if err := r.ApplyMinConfidence(min); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ImpactReport is the flagship impact analysis: who is affected by changing a
 // symbol, and which tests cover those paths.
 type ImpactReport struct {
-	Symbol        string               `json:"symbol"`
-	Selector      *SymbolSelector      `json:"selector,omitempty"`            // exact selected definition; absent on a name-union query
-	Position      *FilePosition        `json:"position,omitempty"`            // original raw batch input; absent on ordinary symbol/selector queries
-	PositionMatch string               `json:"position_resolution,omitempty"` // exact|enclosing|none from symbol-at
-	Error         *ImpactItemError     `json:"error,omitempty"`               // item-level batch miss; project/storage failures remain command errors
-	Project       string               `json:"project"`
-	Found         bool                 `json:"found"`
-	Locations     []SymbolRef          `json:"locations,omitempty"`
-	DirectCallers []SymbolRef          `json:"direct_callers"`
-	BlastRadius   []ImpactNode         `json:"blast_radius"`
-	Tests         []ImpactNode         `json:"tests"`
+	Symbol        string           `json:"symbol"`
+	Selector      *SymbolSelector  `json:"selector,omitempty"`            // exact selected definition; absent on a name-union query
+	Position      *FilePosition    `json:"position,omitempty"`            // original raw batch input; absent on ordinary symbol/selector queries
+	PositionMatch string           `json:"position_resolution,omitempty"` // exact|enclosing|none from symbol-at
+	Error         *ImpactItemError `json:"error,omitempty"`               // item-level batch miss; project/storage failures remain command errors
+	Project       string           `json:"project"`
+	Found         bool             `json:"found"`
+	Locations     []SymbolRef      `json:"locations,omitempty"`
+	DirectCallers []SymbolRef      `json:"direct_callers"`
+	BlastRadius   []ImpactNode     `json:"blast_radius"`
+	Buckets       *ImpactBuckets   `json:"buckets,omitempty"` // blast_radius grouped by depth: direct (1) vs transitive (>=2), with counts
+	Tests         []ImpactNode     `json:"tests"`
+	// MinConfidence and Filtered are set only when a min_confidence filter was
+	// applied: the requested floor and the count of candidate nodes it removed.
+	MinConfidence string               `json:"min_confidence,omitempty"`
+	Filtered      *ImpactFiltered      `json:"filtered,omitempty"`
 	Untested      bool                 `json:"untested"`
 	Note          string               `json:"note,omitempty"`        // set when the name is ambiguous (merges same-named defs)
 	Candidates    []AmbiguityCandidate `json:"candidates,omitempty"`  // the merged definition set behind Note; re-query with candidates[i].selector
@@ -266,12 +398,14 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 			Symbol: nd.Node.Symbol, FQN: nd.Node.FQN, Kind: nd.Node.Kind,
 			File: nd.Node.FilePath, StartLine: nd.Node.StartLine, Depth: nd.Depth,
 			Signature: nd.Node.Signature, Doc: nd.Node.Docstring,
+			Confidence: confidenceLabel(nd.Confirmed),
 		}
 		rep.BlastRadius = append(rep.BlastRadius, in)
 		if nd.Node.Kind == graph.KindTest {
 			rep.Tests = append(rep.Tests, in)
 		}
 	}
+	rep.Buckets = buildImpactBuckets(rep.BlastRadius)
 	rep.Untested = len(rep.Tests) == 0
 	// Heuristic coverage: when the call graph found NO tests — genuinely untested, OR
 	// the test's call edge was lost (a TS test whose call lives in an anonymous
@@ -514,7 +648,7 @@ func heuristicTestCoverage(g *graph.Store, projectID int64, root, symbol string)
 		}
 		out = append(out, ImpactNode{
 			Symbol: filepath.Base(rel), FQN: rel, Kind: graph.KindTest,
-			File: rel, StartLine: 1, Heuristic: true,
+			File: rel, StartLine: 1, Heuristic: true, Confidence: ConfidenceCandidate,
 		})
 		if len(out) >= 50 {
 			break // bound output; the point is "is it tested", not an exhaustive list
@@ -573,7 +707,7 @@ func heuristicTestCoverageBatch(g *graph.Store, projectID int64, root string, sy
 			if m.re.Match(content) {
 				out[m.sym] = append(out[m.sym], ImpactNode{
 					Symbol: filepath.Base(rel), FQN: rel, Kind: graph.KindTest,
-					File: rel, StartLine: 1, Heuristic: true,
+					File: rel, StartLine: 1, Heuristic: true, Confidence: ConfidenceCandidate,
 				})
 			}
 		}

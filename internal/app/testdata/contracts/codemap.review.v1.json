@@ -35,7 +35,8 @@
       "file": "a_test.go",
       "start_line": 5,
       "depth": 1,
-      "signature": "func TestRun(t *testing.T)"
+      "signature": "func TestRun(t *testing.T)",
+      "confidence": "candidate"
     },
     {
       "symbol": "Other",
@@ -44,7 +45,8 @@
       "file": "b.go",
       "start_line": 3,
       "depth": 1,
-      "signature": "func Other()"
+      "signature": "func Other()",
+      "confidence": "candidate"
     }
   ],
   "covering_tests": [
@@ -55,7 +57,8 @@
       "file": "a_test.go",
       "start_line": 5,
       "depth": 1,
-      "signature": "func TestRun(t *testing.T)"
+      "signature": "func TestRun(t *testing.T)",
+      "confidence": "candidate"
     }
   ],
   "untested_symbols": [],
@@ -70,6 +73,12 @@
     "level": "unknown",
     "score": 0,
     "factors": []
+  },
+  "coverage": {
+    "verdict": "covered",
+    "covered_symbols": 1,
+    "uncovered_symbols": 0,
+    "unknown_symbols": 0
   },
   "test_commands": [
     "go test ./ -run '^(TestRun)$'"
@@ -96,6 +105,7 @@
     "would_fail_on": {
       "incomplete_analysis": true,
       "untested": false,
+      "uncovered": false,
       "risk_at_or_above": {
         "low": false,
         "medium": false,

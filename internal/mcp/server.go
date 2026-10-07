@@ -360,6 +360,8 @@ type impactInput struct {
 	Path      string              `json:"path,omitempty" jsonschema:"project directory; defaults to cwd"`
 	Depth     int                 `json:"depth,omitempty" jsonschema:"max hops for the blast radius (default 3)"`
 	MaxTokens int                 `json:"max_tokens,omitempty" jsonschema:"approximate token budget for the JSON result (estimated as compact-JSON bytes / 4); the least important material is trimmed first and the result gains a budget object reporting what was dropped; omitted/0 = no budget"`
+	// MinConfidence "confirmed" drops name-based candidate nodes (cross-file, not precise) from blast_radius, buckets, tests and direct_callers.
+	MinConfidence string `json:"min_confidence,omitempty" jsonschema:"confirmed|candidate: with confirmed, drop name-based candidate nodes from blast_radius/buckets/tests/direct_callers and report the dropped count under filtered (default candidate: keep everything)"`
 }
 
 type reviewInput struct {
@@ -1165,18 +1167,32 @@ func (s *Server) handleReferences(_ context.Context, _ *sdkmcp.CallToolRequest, 
 }
 
 func (s *Server) handleImpact(_ context.Context, _ *sdkmcp.CallToolRequest, in impactInput) (*sdkmcp.CallToolResult, any, error) {
+	if _, err := app.ParseMinConfidence(in.MinConfidence); err != nil {
+		return invalidInputResult(err.Error(), "pass min_confidence: confirmed or candidate"), nil, nil
+	}
 	if r, v, stop := s.notIndexed(in.Path); stop {
 		return r, v, nil
 	}
 	if in.Selector != nil {
 		rep, err := s.svc.ImpactBySelector(cwdOf(in.Path), *in.Selector, in.Depth)
+		rep = filteredImpact(rep, in.MinConfidence)
 		return result(rep, withImpactBudget(rep, err, in.MaxTokens))
 	}
 	if in.Symbol == "" {
 		return invalidInputResult("impact needs symbol or selector", "pass symbol or selector:{file,start_line,fqn,kind}"), nil, nil
 	}
 	rep, err := s.svc.Impact(cwdOf(in.Path), in.Symbol, in.Depth)
+	rep = filteredImpact(rep, in.MinConfidence)
 	return result(rep, withImpactBudget(rep, err, in.MaxTokens))
+}
+
+// filteredImpact applies the already-validated min_confidence filter; a nil
+// report (service error) passes through untouched.
+func filteredImpact(rep *app.ImpactReport, minConfidence string) *app.ImpactReport {
+	if rep != nil {
+		_ = rep.ApplyMinConfidence(minConfidence) // validated by the caller
+	}
+	return rep
 }
 
 func (s *Server) handleReview(_ context.Context, _ *sdkmcp.CallToolRequest, in reviewInput) (*sdkmcp.CallToolResult, any, error) {
