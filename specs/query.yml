@@ -12,7 +12,7 @@ target:
     cwd: "."
 terminal:
     cols: 100
-    rows: 40
+    rows: 60
     profile: xterm-256color
 steps:
     - wait:
