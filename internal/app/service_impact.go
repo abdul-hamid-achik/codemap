@@ -41,6 +41,13 @@ const (
 // ImpactBuckets groups the flat blast radius by hop distance so a reader can
 // act on the direct callers first without re-slicing by depth. The element shape
 // is the same ImpactNode used by blast_radius; the flat list is unchanged.
+//
+// DirectCount and TransitiveCount are always the TRUE totals of the blast radius
+// (after any min_confidence filter). When a max_tokens budget or a composite's
+// list cap trims blast_radius, Direct and Transitive are rebuilt from the kept
+// blast_radius prefix only (so they never contradict it) and may therefore hold
+// fewer nodes than the counts say; the budget's dropped["buckets"] and the
+// report's blast_radius_total record the difference.
 type ImpactBuckets struct {
 	Direct          []ImpactNode `json:"direct"`     // depth 1
 	Transitive      []ImpactNode `json:"transitive"` // depth >= 2
@@ -72,6 +79,18 @@ func buildImpactBuckets(radius []ImpactNode) *ImpactBuckets {
 		}
 	}
 	b.DirectCount, b.TransitiveCount = len(b.Direct), len(b.Transitive)
+	return b
+}
+
+// capImpactBuckets rebuilds the node lists of orig from kept (a prefix of the
+// blast radius that survived a cap or budget) while preserving orig's counts as
+// the true totals. Both slices stay non-nil. A nil orig stays nil.
+func capImpactBuckets(orig *ImpactBuckets, kept []ImpactNode) *ImpactBuckets {
+	if orig == nil {
+		return nil
+	}
+	b := buildImpactBuckets(kept)
+	b.DirectCount, b.TransitiveCount = orig.DirectCount, orig.TransitiveCount
 	return b
 }
 
@@ -132,6 +151,7 @@ func (r *ImpactReport) ApplyMinConfidence(min string) error {
 	}
 	r.DirectCallers = callers
 	r.Buckets = buildImpactBuckets(r.BlastRadius)
+	r.BlastRadiusTotal = len(r.BlastRadius)
 	r.TestCommands = testCommands(r.Tests)
 	r.MinConfidence = ConfidenceConfirmed
 	r.Filtered = &ImpactFiltered{Candidate: len(dropped)}
@@ -167,8 +187,13 @@ type ImpactReport struct {
 	Locations     []SymbolRef      `json:"locations,omitempty"`
 	DirectCallers []SymbolRef      `json:"direct_callers"`
 	BlastRadius   []ImpactNode     `json:"blast_radius"`
-	Buckets       *ImpactBuckets   `json:"buckets,omitempty"` // blast_radius grouped by depth: direct (1) vs transitive (>=2), with counts
-	Tests         []ImpactNode     `json:"tests"`
+	Buckets       *ImpactBuckets   `json:"buckets,omitempty"` // blast_radius grouped by depth: direct (1) vs transitive (>=2); counts are true totals
+	// BlastRadiusTotal is the true size of the blast radius (after any
+	// min_confidence filter) before a max_tokens budget or a composite's list cap
+	// trims blast_radius — the same "true total beside a capped list" convention
+	// as context's *_total counts.
+	BlastRadiusTotal int          `json:"blast_radius_total"`
+	Tests            []ImpactNode `json:"tests"`
 	// MinConfidence and Filtered are set only when a min_confidence filter was
 	// applied: the requested floor and the count of candidate nodes it removed.
 	MinConfidence string               `json:"min_confidence,omitempty"`
@@ -406,6 +431,7 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 		}
 	}
 	rep.Buckets = buildImpactBuckets(rep.BlastRadius)
+	rep.BlastRadiusTotal = len(rep.BlastRadius)
 	rep.Untested = len(rep.Tests) == 0
 	// Heuristic coverage: when the call graph found NO tests — genuinely untested, OR
 	// the test's call edge was lost (a TS test whose call lives in an anonymous

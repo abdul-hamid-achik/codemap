@@ -272,6 +272,7 @@ type flowBuilder struct {
 type flowFile struct {
 	lines []string
 	ok    bool
+	why   string // why the file could not be read ("" when ok)
 }
 
 func newFlowBuilder(root string, nodes []graph.Node, edges []graph.Edge, opts FlowOptions) *flowBuilder {
@@ -302,6 +303,9 @@ func (b *flowBuilder) reset(opts FlowOptions) {
 	b.omittedTests = map[int64]bool{}
 	b.emitted, b.emittedNodes, b.trimmed = 0, nil, false
 	b.ambiguousRefs, b.rejectedCalls = 0, 0
+	// partial is per tree: the file cache outlives reset, so fileLines re-notes an
+	// unreadable file for every tree that touches it.
+	b.partial, b.partialSeen = nil, map[string]bool{}
 }
 
 // buildTree runs the tree pipeline for one entry node: build, trim to the node
@@ -460,17 +464,24 @@ func flowBucket(targets map[int64]graph.Node, reference bool, skip func(int64) b
 // ---- file bodies ----
 
 func (b *flowBuilder) fileLines(file string) []string {
+	note := func(why string) {
+		if !b.partialSeen[file] {
+			b.partialSeen[file] = true
+			b.partial = append(b.partial, fmt.Sprintf("%s: %s — call order for its symbols falls back to name order", graph.CanonicalStructuralPath(file), why))
+		}
+	}
 	if f, ok := b.files[file]; ok {
+		if !f.ok {
+			note(f.why)
+		}
 		return f.lines
 	}
 	f := &flowFile{}
 	b.files[file] = f
 	full := filepath.Join(b.root, filepath.FromSlash(graph.CanonicalStructuralPath(file)))
 	fail := func(why string) {
-		if !b.partialSeen[file] {
-			b.partialSeen[file] = true
-			b.partial = append(b.partial, fmt.Sprintf("%s: %s — call order for its symbols falls back to name order", graph.CanonicalStructuralPath(file), why))
-		}
+		f.why = why
+		note(why)
 	}
 	info, err := os.Stat(full)
 	if err != nil {

@@ -211,20 +211,46 @@ func contextBudgetSteps(rep *ContextReport) []budgetStep {
 }
 
 // impactBudgetSteps is the trim order for one ImpactReport: advisory next
-// actions, blast radius (the largest and most speculative list), direct callers,
-// test commands, then covering tests. Definition locations, candidates and the
-// untested/call_graph signals are never trimmed.
+// actions, the buckets' node lists (they only regroup blast_radius, so they go
+// before it), blast radius (the largest and most speculative list), direct
+// callers, test commands, then covering tests. Definition locations, candidates
+// and the untested/call_graph signals are never trimmed.
+//
+// Buckets never contradict the flat list: at any point they hold only nodes of
+// the kept blast_radius prefix, and the bucket counts and blast_radius_total
+// stay the true totals. The "buckets" dropped count is the number of regrouped
+// nodes removed.
 func impactBudgetSteps(rep *ImpactReport) []budgetStep {
 	if rep == nil {
 		return nil
 	}
-	return []budgetStep{
-		sliceStep("next", 0, &rep.Next, nil),
-		sliceStep("blast_radius", 0, &rep.BlastRadius, nil),
+	steps := []budgetStep{sliceStep("next", 0, &rep.Next, nil)}
+	origRadius := rep.BlastRadius
+	origBuckets := rep.Buckets
+	blastKeep, bucketKeep := len(origRadius), 0
+	if origBuckets != nil {
+		bucketKeep = len(origBuckets.Direct) + len(origBuckets.Transitive)
+	}
+	sync := func() {
+		if origBuckets == nil {
+			return
+		}
+		k := min(blastKeep, bucketKeep, len(origRadius))
+		rep.Buckets = capImpactBuckets(origBuckets, origRadius[:k])
+	}
+	if origBuckets != nil {
+		steps = append(steps, budgetStep{
+			key: "buckets", count: bucketKeep,
+			keep: func(k int) { bucketKeep = k; sync() },
+		})
+	}
+	blast := sliceStep("blast_radius", 0, &rep.BlastRadius, func(k int) { blastKeep = k; sync() })
+	steps = append(steps, blast,
 		sliceStep("direct_callers", 0, &rep.DirectCallers, nil),
 		sliceStep("test_commands", 0, &rep.TestCommands, nil),
 		sliceStep("tests", 0, &rep.Tests, nil),
-	}
+	)
+	return steps
 }
 
 // reverseContextSteps concatenates contextBudgetSteps for each report from the
@@ -290,22 +316,74 @@ func ApplyImpactBatchBudget(rep *ImpactBatchReport, maxTokens int) error {
 	return nil
 }
 
-// exploreBudgetSteps: every context's lists (last context first), then whole
-// trailing contexts, then trailing seeds (the top seed always stays). not_joined
-// is recomputed so it never exceeds the retained unjoined seeds.
+// exploreSeedName is the name a process lists in matched_seeds for a joined
+// seed (see exploreProcesses).
+func exploreSeedName(s ExploreSeed) string {
+	if s.Selector == nil {
+		return ""
+	}
+	return firstNonEmpty(s.Selector.FQN, s.Symbol)
+}
+
+// pruneProcessesForSeeds returns procs with matched_seeds restricted to the
+// names of the retained seeds; a process left with no matched seed is dropped.
+// It never mutates procs, and returns procs itself when every seed is retained.
+func pruneProcessesForSeeds(procs []ExploreProcess, retained, all []ExploreSeed) []ExploreProcess {
+	if len(retained) >= len(all) {
+		return procs
+	}
+	names := map[string]bool{}
+	for _, s := range retained {
+		if n := exploreSeedName(s); n != "" {
+			names[n] = true
+		}
+	}
+	out := make([]ExploreProcess, 0, len(procs))
+	for _, p := range procs {
+		var matched []string
+		for _, m := range p.MatchedSeeds {
+			if names[m] {
+				matched = append(matched, m)
+			}
+		}
+		if len(matched) == 0 {
+			continue
+		}
+		p.MatchedSeeds = matched
+		out = append(out, p)
+	}
+	return out
+}
+
+// exploreBudgetSteps: every context's lists (last context first), then
+// trailing processes, then whole trailing contexts, then trailing seeds (the top
+// seed always stays). not_joined is recomputed so it never exceeds the retained
+// unjoined seeds, and a process never names a dropped seed in matched_seeds
+// (a process left with no retained seed is removed).
 func exploreBudgetSteps(rep *ExploreReport) []budgetStep {
 	if rep == nil {
 		return nil
 	}
 	steps := reverseContextSteps(rep.Contexts)
+	allSeeds := append([]ExploreSeed(nil), rep.Seeds...)
+	origProcs := rep.Processes
+	procKeep, seedKeep := len(origProcs), len(allSeeds)
+	syncProcs := func() {
+		rep.Processes = pruneProcessesForSeeds(origProcs[:procKeep], allSeeds[:seedKeep], allSeeds)
+	}
+	steps = append(steps, budgetStep{
+		key: "processes", count: len(origProcs),
+		keep: func(k int) { procKeep = k; syncProcs() },
+	})
 	steps = append(steps, sliceStep("contexts", 0, &rep.Contexts, nil))
 	origNotJoined := rep.NotJoined
 	steps = append(steps, sliceStep("seeds", 1, &rep.Seeds, nil))
 	// sliceStep captured the original seeds; wrap keep to fix not_joined too.
 	seeds := steps[len(steps)-1]
-	allSeeds := append([]ExploreSeed(nil), rep.Seeds...)
 	steps[len(steps)-1].keep = func(k int) {
 		seeds.keep(k)
+		seedKeep = k
+		syncProcs()
 		if k >= len(allSeeds) {
 			rep.NotJoined = origNotJoined
 			return
