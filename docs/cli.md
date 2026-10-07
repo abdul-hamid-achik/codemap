@@ -89,7 +89,8 @@ failures remain `name`/`unresolved`. (TypeScript and JavaScript get name-based c
 JSX component usage, imports, Next.js framework wiring, and high-precision calls: same-file calls
 (`f()`, `new C()`, `await f()`, `this.m()`) and calls through imported bindings (named, default, and
 namespace imports and `require`, resolved through relative paths, `@/`/`~/` aliases, and workspace
-packages). Arbitrary `obj.method()` calls are not linked, and Python has no base-level call edges, so
+packages). Arbitrary `obj.method()` calls are not linked (Python carries the same kind of candidates:
+same-file calls, `self`/`cls` methods, imported bindings), so
 `--precise` is what gives covered files a complete call graph, superseding the candidates per file.) Vue SFCs currently provide script-block
 symbols, `defines`, and import edges only; precise indexing does not add Vue call edges yet. For a one-off exact answer without
 reindexing, `callers`/`callees` accept `--precise`; it degrades to the indexed graph with a note

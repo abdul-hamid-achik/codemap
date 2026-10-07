@@ -144,46 +144,60 @@ func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult
 
 // extract also reports whether the parse was free of syntax errors.
 func (e *Extractor) extract(relPath string, src []byte) (*extract.FileResult, bool, error) {
-	syms, clean, err := e.parse(relPath, src)
+	p, err := e.parse(relPath, src)
 	if err != nil {
 		return nil, false, err
 	}
-	return lspsrc.FromDocumentSymbols(e.lang, relPath, src, syms), clean, nil
+	res := lspsrc.FromDocumentSymbols(e.lang, relPath, src, p.syms)
+	res.References = append(res.References, p.refs...)
+	res.Imports = append(res.Imports, p.imports...)
+	return res, p.clean, nil
 }
 
 // DocumentSymbols parses src and returns the documentSymbol tree the language
 // server would have produced for it. Exposed for the parity harness.
 func (e *Extractor) DocumentSymbols(relPath string, src []byte) ([]lsp.DocumentSymbol, error) {
-	syms, _, err := e.parse(relPath, src)
-	return syms, err
+	p, err := e.parse(relPath, src)
+	return p.syms, err
 }
 
-func (e *Extractor) parse(relPath string, src []byte) ([]lsp.DocumentSymbol, bool, error) {
+// parsed is one file's parse: the emulated symbol tree plus, for Python,
+// the call candidates and import specs the binder emulation yields (TS/JS
+// get theirs from tsscan inside lspsrc.FromDocumentSymbols).
+type parsed struct {
+	syms    []lsp.DocumentSymbol
+	refs    []extract.Reference
+	imports []string
+	clean   bool
+}
+
+func (e *Extractor) parse(relPath string, src []byte) (parsed, error) {
 	if len(src) > MaxFileBytes {
-		return nil, false, fmt.Errorf("%s: %d bytes exceeds the %d-byte structural parse limit (generated or minified?)", relPath, len(src), MaxFileBytes)
+		return parsed{}, fmt.Errorf("%s: %d bytes exceeds the %d-byte structural parse limit (generated or minified?)", relPath, len(src), MaxFileBytes)
 	}
 	loadGrammars()
 	g := e.grammarFor(relPath)
 	if gerr := grammarErrs[g]; gerr != nil {
-		return nil, false, fmt.Errorf("%s: %w", relPath, gerr)
+		return parsed{}, fmt.Errorf("%s: %w", relPath, gerr)
 	}
 	tree, err := pools[g].Parse(src)
 	if err != nil {
-		return nil, false, fmt.Errorf("%s: parse: %w", relPath, err)
+		return parsed{}, fmt.Errorf("%s: parse: %w", relPath, err)
 	}
 	if tree == nil {
-		return nil, false, fmt.Errorf("%s: parse returned no tree", relPath)
+		return parsed{}, fmt.Errorf("%s: parse returned no tree", relPath)
 	}
 	defer tree.Release()
 	root := tree.RootNode()
 	if root == nil {
-		return nil, false, fmt.Errorf("%s: parse returned no root", relPath)
+		return parsed{}, fmt.Errorf("%s: parse returned no root", relPath)
 	}
 	clean := !root.HasError()
 	if g == grammarPython {
-		return pythonSymbols(langs[g], src, root), clean, nil
+		w := bindPython(langs[g], src, root)
+		return parsed{syms: w.emit(nil), refs: pythonCallRefs(w, root, relPath), imports: dedupeStrings(w.imports), clean: clean}, nil
 	}
-	return tsSymbols(langs[g], src, root, g == grammarJS), clean, nil
+	return parsed{syms: tsSymbols(langs[g], src, root, g == grammarJS), clean: clean}, nil
 }
 
 // node helpers shared by both emulators.
@@ -200,4 +214,16 @@ func text(src []byte, n *ts.Node) string {
 func symbol(name string, kind, start, end int, children []lsp.DocumentSymbol) lsp.DocumentSymbol {
 	r := lsp.Range{Start: lsp.Position{Line: start}, End: lsp.Position{Line: end}}
 	return lsp.DocumentSymbol{Name: name, Kind: kind, Range: r, SelectionRange: r, Children: children}
+}
+
+func dedupeStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, s := range in {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }

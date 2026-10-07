@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -514,5 +515,87 @@ func TestTreeSitterIndexesTypeScriptWithoutServers(t *testing.T) {
 	}
 	if line := tooling.WarningLine(res.ServerIssues[0]); !strings.Contains(line, "precise call graph unavailable") || strings.Contains(line, "skipped") {
 		t.Errorf("warning should scope the gap to --precise, got %q", line)
+	}
+}
+
+// TestTreeSitterPythonCallCandidates indexes a small package with no language
+// server and proves the base graph now carries Python call candidates through
+// same-file calls, self-methods, and imports (relative, absolute, src/
+// layout), plus file→file import edges — none of which existed before.
+func TestTreeSitterPythonCallCandidates(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "src/shop/__init__.py", "")
+	writeFile(t, dir, "src/shop/pricing.py", "def price(item):\n    return discount(item)\n\n\ndef discount(item):\n    return item\n")
+	writeFile(t, dir, "src/shop/cart.py", strings.Join([]string{
+		"from .pricing import price",
+		"import shop.pricing as pr",
+		"",
+		"",
+		"class Cart:",
+		"    def total(self):",
+		"        return self.sum_items()",
+		"",
+		"    def sum_items(self):",
+		"        return price(1) + pr.discount(2)",
+		"",
+	}, "\n"))
+	writeFile(t, dir, "tests/test_cart.py", "from shop.cart import Cart\n\n\ndef test_total():\n    Cart().total()\n")
+	g, _ := newStores(t)
+	pid, _ := g.UpsertProject("py", dir, "python")
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "py", dir, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+	callers := func(fqn string) []string {
+		t.Helper()
+		nodes, _ := g.FindNodesBySymbol(pid, fqn[strings.LastIndex(fqn, ".")+1:])
+		var out []string
+		for _, n := range nodes {
+			if n.FQN != fqn {
+				continue
+			}
+			cs, err := g.CallersOfNode(pid, n.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range cs {
+				out = append(out, c.FQN)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	for fqn, want := range map[string]string{
+		"discount":       "Cart.sum_items,price", // same-file + `import … as pr` module call
+		"price":          "Cart.sum_items",       // `from .pricing import price`
+		"Cart.sum_items": "Cart.total",           // self.method()
+		"Cart.total":     "test_total",           // Cart().total() is obj.method(): unlinked…
+		"Cart":           "test_total",           // …but Cart() links through the src/ import
+	} {
+		got := strings.Join(callers(fqn), ",")
+		if fqn == "Cart.total" {
+			if got != "" {
+				t.Errorf("Cart().total() needs types; want no candidate, got %q", got)
+			}
+			continue
+		}
+		if got != want {
+			t.Errorf("callers(%s) = %q, want %q", fqn, got, want)
+		}
+	}
+	nodes, _ := g.ProjectNodes(pid)
+	byID := map[int64]graph.Node{}
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	edges, _ := g.ProjectEdges(pid)
+	var imports []string
+	for _, e := range edges {
+		if e.EdgeType == graph.EdgeImports && byID[e.SourceID].FilePath == "src/shop/cart.py" {
+			imports = append(imports, byID[e.TargetID].FilePath)
+		}
+	}
+	if strings.Join(imports, ",") != "src/shop/pricing.py" {
+		t.Errorf("cart.py imports = %v, want [src/shop/pricing.py]", imports)
 	}
 }

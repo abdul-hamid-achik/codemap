@@ -40,9 +40,9 @@ func NewService(s *Session) *Service { return &Service{s: s} }
 
 // noNameBasedCallLang reports whether a language lacks a COMPLETE name-based call
 // graph — a complete one exists ONLY under `index --precise` (callHierarchy).
-// Python has no name-based call edges at all; TS/JS/Vue have a partial set of
-// name-based candidates (same-file calls and imported bindings, from tsscan) whose
-// absence still does not prove "no caller". For these, empty callers/callees/
+// TS/JS/Vue (tsscan) and Python (the tree-sitter binder) have a partial set of
+// name-based candidates (same-file calls and imported bindings) whose absence
+// still does not prove "no caller". For these, empty callers/callees/
 // blast/tests on a name-based index means "unresolved", not "none", so the
 // call_graph classification stays "unresolved" until a precise pass covers the file.
 func noNameBasedCallLang(lang string) bool {
@@ -55,11 +55,12 @@ func noNameBasedCallLang(lang string) bool {
 
 // partialNameCallLang reports whether a language's non-precise index carries a
 // PARTIAL name-based call graph: TS/JS/Vue get high-precision candidates for
-// same-file calls and imported bindings (tsscan.CallRefs), so their edges are
-// present but incomplete — unlike Python, which has none.
+// same-file calls and imported bindings (tsscan.CallRefs), and Python the same
+// plus self/cls methods (sittersrc, the default tree-sitter backend), so their
+// edges are present but incomplete.
 func partialNameCallLang(lang string) bool {
 	switch lang {
-	case "typescript", "javascript", "vue":
+	case "typescript", "javascript", "vue", "python":
 		return true
 	}
 	return false
@@ -72,7 +73,11 @@ func partialNameCallLang(lang string) bool {
 // the rest. The machine field call_graph is unaffected (stays "unresolved").
 func callGraphGap(lang string) (head, state string) {
 	if partialNameCallLang(lang) {
-		return fmt.Sprintf("call graph for %s is partial without precise indexing (name-based candidates cover same-file calls and imported bindings only)", lang), "incomplete (absent edges are not proof of absence)"
+		covers := "same-file calls and imported bindings"
+		if lang == "python" {
+			covers = "same-file calls, self/cls methods, and imported bindings"
+		}
+		return fmt.Sprintf("call graph for %s is partial without precise indexing (name-based candidates cover %s only)", lang, covers), "incomplete (absent edges are not proof of absence)"
 	}
 	return fmt.Sprintf("call graph not available for %s without precise indexing", lang), "unresolved (not absent)"
 }

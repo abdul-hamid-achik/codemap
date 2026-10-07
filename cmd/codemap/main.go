@@ -353,7 +353,7 @@ func preciseTips(languages map[string]int, goAvailable bool) []string {
 		tips = append(tips, "Go call edges are name-based; add --precise to resolve them exactly (eliminates same-named over-matching)")
 	}
 	// TS/JS carry a PARTIAL name-based call graph (tsscan: same-file calls and
-	// imported bindings); Python still has none. Say exactly that.
+	// imported bindings); Python likewise plus self/cls methods. Say exactly that.
 	var partial []string
 	for _, l := range []string{"typescript", "javascript"} {
 		if languages[l] > 0 {
@@ -364,7 +364,7 @@ func preciseTips(languages map[string]int, goAvailable bool) []string {
 		tips = append(tips, strings.Join(partial, "/")+" call edges are name-based candidates (same-file calls and imported bindings only) — add --precise for a complete call graph (callers/impact/hotspots/path)")
 	}
 	if languages["python"] > 0 {
-		tips = append(tips, "no call graph for python yet — add --precise for callers/impact/hotspots/path")
+		tips = append(tips, "python call edges are name-based candidates (same-file calls, self/cls methods, imported bindings) — add --precise for a complete call graph (callers/impact/hotspots/path)")
 	}
 	return tips
 }

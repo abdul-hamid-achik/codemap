@@ -14,7 +14,7 @@ capabilities, and the JSON contracts keep that distinction visible.
 |---|---|---|---|
 | **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + a buildable module for the precise pass. One-off `callers --precise` / `callees --precise` uses `gopls`. |
 | **TypeScript + JavaScript** | Built in with a pure-Go tree-sitter parser (TS, TSX, JS/JSX, `.mjs`/`.cjs`), producing the same symbols `typescript-language-server`'s `documentSymbol` would | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, Next.js framework wiring, same-file calls, and calls through imported bindings; arbitrary `obj.method()` calls are not linked, so the graph is partial until `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | None to index. `--precise` needs `node` + `typescript-language-server`. |
-| **Python** | Built in with a pure-Go tree-sitter parser, producing the same symbols `pyright-langserver` would | No name-based edges; `--precise` uses LSP `callHierarchy` | None to index. `--precise` needs `node` + `pyright-langserver`. |
+| **Python** | Built in with a pure-Go tree-sitter parser, producing the same symbols `pyright-langserver` would | Name-based candidates for same-file calls, `self`/`cls` methods, and imported bindings, plus file→file import edges; `--precise` (LSP `callHierarchy`) supersedes them per file | None to index. `--precise` needs `node` + `pyright-langserver`. |
 | **Ruby** | Built in with a pure-Go scanner: modules, classes, `def` (incl. `def self.x`, endless defs, `private def`); heredoc-, `=begin`-, and string-safe | Name-based calls plus `require`/`require_relative` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **Lua** | Built in with a pure-Go scanner: `function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe | Name-based calls plus `require` imports; no precise pass yet | None — works offline like Go's name-based path. |
 | **GDScript** | Built in with a pure-Go scanner: `class_name`, inner classes, functions, signals, enums, variables, and constants; comment-safe | Name-based calls plus `preload`/`load` imports; no precise pass yet | None — works offline like Go's name-based path. Godot Engine `.gd` files. |
@@ -84,7 +84,11 @@ JSX-rendered by name and can still appear as an orphan; a **wrapped default expo
 name-resolvable; and calls that are neither same-file nor through an imported binding
 (`obj.method()`, dynamic dispatch, callbacks resolved at runtime) have no name-based edges, so
 `call_graph` stays `unresolved` (a partial graph) for uncovered TS/JS and `--precise` remains the
-only source for complete calls. Python has no base-level call edges.
+only source for complete calls. Python's base graph carries the analogous candidates — calls to
+same-file definitions (scope-aware: parameters, locals, lambda parameters and comprehension
+targets shadow), `self.m()` / `cls.m()` to the enclosing class, `C.m()` on a same-file class,
+and calls through `from m import f` / `import pkg.mod as m` bindings (relative, absolute, and
+`src/`-layout imports) — plus file→file import edges.
 
 ## Support ladder
 

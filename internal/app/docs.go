@@ -269,7 +269,8 @@ wiring, and plain calls to same-file definitions and imported bindings (arbitrar
 obj.method() calls are not linked) — so the graph is partial until --precise, and
 impact/callers/callees on an uncovered TS/JS/Python symbol return a "resolution" note and
 call_graph:"unresolved", NOT a confidently-empty result or untested:true; missing
-callers/tests are unresolved, not absent. Python has no base-level call edges. Ruby and Lua carry name-based call edges from their built-in
+callers/tests are unresolved, not absent. Python base call edges are candidates (same-file,
+self/cls methods, imported bindings). Ruby and Lua carry name-based call edges from their built-in
 backends and classify as "name".) Every impact/callers/callees/review/
 context/hotspots/orphans/path report also carries a stable machine enum — "call_graph": "resolved|name|unresolved|none" —
 so a consumer can switch on confidence (resolved→high, name→medium, unresolved/none→low) instead of

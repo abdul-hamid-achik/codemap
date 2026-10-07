@@ -137,7 +137,7 @@ language-agnostic once symbols are indexed. A precise call graph
 |---|---|---|---|
 | **Go** | stdlib `go/parser` (pure Go, always) · `--precise` adds exact edges via in-process `go/types` | `.go` | name-based by default; exact via `--precise` |
 | **TypeScript / JavaScript** | built-in pure-Go tree-sitter parser (TS, TSX, JS/JSX) · `--precise` drives `typescript-language-server` `callHierarchy` (one server, resolves across the `.ts`↔`.js` boundary) · plus a name-based scan for imports, JSX component usage, and Next.js framework wiring | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | name-based JSX, import, framework, same-file call, and imported-binding edges by default (partial); complete calls via `--precise` |
-| **Python** | built-in pure-Go tree-sitter parser · `--precise` drives `pyright-langserver` | `.py` `.pyw` `.pyi` | `--precise` only |
+| **Python** | built-in pure-Go tree-sitter parser · `--precise` drives `pyright-langserver` | `.py` `.pyw` `.pyi` | name-based same-file, self/cls-method, and imported-binding candidates (partial); complete via `--precise` |
 | **Ruby** | built-in pure-Go scanner (modules/classes/defs incl. `def self.x`, endless defs, `private def`; heredoc-, `=begin`-, and string-safe) | `.rb` | name-based (calls + `require`/`require_relative` imports) |
 | **Lua** | built-in pure-Go scanner (`function M.foo()`/`M:foo()`/`local function` and function assignments; long-string- and comment-safe) | `.lua` | name-based (calls + `require` imports) |
 | **Vue SFC** | `vuesrc` — `<script>`/`<script setup>` block content is extracted and parsed by the TS/JS backend; symbol lines are mapped back onto the original `.vue` file | `.vue` | symbols + `defines` edges only (no `--precise` call graph yet) |
@@ -349,7 +349,8 @@ JSX creates nothing), and Next.js framework-wiring references. Like all name-bas
 are *candidate* edges (same over-match contract as Go selector calls) — but a React codebase no
 longer reads as disconnected. Base indexing also links same-file calls (`f()`, `new C()`, `await f()`, `this.m()`) and calls through
 imported bindings (named, default, and namespace imports, `require`). Arbitrary `obj.method()` calls
-are not linked, and Python has no base-level call edges, so uncovered definitions stay `unresolved`.
+are not linked (Python gets the same kind of candidates — same-file calls, `self`/`cls` methods,
+imported bindings), so uncovered definitions stay `unresolved`.
 `index --precise` drives `typescript-language-server` `callHierarchy`; files it resolves gain
 exact edges that supersede the candidates per file, while any uncovered definition remains
 explicitly `unresolved`. The same

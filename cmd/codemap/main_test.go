@@ -144,8 +144,8 @@ func TestPreciseTips(t *testing.T) {
 	}
 
 	mixed := preciseTips(map[string]int{"go": 3, "javascript": 5, "python": 2}, true)
-	if !has(mixed, "Go call edges are name-based") || !has(mixed, "javascript call edges are name-based candidates") || !has(mixed, "no call graph for python") {
-		t.Errorf("mixed project should get the Go tip, the JS partial tip, and the Python no-graph tip, got %v", mixed)
+	if !has(mixed, "Go call edges are name-based") || !has(mixed, "javascript call edges are name-based candidates") || !has(mixed, "python call edges are name-based candidates") {
+		t.Errorf("mixed project should get the Go tip, the JS partial tip, and the Python partial tip, got %v", mixed)
 	}
 
 	if len(preciseTips(map[string]int{}, true)) != 0 {

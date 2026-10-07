@@ -39,7 +39,8 @@ Key features:
   with `--precise`; base TS/JS gets name-based JSX component-usage call edges, high-precision
   name-based call candidates for same-file calls and imported bindings (`tsscan.CallRefs`), import
   edges, and Next.js framework-wiring references via `tsscan`, while the complete TS/JS call graph
-  and all Python function-call edges come only from `--precise` via `callHierarchy`;
+  (Python base: same-file, self/cls-method, and imported-binding call candidates from the
+  tree-sitter binder emulation, `sittersrc/pyrefs.go`) come only from `--precise` via `callHierarchy`;
   Vue SFC script blocks currently produce symbols + `defines` + import edges but no call graph;
   Go callback/handler uses and TS/JS framework wiring are persisted as `references`; Go imports are
   package-scoped evidence, TS/JS/Vue/Ruby/Lua imports resolve file→file;
@@ -443,7 +444,8 @@ index tarballs — no fcheap/shared store, CLI-only, no MCP tool), `daemon start
   changed files lose coverage until their precise pass succeeds again. TS/JS get name-based
   candidate edges for JSX component usage, imports, Next.js framework wiring, and same-file /
   imported-binding function calls (a partial graph: other plain calls such as `obj.method()` have
-  no edge); all Python calls have **no** name-based edges, so `--precise` is
+  no edge); Python gets the analogous candidates (same-file calls, self/cls methods, imported
+  bindings; never `obj.method()`), so `--precise` is
   what gives those languages a complete call graph (for Go it *replaces* the name-based edges;
   name-based stays the Go/Ruby/Lua
   default). The Go pass degrades

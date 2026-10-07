@@ -175,8 +175,8 @@ calibrate its confidence:
 
 The Go, Ruby, and Lua graphs start name-based from built-in pure-Go backends; base TS/JS carries
 name-based JSX component-usage, import, Next.js framework-wiring, same-file call, and
-imported-binding call edges (arbitrary `obj.method()` calls are not linked, and Python has no
-base-level call edges). For complete TypeScript/JavaScript/Python calls — and for
+imported-binding call edges, and base Python carries same-file, `self`/`cls`-method, and
+imported-binding call candidates (arbitrary `obj.method()` calls are not linked in either). For complete TypeScript/JavaScript/Python calls — and for
 exact Go method resolution — run `codemap index --precise` (go/types + language-server
 `callHierarchy`). Precise coverage is tracked per file: a query is `resolved` only when every
 matched definition file completed the pass; partial failures remain `name`/`unresolved`, and

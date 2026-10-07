@@ -1,6 +1,8 @@
 package sittersrc
 
 import (
+	"strings"
+
 	ts "github.com/odvcencio/gotreesitter"
 
 	"github.com/abdul-hamid-achik/codemap/internal/lsp"
@@ -38,6 +40,10 @@ type pyDecl struct {
 	typed      bool
 	start, end int
 	scope      *pyScope // the def/class body's own scope
+
+	// Import bindings (pyAlias): the module spec as written ("a.b", ".pkg")
+	// and the imported name (empty when the binding is the module itself).
+	module, orig string
 }
 
 type pyScope struct {
@@ -48,6 +54,11 @@ type pyScope struct {
 	globals map[string]bool
 	selfVar string // first parameter of a method: `self.x` targets bind in parent
 	static  bool
+
+	// For call references: the scope's FQN as codemap indexes it ("" for the
+	// module), and a function's parameter names (they shadow outer bindings).
+	fqn    string
+	params map[string]bool
 }
 
 func newPyScope(kind pyDeclKind, parent *pyScope) *pyScope {
@@ -69,6 +80,9 @@ type pyWalker struct {
 	src      []byte
 	module   *pyScope
 	deferred []pyDeferred
+
+	scopeOf map[uint32]*pyScope // def/class node start byte → its body scope
+	imports []string            // module specs for file→file import edges
 }
 
 type pyDeferred struct {
@@ -77,7 +91,12 @@ type pyDeferred struct {
 }
 
 func pythonSymbols(lang *ts.Language, src []byte, root *ts.Node) []lsp.DocumentSymbol {
-	w := &pyWalker{lang: lang, src: src}
+	return bindPython(lang, src, root).emit(nil)
+}
+
+// bindPython runs the binder emulation over a whole file.
+func bindPython(lang *ts.Language, src []byte, root *ts.Node) *pyWalker {
+	w := &pyWalker{lang: lang, src: src, scopeOf: map[uint32]*pyScope{}}
 	w.module = newPyScope(pyVar, nil)
 	w.bindBlock(root, w.module)
 	for len(w.deferred) > 0 {
@@ -85,7 +104,7 @@ func pythonSymbols(lang *ts.Language, src []byte, root *ts.Node) []lsp.DocumentS
 		w.deferred = w.deferred[1:]
 		w.bindBlock(d.body, d.scope)
 	}
-	return w.emit(w.module)
+	return w
 }
 
 func (w *pyWalker) typ(n *ts.Node) string { return n.Type(w.lang) }
@@ -99,8 +118,12 @@ func (w *pyWalker) field(n *ts.Node, name string) *ts.Node {
 
 func (w *pyWalker) text(n *ts.Node) string { return text(w.src, n) }
 
-// emit applies pyright's per-symbol declaration choice and builds the tree.
+// emit applies pyright's per-symbol declaration choice and builds the tree
+// (nil = the module scope).
 func (w *pyWalker) emit(s *pyScope) []lsp.DocumentSymbol {
+	if s == nil {
+		s = w.module
+	}
 	var out []lsp.DocumentSymbol
 	for _, name := range s.order {
 		decls := s.decls[name]
@@ -268,6 +291,8 @@ func (w *pyWalker) bindDefinition(def, outer *ts.Node, s *pyScope) {
 	body := w.field(def, "body")
 	if w.typ(def) == "class_definition" {
 		cs := newPyScope(pyClass, s)
+		cs.fqn = joinFQN(s.fqn, name)
+		w.scopeOf[def.StartByte()] = cs
 		s.declare(name, pyDecl{kind: pyClass, typed: true, start: start, end: end, scope: cs})
 		w.bindBlock(body, cs)
 		w.bindSlots(body, cs)
@@ -275,6 +300,9 @@ func (w *pyWalker) bindDefinition(def, outer *ts.Node, s *pyScope) {
 	}
 	fs := newPyScope(pyFunc, s)
 	fs.globals = map[string]bool{}
+	fs.fqn = joinFQN(s.fqn, name)
+	fs.params = w.paramNames(def)
+	w.scopeOf[def.StartByte()] = fs
 	if s.kind == pyClass {
 		fs.selfVar = w.firstParam(def)
 		fs.static = w.hasDecorator(outer, "staticmethod")
@@ -537,17 +565,22 @@ func (w *pyWalker) bindImport(n *ts.Node, s *pyScope) {
 	for i := 0; i < n.NamedChildCount(); i++ {
 		c := n.NamedChild(i)
 		var name *ts.Node
+		module := ""
 		switch w.typ(c) {
 		case "dotted_name":
 			if c.NamedChildCount() > 0 {
 				name = c.NamedChild(0) // `import a.b` binds a
+				module = w.text(name)
+				w.imports = append(w.imports, w.text(c))
 			}
 		case "aliased_import":
 			name = w.field(c, "alias")
+			module = w.text(w.field(c, "name"))
+			w.imports = append(w.imports, module)
 		}
 		if name != nil {
 			st, en := span(name)
-			s.declare(w.text(name), pyDecl{kind: pyAlias, start: st, end: en})
+			s.declare(w.text(name), pyDecl{kind: pyAlias, start: st, end: en, module: module})
 		}
 	}
 }
@@ -560,17 +593,23 @@ func (w *pyWalker) bindImportFrom(n *ts.Node, s *pyScope) {
 			continue
 		}
 		var name *ts.Node
+		orig := ""
 		switch w.typ(c) {
 		case "dotted_name":
 			if c.NamedChildCount() > 0 {
 				name = c.NamedChild(c.NamedChildCount() - 1)
+				orig = w.text(c)
 			}
 		case "aliased_import":
 			name = w.field(c, "alias")
+			orig = w.text(w.field(c, "name"))
 		}
 		if name != nil {
 			st, en := span(name)
-			s.declare(w.text(name), pyDecl{kind: pyAlias, start: st, end: en})
+			spec := w.text(module)
+			s.declare(w.text(name), pyDecl{kind: pyAlias, start: st, end: en, module: spec, orig: orig})
+			// The module itself, and the name as a possible submodule.
+			w.imports = append(w.imports, spec, pyJoinModule(spec, orig))
 		}
 	}
 }
@@ -593,4 +632,51 @@ func pyEndLine(w *pyWalker, n *ts.Node) int {
 		}
 		n = last
 	}
+}
+
+// paramNames returns a def's parameter names (they shadow outer bindings for
+// call resolution; they are never indexed).
+func (w *pyWalker) paramNames(def *ts.Node) map[string]bool {
+	out := map[string]bool{}
+	params := w.field(def, "parameters")
+	if params == nil {
+		return out
+	}
+	for i := 0; i < params.NamedChildCount(); i++ {
+		p := params.NamedChild(i)
+		var id *ts.Node
+		switch w.typ(p) {
+		case "identifier":
+			id = p
+		case "typed_parameter", "list_splat_pattern", "dictionary_splat_pattern":
+			if p.NamedChildCount() > 0 {
+				id = p.NamedChild(0)
+			}
+		case "default_parameter", "typed_default_parameter":
+			id = w.field(p, "name")
+		}
+		if id != nil && w.typ(id) == "identifier" {
+			out[w.text(id)] = true
+		}
+	}
+	return out
+}
+
+func joinFQN(parent, name string) string {
+	if parent == "" {
+		return name
+	}
+	return parent + "." + name
+}
+
+// pyJoinModule appends a dotted name to a module spec, minding relative
+// specs ("." + "x" is ".x", not "..x").
+func pyJoinModule(spec, name string) string {
+	if name == "" {
+		return spec
+	}
+	if spec == "" || strings.HasSuffix(spec, ".") {
+		return spec + name
+	}
+	return spec + "." + name
 }
