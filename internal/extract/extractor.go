@@ -99,6 +99,12 @@ type Reference struct {
 	// export: To is then the member path under it ("" for the export itself,
 	// "get" for api.get()), and the indexer prefixes the export's own name.
 	DefaultExport bool
+
+	// SourceFile is set by the indexer, never by extractors: the project-relative
+	// file this reference was extracted from. It disambiguates an unscoped From
+	// FQN declared in several files — every Go `main.main`, two packages both
+	// named `data` — which would otherwise collapse onto one node.
+	SourceFile string
 }
 
 // FileResult is everything extracted from one file.

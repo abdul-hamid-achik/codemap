@@ -169,8 +169,11 @@ back-compatible:
   behavior.
 - `vecgrep` delegates every semantic query to the sibling CLI. In this mode
   `codemap index` skips and removes unused local vectors while continuing to
-  index the structural graph; a missing vecgrep binary or invalid response is a
-  visible error, not a silent owner switch.
+  index the structural graph; a missing vecgrep binary, a missing vecgrep index,
+  or an invalid response is a visible error from `semantic` (with vecgrep's own
+  message, e.g. "run 'vecgrep index'"), not a silent owner switch. Orientation
+  commands (`explore`, `task-context`) keep answering from name and keyword
+  matches instead, and say so: the note and `owner_error` carry vecgrep's error.
 
 The adapter is one process hop (`vecgrep search ... --format json`), not shared
 packages, shared databases, or MCP-to-MCP recursion. `find` and `grep` remain

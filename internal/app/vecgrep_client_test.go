@@ -120,15 +120,39 @@ func TestSemanticBackendVecgrepOwnsZeroHitAndUnavailableStates(t *testing.T) {
 		}
 	})
 
-	t.Run("missing explicit backend is an error", func(t *testing.T) {
+	t.Run("missing explicit backend is an error for Semantic, a visible degradation for Search", func(t *testing.T) {
 		svc, proj := semanticProj(t, "")
 		svc.s.Config.Semantic.Backend = "vecgrep"
 		svc.s.Config.Vecgrep = config.VecgrepConfig{Enabled: true, Bin: "vecgrep-definitely-missing"}
 		if _, err := svc.Semantic(context.Background(), proj, "anything", 5); err == nil {
 			t.Fatal("explicit vecgrep backend should fail when its binary is unavailable")
 		}
-		if _, err := svc.Search(context.Background(), proj, "TargetFunc", 5); err == nil {
-			t.Fatal("Search should not hide an explicit vecgrep owner failure behind name fallback")
+		search, err := svc.Search(context.Background(), proj, "TargetFunc", 5)
+		if err != nil {
+			t.Fatalf("Search should degrade to the name/lexical floor, got %v", err)
+		}
+		if search.OwnerError == "" || !strings.Contains(search.Note, "vecgrep failed") {
+			t.Fatalf("owner failure must stay visible: owner_error=%q note=%q", search.OwnerError, search.Note)
+		}
+		if len(search.Hits) == 0 || search.Hits[0].Symbol != "TargetFunc" {
+			t.Fatalf("floor hits = %+v, want TargetFunc", search.Hits)
+		}
+	})
+
+	t.Run("a failing vecgrep reports its own stderr", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("POSIX helper")
+		}
+		bin := filepath.Join(t.TempDir(), "vecgrep")
+		script := "#!/bin/sh\necho \"Error: index not built for project; run 'vecgrep index' to build it\" >&2\nexit 1\n"
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		svc, proj := semanticProj(t, bin)
+		svc.s.Config.Semantic.Backend = "vecgrep"
+		_, err := svc.Semantic(context.Background(), proj, "anything", 5)
+		if err == nil || !strings.Contains(err.Error(), "run 'vecgrep index'") || strings.Contains(err.Error(), "Error:") {
+			t.Fatalf("error = %v, want vecgrep's own hint without its Error: prefix", err)
 		}
 	})
 }
