@@ -40,14 +40,30 @@ var (
 		Args:  cobra.NoArgs,
 		RunE:  runAgentPlaybook,
 	}
+	agentSkillCmd = &cobra.Command{
+		Use:   "skill",
+		Short: "Install the using-codemap skill in ~/.agents/skills and link it into Claude Code, Codex, OpenCode, Hermes and omp",
+		Long: "Writes the portable using-codemap skill (MCP tools or CLI) to the shared skill library\n" +
+			"(~/.agents/skills, or $MINERVA_AGENTS_DIR/skills) and symlinks it into each detected\n" +
+			"harness's skills dir; omp reads the library natively. Only files codemap wrote are ever\n" +
+			"replaced or removed.",
+		Args: cobra.NoArgs,
+		RunE: runAgentSkill,
+	}
 )
 
 func init() {
 	agentSetupCmd.Flags().Bool("global", false, "write user-level config where the harness has one (default: project-scoped files)")
 	agentSetupCmd.Flags().Bool("dry-run", false, "print every planned write, change nothing")
 	agentSetupCmd.Flags().Bool("no-playbook", false, "register the MCP server only, skip the guidance file")
-	agentPlaybookCmd.Flags().String("format", "markdown", "output format: markdown | markdown-cli | claude-skill | cursor-rule")
-	agentCmd.AddCommand(agentListCmd, agentSetupCmd, agentPlaybookCmd)
+	agentPlaybookCmd.Flags().String("format", "markdown", "output format: markdown | markdown-cli | claude-skill | cursor-rule | skill")
+	agentSkillCmd.Flags().StringSlice("harness", nil, "harnesses to link ("+strings.Join(app.SkillHarnessNames(), ", ")+"); default: every detected one")
+	agentSkillCmd.Flags().String("dir", "", "shared skill library (default ~/.agents/skills)")
+	agentSkillCmd.Flags().Bool("copy", false, "copy the skill into harness dirs instead of symlinking")
+	agentSkillCmd.Flags().Bool("force", false, "replace a using-codemap skill codemap did not write")
+	agentSkillCmd.Flags().Bool("remove", false, "uninstall: remove the skill and links codemap wrote")
+	agentSkillCmd.Flags().Bool("dry-run", false, "print every planned change, change nothing")
+	agentCmd.AddCommand(agentListCmd, agentSetupCmd, agentPlaybookCmd, agentSkillCmd)
 }
 
 func runAgentList(cmd *cobra.Command, _ []string) error {
@@ -106,12 +122,44 @@ func runAgentPlaybook(cmd *cobra.Command, _ []string) error {
 		f = app.FormatCursorRule
 	case "markdown-cli", "cli":
 		f = app.FormatMarkdownSectionCLI
+	case "skill":
+		f = app.FormatAgentSkill
 	case "markdown", "":
 		f = app.FormatMarkdownSection
 	default:
-		return fmt.Errorf("unknown format %q — valid: markdown, markdown-cli, claude-skill, cursor-rule", format)
+		return fmt.Errorf("unknown format %q — valid: markdown, markdown-cli, claude-skill, cursor-rule, skill", format)
 	}
 	fmt.Print(app.RenderPlaybook(f))
+	return nil
+}
+
+func runAgentSkill(cmd *cobra.Command, _ []string) error {
+	harnesses, _ := cmd.Flags().GetStringSlice("harness")
+	dir, _ := cmd.Flags().GetString("dir")
+	cp, _ := cmd.Flags().GetBool("copy")
+	force, _ := cmd.Flags().GetBool("force")
+	remove, _ := cmd.Flags().GetBool("remove")
+	dry, _ := cmd.Flags().GetBool("dry-run")
+	rep, err := app.InstallAgentSkill(app.SkillOptions{
+		Harnesses: harnesses, Dir: dir, Copy: cp, Force: force, Remove: remove, DryRun: dry,
+	})
+	if err != nil {
+		return err
+	}
+	if jsonOut(cmd) {
+		return printJSON(rep)
+	}
+	if dry {
+		fmt.Println("dry-run: nothing changed")
+	}
+	fmt.Printf("  %-9s %s\n", rep.Action, rep.Skill)
+	for _, t := range rep.Targets {
+		line := fmt.Sprintf("  %-9s %-9s %s", t.Action, t.Harness, t.Path)
+		if t.Reason != "" {
+			line += " (" + t.Reason + ")"
+		}
+		fmt.Println(line)
+	}
 	return nil
 }
 

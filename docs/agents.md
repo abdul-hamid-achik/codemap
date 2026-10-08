@@ -77,6 +77,39 @@ install via Homebrew/`go install`, it is not bundled):
 You get the `codemap` MCP tools, the `using-codemap` skill (this playbook), and a
 `/codemap:codemap-setup` command that indexes the current repo.
 
+### One skill for every skills-aware harness
+
+Harnesses that load skills from a directory get the same playbook as a portable
+`using-codemap` skill. It works with or without the MCP server: when the `codemap_*` tools
+are missing, it tells the agent to run the matching `codemap <command> --json` and to index the
+repo first.
+
+```bash
+codemap agent skill --dry-run      # preview
+codemap agent skill                # install for every detected harness
+codemap agent skill --harness codex,hermes
+codemap agent skill --remove       # uninstall what codemap wrote
+```
+
+The skill is written once to the shared skill library, `~/.agents/skills/using-codemap`
+(`$MINERVA_AGENTS_DIR/skills` when set, or `--dir`), and symlinked into each harness that keeps
+its own skills directory:
+
+| Harness | Skills directory |
+|---|---|
+| Claude Code | `~/.claude/skills` (skipped when the codemap plugin is installed, since the plugin ships the skill) |
+| OpenAI Codex | `$CODEX_HOME/skills` (`~/.codex/skills`) |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/skills` |
+| Hermes Agent | `$HERMES_HOME/skills` (`~/.hermes/skills`) |
+| oh-my-pi (`omp`) | none: it reads `~/.agents/skills` directly |
+
+Without `--harness`, only harnesses whose home directory exists are linked. `--copy` copies
+instead of symlinking. codemap only ever replaces or removes a skill it wrote; a hand-written
+`using-codemap` is left alone unless you pass `--force`. Skill managers that sync
+`~/.agents/skills`, such as minerva, pick the skill up like any other. The same file is checked
+in at `integrations/agent-skills/using-codemap/SKILL.md`, and
+`codemap agent playbook --format skill` prints it.
+
 ## The agent loop
 
 Call `codemap_index` once per repo (it builds the graph, and embeddings if Ollama is up)

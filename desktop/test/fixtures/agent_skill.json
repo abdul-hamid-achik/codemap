@@ -1,0 +1,11 @@
+{
+  "skill": "/Users/me/.agents/skills/using-codemap/SKILL.md",
+  "action": "created",
+  "targets": [
+    { "harness": "claude", "path": "/Users/me/.claude/skills/using-codemap", "action": "linked" },
+    { "harness": "codex", "path": "/Users/me/.codex/skills/using-codemap", "action": "linked" },
+    { "harness": "opencode", "path": "/Users/me/.config/opencode/skills/using-codemap", "action": "linked" },
+    { "harness": "hermes", "path": "/Users/me/.hermes/skills/using-codemap", "action": "linked" },
+    { "harness": "omp", "path": "/Users/me/.agents/skills", "action": "native", "reason": "reads the shared skill library directly" }
+  ]
+}

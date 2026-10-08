@@ -311,7 +311,7 @@ complete set.
 | Branch | `branch-status` / `branch-switch` / `branch-snapshot` | per-branch index snapshots via fcheap |
 | Daemon | `daemon start` / `status` / `stop` | background watcher that keeps the index fresh |
 | Knowledge | `annotate` / `annotations` | pin / list notes and external data on symbols/paths; `--external-id` makes automated writes retry-safe |
-| Agent harness | `agent setup` / `list` / `playbook` | wire codemap (MCP server + playbook) into an AI coding harness |
+| Agent harness | `agent setup` / `list` / `playbook` / `skill` | wire codemap (MCP server + playbook) into an AI coding harness; install the portable skill |
 | Surfaces | `serve` | MCP server (stdio) |
 
 All query commands accept `--json`.
@@ -400,6 +400,7 @@ codemap agent setup claude-code   # installs the plugin (MCP server + using-code
 codemap agent setup cursor        # or: codex, gemini, vscode, opencode, cline, roo, zed, aider
 codemap agent setup agents-md     # playbook-only fallback for any AGENTS.md-aware harness
 codemap agent list                # what's detected here, and whether codemap is registered
+codemap agent skill               # using-codemap skill → ~/.agents/skills, linked into Claude Code, Codex, OpenCode, Hermes, omp
 ```
 
 In **Claude Code** you can also install the plugin directly:

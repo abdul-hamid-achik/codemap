@@ -10,6 +10,16 @@ releases page is the authoritative history.
 
 ### Added
 
+- **`codemap agent skill`** — installs a portable `using-codemap` skill once in the shared
+  skill library (`~/.agents/skills`, or `$MINERVA_AGENTS_DIR/skills`) and symlinks it into
+  Claude Code, Codex, OpenCode and Hermes; omp reads the library natively. The skill works with
+  or without the MCP server (it maps every `codemap_*` tool to `codemap <command> --json` and
+  says to index first). `--harness`, `--copy`, `--remove`, `--dry-run`, `--force`; only files
+  codemap wrote are ever replaced or removed, and Claude Code is skipped when the codemap
+  plugin already ships the skill. `agent playbook --format skill` prints it, and it is checked
+  in at `integrations/agent-skills/using-codemap/SKILL.md` for skill managers that install
+  from GitHub. Codemap Studio gains an Install skill panel.
+
 - **Declared inheritance edges** — `extends` / `implements` edges for TypeScript, JavaScript, and
   Python classes and interfaces (resolved through same-file and import bindings), derived
   `overrides` edges from each method to the same-named method of a direct base, and — under Go

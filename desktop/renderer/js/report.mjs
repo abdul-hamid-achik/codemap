@@ -253,6 +253,7 @@ export const RENDERERS = {
   source: renderSource,
   annotations: renderAnnotations,
   agents: renderAgents,
+  agentSkill: renderAgentSkill,
   docs: (json, ctx, feat, result) => markdownCard(String(result?.stdout || ''), 'Guide'),
   text: (json, ctx, feat, result) => h('pre.code', { style: 'white-space:pre-wrap' }, String(result?.stdout || '')),
   cache: renderCache,
@@ -1509,6 +1510,31 @@ function renderAgents(json, ctx, feat, result) {
       { dense: true },
     ),
     callout('info', 'Registration writes config', 'agent setup writes the MCP server entry plus a generated guidance file for that harness. Always preview with --dry-run first; the guidance is generated from the same playbook the CLI prints, never hand-typed.'),
+  ])
+}
+
+function renderAgentSkill(json, ctx, feat, result) {
+  const targets = json.targets || []
+  if (!json.skill) return genericReport(json, ctx, feat, result)
+  return h('div.stack', [
+    kv([
+      ['skill', codeInline(shortPath(json.skill))],
+      ['action', badge(json.action || '—', json.action === 'skipped' ? 'warn' : 'info')],
+      json.dry_run ? ['mode', badge('dry run', 'warn')] : null,
+    ].filter(Boolean)),
+    targets.length
+      ? table(
+          [
+            { key: 'harness', label: 'Harness', render: (r) => h('span.mono', r.harness) },
+            { key: 'action', label: 'Action', render: (r) => badge(r.action, r.action === 'skipped' ? 'warn' : 'info') },
+            { key: 'path', label: 'Path', render: (r) => codeInline(shortPath(r.path || '')) },
+            { key: 'reason', label: 'Note', render: (r) => r.reason || '—' },
+          ],
+          targets,
+          { dense: true },
+        )
+      : emptyState({ icon: '✎', title: 'No harness detected', note: 'Name one with --harness (claude, codex, opencode, hermes, omp).' }),
+    callout('info', 'One skill, linked everywhere', 'The skill lives once in the shared library; harness dirs get a symlink to it, and omp reads the library directly. Only files codemap wrote are ever replaced or removed.'),
   ])
 }
 
