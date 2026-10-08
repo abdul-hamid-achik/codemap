@@ -200,6 +200,8 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **`index.precise_servers` validation message** — a negative value no longer says "0 = auto";
+  0 means one process, the default.
 - **Opt-in parallel `--precise`** — `index.precise_servers` / `CODEMAP_PRECISE_SERVERS` (default 1)
   forks extra language-server processes that take whole projects (nearest `tsconfig.json`/
   `jsconfig.json`/`package.json`/`pyproject.toml`) from a shared largest-first queue; an oversized

@@ -325,7 +325,7 @@ func (c *Config) Validate() error {
 		{name: "index.embed_batch_size", value: c.Index.EmbedBatchSize, zeroMeaning: "0 = use the default"},
 		{name: "index.embed_concurrency", value: c.Index.EmbedConcurrency, zeroMeaning: "0 = use the default"},
 		{name: "index.extract_concurrency", value: c.Index.ExtractConcurrency, zeroMeaning: "0 = use the default"},
-		{name: "index.precise_servers", value: c.Index.PreciseServers, zeroMeaning: "0 = auto"},
+		{name: "index.precise_servers", value: c.Index.PreciseServers, zeroMeaning: "0 = one process (the default)"},
 		{name: "index.embed_max_chars", value: c.Index.EmbedMaxChars, zeroMeaning: "0 = no text cap"},
 		{name: "daemon.debounce_ms", value: c.Daemon.DebounceMS, zeroMeaning: "0 = use the default"},
 		{name: "daemon.idle_timeout_min", value: c.Daemon.IdleTimeoutMin, zeroMeaning: "0 = never shut down for idleness"},
