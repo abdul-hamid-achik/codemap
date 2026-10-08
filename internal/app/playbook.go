@@ -61,6 +61,12 @@ const (
 	// codemap_<tool> rewritten to its `codemap <name> --json` CLI form, for aider
 	// CONVENTIONS.md and any AGENTS.md-reading harness without MCP.
 	FormatMarkdownSectionCLI PlaybookFormat = "markdown-cli"
+	// FormatAgentSkill renders a portable Agent Skills SKILL.md for any harness
+	// that loads skills from a directory (~/.agents/skills, Codex, OpenCode,
+	// Hermes, omp, Claude Code): the canonical body plus a "Calling codemap"
+	// section, so one file works whether or not the codemap MCP server is
+	// connected. `codemap agent skill` installs it.
+	FormatAgentSkill PlaybookFormat = "skill"
 )
 
 const (
@@ -79,6 +85,27 @@ func PlaybookMarkdown() string {
 		"\n\n## The workflow\n\n" + strings.TrimRight(Docs("workflow"), "\n") +
 		"\n\n## Accuracy and honesty signals\n\n" + strings.TrimRight(Docs("accuracy"), "\n") + "\n"
 }
+
+// agentSkillDescription is the portable skill's frontmatter description: the
+// trigger a harness matches against the task. It names both surfaces because the
+// skill is installed where no MCP server may be connected.
+const agentSkillDescription = "Use for structural code questions (who calls X, what breaks if Y changes, which tests cover a change, where to start reading a repo) before grep or opening files, and run a codemap review after edits. Works through the codemap_* MCP tools or the codemap CLI with --json."
+
+// agentSkillCalling is the portable skill's preamble: how to reach codemap with
+// or without the MCP server, and how to make sure the repo is indexed. The CLI
+// mapping is the rule cliify applies (pinned against the registered commands
+// by TestCliifyMapsToRegisteredCommands).
+const agentSkillCalling = "## Calling codemap\n\n" +
+	"If codemap_* tools are in your tool list, use them. Otherwise run the CLI from\n" +
+	"the repository: every codemap_<tool> below is `codemap <tool> --json` with\n" +
+	"underscores turned into dashes (codemap_file_impact is `codemap file-impact --json`),\n" +
+	"codemap_context_batch is `codemap context <a> <b> --json`, and the MCP path\n" +
+	"parameter is `-C <dir>`.\n\n" +
+	"Before the first question in a repository, check the index with\n" +
+	"`codemap status --json`. When registered is false or nodes is 0, run\n" +
+	"`codemap index` (add --precise for exact TypeScript/JavaScript/Python call edges\n" +
+	"when the language server is installed); when a result says stale, reindex first.\n" +
+	"CLI exit codes: 0 answered, 2 not found, 3 index missing, 6 a review/risk gate failed.\n\n"
 
 // mcpToolRe matches a codemap_<tool> MCP token so the CLI renderer can rewrite it.
 var mcpToolRe = regexp.MustCompile(`codemap_([a-z][a-z_]*)`)
@@ -118,6 +145,8 @@ func RenderPlaybook(f PlaybookFormat) string {
 	switch f {
 	case FormatClaudeSkill:
 		return "---\nname: using-codemap\ndescription: " + playbookDescription + "\n---\n\n" + PlaybookMarkdown()
+	case FormatAgentSkill:
+		return "---\nname: using-codemap\ndescription: " + agentSkillDescription + "\n---\n\n" + agentSkillMarker + "\n\n" + agentSkillCalling + PlaybookMarkdown()
 	case FormatCursorRule:
 		return "---\ndescription: " + playbookDescription + "\nalwaysApply: false\n---\n\n" + PlaybookMarkdown()
 	case FormatMarkdownSectionCLI:
