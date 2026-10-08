@@ -1,7 +1,9 @@
 /* Copyright © 2026 abdul hamid <abdulachik@icloud.com> */
 
 // Review desk: codemap's diff-scoped impact analysis next to the actual git
-// diff, so "what did I change" and "what does it touch" sit in one place.
+// diff, so "what did I change" and "what does it touch" sit in one place —
+// plus `codemap affected` for the same scope, so the answer ends in the test
+// files to run and the commands that run them.
 
 import { h, clear, mount } from '../dom.mjs'
 import { runArgs } from '../runner.mjs'
@@ -17,6 +19,7 @@ export function reviewView(ctx) {
   let depth = 3
   let failOnRisk = ''
   let failOnUntested = false
+  let failOnUncovered = false
   let lastJson = null
 
   function currentArgs() {
@@ -25,20 +28,22 @@ export function reviewView(ctx) {
     if (mode === 'since') args.push('--since', since)
     if (failOnRisk) args.push('--fail-on-risk', failOnRisk)
     if (failOnUntested) args.push('--fail-on-untested')
+    if (failOnUncovered) args.push('--fail-on-uncovered')
     return args
   }
 
   async function run() {
     mount(out, spinner('analysing the diff…'))
-    const [res, diff] = await Promise.all([
+    const [res, diff, aff] = await Promise.all([
       runArgs(currentArgs(), { featureId: 'review' }),
       window.studio.gitDiff({ cwd: state.project, staged: mode === 'staged', since: mode === 'since' ? since : null }),
+      runArgs(affectedArgs({ mode, since, depth }), { featureId: 'affected', quiet: true }),
     ])
     lastJson = res?.json || null
-    render(res, diff)
+    render(res, diff, aff?.ok ? aff.json : null)
   }
 
-  function render(res, diff) {
+  function render(res, diff, affected) {
     const json = res?.json || null
     const risk = json?.risk || {}
     const nodes = []
@@ -54,6 +59,7 @@ export function reviewView(ctx) {
           ]),
           h('div.vh-sub', 'Diff-scoped impact plus test selection: which symbols your changes touch, how far that reaches, which tests cover them, and one aggregate risk band you can gate on.'),
           h('div.cmdline', [h('span.dim', '$'), h('code', `codemap ${currentArgs().join(' ')} --json`)]),
+          gates(),
         ]),
         h('div.vh-actions', controls()),
       ]),
@@ -72,17 +78,24 @@ export function reviewView(ctx) {
 
     // ---- gate strip -------------------------------------------------------
     const gate = json.gate || {}
+    const cov = json.coverage || null
+    const blast = json.blast_radius || []
+    const confirmed = blast.filter((n) => n.confidence === 'confirmed').length
+    const tests = affected?.tests || []
     nodes.push(
       h('div.grid.c4', [
-        metric('Aggregate risk', String(risk.level || 'unknown').toUpperCase(), risk.score !== undefined ? `score ${Number(risk.score).toFixed(2)}` : '', toneFor(risk.level)),
-        metric('Changed files', fmt.num((json.changed_files || []).length), `${fmt.num(json.total_symbols || 0)} symbol(s) mapped`),
-        metric('Blast radius', fmt.num((json.blast_radius || []).length), `depth ≤ ${json.depth ?? depth}`),
-        metric('Covering tests', fmt.num((json.covering_tests || []).length), (json.untested_symbols || []).length ? `${json.untested_symbols.length} changed symbol(s) untested` : 'every changed symbol covered', (json.untested_symbols || []).length ? 'danger' : 'ok'),
+        metric('Aggregate risk', String(risk.level || 'unknown').toUpperCase(), `${risk.score !== undefined ? `score ${Number(risk.score).toFixed(2)} · ` : ''}${fmt.num((json.changed_files || []).length)} file(s), ${fmt.num(json.total_symbols || 0)} symbol(s)`, toneFor(risk.level)),
+        metric('Test coverage', cov ? String(cov.verdict).toUpperCase() : '—', cov ? `${cov.covered_symbols} covered · ${cov.uncovered_symbols} uncovered · ${cov.unknown_symbols} unknown` : 'no non-test symbol assessed', coverageTone(cov?.verdict)),
+        metric('Blast radius', fmt.num(blast.length), `depth ≤ ${json.depth ?? depth}${blast.length ? ` · ${fmt.num(confirmed)} confirmed` : ''}`),
+        metric('Tests to run', affected ? fmt.num(tests.length) : '—', affected ? (affected.unmapped?.length ? `${affected.unmapped.length} changed file(s) unmapped` : 'every changed file mapped') : 'affected unavailable', affected && !affected.unmapped?.length ? 'ok' : ''),
       ]),
     )
 
     if (risk.level === 'unknown') {
       nodes.push(callout('warn', 'Risk is unknown, not low', 'At least one changed symbol has no usable call graph, or the analysis is incomplete. codemap never reports “unknown” as safe, and the risk gate never trips on it.'))
+    }
+    if (Array.isArray(risk.factors) && risk.factors.length) {
+      nodes.push(card({ title: 'Why this risk', sub: 'factors behind the aggregate band, by severity', body: riskFactors(risk.factors), tight: true }))
     }
     if (gate.would_fail_on) {
       nodes.push(callout('danger', `Gate would fail: ${gateReasons(gate.would_fail_on)}`, 'A CI gate configured with these thresholds would exit 6 on this diff.'))
@@ -129,11 +142,13 @@ export function reviewView(ctx) {
           (json.untested_symbols || []).length
             ? card({ title: `Untested changed symbols (${json.untested_symbols.length})`, body: symList(json.untested_symbols, { onPick: ctx.openSymbol }), tight: true })
             : null,
-          (json.covering_tests || []).length ? card({ title: `Tests to run (${json.covering_tests.length})`, body: symList(json.covering_tests, { onPick: ctx.openSymbol }), tight: true }) : null,
+          (json.covering_tests || []).length ? card({ title: `Covering test functions (${json.covering_tests.length})`, body: symList(json.covering_tests, { onPick: ctx.openSymbol, meta: (t) => t.confidence || '' }), tight: true }) : null,
           json.test_commands?.length ? card({ title: 'Test commands', body: h('div.pill-list', json.test_commands.map((c) => codeInline(typeof c === 'string' ? c : JSON.stringify(c)))), tight: true }) : null,
         ]),
       ]),
     )
+
+    nodes.push(testsCard(json, affected, ctx))
 
     nodes.push(card({ title: 'Full codemap report', sub: 'exactly what `codemap review --json` returned', body: renderReport({ id: 'review', title: 'Review', render: 'review', mcp: 'codemap_review' }, res, ctx) }))
 
@@ -155,6 +170,14 @@ export function reviewView(ctx) {
         },
       ),
       mode === 'since' ? h('input', { type: 'text', value: since, style: 'width:130px', oninput: (e) => (since = e.target.value) }) : null,
+      h('button.btn.primary', { type: 'button', onclick: run }, '▷ Run review'),
+    ])
+  }
+
+  // CI gates: they never change the report, only the exit code a CI job would see.
+  function gates() {
+    return h('div.btn-row', { style: 'margin-top:8px' }, [
+      h('span.small.muted', 'CI gates'),
       h('select', {
         style: 'width:auto',
         title: 'fail-on-risk gate',
@@ -164,7 +187,7 @@ export function reviewView(ctx) {
         ...['low', 'medium', 'high'].map((v) => h('option', { value: v, selected: failOnRisk === v }, `fail on risk ≥ ${v}`)),
       ]),
       h('label.check', [h('input', { type: 'checkbox', checked: failOnUntested, onchange: (e) => (failOnUntested = e.target.checked) }), 'fail on untested']),
-      h('button.btn.primary', { type: 'button', onclick: run }, '▷ Run review'),
+      h('label.check', { title: 'Exit 6 only on known-uncovered symbols; unknown coverage never trips it' }, [h('input', { type: 'checkbox', checked: failOnUncovered, onchange: (e) => (failOnUncovered = e.target.checked) }), 'fail on uncovered']),
     ])
   }
 
@@ -182,6 +205,100 @@ export function reviewView(ctx) {
 
 function toneFor(level) {
   return { low: 'ok', medium: 'warn', high: 'danger' }[level] || ''
+}
+
+function coverageTone(verdict) {
+  return { covered: 'ok', partial: 'warn', uncovered: 'danger' }[verdict] || ''
+}
+
+/** argv for `codemap affected` over the same diff scope as the review. */
+export function affectedArgs({ mode = 'working', since = 'main', depth = 3 } = {}) {
+  const args = ['affected', '--depth', String(depth)]
+  if (mode === 'staged') args.push('--staged')
+  if (mode === 'since' && since) args.push('--since', since)
+  return args
+}
+
+/** The runnable test commands review suggests in next[] (tool "terminal"). */
+export function testCommands(json) {
+  return (json?.next || []).filter((n) => n?.tool === 'terminal' && n.args?.command).map((n) => ({ command: n.args.command, why: n.why || '' }))
+}
+
+/** Group affected tests by their strongest reason: covers, imports, changed. */
+export function groupAffected(tests) {
+  const out = { covers: [], imports: [], changed: [] }
+  for (const t of tests || []) {
+    const reasons = t.reasons || []
+    const key = reasons.some((r) => r.startsWith('covers:')) ? 'covers' : reasons.some((r) => r.startsWith('imports:')) ? 'imports' : 'changed'
+    out[key].push(t)
+  }
+  return out
+}
+
+function riskFactors(factors) {
+  const rows = [...factors].sort((a, b) => (b.severity || 0) - (a.severity || 0))
+  return h(
+    'div.stack',
+    { style: 'gap:8px' },
+    rows.map((f) => {
+      const sev = Number(f.severity) || 0
+      return h('div', { style: 'display:grid;grid-template-columns:170px 120px minmax(0,1fr);gap:12px;align-items:center' }, [
+        h('span.mono.small', String(f.factor || '').replace(/_/g, ' ')),
+        h('div.bar', { class: `bar ${sev >= 0.7 ? 'danger' : sev >= 0.4 ? 'warn' : 'ok'}` }, [h('i', { style: { width: `${Math.max(4, sev * 100)}%` } })]),
+        h('span.small', f.detail || ''),
+      ])
+    }),
+  )
+}
+
+function testsCard(json, affected, ctx) {
+  const cmds = testCommands(json)
+  if (!affected && !cmds.length) return null
+  const tests = affected?.tests || []
+  const groups = groupAffected(tests)
+  const label = { covers: 'Cover a changed symbol', imports: 'Import a changed file', changed: 'Changed test files' }
+  const row = (t) =>
+    h('button.symrow', { type: 'button', style: 'grid-template-columns:minmax(0,1fr) auto', onclick: () => ctx.openFile(t.file) }, [
+      h('span.sn', t.file),
+      h('span.sp', { title: (t.reasons || []).join('\n') }, summarizeReasons(t.reasons)),
+    ])
+  return card({
+    title: `Run these tests${tests.length ? ` (${tests.length})` : ''}`,
+    sub: affected ? `codemap affected · call graph ${affected.call_graph || '—'}${affected.analysis_complete === false ? ' · selection may be incomplete' : ''}` : '',
+    actions: [
+      tests.length ? h('button.btn.sm', { type: 'button', onclick: () => copy(tests.map((t) => t.file).join('\n')).then(() => toast(`${tests.length} test path(s) copied`, { tone: 'ok' })) }, 'Copy paths') : null,
+      h('button.btn.sm', { type: 'button', onclick: () => ctx.openFeature('affected') }, 'Open in Affected'),
+    ],
+    body: h('div.stack', [
+      cmds.length
+        ? h('div.stack', { style: 'gap:6px' }, cmds.map((c) =>
+            h('div.cmdline', { title: c.why }, [
+              h('span.dim', '$'),
+              h('code', { style: 'flex:1;overflow:auto' }, c.command),
+              h('button.btn.sm', { type: 'button', onclick: () => copy(c.command).then(() => toast('command copied', { tone: 'ok' })) }, 'Copy'),
+            ]),
+          ))
+        : null,
+      affected?.analysis_complete === false ? callout('warn', 'The selection may be incomplete', affected.note || 'Part of the diff has no usable call graph or the index is stale — absent tests are not proof that nothing else breaks.') : null,
+      ...['covers', 'imports', 'changed'].filter((k) => groups[k].length).map((k) =>
+        h('details', { open: k === 'covers' || tests.length <= 30 }, [
+          h('summary.small.muted', `${label[k]} (${groups[k].length})`),
+          h('div.symlist', { style: 'margin-top:6px' }, groups[k].slice(0, 300).map(row)),
+        ]),
+      ),
+      affected?.unmapped?.length ? h('details', [h('summary.small.muted', `${affected.unmapped.length} changed file(s) the index could not map`), h('div.logbox', { style: 'margin-top:6px' }, affected.unmapped.map((u) => (typeof u === 'string' ? u : u.file || JSON.stringify(u))).join('\n'))]) : null,
+      affected && !tests.length ? emptyState({ icon: '∅', title: 'No tests selected', note: 'No test covers, imports, or is part of this diff.' }) : null,
+    ]),
+    tight: true,
+  })
+}
+
+function summarizeReasons(reasons = []) {
+  const covers = reasons.filter((r) => r.startsWith('covers:'))
+  if (covers.length) return covers.length === 1 ? covers[0].replace('covers:', 'covers ') : `covers ${covers.length} symbols`
+  const imports = reasons.filter((r) => r.startsWith('imports:'))
+  if (imports.length) return imports.length === 1 ? imports[0].replace('imports:', 'imports ') : `imports ${imports.length} files`
+  return reasons.join(', ')
 }
 
 function segmented(options, value, onChange) {

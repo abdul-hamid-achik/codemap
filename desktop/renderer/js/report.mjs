@@ -1499,9 +1499,9 @@ function renderAgents(json, ctx, feat, result) {
     table(
       [
         { key: 'name', label: 'Harness', render: (r) => h('span.mono', r.name || r.id || '') },
-        { key: 'detected', label: 'Detected here', render: (r) => boolBadge('', !!r.detected) },
+        { key: 'present', label: 'Detected here', render: (r) => boolBadge('', !!(r.present ?? r.detected)) },
         { key: 'registered', label: 'codemap registered', render: (r) => boolBadge('', !!r.registered) },
-        { key: 'mcp', label: 'MCP config', render: (r) => (r.mcp_path || r.config ? codeInline(shortPath(r.mcp_path || r.config)) : '—') },
+        { key: 'config_path', label: 'MCP config', render: (r) => (r.config_path || r.mcp_path || r.config ? codeInline(shortPath(r.config_path || r.mcp_path || r.config)) : '—') },
         { key: 'guidance', label: 'Guidance file', render: (r) => (r.guidance_path || r.playbook ? codeInline(shortPath(r.guidance_path || r.playbook)) : '—') },
         { key: 'profile', label: 'Profile', render: (r) => (r.profile ? badge(r.profile, 'info') : '—') },
         { key: 'act', label: '', sort: false, render: (r) => h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); ctx.onPrefill?.('agent-setup', { harness: r.name || r.id, dry_run: true }) } }, 'setup (dry run)') },

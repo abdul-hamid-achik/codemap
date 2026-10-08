@@ -5,7 +5,7 @@
 // errors, and writes screenshots. Run with: node test/smoke.mjs
 
 import { app, BrowserWindow } from 'electron'
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -15,6 +15,17 @@ import { Settings } from '../electron/settings.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(here, '..')
 const repo = path.resolve(appRoot, '..')
+// A stable exact position: the line of Service.Review, found rather than
+// hard-coded so ordinary edits to review.go don't break the walk.
+const REVIEW_AT = (() => {
+  try {
+    const lines = readFileSync(path.join(repo, 'internal/app/review.go'), 'utf8').split('\n')
+    const i = lines.findIndex((l) => l.startsWith('func (svc *Service) Review('))
+    return `internal/app/review.go:${i >= 0 ? i + 1 : 1}`
+  } catch {
+    return 'internal/app/review.go:1'
+  }
+})()
 const outDir = process.env.SMOKE_OUT || '/tmp/codemap-studio-smoke'
 const userData = path.join(outDir, 'userdata')
 const shots = path.join(outDir, 'shots')
@@ -276,12 +287,12 @@ app.whenReady().then(async () => {
   }
 
   // ---- walk every app view ----------------------------------------------
-  const views = ['overview', 'atlas', 'features', 'flow', 'dashboard', 'catalog', 'search', 'source', 'graph', 'map', 'review', 'mcp', 'raw', 'history', 'settings']
+  const views = ['overview', 'atlas', 'features', 'flow', 'processes', 'dashboard', 'catalog', 'search', 'source', 'graph', 'map', 'review', 'agents', 'mcp', 'raw', 'history', 'settings']
   for (const v of views) {
     log(`view ${v}`)
     try {
       await evalIn(win, (name) => window.__studio.route(name, { fresh: true }), v)
-      await wait(v === 'review' ? 9000 : v === 'dashboard' || v === 'map' ? 4200 : v === 'overview' || v === 'atlas' || v === 'features' ? 3000 : 1600)
+      await wait(v === 'review' ? 12000 : v === 'dashboard' || v === 'map' || v === 'processes' || v === 'agents' ? 4200 : v === 'overview' || v === 'atlas' || v === 'features' ? 3000 : 1600)
       const info = await evalIn(win, () => {
         const root = document.querySelector('.view-root')
         return { nodes: root ? root.querySelectorAll('*').length : 0, text: (root?.textContent || '').slice(0, 120) }
@@ -351,8 +362,8 @@ app.whenReady().then(async () => {
     ['file-context', { file: 'internal/app/review.go' }, 'panel-file-context'],
     ['dependencies', { file: 'internal/app/review.go' }, 'panel-dependencies'],
     ['risk', { symbol: 'Review' }, 'panel-risk'],
-    ['callers', { at: 'internal/app/review.go:123' }, 'panel-callers'],
-    ['traverse', { at: 'internal/app/review.go:123', depth: 2, limit: 30 }, 'panel-traverse'],
+    ['callers', { at: REVIEW_AT }, 'panel-callers'],
+    ['traverse', { at: REVIEW_AT, depth: 2, limit: 30 }, 'panel-traverse'],
     ['refactor-plan', { symbol: 'Review' }, 'panel-refactor'],
     ['task-context', { task: 'understand the review pipeline', mode: 'understand' }, 'panel-task-context'],
     ['coverage', { top: 20, files: true }, 'panel-coverage'],
@@ -420,10 +431,10 @@ app.whenReady().then(async () => {
   log("graph explorer")
   // ---- graph explorer with real data -------------------------------------
   try {
-    await evalIn(win, async () => {
-      window.__studio.route('graph', { fresh: true, mode: 'traverse', at: 'internal/app/review.go:123', depth: 2, limit: 40 })
+    await evalIn(win, async (at) => {
+      window.__studio.route('graph', { fresh: true, mode: 'traverse', at, depth: 2, limit: 40 })
       return true
-    })
+    }, REVIEW_AT)
     await wait(5000)
     const g = await evalIn(win, () => ({ nodes: window.__studio.state.graph.nodes?.length || 0, edges: window.__studio.state.graph.edges?.length || 0 }))
     results.graph = g

@@ -27,6 +27,8 @@ import { overviewView } from './views/overview.mjs'
 import { atlasView } from './views/atlasview.mjs'
 import { featuresView } from './views/featuresview.mjs'
 import { flowView } from './views/flowview.mjs'
+import { processesView } from './views/processesview.mjs'
+import { agentsView } from './views/agentsview.mjs'
 import { clearLearnCache } from './learn.mjs'
 
 const viewRoot = () => document.getElementById('view-root')
@@ -141,7 +143,7 @@ function buildSidebar() {
   const items = []
   const viewEntry = (v) => ({ id: `view:${v.id}`, label: v.label, icon: v.icon, view: v.id })
   items.push(navGroup('Learn', APP_VIEWS.filter((v) => v.group === 'learn').map(viewEntry), 'learn'))
-  items.push(navGroup('Workspace', APP_VIEWS.filter((v) => v.group === 'app').slice(0, 6).map(viewEntry), 'workspace'))
+  items.push(navGroup('Workspace', APP_VIEWS.filter((v) => v.group === 'app').slice(0, 7).map(viewEntry), 'workspace'))
   for (const g of GROUPS) {
     const feats = groups.get(g.id) || []
     if (!feats.length) continue
@@ -207,6 +209,8 @@ function route(view, opts = {}) {
         case 'atlas': return atlasView(ctx, opts)
         case 'features': return featuresView(ctx, opts)
         case 'flow': return flowView(ctx, opts)
+        case 'processes': return processesView(ctx, opts)
+        case 'agents': return agentsView(ctx)
         case 'dashboard': return dashboardView(ctx)
         case 'catalog': return catalogView(ctx)
         case 'search': return searchView(ctx, opts)

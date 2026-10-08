@@ -10,6 +10,16 @@ releases page is the authoritative history.
 
 ### Added
 
+- **Codemap Studio catches up with the CLI** — a **Processes** view (every entry point's
+  execution flow, filterable by kind and searchable, each opening in Flow); an **Agents** view
+  (per-harness MCP registration and using-codemap skill state, with every change previewed as a
+  dry run before it is written, plus the playbook in each format); the **Review desk** now shows
+  the coverage verdict, the risk factors, the test files to run from `codemap affected` for the
+  same diff scope with the suggested test commands, and the `--fail-on-uncovered` gate.
+  `Index --precise` exposes `CODEMAP_PRECISE_SERVERS` (panels can now pass `CODEMAP_*`
+  settings that have no flag), and `agent setup` lists `roo` and `agents-md`, audited against
+  the binary.
+
 - **`codemap agent skill`** — installs a portable `using-codemap` skill once in the shared
   skill library (`~/.agents/skills`, or `$MINERVA_AGENTS_DIR/skills`) and symlinks it into
   Claude Code, Codex, OpenCode and Hermes; omp reads the library natively. The skill works with

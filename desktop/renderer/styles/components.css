@@ -454,6 +454,10 @@ table.dense th {
 .symrow:hover {
   background: var(--surface-hover);
 }
+.symrow.active {
+  background: var(--surface-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .symrow .sk {
   font-family: var(--font-mono);
   font-size: 10px;

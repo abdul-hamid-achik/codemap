@@ -440,3 +440,13 @@ export function recoverJSON(text) {
   }
   return best
 }
+
+// Only CODEMAP_* settings may come from the renderer; everything else in the
+// child's environment stays the login shell's.
+export function codemapEnv(extra) {
+  const out = {}
+  for (const [k, v] of Object.entries(extra || {})) {
+    if (/^CODEMAP_[A-Z0-9_]+$/.test(k) && v !== undefined && v !== null) out[k] = String(v)
+  }
+  return out
+}

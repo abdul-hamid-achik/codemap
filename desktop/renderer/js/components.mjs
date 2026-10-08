@@ -98,6 +98,7 @@ export function gateReasons(w) {
   const out = []
   if (w.incomplete_analysis) out.push('incomplete analysis')
   if (w.untested) out.push('untested changed symbols')
+  if (w.uncovered) out.push('uncovered changed symbols')
   if (w.risk_at_or_above && typeof w.risk_at_or_above === 'object') {
     const levels = Object.entries(w.risk_at_or_above)
       .filter(([, v]) => v)
@@ -105,7 +106,7 @@ export function gateReasons(w) {
     if (levels.length) out.push(`risk at or above ${levels.join('/')}`)
   }
   for (const [k, v] of Object.entries(w)) {
-    if (['incomplete_analysis', 'untested', 'risk_at_or_above'].includes(k)) continue
+    if (['incomplete_analysis', 'untested', 'uncovered', 'risk_at_or_above'].includes(k)) continue
     if (v) out.push(String(k))
   }
   return out.length ? out.join(' · ') : 'nothing'

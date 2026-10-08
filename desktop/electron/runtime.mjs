@@ -9,7 +9,7 @@ import { spawn, execFile } from 'node:child_process'
 import { readFileSync, statSync, readdirSync, writeFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 
-import { runCodemap, resolveBinary, shellEnv, cancelRun, activeRuns } from './cli.mjs'
+import { runCodemap, resolveBinary, shellEnv, cancelRun, activeRuns, codemapEnv } from './cli.mjs'
 import { inspectServer } from './mcp.mjs'
 
 function runGit(args, cwd, timeoutMs = 15000) {
@@ -162,7 +162,7 @@ export function createRuntime({ appRoot, settings, getWin, isDev = false }) {
         args,
         json,
         cwd: dir,
-        env: await env(),
+        env: { ...(await env()), ...codemapEnv(req?.env) },
         timeoutMs: limit,
         onEvent: (evt) => {
           if (evt.type === 'start' && req?.runKey) runIdsByKey.set(req.runKey, evt.runId)

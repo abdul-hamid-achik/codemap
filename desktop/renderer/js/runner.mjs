@@ -5,7 +5,7 @@
 // app state, and turns a report's `next[]` suggestions into runnable values.
 
 import { state, bus, EVENTS, setView } from './state.mjs'
-import { FEATURES, feature, buildArgs, defaultValues } from './features.mjs'
+import { FEATURES, feature, buildArgs, buildEnv, defaultValues } from './features.mjs'
 import { confirmDialog, toast } from './components.mjs'
 
 const MCP_TO_FEATURE = new Map()
@@ -50,7 +50,7 @@ export function globalArgs() {
  * Execute argv against the active project.
  * @returns {Promise<object>} the normalized result
  */
-export async function runArgs(args, { featureId = 'raw', cwd, json = true, stream = false, timeoutMs, runKey, quiet = false } = {}) {
+export async function runArgs(args, { featureId = 'raw', cwd, json = true, stream = false, timeoutMs, runKey, quiet = false, env } = {}) {
   state.running++
   bus.emit(EVENTS.RUNNING, state.running)
   const started = Date.now()
@@ -63,6 +63,7 @@ export async function runArgs(args, { featureId = 'raw', cwd, json = true, strea
       stream,
       timeoutMs,
       runKey,
+      env,
     })
     result.featureId = featureId
     result.startedAt = started
@@ -139,6 +140,7 @@ export async function runFeature(feat, values, opts = {}) {
     cwd: opts.cwd,
     timeoutMs: opts.timeoutMs,
     runKey: opts.runKey,
+    env: buildEnv(feat, values),
   })
 }
 

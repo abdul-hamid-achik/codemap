@@ -58,7 +58,7 @@ test('runnable features declare a command and valid argument specs', () => {
       assert.ok(!names.has(a.name), `${f.id}: duplicate argument name ${a.name}`)
       names.add(a.name)
       assert.ok(['pos', 'text', 'num', 'bool', 'select', 'csv', 'repeat', 'path'].includes(a.kind), `${f.id}.${a.name}: unknown kind ${a.kind}`)
-      if (!a.pos && a.kind !== 'pos') assert.ok(a.flag, `${f.id}.${a.name}: non-positional needs a flag`)
+      if (!a.pos && a.kind !== 'pos') assert.ok(a.flag || /^CODEMAP_[A-Z0-9_]+$/.test(a.env || ''), `${f.id}.${a.name}: non-positional needs a flag or a CODEMAP_* env`)
       if (a.kind === 'select') assert.ok(a.options?.length, `${f.id}.${a.name}: select needs options`)
     }
   }
@@ -176,4 +176,27 @@ test('live CLI audit: declared flags exist on the real command', { skip: !findBi
     }
   }
   assert.deepEqual(problems, [], problems.join('\n'))
+})
+
+test('live CLI audit: the setup harness list matches codemap agent setup', { skip: !findBinary() && 'no codemap binary available' }, () => {
+  let msg = ''
+  try {
+    execFileSync(findBinary(), ['agent', 'setup', '__none__'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (err) {
+    msg = String(err.stderr || err.stdout || '')
+  }
+  const valid = (/valid: ([a-z0-9, -]+)/.exec(msg)?.[1] || '').split(',').map((s) => s.trim()).filter(Boolean)
+  assert.ok(valid.length, `could not parse the harness list from: ${msg}`)
+  const declared = feature('agent-setup').args.find((a) => a.name === 'harness').options.map((o) => o.v)
+  assert.deepEqual([...declared].sort(), [...valid].sort())
+})
+
+test('env fields become CODEMAP_* variables, never flags', async () => {
+  const { buildEnv } = await import('../renderer/js/features.mjs')
+  const f = feature('index-precise')
+  const values = { ...defaultValues(f), precise_servers: 4 }
+  assert.ok(!buildArgs(f, values).some((a) => /precise.servers/i.test(a)), 'no flag for an env field')
+  assert.deepEqual(buildEnv(f, values), { CODEMAP_PRECISE_SERVERS: '4' })
+  assert.deepEqual(buildEnv(f, defaultValues(f)), {}, '0 leaves the configured value alone')
+  assert.ok(commandLine(f, values).startsWith('CODEMAP_PRECISE_SERVERS=4 index --precise'))
 })

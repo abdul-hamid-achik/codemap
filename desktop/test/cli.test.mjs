@@ -141,3 +141,9 @@ test('resolveBinary uses the bundled binary when no newer codemap is installed',
     rmSync(resources, { recursive: true, force: true })
   }
 })
+
+test('codemapEnv only lets CODEMAP_* settings through from the renderer', async () => {
+  const { codemapEnv } = await import('../electron/cli.mjs')
+  assert.deepEqual(codemapEnv({ CODEMAP_PRECISE_SERVERS: 4, PATH: '/evil', NODE_OPTIONS: '--x', codemap_lower: '1', CODEMAP_NULL: null }), { CODEMAP_PRECISE_SERVERS: '4' })
+  assert.deepEqual(codemapEnv(undefined), {})
+})

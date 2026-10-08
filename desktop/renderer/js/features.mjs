@@ -14,6 +14,9 @@
 //   csv     --flag a,b,c                   (cobra `strings` flag)
 //   repeat  --flag a --flag b              (cobra `stringArray`)
 //   path    --flag <file>                  (opens a save/load dialog)
+//
+// A field with `env` instead of `flag` is passed as that CODEMAP_* environment
+// variable (settings that have no CLI flag, like index.precise_servers).
 
 export const GROUPS = [
   { id: 'health', label: 'Status & config', icon: '◉' },
@@ -187,6 +190,16 @@ export const FEATURES = [
       { kind: 'pos', name: 'path', label: 'Path', placeholder: '(current project)', required: false },
       { kind: 'bool', flag: '--reindex', name: 'reindex', label: 'Full reindex' },
       { kind: 'bool', flag: '--no-embed', name: 'no_embed', label: 'Skip embeddings' },
+      {
+        kind: 'num',
+        env: 'CODEMAP_PRECISE_SERVERS',
+        name: 'precise_servers',
+        label: 'Parallel servers',
+        def: 0,
+        min: 0,
+        max: 16,
+        hint: 'Language-server processes for the TS/JS/Python pass (CODEMAP_PRECISE_SERVERS; 0 keeps the configured value, one process by default). Helps a repo of many independent projects; on one large project each process reloads it, so it can be slower.',
+      },
     ],
     render: 'index',
     mutating: true,
@@ -678,6 +691,7 @@ export const FEATURES = [
         hint: 'Exit 6 when the aggregate risk level reaches the threshold. “unknown” never trips it.',
       },
       { kind: 'bool', flag: '--fail-on-untested', name: 'fail_on_untested', label: 'Gate: fail on untested', hint: 'Exit 6 when any changed symbol has no covering test.' },
+      { kind: 'bool', flag: '--fail-on-uncovered', name: 'fail_on_uncovered', label: 'Gate: fail on uncovered', hint: 'Exit 6 only when the coverage verdict is uncovered or partial with known-uncovered symbols. Unknown coverage never trips it; an incomplete analysis fails closed.' },
     ],
     render: 'review',
     view: 'review',
@@ -921,7 +935,7 @@ export const FEATURES = [
         label: 'Harness',
         pos: true,
         required: true,
-        options: ['claude-code', 'cursor', 'codex', 'gemini', 'cline', 'zed', 'vscode', 'opencode', 'aider'].map((v) => ({ v, label: v })),
+        options: ['claude-code', 'cursor', 'codex', 'gemini', 'cline', 'roo', 'zed', 'vscode', 'opencode', 'aider', 'agents-md'].map((v) => ({ v, label: v })),
       },
       { kind: 'bool', flag: '--dry-run', name: 'dry_run', label: 'Dry run', def: true, hint: 'Print every planned write, change nothing.' },
       { kind: 'bool', flag: '--global', name: 'global', label: 'User-level config', hint: 'Write user-level config where the harness has one (default: project-scoped files).' },
@@ -1162,12 +1176,14 @@ export const APP_VIEWS = [
   { id: 'atlas', group: 'learn', label: 'Atlas', icon: '▦' },
   { id: 'features', group: 'learn', label: 'Features', icon: '✦' },
   { id: 'flow', group: 'learn', label: 'Flow', icon: '⇢' },
+  { id: 'processes', group: 'learn', label: 'Processes', icon: '⇶' },
   { id: 'dashboard', group: 'app', label: 'Health', icon: '◈' },
   { id: 'search', group: 'app', label: 'Unified search', icon: '⌕' },
   { id: 'graph', group: 'app', label: 'Graph explorer', icon: '⇄' },
   { id: 'source', group: 'app', label: 'Source browser', icon: '⌸' },
   { id: 'review', group: 'app', label: 'Review desk', icon: '◎' },
   { id: 'map', group: 'app', label: 'Architecture map', icon: '⬡' },
+  { id: 'agents', group: 'app', label: 'Agents', icon: '✦' },
   { id: 'catalog', group: 'app', label: 'Feature catalog', icon: '≡' },
   { id: 'history', group: 'app', label: 'Run history', icon: '↺' },
   { id: 'settings', group: 'app', label: 'Settings', icon: '⚙' },
@@ -1202,6 +1218,7 @@ export function buildArgs(feat, values = {}) {
   const args = []
   for (const a of feat.args || []) {
     const raw = values[a.name]
+    if (a.env) continue
     if (a.kind === 'pos' || a.pos) {
       if (raw === undefined || raw === null) continue
       const list = Array.isArray(raw) ? raw : typeof raw === 'string' && a.multi ? splitMulti(raw) : [raw]
@@ -1263,11 +1280,25 @@ export function requiredFields(feat) {
   return (feat.args || []).filter((a) => a.required)
 }
 
+/** CODEMAP_* environment variables set by `env` fields; empty and 0 mean unset. */
+export function buildEnv(feat, values = {}) {
+  const out = {}
+  for (const a of feat.args || []) {
+    if (!a.env) continue
+    const raw = values[a.name]
+    if (raw === undefined || raw === null || raw === '' || raw === false) continue
+    if (a.kind === 'num' && !(Number(raw) > 0)) continue
+    out[a.env] = a.kind === 'bool' ? '1' : String(raw)
+  }
+  return out
+}
+
 /** Human-readable argv for the current values (the app runs it with cwd = project). */
 export function commandLine(feat, values, { json = true } = {}) {
+  const env = Object.entries(buildEnv(feat, values)).map(([k, v]) => `${k}=${v}`)
   const parts = [...(feat.cmd || []), ...buildArgs(feat, values)]
   if (json !== false && feat.json !== false) parts.push('--json')
-  return parts.join(' ')
+  return [...env, ...parts].join(' ')
 }
 
 /** Full argv array, ready to hand to the runner. */

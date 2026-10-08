@@ -131,6 +131,15 @@ context and impact. The **Diagram** tab draws the same tree left to right.
 **Copy as brief** produces a numbered outline you can paste into an agent chat
 or a note.
 
+### Processes
+
+Every entry point with a resolved handler — CLI command, HTTP or API route,
+RPC/MCP tool, page, program — traced into the code it reaches, in call order
+(`codemap processes`). Filter by kind or search with plain words ("how does
+signup work"); the selected process lists its ordered steps and the files it
+touches, and **Open in Flow** shows the same entry as a full tree with docs.
+Nothing is stored: every flow is computed from the graph when you ask.
+
 ## Workspace
 
 The rest of the sidebar runs codemap's commands. The **Feature catalog**
@@ -146,8 +155,9 @@ command has no panel, so the list cannot silently drift from the CLI.
 | Unified search | One box over four retrieval modes: name, indexed text, semantic, intent |
 | Graph explorer | Typed relations from one exact source definition, drawn and expandable |
 | Source browser | Indexed source with symbols overlaid; every position-aware feature from any line |
-| Review desk | The real `git diff` beside codemap's diff-scoped impact, tests and risk band |
+| Review desk | The real `git diff` beside codemap's diff-scoped impact, the risk band and why, the coverage verdict, and the test files to run (`codemap affected`) with ready-to-copy test commands |
 | Architecture map | Subsystems and the directed bridges between them, as a graph |
+| Agents | Every AI coding harness on this machine: whether codemap's MCP server is registered and the using-codemap skill installed, with each change previewed as a dry run before it is written |
 | MCP inspector | A live `codemap serve` handshake: profiles, tool schemas, direct tool calls |
 | Raw command | Any argv at all — the guarantee that coverage is total |
 
