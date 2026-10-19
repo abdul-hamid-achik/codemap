@@ -1542,6 +1542,34 @@ func (s *Store) ProjectVecIDCount(projectID int64) (int, error) {
 	return n, err
 }
 
+// VecIDOwner is the graph-side owner of one local vector record.
+type VecIDOwner struct {
+	NodeID  int64
+	Project string
+}
+
+// VecIDOwners maps every non-empty vec_id in the graph to its owning node
+// and project name — the validity set for orphan-vector GC.
+func (s *Store) VecIDOwners() (map[string]VecIDOwner, error) {
+	rows, err := s.db.Query(
+		`SELECT n.vec_id, n.id, p.name FROM nodes n JOIN projects p ON p.id = n.project_id
+		 WHERE n.vec_id IS NOT NULL AND n.vec_id<>''`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]VecIDOwner)
+	for rows.Next() {
+		var vecID, project string
+		var nodeID int64
+		if err := rows.Scan(&vecID, &nodeID, &project); err != nil {
+			return nil, err
+		}
+		out[vecID] = VecIDOwner{NodeID: nodeID, Project: project}
+	}
+	return out, rows.Err()
+}
+
 // ClearProjectVecIDsByName blanks every vec_id of the named project (” is
 // the no-vector value node scans expect; NULL breaks them). Called after the
 // project's local vectors were deleted so later structure-only runs can tell

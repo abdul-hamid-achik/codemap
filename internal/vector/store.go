@@ -251,6 +251,20 @@ func (s *Store) IterByProject(project string) ([]VecRecord, error) {
 	return out, nil
 }
 
+// ForEachMeta visits each record's id and metadata in unspecified order;
+// return false to stop. For maintenance scans (orphan GC) that must not
+// materialize every vector/content up front.
+func (s *Store) ForEachMeta(fn func(id uint64, meta NodeMeta) bool) {
+	s.coll.ForEach(func(r *veclite.Record) bool {
+		return fn(r.ID, metaFromPayload(r.Payload))
+	})
+}
+
+// DeleteByID removes one record by its veclite id.
+func (s *Store) DeleteByID(id uint64) error {
+	return s.coll.Delete(id)
+}
+
 // CountByProject returns how many embeddings a project has (0 = no semantic
 // index, so semantic search won't return results until `index` runs with an
 // embedding provider).

@@ -149,6 +149,7 @@ func init() {
 	indexCmd.Flags().Bool("no-tips", false, "suppress post-index advisory tips (useful in scripts/CI)")
 	initCmd.Flags().Bool("local", false, "drop a .codemap marker (so a repo-local codemap.yaml is found; index stays central)")
 	statusCmd.Flags().Bool("full", false, "include the local vector-store count (may use substantial memory)")
+	vectorsGCCmd.Flags().Bool("dry-run", false, "report orphan vector records without deleting them")
 	statusCmd.Flags().Bool("skip-stale", false, "skip the working-tree drift walk (faster readiness probes)")
 	// P1-09: --precise is the primary flag; --lsp is kept as a hidden alias
 	// so existing agent scripts don't break. The capability drives
@@ -233,7 +234,7 @@ func init() {
 
 	rootCmd.AddCommand(versionCmd, initCmd, indexCmd, statusCmd, doctorCmd, serveCmd,
 		callersCmd, calleesCmd, referencesCmd, impactCmd, reviewCmd, affectedCmd, readOrderCmd, mapCmd, exploreCmd, traverseCmd, taskContextCmd, relatedFilesCmd, dependenciesCmd, fileImpactCmd, fileContextCmd, riskCmd, symbolAtCmd, secretImpactCmd, requiredKeysCmd, semanticCmd, hotspotsCmd, orphansCmd, coverageCmd, pathCmd, symbolsCmd, findCmd, grepCmd, sourceCmd, contextCmd, refactorPlanCmd, projectsCmd, docsCmd,
-		annotateCmd, annotationsCmd, inconsistenciesCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, configCmd, daemonCmd, agentCmd)
+		annotateCmd, annotationsCmd, inconsistenciesCmd, branchStatusCmd, branchSwitchCmd, branchSnapshotCmd, structuralManifestCmd, structuralExportCmd, vectorsGCCmd, configCmd, daemonCmd, agentCmd)
 
 	// Wrap every descendant's RunE so a --json failure prints the structured
 	// {ok,error,code,hint} envelope to stdout with a stable machine code, and

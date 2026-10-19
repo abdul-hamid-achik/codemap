@@ -245,6 +245,17 @@ export const FEATURES = [
     mcp: null,
   },
   {
+    id: 'vectors-gc',
+    group: 'index',
+    title: 'Vectors GC',
+    blurb: 'Prune orphan local vector records no graph node claims (loads the shared store).',
+    cmd: ['vectors-gc'],
+    args: [
+      { kind: 'bool', flag: '--dry-run', name: 'dry_run', label: 'Dry run', def: true, hint: 'Report orphans without deleting them.' },
+    ],
+    mcp: null,
+  },
+  {
     id: 'export-symbols',
     group: 'index',
     title: 'Export symbols',

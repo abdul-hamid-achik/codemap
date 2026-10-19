@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "dry_run": true,
+  "store_present": true,
+  "scanned": 3,
+  "orphans": 2,
+  "deleted": 0,
+  "projects": [
+    { "project": "app", "scanned": 2, "orphans": 1, "deleted": 0 },
+    { "project": "ghost", "scanned": 1, "orphans": 1, "deleted": 0 }
+  ]
+}

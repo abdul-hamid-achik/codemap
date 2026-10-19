@@ -220,6 +220,10 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **`codemap vectors-gc`** — prunes orphan local vector records no graph node claims
+  (deleted/replaced nodes, projects that migrated to the vecgrep backend), with `--dry-run`
+  reporting per-project orphan counts first; embedding storage also runs in bounded waves so a
+  reindex no longer holds every vector in memory before inserting.
 - **Structure-only indexing no longer loads the shared vector store into memory** — every
   `codemap index` without local embeddings opened veclite twice (maintenance cleanup plus the
   cache auto-save's count check), and veclite loads every project's records on open, so a no-op
