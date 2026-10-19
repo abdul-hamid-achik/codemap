@@ -231,6 +231,7 @@ func (s *Store) DeleteByProject(project string) (int, error) {
 // elsewhere without re-embedding: the raw vector, its searchable content, and the
 // graph metadata (incl. the node id it belongs to).
 type VecRecord struct {
+	ID      uint64
 	Vector  []float32
 	Content string
 	Meta    NodeMeta
@@ -246,7 +247,7 @@ func (s *Store) IterByProject(project string) ([]VecRecord, error) {
 	}
 	out := make([]VecRecord, 0, len(recs))
 	for _, r := range recs {
-		out = append(out, VecRecord{Vector: r.Vector, Content: r.Content, Meta: metaFromPayload(r.Payload)})
+		out = append(out, VecRecord{ID: r.ID, Vector: r.Vector, Content: r.Content, Meta: metaFromPayload(r.Payload)})
 	}
 	return out, nil
 }

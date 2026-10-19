@@ -92,8 +92,20 @@ func ConfigFile() string {
 // DBPath is the SQLite graph database path.
 func DBPath() string { return filepath.Join(DataDir(), "graph.db") }
 
-// VeclitePath is the veclite vector store path.
+// VeclitePath is the legacy shared veclite vector store path (every
+// project's records in one file).
 func VeclitePath() string { return filepath.Join(DataDir(), appName+".veclite") }
+
+// VecliteProjectPath is the per-project veclite store for scope (a stable
+// project key). Opening a project store loads only that project's records,
+// bounding vector memory by one project instead of the whole registry.
+// An empty scope names the legacy shared store.
+func VecliteProjectPath(scope string) string {
+	if scope == "" {
+		return VeclitePath()
+	}
+	return filepath.Join(DataDir(), "vectors", scope+".veclite")
+}
 
 // RegistryDir holds per-project registry entries and local index state.
 func RegistryDir() string { return filepath.Join(DataDir(), "projects") }

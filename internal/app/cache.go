@@ -46,7 +46,7 @@ func (svc *Service) CacheSave(ctx context.Context, cwd string) (stashID, treeHas
 	var vec *vector.Store
 	profile := ""
 	if n, _ := svc.embeddedCount(name); n > 0 {
-		if v, verr := svc.s.Vectors(); verr == nil {
+		if v, verr := svc.projectVectors(p); verr == nil {
 			vec = v
 			if emb := svc.s.Embedder(); emb != nil {
 				profile = emb.Profile().String()
@@ -162,7 +162,7 @@ func (svc *Service) CacheRestore(ctx context.Context, cwd string) (restored bool
 
 	var vec *vector.Store
 	if entry.VectorCount > 0 {
-		if v, verr := svc.s.Vectors(); verr == nil {
+		if v, verr := svc.projectVectors(p); verr == nil {
 			vec = v
 		}
 	}

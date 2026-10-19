@@ -175,7 +175,14 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	var emb embed.Provider
 	if !cfg.NoEmbed && !strings.EqualFold(strings.TrimSpace(sess.Config.Semantic.Backend), "vecgrep") {
 		emb = sess.Embedder()
-		if v, verr := sess.Vectors(); verr == nil {
+		// Prefer the project's own shard when the initial index created
+		// or migrated one; otherwise the records still live in legacy.
+		scope := git.RepoHash(p.Path)
+		if _, serr := os.Stat(config.VecliteProjectPath(scope)); serr == nil {
+			if v, verr := sess.VectorsForProject(scope); verr == nil {
+				vec = v
+			}
+		} else if v, verr := sess.Vectors(); verr == nil {
 			vec = v
 		}
 	}

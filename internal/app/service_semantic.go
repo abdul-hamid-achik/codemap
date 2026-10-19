@@ -192,7 +192,15 @@ func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK in
 	if len(vecs) == 0 {
 		return rep, nil
 	}
-	vstore, err := svc.s.VectorsReadOnly()
+	gForScope, gerr := svc.s.Graph()
+	if gerr != nil {
+		return nil, gerr
+	}
+	proj, perr := gForScope.GetProjectByID(pid)
+	if perr != nil {
+		return nil, perr
+	}
+	vstore, err := svc.projectVectorsReadOnly(proj)
 	if err != nil {
 		return nil, err
 	}

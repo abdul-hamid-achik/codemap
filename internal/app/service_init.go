@@ -191,6 +191,7 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 
 	rep := &IndexReport{Project: name, Root: root}
 	var vec *vector.Store
+	vecScope := "" // "" = legacy shared store; otherwise the project shard in use
 	emb := svc.s.Embedder()
 	if strings.EqualFold(strings.TrimSpace(svc.s.Config.Semantic.Backend), "vecgrep") && withEmbed {
 		// An explicit semantic owner is also an indexing decision: writing a
@@ -216,7 +217,25 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 			}
 		}
 		if emb != nil {
-			if vec, err = svc.s.Vectors(); err != nil {
+			// Embedded writes go to the project's own shard. A project
+			// still living in the legacy shared store migrates once here
+			// (bounded afterwards); a migration declined for profile
+			// reasons keeps the legacy store so its guard can speak.
+			scope := vectorScope(project)
+			if !projectShardExists(scope) {
+				if _, merr := svc.migrateProjectVectorsToShard(g, project); merr != nil {
+					return nil, merr
+				}
+			}
+			if projectShardExists(scope) || !fileExists(config.VeclitePath()) {
+				if vec, err = svc.s.VectorsForProject(scope); err != nil {
+					return nil, err
+				}
+				vecScope = scope
+				if rerr := svc.reconcileShardVecIDs(g, project, vec); rerr != nil {
+					return nil, rerr
+				}
+			} else if vec, err = svc.s.Vectors(); err != nil {
 				return nil, err
 			}
 		}
@@ -234,7 +253,12 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 			return nil, herr
 		}
 		if hasVec {
-			if vec, err = svc.s.VectorsForMaintenance(); err != nil {
+			if scope := vectorScope(project); projectShardExists(scope) {
+				if vec, err = svc.s.VectorsForProjectMaintenance(scope); err != nil {
+					return nil, err
+				}
+				vecScope = scope
+			} else if vec, err = svc.s.VectorsForMaintenance(); err != nil {
 				return nil, err
 			}
 		}
@@ -245,9 +269,14 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	// service. Release its exclusive flock on every return path so this process
 	// can reopen read-only and unrelated processes can acquire the writer lock.
 	var releaseErr error
-	if emb == nil {
+	switch {
+	case vecScope != "" && emb == nil:
+		releaseErr = svc.s.ReleaseProjectMaintenanceVectors(vecScope)
+	case vecScope != "":
+		releaseErr = svc.s.ReleaseProjectVectors(vecScope)
+	case emb == nil:
 		releaseErr = svc.s.ReleaseMaintenanceVectors()
-	} else {
+	default:
 		releaseErr = svc.s.ReleaseVectors()
 	}
 	if indexErr != nil || releaseErr != nil {

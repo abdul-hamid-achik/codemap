@@ -101,7 +101,7 @@ func (svc *Service) CacheExport(_ context.Context, cwd, outPath string) (*CacheE
 	var vec *vector.Store
 	profile := ""
 	if n, _ := svc.embeddedCount(name); n > 0 {
-		if v, verr := svc.s.Vectors(); verr == nil {
+		if v, verr := svc.projectVectors(p); verr == nil {
 			vec = v
 			if emb := svc.s.Embedder(); emb != nil {
 				profile = emb.Profile().String()
@@ -257,7 +257,7 @@ func (svc *Service) CacheImport(_ context.Context, cwd, inPath string, force boo
 	// snapshot.Import's existing wipe-then-restore path clear them even when
 	// there are zero rows to re-insert.
 	var vec *vector.Store
-	if v, verr := svc.s.Vectors(); verr == nil {
+	if v, verr := svc.projectVectors(project); verr == nil {
 		vec = v
 	}
 	m, ierr := snapshot.Import(g, vec, pid, name, tmp, curProfile)

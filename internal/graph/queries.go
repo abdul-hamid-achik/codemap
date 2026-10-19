@@ -1570,6 +1570,56 @@ func (s *Store) VecIDOwners() (map[string]VecIDOwner, error) {
 	return out, rows.Err()
 }
 
+// SetNodeVecIDs points nodes of one project at new vector record ids
+// (nodeID -> vecID), in one transaction. Used when records move between
+// stores (per-project migration) and the graph must follow them.
+func (s *Store) SetNodeVecIDs(projectID int64, byNode map[int64]string) (int, error) {
+	if len(byNode) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	stmt, err := tx.Prepare(`UPDATE nodes SET vec_id=?, updated_at=? WHERE id=? AND project_id=?`)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = stmt.Close() }()
+	n := 0
+	for nodeID, vecID := range byNode {
+		res, err := stmt.Exec(vecID, now(), nodeID, projectID)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ := res.RowsAffected()
+		n += int(affected)
+	}
+	return n, tx.Commit()
+}
+
+// NodeProjectNames maps every node id to its project name — the validity
+// index orphan-vector GC uses for records whose graph back-pointer may be
+// mid-migration.
+func (s *Store) NodeProjectNames() (map[int64]string, error) {
+	rows, err := s.db.Query(`SELECT n.id, p.name FROM nodes n JOIN projects p ON p.id = n.project_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[int64]string)
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}
+
 // ClearProjectVecIDsByName blanks every vec_id of the named project (” is
 // the no-vector value node scans expect; NULL breaks them). Called after the
 // project's local vectors were deleted so later structure-only runs can tell

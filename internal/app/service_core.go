@@ -269,9 +269,6 @@ func worstCallGraph(imps []*ImpactReport) string {
 // the project is structure-only, which is a known 0 — so a structure-only project
 // is never charged a store-open or an empty file just to be counted.
 func (svc *Service) embeddedCount(name string) (n int, ok bool) {
-	if _, err := os.Stat(config.VeclitePath()); err != nil {
-		return 0, true // no veclite file → definitely no embeddings
-	}
 	// Count from the graph, not by opening veclite: a read-only veclite open
 	// still loads every project's records into memory, which made this
 	// existence check cost gigabytes on a large shared store. The graph's
@@ -283,6 +280,9 @@ func (svc *Service) embeddedCount(name string) (n int, ok bool) {
 	p, err := g.GetProjectByName(name)
 	if err != nil {
 		return 0, false
+	}
+	if !fileExists(config.VeclitePath()) && !projectShardExists(vectorScope(p)) {
+		return 0, true // no vector store anywhere → definitely no embeddings
 	}
 	c, err := g.ProjectVecIDCount(p.ID)
 	if err != nil {

@@ -118,14 +118,16 @@ tree-sitter grammar `-tags` (Taskfile, mirrored in `.goreleaser.yaml` and
   precise success (changed files lose coverage until re-resolved). The contentless
   FTS5 `nodes_fts` is reconciled by `Store.SyncLexical` in one pass after each index
   run — never on the per-row write path.
-- Vectors: veclite, one shared `codemap` collection. Filterable fields go in
+- Vectors: veclite, one `codemap` collection per store file — per-project shards under
+  `vectors/<project-key>.veclite`, with the legacy shared `codemap.veclite` as pre-migration
+  fallback (embedded index migrates a project once). Filterable fields go in
   **Payload**, searchable source text in **Content**. **Lazy open**: never open the
   graph DB or veclite at process startup — open on first use.
 - Embeddings: `embed.Provider`; only Ollama (`/api/embed`) is implemented — never
   advertise OpenAI/Cohere/Voyage. A remote `ollama_url` is explicit opt-in and
   receives source text. **EmbeddingProfile guard**: provider/model/dimensions/distance
   mismatch fails the index with rebuild guidance; never mix embedding spaces.
-- **Opening veclite loads every project's records into RAM** (it is an in-memory store;
+- **Opening a veclite store loads all its records into RAM** (it is an in-memory store;
   `Sync` re-serializes the whole collection). Structure-only paths must therefore not
   open it "just to check": gate on graph-side evidence (`graph.ProjectHasVecIDs` /
   `ProjectVecIDCount`) and skip `Sync` when nothing was deleted/inserted. A cleared

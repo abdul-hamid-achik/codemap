@@ -181,29 +181,74 @@ func TestIndexSameBasenameProjectsKeepsVectorScopesSeparate(t *testing.T) {
 		t.Fatalf("direct Index reused vector project key %q for both roots", first.Project)
 	}
 
-	v, err := sess.Vectors()
+	g, err := sess.Graph()
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstCount, err := v.CountByProject(first.Project)
+	shardOf := func(name string) (func() (int, []struct {
+		Symbol string
+		Vector []float32
+	}, error), func() error) {
+		p, perr := g.GetProjectByName(name)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		scope := vectorScope(p)
+		v, verr := sess.VectorsReadOnlyForProject(scope)
+		if verr != nil {
+			t.Fatal(verr)
+		}
+		return func() (int, []struct {
+			Symbol string
+			Vector []float32
+		}, error) {
+			recs, rerr := v.IterByProject(name)
+			if rerr != nil {
+				return 0, nil, rerr
+			}
+			out := make([]struct {
+				Symbol string
+				Vector []float32
+			}, 0, len(recs))
+			for _, r := range recs {
+				out = append(out, struct {
+					Symbol string
+					Vector []float32
+				}{r.Meta.Symbol, r.Vector})
+			}
+			return len(recs), out, nil
+		}, func() error { return sess.ReleaseProjectVectors(scope) }
+	}
+	firstCountFn, releaseFirst := shardOf(first.Project)
+	defer func() { _ = releaseFirst() }()
+	secondCountFn, releaseSecond := shardOf(second.Project)
+	defer func() { _ = releaseSecond() }()
+	firstCount, firstRecords, err := firstCountFn()
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondCount, err := v.CountByProject(second.Project)
+	secondCount, _, err := secondCountFn()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if firstCount != 1 || secondCount != 1 {
-		t.Fatalf("vector counts by canonical project = %d/%d, want 1/1", firstCount, secondCount)
+		t.Fatalf("shard vector counts by canonical project = %d/%d, want 1/1", firstCount, secondCount)
 	}
-	firstRecords, err := v.IterByProject(first.Project)
-	if err != nil || len(firstRecords) != 1 {
-		t.Fatalf("first project records = %d err=%v", len(firstRecords), err)
+	if len(firstRecords) != 1 {
+		t.Fatalf("first project records = %d", len(firstRecords))
 	}
 	for project, forbidden := range map[string]string{
 		first.Project:  "BetaUnique",
 		second.Project: "AlphaUnique",
 	} {
+		p, perr := g.GetProjectByName(project)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		v, verr := sess.VectorsReadOnlyForProject(vectorScope(p))
+		if verr != nil {
+			t.Fatal(verr)
+		}
 		hits, err := v.Search(firstRecords[0].Vector, 10, project)
 		if err != nil {
 			t.Fatal(err)
@@ -214,6 +259,11 @@ func TestIndexSameBasenameProjectsKeepsVectorScopesSeparate(t *testing.T) {
 		if hits[0].Meta.Symbol == forbidden {
 			t.Fatalf("search scope %q leaked symbol %q from the other project", project, forbidden)
 		}
+	}
+	// Embedded writes now land in shards: the legacy shared store stays
+	// empty for these projects.
+	if n, ok := svc.embeddedCount(first.Project); !ok || n != 1 {
+		t.Fatalf("embeddedCount(first) = (%d, %v), want known 1 via graph", n, ok)
 	}
 }
 

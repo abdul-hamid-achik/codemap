@@ -52,6 +52,12 @@ type Session struct {
 	// flock, RW with exclusive flock). Created lazily on first vector open.
 	// Guarded by vecMu (see above).
 	vecSession *vlsession.Session
+
+	// projectVectors holds per-project vector stores (scope -> handles),
+	// guarded by vecMu like the legacy fields above. The legacy fields
+	// serve the shared store; project states serve one project each so an
+	// open loads only that project's records.
+	projectVectors map[string]*projectVectorState
 }
 
 // Open loads configuration (honoring the --config path / CODEMAP_CONFIG) and
@@ -335,6 +341,10 @@ func (s *Session) Close() error {
 	if s.vecSession != nil {
 		err = errors.Join(err, s.vecSession.Close())
 		s.vecSession = nil
+	}
+	for scope, st := range s.projectVectors {
+		err = errors.Join(err, st.close())
+		delete(s.projectVectors, scope)
 	}
 	if s.graph != nil {
 		err = errors.Join(err, s.graph.Close())

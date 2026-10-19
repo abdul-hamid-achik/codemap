@@ -48,7 +48,7 @@ func (svc *Service) BranchSnapshot(ctx context.Context, root, branch string) err
 	var vec *vector.Store
 	profile := ""
 	if n, _ := svc.embeddedCount(name); n > 0 {
-		if v, verr := svc.s.Vectors(); verr == nil {
+		if v, verr := svc.projectVectors(p); verr == nil {
 			vec = v
 			if emb := svc.s.Embedder(); emb != nil {
 				profile = emb.Profile().String()
@@ -223,9 +223,11 @@ func (svc *Service) restoreSnapshot(ctx context.Context, g *graph.Store, pid int
 	// PROJECT currently has any embeddings so the previous branch's
 	// vectors don't survive a structure-only restore.
 	var vec *vector.Store
-	if v, verr := svc.s.Vectors(); verr == nil {
-		if n, _ := svc.embeddedCount(name); n > 0 {
-			vec = v
+	if proj, perr := g.GetProjectByID(pid); perr == nil {
+		if v, verr := svc.projectVectors(proj); verr == nil {
+			if n, _ := svc.embeddedCount(name); n > 0 {
+				vec = v
+			}
 		}
 	}
 	if _, ierr := snapshot.Import(g, vec, pid, name, tmp, curProfile); ierr != nil {

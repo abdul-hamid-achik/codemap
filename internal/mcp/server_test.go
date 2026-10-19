@@ -18,6 +18,7 @@ import (
 
 	"github.com/abdul-hamid-achik/codemap/internal/app"
 	"github.com/abdul-hamid-achik/codemap/internal/embed"
+	"github.com/abdul-hamid-achik/codemap/internal/git"
 	"github.com/abdul-hamid-achik/codemap/internal/index"
 )
 
@@ -1409,8 +1410,17 @@ func TestMCPIndexCoordinatesSessionOwnership(t *testing.T) {
 	}
 	defer external.Close()
 	external.SetEmbedder(coordinatingEmbedder{})
-	if _, err := external.Vectors(); err == nil {
-		_ = external.ReleaseVectors()
+	extGraph, gerr := external.Graph()
+	if gerr != nil {
+		t.Fatal(gerr)
+	}
+	projects, perr := extGraph.ListProjects()
+	if perr != nil || len(projects) != 1 {
+		t.Fatalf("projects = %v err=%v", projects, perr)
+	}
+	scope := git.RepoHash(projects[0].Path) // embedded writes now lock the project shard
+	if _, err := external.VectorsForProject(scope); err == nil {
+		_ = external.ReleaseProjectVectors(scope)
 		t.Fatal("independent writer acquired the database during active MCP index")
 	} else if !strings.Contains(err.Error(), "locked") {
 		t.Fatalf("independent writer error = %v, want lock contention", err)
@@ -1462,10 +1472,10 @@ func TestMCPIndexCoordinatesSessionOwnership(t *testing.T) {
 
 	// The writer lock is operation-scoped: an independent owner can acquire it
 	// immediately while the MCP server and its Session remain alive.
-	if _, err := external.Vectors(); err != nil {
+	if _, err := external.VectorsForProject(scope); err != nil {
 		t.Fatalf("independent writer blocked after MCP index completed: %v", err)
 	}
-	if err := external.ReleaseVectors(); err != nil {
+	if err := external.ReleaseProjectVectors(scope); err != nil {
 		t.Fatal(err)
 	}
 

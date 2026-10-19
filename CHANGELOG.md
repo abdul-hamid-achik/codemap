@@ -182,6 +182,12 @@ releases page is the authoritative history.
 
 ### Changed
 
+- **Local vectors are sharded per project** — embedded indexing writes to
+  `vectors/<project-key>.veclite` instead of the one shared `codemap.veclite`, so opening a
+  project's vectors loads only its records. A project still in the legacy shared store migrates
+  once on its next embedded index (copy → rename → graph re-point → legacy delete; a crash
+  mid-migration reconciles on the next run). Unmigrated projects keep reading through the legacy
+  store, and `vectors-gc` scans both.
 - **Body-only edits no longer re-extract every dependent** — replacing a file's nodes remaps
   inbound edges onto replacement symbols with the same identity (including overload order and
   pure line shifts); only dependents of files whose symbol surface changed are expanded for

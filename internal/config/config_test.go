@@ -90,13 +90,15 @@ func TestXDGPaths(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheHome)
 
 	checks := map[string][2]string{
-		"ConfigDir":   {ConfigDir(), filepath.Join(cfgHome, "codemap")},
-		"DataDir":     {DataDir(), filepath.Join(dataHome, "codemap")},
-		"CacheDir":    {CacheDir(), filepath.Join(cacheHome, "codemap")},
-		"ConfigFile":  {ConfigFile(), filepath.Join(cfgHome, "codemap", "config.yaml")},
-		"DBPath":      {DBPath(), filepath.Join(dataHome, "codemap", "graph.db")},
-		"VeclitePath": {VeclitePath(), filepath.Join(dataHome, "codemap", "codemap.veclite")},
-		"RegistryDir": {RegistryDir(), filepath.Join(dataHome, "codemap", "projects")},
+		"ConfigDir":                {ConfigDir(), filepath.Join(cfgHome, "codemap")},
+		"DataDir":                  {DataDir(), filepath.Join(dataHome, "codemap")},
+		"CacheDir":                 {CacheDir(), filepath.Join(cacheHome, "codemap")},
+		"ConfigFile":               {ConfigFile(), filepath.Join(cfgHome, "codemap", "config.yaml")},
+		"DBPath":                   {DBPath(), filepath.Join(dataHome, "codemap", "graph.db")},
+		"VeclitePath":              {VeclitePath(), filepath.Join(dataHome, "codemap", "codemap.veclite")},
+		"VecliteProjectPath":       {VecliteProjectPath("abc123"), filepath.Join(dataHome, "codemap", "vectors", "abc123.veclite")},
+		"VecliteProjectPathLegacy": {VecliteProjectPath(""), filepath.Join(dataHome, "codemap", "codemap.veclite")},
+		"RegistryDir":              {RegistryDir(), filepath.Join(dataHome, "codemap", "projects")},
 	}
 	for name, c := range checks {
 		if c[0] != c[1] {
