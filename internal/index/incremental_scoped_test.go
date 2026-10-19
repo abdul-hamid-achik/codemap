@@ -37,14 +37,18 @@ func TestScopedImportsRewriteDependents(t *testing.T) {
 		return r
 	}
 	run()
-	// Modified-only delta in the imported file: the inbound-closure expansion
-	// (pre-existing) force-re-extracts a.go because it calls b.B(), and a.go's
-	// import edge — cascade-deleted by the node replacements — must come back
-	// through the scoped import pass.
+	// Body-only delta in the imported file: b's symbol surface is stable,
+	// so indexFile remaps a.go's inbound call edge onto the replacement B
+	// node and a.go is NOT re-extracted; a.go's import edge — cascade-
+	// deleted by the node replacement — still comes back through the
+	// scoped import pass.
 	writeFile(t, root, "b/b.go", "package b\n\n// edited\nfunc B() {}\n")
 	r := run()
-	if r.FilesIndexed != 2 {
-		t.Fatalf("files indexed = %d, want 2 (b.go + inbound-closure a.go)", r.FilesIndexed)
+	if r.FilesIndexed != 1 {
+		t.Fatalf("files indexed = %d, want 1 (only b.go; a.go's edges remap)", r.FilesIndexed)
+	}
+	if n, _ := g.CountEdgesByType(pid, graph.EdgeCalls); n != 1 {
+		t.Fatalf("call edges after body-only edit = %d, want 1 (A→B remapped)", n)
 	}
 	if n, _ := g.CountEdgesByType(pid, graph.EdgeImports); n != 1 {
 		t.Fatalf("import edges after scoped run = %d, want 1 (a.go→b.go)", n)
@@ -60,6 +64,87 @@ func TestScopedImportsRewriteDependents(t *testing.T) {
 	}
 	if n, _ := g.CountEdgesByType(pid, graph.EdgeImports); n != 1 {
 		t.Fatalf("import edges after no-op = %d, want 1", n)
+	}
+}
+
+// A surface change (rename) cannot be remapped: the dependent must be
+// re-extracted so its references re-resolve against the new surface.
+func TestSurfaceChangeReextractsDependents(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module scoped-rename\n\ngo 1.22\n")
+	writeFile(t, root, "b/b.go", "package b\n\nfunc B() {}\n")
+	writeFile(t, root, "a.go", "package a\n\nimport \"scoped-rename/b\"\n\nfunc A() { b.B() }\n")
+	g, _ := newStores(t)
+	pid, err := g.UpsertProject("scoped-rename", root, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	run := func() *Result {
+		t.Helper()
+		r, err := ix.IndexProject(context.Background(), pid, "scoped-rename", root, Options{NoLSP: true})
+		if err != nil || len(r.Errors) > 0 {
+			t.Fatalf("index=%+v err=%v", r, err)
+		}
+		return r
+	}
+	run()
+	writeFile(t, root, "b/b.go", "package b\n\nfunc C() {}\n")
+	r := run()
+	if r.FilesIndexed != 2 {
+		t.Fatalf("files indexed = %d, want 2 (b.go + dependent a.go)", r.FilesIndexed)
+	}
+	if n, _ := g.CountEdgesByType(pid, graph.EdgeCalls); n != 0 {
+		t.Fatalf("call edges after rename = %d, want 0 (A still calls missing b.B)", n)
+	}
+	if n, _ := g.CountEdgesByType(pid, graph.EdgeImports); n != 1 {
+		t.Fatalf("import edges after rename = %d, want 1", n)
+	}
+}
+
+// The watcher path gets the same surface-scoped expansion: a body-only
+// edit remaps the caller's edge without re-extracting it, while a rename
+// still pulls the dependent in for re-resolution.
+func TestIndexFilesSurfaceScopedExpansion(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module watcher-scope\n\ngo 1.22\n")
+	writeFile(t, root, "b/b.go", "package b\n\nfunc B() {}\n")
+	writeFile(t, root, "a.go", "package a\n\nimport \"watcher-scope/b\"\n\nfunc A() { b.B() }\n")
+	g, _ := newStores(t)
+	pid, err := g.UpsertProject("watcher-scope", root, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ix := New(g, nil, nil, config.DefaultConfig().Index)
+	if _, err := ix.IndexProject(context.Background(), pid, "watcher-scope", root, Options{NoLSP: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeFile(t, root, "b/b.go", "package b\n\n// edited\nfunc B() {}\n")
+	r, err := ix.IndexFiles(context.Background(), pid, "watcher-scope", root, []string{"b/b.go"}, Options{NoLSP: true})
+	if err != nil || len(r.Errors) > 0 {
+		t.Fatalf("watcher body-only=%+v err=%v", r, err)
+	}
+	if r.FilesIndexed != 1 {
+		t.Fatalf("body-only watcher files indexed = %d, want 1", r.FilesIndexed)
+	}
+	if n, _ := g.CountEdgesByType(pid, graph.EdgeCalls); n != 1 {
+		t.Fatalf("body-only watcher call edges = %d, want 1 (remapped)", n)
+	}
+
+	writeFile(t, root, "b/b.go", "package b\n\nfunc C() {}\n")
+	r, err = ix.IndexFiles(context.Background(), pid, "watcher-scope", root, []string{"b/b.go"}, Options{NoLSP: true})
+	if err != nil || len(r.Errors) > 0 {
+		t.Fatalf("watcher rename=%+v err=%v", r, err)
+	}
+	if r.FilesIndexed != 2 {
+		t.Fatalf("rename watcher files indexed = %d, want 2 (dependent re-extracted)", r.FilesIndexed)
+	}
+	if n, _ := g.CountEdgesByType(pid, graph.EdgeCalls); n != 0 {
+		t.Fatalf("rename watcher call edges = %d, want 0", n)
+	}
+	if n, _ := g.CountEdgesByType(pid, graph.EdgeImports); n != 1 {
+		t.Fatalf("rename watcher import edges = %d, want 1", n)
 	}
 }
 

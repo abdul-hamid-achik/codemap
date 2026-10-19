@@ -124,14 +124,19 @@ type FileError struct {
 
 // Result summarizes an index run.
 type Result struct {
-	FilesScanned   int         `json:"files_scanned"`
-	FilesIndexed   int         `json:"files_indexed"`           // new or changed
-	FilesSkipped   int         `json:"files_skipped"`           // oversized, generated, or extraction-errored — NOT unchanged or precise-only degradation
-	FilesUnchanged int         `json:"files_unchanged"`         // P2-07 (O108): hash-matched files that were skipped because they're up-to-date (not a failure)
-	FilesDeleted   int         `json:"files_deleted,omitempty"` // pruned: indexed before, now gone from disk
-	Nodes          int         `json:"nodes"`
-	Edges          int         `json:"edges"`
-	Errors         []FileError `json:"errors,omitempty"`
+	FilesScanned   int `json:"files_scanned"`
+	FilesIndexed   int `json:"files_indexed"`           // new or changed
+	FilesSkipped   int `json:"files_skipped"`           // oversized, generated, or extraction-errored — NOT unchanged or precise-only degradation
+	FilesUnchanged int `json:"files_unchanged"`         // P2-07 (O108): hash-matched files that were skipped because they're up-to-date (not a failure)
+	FilesDeleted   int `json:"files_deleted,omitempty"` // pruned: indexed before, now gone from disk
+	// fileSurfaceChanged is per-file scratch: indexFile sets it on the
+	// caller-provided local Result when the file's symbol identity set
+	// changed (or an inbound edge found no replacement), telling the
+	// caller its dependents need re-extraction. Never serialized.
+	fileSurfaceChanged bool        `json:"-"`
+	Nodes              int         `json:"nodes"`
+	Edges              int         `json:"edges"`
+	Errors             []FileError `json:"errors,omitempty"`
 	// Phase timing (wall-clock milliseconds). Extract covers Pass 1 (walk + parse +
 	// graph writes); Embed covers Pass 4 (Ollama + vector inserts); Precise covers
 	// the opt-in go/types + LSP callHierarchy passes. Total is the end-to-end wall
@@ -788,7 +793,7 @@ func usesLanguageServer(ft fileTask) bool {
 // touched, when non-nil, collects the paths whose node generation was actually
 // replaced (changed=true) — the scoping set for the deferred import and
 // declarative passes.
-func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int, onErrUnchanged bool, projectID int64, projectName string, opts Options, res *Result, pending *[]extract.Reference, embedAcc *[]embedItem, touched *[]string, mu *sync.Mutex, fileDone *int64, total int) error {
+func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int, onErrUnchanged bool, projectID int64, projectName string, opts Options, res *Result, pending *[]extract.Reference, embedAcc *[]embedItem, touched *[]string, surfaceChanged *[]string, mu *sync.Mutex, fileDone *int64, total int) error {
 	if len(files) == 0 {
 		return nil
 	}
@@ -836,6 +841,9 @@ func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int
 				*embedAcc = append(*embedAcc, toEmbed...)
 				if touched != nil {
 					*touched = append(*touched, ft.rel)
+				}
+				if surfaceChanged != nil && localRes.fileSurfaceChanged {
+					*surfaceChanged = append(*surfaceChanged, ft.rel)
 				}
 			}
 			mu.Unlock()
@@ -1156,30 +1164,16 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	deleted := []string{}
 	fullPasses := opts.Reindex
 	if !opts.Reindex {
-		// Before replacing any changed file nodes, remember which unchanged files
-		// point into them. Replacing a target cascades those inbound edges; forcing
-		// their source files through extraction lets the final resolution pass
-		// rebuild the edges against the replacement nodes.
-		changed, deltaAdded, err := ix.changedFilePaths(projectID, files)
+		// Inbound dependents are no longer force-extracted up front:
+		// indexFile remaps their edges onto the replacement nodes when the
+		// changed file's symbol surface is stable, and only files whose
+		// surface actually changed expand to their dependents (below,
+		// after Pass 1 knows which files those are).
+		_, deltaAdded, err := ix.changedFilePaths(projectID, files)
 		if err != nil {
 			return nil, err
 		}
 		added = deltaAdded
-		_, inbound, err := ix.expandWithInboundSources(projectID, changed)
-		if err != nil {
-			return nil, err
-		}
-		present := make(map[string]bool, len(files))
-		for _, ft := range files {
-			present[ft.rel] = true
-		}
-		for _, rel := range inbound {
-			if present[rel] {
-				if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
-					return nil, err
-				}
-			}
-		}
 	}
 
 	// Incremental only: prune files that were indexed before but are gone from disk
@@ -1205,10 +1199,11 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// documentSymbol on a single stdio connection deadlocks tsserver/pyright.
 	var pending []extract.Reference
 	var embedAcc []embedItem
-	var touched []string // files whose node generation was replaced this run
-	var mu sync.Mutex    // guards res, embedAcc, pending, touched across parallel workers
-	total := len(files)  // == res.FilesScanned; the bar's denominator
-	var fileDone int64   // atomic counter for OnFile progress reporting
+	var touched []string        // files whose node generation was replaced this run
+	var surfaceChanged []string // touched files whose symbol surface changed
+	var mu sync.Mutex           // guards res, embedAcc, pending, touched across parallel workers
+	total := len(files)         // == res.FilesScanned; the bar's denominator
+	var fileDone int64          // atomic counter for OnFile progress reporting
 	// P2-04 (O30): build the project-wide import index once after the
 	// LSP re-walk and before the cheap/LSP split, so every indexFile call
 	// shares the same goFiles / relFiles maps. Pure data — no DB access, no
@@ -1237,15 +1232,59 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	}
 	// Cheap files first: parallel, finish quickly and leave a usable graph
 	// even if a later LSP pass is slow on a large monorepo.
-	if err := ix.extractFiles(ctx, cheapFiles, concurrency, false, projectID, projectName, opts, res, &pending, &embedAcc, &touched, &mu, &fileDone, total); err != nil {
+	if err := ix.extractFiles(ctx, cheapFiles, concurrency, false, projectID, projectName, opts, res, &pending, &embedAcc, &touched, &surfaceChanged, &mu, &fileDone, total); err != nil {
 		return res, err
 	}
 
 	// Language-server files: ONE in-flight extract at a time. Documents are
 	// closed after DidOpen (see lspsrc.ExtractFile) so open buffers do not
 	// accumulate.
-	if err := ix.extractFiles(ctx, lspFiles, 1, true, projectID, projectName, opts, res, &pending, &embedAcc, &touched, &mu, &fileDone, total); err != nil {
+	if err := ix.extractFiles(ctx, lspFiles, 1, true, projectID, projectName, opts, res, &pending, &embedAcc, &touched, &surfaceChanged, &mu, &fileDone, total); err != nil {
 		return res, err
+	}
+
+	// Dependents of files whose symbol surface changed (renamed/removed/
+	// added definitions, or an inbound edge with no identity match) still
+	// need re-extraction so their references re-resolve against the new
+	// surface. Body-only edits never reach here: indexFile already
+	// remapped their inbound edges onto the replacement nodes. This bounds
+	// the old unconditional inbound closure — editing a hub's body no
+	// longer re-extracts its thousands of callers.
+	if len(surfaceChanged) > 0 && !opts.Reindex {
+		_, inboundAdded, err := ix.expandWithInboundSources(projectID, surfaceChanged)
+		if err != nil {
+			return res, err
+		}
+		touchedSet := make(map[string]bool, len(touched))
+		for _, rel := range touched {
+			touchedSet[rel] = true
+		}
+		want := make(map[string]bool, len(inboundAdded))
+		for _, rel := range inboundAdded {
+			if !touchedSet[rel] {
+				want[rel] = true
+			}
+		}
+		var depCheap, depLSP []fileTask
+		for _, ft := range files {
+			if !want[ft.rel] {
+				continue
+			}
+			if err := ix.graph.DeleteFileHash(projectID, ft.rel); err != nil {
+				return res, err
+			}
+			if usesLanguageServer(ft) {
+				depLSP = append(depLSP, ft)
+			} else {
+				depCheap = append(depCheap, ft)
+			}
+		}
+		if err := ix.extractFiles(ctx, depCheap, concurrency, false, projectID, projectName, opts, res, &pending, &embedAcc, &touched, nil, &mu, &fileDone, total); err != nil {
+			return res, err
+		}
+		if err := ix.extractFiles(ctx, depLSP, 1, true, projectID, projectName, opts, res, &pending, &embedAcc, &touched, nil, &mu, &fileDone, total); err != nil {
+			return res, err
+		}
 	}
 	res.ExtractMs = int(time.Since(extractStart).Milliseconds())
 	if res.ExtractMs == 0 {
@@ -1422,7 +1461,8 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	var pending []extract.Reference
 	var embedAcc []embedItem
 	var importFiles []fileTask
-	var touchedFiles []string // files whose nodes changed — used to refresh the cached node index (P7)
+	var touchedFiles []string        // files whose nodes changed — used to refresh the cached node index (P7)
+	var surfaceChangedFiles []string // initial files whose dependents need re-resolution
 	preciseRelevant, goTouched := false, false
 	for _, rel := range rels {
 		lang := extract.LanguageForPath(rel)
@@ -1484,33 +1524,44 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 		return res, err
 	}
 
-	// Pin P0-04: expand the changed set with every file that currently has
-	// edges TARGETING nodes in a changed file. Pre-fix the FK-cascaded
-	// inbound edges (from unchanged files into a changed file) were never
-	// rebuilt on incremental reindex, so callers-of-edited-symbols returned
-	// a confidently-empty answer. The expansion below re-extracts those
-	// source files so their outbound refs end up in `pending` and the
-	// resolve pass rebuilds the now-dangling inbound edges.
-	if len(rels) > 0 {
-		var added []string
-		rels, added, err = ix.expandWithInboundSources(projectID, rels)
-		if err != nil {
-			return res, err
-		}
-		// Force re-extraction of the inbound-expanded files: their content
-		// didn't change, so the hash short-circuit inside indexFile would
-		// otherwise skip the refs needed to rebuild cascaded inbound edges.
-		for _, rel := range added {
-			if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
-				return res, err
-			}
-		}
-	}
+	// Dependents are expanded after the initial files run, and only for
+	// those whose symbol surface changed. indexFile remaps inbound edges
+	// for stable surfaces; surface changes still expand below so their
+	// dependents' outbound refs re-resolve against the new declarations.
 	impIdx := incrementalImportIndex(root, append(indexedFiles, rels...))
+	initialRels := len(rels)
+	surfaceExpanded := false
+	processed := make(map[string]bool, len(rels))
 
 	var prunedFiles []string
 	var prunedDangling []graph.UnresolvedRef
-	for _, rel := range rels {
+	for i := 0; i < len(rels) || (i == initialRels && !surfaceExpanded && len(surfaceChangedFiles) > 0); i++ {
+		if i == initialRels && !surfaceExpanded {
+			surfaceExpanded = true
+			if len(surfaceChangedFiles) > 0 {
+				_, added, expandErr := ix.expandWithInboundSources(projectID, surfaceChangedFiles)
+				if expandErr != nil {
+					return res, expandErr
+				}
+				for _, rel := range added {
+					if processed[rel] {
+						continue
+					}
+					if err := ix.graph.DeleteFileHash(projectID, rel); err != nil {
+						return res, err
+					}
+					rels = append(rels, rel)
+				}
+			}
+			if i >= len(rels) {
+				break
+			}
+		}
+		rel := rels[i]
+		if processed[rel] {
+			continue
+		}
+		processed[rel] = true
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
@@ -1556,6 +1607,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 		}
 		res.FilesScanned++
 		ft := fileTask{abs: abs, rel: rel, lang: lang, ext: ext, importIndex: impIdx}
+		res.fileSurfaceChanged = false
 		changed, refs, toEmbed, err := ix.indexFile(ctx, projectID, projectName, ft, opts, res)
 		if err != nil {
 			res.Errors = append(res.Errors, FileError{File: rel, Err: err.Error()})
@@ -1566,6 +1618,9 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 			pending = append(pending, refs...)
 			embedAcc = append(embedAcc, toEmbed...)
 			touchedFiles = append(touchedFiles, rel)
+			if i < initialRels && res.fileSurfaceChanged {
+				surfaceChangedFiles = append(surfaceChangedFiles, rel)
+			}
 		}
 		importFiles = append(importFiles, ft)
 	}
@@ -1875,6 +1930,19 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 	}
 	defer func() { _ = tx.Rollback() }() // safe: Commit renders this a no-op
 
+	// Snapshot the prior generation before replacing it: its symbol
+	// identities (to tell whether this edit changed the file's surface)
+	// and its remappable inbound edges (re-pointed at the replacement
+	// nodes below, so unchanged dependents need no re-extraction).
+	oldNodes, err := graph.FileNodesTx(tx, projectID, ft.rel)
+	if err != nil {
+		return false, nil, nil, err
+	}
+	inbound, err := graph.CaptureInboundEdgesTx(tx, projectID, ft.rel)
+	if err != nil {
+		return false, nil, nil, err
+	}
+
 	if err := graph.DeleteNodesInFileTx(tx, projectID, ft.rel); err != nil {
 		return false, nil, nil, err
 	}
@@ -1895,6 +1963,12 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		return false, nil, nil, err
 	}
 
+	type symbolIdentity struct{ symbol, fqn, kind string }
+	type placedNode struct {
+		id        int64
+		startLine int
+	}
+	newByIdentity := make(map[symbolIdentity][]placedNode, len(fr.Symbols))
 	var toEmbed []embedItem
 	for _, sym := range fr.Symbols {
 		nid, err := graph.AddNodeTx(tx, &graph.Node{
@@ -1905,6 +1979,8 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		if err != nil {
 			return false, nil, nil, err
 		}
+		ident := symbolIdentity{sym.Name, sym.FQN, sym.Kind}
+		newByIdentity[ident] = append(newByIdentity[ident], placedNode{id: nid, startLine: sym.StartLine})
 		if _, err := graph.AddEdgeProvTx(tx, fileID, nid, graph.EdgeDefines, graph.WeightLSP, graph.ProvName); err != nil {
 			return false, nil, nil, err
 		}
@@ -1920,6 +1996,76 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 			})
 		}
 	}
+	// Re-point the prior generation's inbound edges at the replacement
+	// nodes with the same identity. A precise call edge downgrades to a
+	// name candidate: this file's precise coverage was just cleared, but
+	// the (unchanged) caller's call site still names this declaration.
+	// An edge whose target identity vanished or became ambiguous marks
+	// the surface changed, and the caller re-extracts its dependents.
+	res.fileSurfaceChanged = false
+	{
+		oldCount := make(map[symbolIdentity]int, len(oldNodes))
+		oldOrdinal := make(map[int64]int, len(oldNodes))
+		for _, n := range oldNodes {
+			if n.Kind == graph.KindFile {
+				continue
+			}
+			ident := symbolIdentity{n.Symbol, n.FQN, n.Kind}
+			oldOrdinal[n.ID] = oldCount[ident]
+			oldCount[ident]++
+		}
+		if len(oldCount) != len(newByIdentity) {
+			res.fileSurfaceChanged = true
+		} else {
+			for ident, placed := range newByIdentity {
+				if oldCount[ident] != len(placed) {
+					res.fileSurfaceChanged = true
+					break
+				}
+			}
+		}
+		type edgeKey struct {
+			source, target int64
+			kind           string
+		}
+		seen := make(map[edgeKey]bool, len(inbound))
+		for _, e := range inbound {
+			candidates := newByIdentity[symbolIdentity{e.TargetSymbol, e.TargetFQN, e.TargetKind}]
+			var target int64
+			if e.TargetKind == graph.KindFile {
+				target = fileID // the file node itself always has a replacement
+				candidates = nil
+			}
+			switch {
+			case len(candidates) == 1:
+				target = candidates[0].id
+			case len(candidates) > 1:
+				// Preserve the declaration's ordinal among identical
+				// identities (for example, overloads), so a pure line shift
+				// does not make every inbound edge ambiguous.
+				if ordinal, ok := oldOrdinal[e.TargetID]; ok && ordinal < len(candidates) {
+					target = candidates[ordinal].id
+				}
+			}
+			if target == 0 {
+				res.fileSurfaceChanged = true
+				continue
+			}
+			key := edgeKey{e.SourceID, target, e.EdgeType}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			prov, weight := e.Provenance, e.Weight
+			if e.EdgeType == graph.EdgeCalls && prov == graph.ProvPrecise {
+				prov, weight = graph.ProvName, graph.WeightTreeSitter
+			}
+			if _, err := graph.AddEdgeProvTx(tx, e.SourceID, target, e.EdgeType, weight, prov); err != nil {
+				return false, nil, nil, err
+			}
+		}
+	}
+
 	// P2-04 (O30): the import edge write is deferred to a final pass
 	// (writeAllImportEdges) after all file nodes exist. Writing inside
 	// indexFile races with the target file's own indexFile call — a

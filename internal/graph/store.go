@@ -579,6 +579,77 @@ func DeleteNodesInFileTx(tx *sql.Tx, projectID int64, file string) error {
 	return err
 }
 
+// InboundEdge is one edge from outside a file into one of its symbols,
+// captured before the file's nodes are replaced so it can be remapped onto
+// the replacement node with the same identity instead of forcing the
+// (unchanged) source file through re-extraction.
+type InboundEdge struct {
+	SourceID        int64
+	TargetID        int64
+	EdgeType        string
+	Weight          float64
+	Provenance      string
+	TargetSymbol    string
+	TargetFQN       string
+	TargetKind      string
+	TargetStartLine int
+}
+
+// FileNodesTx lists a file's current nodes inside tx (the store's single
+// connection makes the non-tx read deadlock during node replacement).
+func FileNodesTx(tx *sql.Tx, projectID int64, file string) ([]Node, error) {
+	rows, err := tx.Query("SELECT "+nodeCols+" FROM nodes WHERE project_id=? AND file_path=? ORDER BY start_line", projectID, file)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *n)
+	}
+	return out, rows.Err()
+}
+
+// CaptureInboundEdgesTx snapshots the remappable inbound edges targeting
+// file's symbols (code and declarative relations from other files).
+// Precise call edges are included; the caller downgrades their provenance
+// on remap because the target file's precise coverage is cleared by the
+// same replacement. Defines/overrides edges are owned by their own
+// passes (in-file defines are rebuilt with the symbols, overrides by
+// RecomputeOverrides) and are not captured. Import edges are captured so
+// the scoped import pass can still discover importers of a touched file
+// after its node replacement; that pass replaces them wholesale anyway.
+func CaptureInboundEdgesTx(tx *sql.Tx, projectID int64, file string) ([]InboundEdge, error) {
+	rows, err := tx.Query(`
+		SELECT e.source_id, e.target_id, e.edge_type, e.weight, e.provenance,
+		       COALESCE(t.symbol,''), COALESCE(t.fqn,''), t.kind, t.start_line
+		FROM edges e
+		JOIN nodes t ON e.target_id = t.id
+		JOIN nodes s ON e.source_id = s.id
+		WHERE t.project_id = ? AND t.file_path = ? AND s.file_path <> ?
+		  AND e.edge_type IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		projectID, file, file, EdgeCalls, EdgeReferences, EdgeExtends, EdgeImplements,
+		EdgeReads, EdgeWrites, EdgeDocuments, EdgeDependsOn, EdgeStyles, EdgeTests, EdgeImports)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []InboundEdge
+	for rows.Next() {
+		var e InboundEdge
+		if err := rows.Scan(&e.SourceID, &e.TargetID, &e.EdgeType, &e.Weight, &e.Provenance,
+			&e.TargetSymbol, &e.TargetFQN, &e.TargetKind, &e.TargetStartLine); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) queryNodes(query string, args ...any) ([]Node, error) {
 	rows, err := s.db.Query(query, args...)
 	if err != nil {

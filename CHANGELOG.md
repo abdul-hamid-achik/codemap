@@ -182,6 +182,13 @@ releases page is the authoritative history.
 
 ### Changed
 
+- **Body-only edits no longer re-extract every dependent** — replacing a file's nodes remaps
+  inbound edges onto replacement symbols with the same identity (including overload order and
+  pure line shifts); only dependents of files whose symbol surface changed are expanded for
+  re-resolution, in both project indexing and the watcher path. Precise inbound call edges
+  conservatively downgrade to name candidates because the edited file's coverage is cleared until
+  the next precise pass. On a 4,665-file hub-heavy monorepo, a comment-only hub edit now indexes
+  1 file instead of 1,298 while preserving all 178,903 edges.
 - **TypeScript, JavaScript, and Python index without language servers** — a new built-in
   backend (`internal/extract/sittersrc`) parses them with a pure-Go tree-sitter runtime
   (gotreesitter, no CGO) and reproduces the symbol trees `typescript-language-server` and
