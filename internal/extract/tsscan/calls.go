@@ -31,7 +31,9 @@ import (
 //     looks the member up INSIDE that file only. A package import (react,
 //     node:fs) resolves to no project file and so yields no edge;
 //  3. `this.method(` inside a class member → the same class's member when the
-//     class defines it in this file.
+//     class defines it in this file;
+//  4. Temporal dispatch through proxyActivities objects/locals and typed
+//     workflow starts (see temporal.go).
 //
 // Everything else (arbitrary `obj.method(`, globals, callbacks passed by
 // value, inherited members, calls through barrel re-exports) is deliberately
@@ -91,15 +93,22 @@ var (
 // since specifiers live inside strings). Type-only imports (`import type`,
 // `{ type X }`) are skipped: they never execute.
 func parseImportBindings(code string) map[string]importBinding {
+	return parseImportBindingsMode(code, false)
+}
+
+// parseImportBindingsMode optionally retains type-only bindings. Temporal's
+// activity/workflow contracts are commonly imported only as types even though
+// their names identify runtime dispatch targets.
+func parseImportBindingsMode(code string, includeTypes bool) map[string]importBinding {
 	out := map[string]importBinding{}
 	for _, m := range importClauseRe.FindAllStringSubmatch(code, -1) {
-		if m[1] != "" {
+		if m[1] != "" && !includeTypes {
 			continue // import type …
 		}
 		if strings.HasPrefix(m[3], "node:") {
 			continue // runtime builtin: never a project file
 		}
-		addClauseBindings(out, strings.TrimSpace(m[2]), m[3])
+		addClauseBindingsMode(out, strings.TrimSpace(m[2]), m[3], includeTypes)
 	}
 	for _, m := range requireBindRe.FindAllStringSubmatch(code, -1) {
 		spec := m[3]
@@ -136,7 +145,7 @@ func parseImportBindings(code string) map[string]importBinding {
 	return out
 }
 
-func addClauseBindings(out map[string]importBinding, clause, spec string) {
+func addClauseBindingsMode(out map[string]importBinding, clause, spec string, includeTypes bool) {
 	if clause == "" {
 		return
 	}
@@ -169,9 +178,10 @@ func addClauseBindings(out map[string]importBinding, clause, spec string) {
 	}
 	for _, item := range strings.Split(body, ",") {
 		item = strings.TrimSpace(item)
-		if item == "" || strings.HasPrefix(item, "type ") {
+		if item == "" || (strings.HasPrefix(item, "type ") && !includeTypes) {
 			continue
 		}
+		item = strings.TrimSpace(strings.TrimPrefix(item, "type "))
 		exported, local := item, item
 		if i := strings.Index(item, " as "); i > 0 {
 			exported, local = strings.TrimSpace(item[:i]), strings.TrimSpace(item[i+4:])
@@ -225,7 +235,8 @@ var notACallBefore = map[string]bool{
 func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Reference {
 	view, code := sanitize(src)
 	imports := parseImportBindings(string(code))
-	if len(symbols) == 0 && len(imports) == 0 {
+	typeImports := parseImportBindingsMode(string(code), true)
+	if len(symbols) == 0 && len(imports) == 0 && len(typeImports) == 0 {
 		return nil
 	}
 	text := string(view)
@@ -240,6 +251,7 @@ func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Re
 			byFQN[s.FQN] = s
 		}
 	}
+	temporal := parseTemporalBindings(string(code), typeImports, byFQN)
 	bare := map[string][]symInfo{}
 	memberOwners := map[string]bool{}
 	hasMethods := false
@@ -278,6 +290,15 @@ func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Re
 	for name := range imports {
 		interesting[name] = true
 	}
+	for name := range temporal.objects {
+		interesting[name] = true
+	}
+	for name := range temporal.locals {
+		interesting[name] = true
+	}
+	for name := range temporal.childFuncs {
+		interesting[name] = true
+	}
 	if hasMethods {
 		interesting["this"] = true
 	}
@@ -310,6 +331,65 @@ func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Re
 		ref.From, ref.FromLine, ref.FromFile = from, fromLine, relPath
 		ref.Kind, ref.Line, ref.Qualified = extract.RefCalls, line, true
 		refs = append(refs, ref)
+	}
+
+	emitTemporal := func(start int, target temporalTarget, method string) {
+		to := method
+		if target.prefix != "" {
+			to = target.prefix + "." + method
+		}
+		ref := extract.Reference{To: to}
+		switch {
+		case target.spec != "":
+			ref.ImportSpec = target.spec
+		case target.prefix != "":
+			sym := byFQN[to]
+			if sym == nil {
+				return
+			}
+			ref.ToFile, ref.ToLine = relPath, sym.StartLine
+		default:
+			return
+		}
+		emit(start, ref)
+	}
+
+	// emitWorkflowTarget resolves a workflow-start target expression
+	// (identifier or root.member) through imports (type-only included:
+	// workflow functions are commonly imported as types) or same-file symbols.
+	emitWorkflowTarget := func(start int, expr string) {
+		parts := strings.Split(expr, ".")
+		if len(parts) == 2 {
+			root, member := parts[0], parts[1]
+			if b, ok := typeImports[root]; ok {
+				switch b.kind {
+				case bindNamespace:
+					emit(start, extract.Reference{To: member, ImportSpec: b.spec})
+				case bindNamed:
+					emit(start, extract.Reference{To: b.exported + "." + member, ImportSpec: b.spec})
+				case bindDefault:
+					emit(start, extract.Reference{To: member, ImportSpec: b.spec, DefaultExport: true})
+				}
+				return
+			}
+			if sym := byFQN[expr]; sym != nil {
+				emit(start, extract.Reference{To: sym.FQN, ToFile: relPath, ToLine: sym.StartLine})
+			}
+			return
+		}
+		name := parts[0]
+		if b, ok := typeImports[name]; ok {
+			switch b.kind {
+			case bindNamed:
+				emit(start, extract.Reference{To: b.exported, ImportSpec: b.spec})
+			case bindDefault:
+				emit(start, extract.Reference{ImportSpec: b.spec, DefaultExport: true})
+			}
+			return
+		}
+		if t := visibleBare(bare[name], lineOf(start)); t != nil {
+			emit(start, extract.Reference{To: t.FQN, ToFile: relPath, ToLine: t.StartLine})
+		}
 	}
 
 	n := len(text)
@@ -354,6 +434,24 @@ func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Re
 			}
 			member := text[ms:me]
 			if _, ok := openParenAfter(text, me); !ok {
+				// Temporal activities are often handed to a step runner by
+				// value (`runGuardedStep(..., acts.load)`), which then invokes
+				// them. In argument position that member access is the call.
+				if target, ok := temporal.objects[tok]; ok && target.allows(member) && !temporal.inDeclaration(start) {
+					q := me
+					for q < n && (text[q] == ' ' || text[q] == '\t' || text[q] == '\n' || text[q] == '\r') {
+						q++
+					}
+					if q < n && (text[q] == ',' || text[q] == ')') {
+						if p := prevNonSpace(text, start); p >= 0 && (text[p] == '(' || text[p] == ',') {
+							emitTemporal(start, target, member)
+						}
+					}
+				}
+				continue
+			}
+			if target, ok := temporal.objects[tok]; ok && target.allows(member) {
+				emitTemporal(start, target, member)
 				continue
 			}
 			if tok == "this" {
@@ -382,12 +480,23 @@ func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Re
 					emit(start, extract.Reference{To: b.exported + "." + member, ImportSpec: b.spec})
 				}
 			}
+		case k < n && (text[k] == ',' || text[k] == ')'):
+			// A destructured activity local passed as a call argument to a
+			// step runner (`runStep(..., loadEvent)`) is invoked by that
+			// runner; model the handoff as the activity call candidate.
+			if local, ok := temporal.locals[tok]; ok && !temporal.inDeclaration(start) {
+				if p := prevNonSpace(text, start); p >= 0 && (text[p] == '(' || text[p] == ',') {
+					emitTemporal(start, local.target, local.exported)
+				}
+			}
 		case k < n && (text[k] == '(' || text[k] == '<'):
+			generic := ""
 			if text[k] == '<' {
 				g := skipGeneric(text, k)
 				if g < 0 {
 					continue
 				}
+				generic = text[k+1 : g-1]
 				k = skipBlanks(text, g)
 				if k >= n || text[k] != '(' {
 					continue
@@ -397,6 +506,21 @@ func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Re
 				continue
 			}
 			if isDeclarationSite(text, start, k) {
+				continue
+			}
+			if temporal.proxyFuncs[tok] {
+				continue // the factory itself is modeled through its proxy calls
+			}
+			if local, ok := temporal.locals[tok]; ok {
+				emitTemporal(start, local.target, local.exported)
+				continue
+			}
+			if temporal.childFuncs[tok] {
+				if expr, ok := typeofTargetExpr(generic); ok {
+					emitWorkflowTarget(start, expr)
+				} else if expr, ok := parseFirstArgExpr(text, k); ok {
+					emitWorkflowTarget(start, expr)
+				}
 				continue
 			}
 			line := lineOf(start)
@@ -412,6 +536,11 @@ func CallRefs(relPath string, src []byte, symbols []extract.Symbol) []extract.Re
 					emit(start, extract.Reference{ImportSpec: b.spec, DefaultExport: true})
 				}
 			}
+		}
+	}
+	if temporal.hasClient {
+		for _, start := range clientWorkflowStarts(text) {
+			emitWorkflowTarget(start.pos, start.expr)
 		}
 	}
 	return refs

@@ -296,6 +296,71 @@ func TestCallRefs(t *testing.T) {
 			want: []string{"Page>same:format"},
 		},
 		{
+			name: "temporal proxyActivities object and destructured locals resolve to the contract",
+			src: lines(
+				"import { proxyActivities } from '@temporalio/workflow';",                  // 1
+				"import type { Activities } from './activities';",                          // 2
+				"const acts = proxyActivities<Pick<Activities, \"load\" | \"save\">>({});", // 3
+				"const { remove: removeIt } = proxyActivities<Activities>({});",            // 4
+				"export async function workflow() {",                                       // 5
+				"  await acts.load();",                                                     // 6
+				"  await acts.missing();",                                                  // 7
+				"  await removeIt();",                                                      // 8
+				"}"),                                                                       // 9
+			syms: []extract.Symbol{fn("workflow", 5, 9)},
+			want: []string{"workflow>./activities:Activities.load", "workflow>./activities:Activities.remove"},
+		},
+		{
+			name: "temporal proxyActivities with a different import source is ignored",
+			src: lines(
+				"import { proxyActivities } from './fake';",                // 1
+				"import type { Activities } from './activities';",          // 2
+				"const acts = proxyActivities<Activities>({});",            // 3
+				"export async function workflow() { await acts.load(); }"), // 4
+			syms: []extract.Symbol{fn("workflow", 4, 4)},
+			want: []string{path + ">./fake:proxyActivities"},
+		},
+		{
+			name: "temporal child workflows resolve direct and typeof targets",
+			src: lines(
+				"import { executeChild } from '@temporalio/workflow';",             // 1
+				"import { childWorkflow } from './child';",                         // 2
+				"export async function parent() {",                                 // 3
+				"  await executeChild(childWorkflow, {});",                         // 4
+				"  await executeChild<typeof childWorkflow>('childWorkflow', {});", // 5
+				"}"), // 6
+			syms: []extract.Symbol{fn("parent", 3, 6)},
+			want: []string{"parent>./child:childWorkflow"},
+		},
+		{
+			name: "temporal activities passed by value to a step runner",
+			src: lines(
+				"import { proxyActivities } from '@temporalio/workflow';",           // 1
+				"import type { Activities } from './activities';",                   // 2
+				"const acts = proxyActivities<Activities>({});",                     // 3
+				"const { charge } = proxyActivities<typeof import('./acts')>({});",  // 4
+				"declare function runStep(id: string, fn: () => unknown): unknown;", // 5
+				"export async function workflow() {",                                // 6
+				"  await runStep('load', acts.load);",                               // 7
+				"  await runStep('charge', charge);",                                // 8
+				"  const alias = acts.load;",                                        // 9
+				"}"),                                                                // 10
+			syms: []extract.Symbol{fn("workflow", 6, 10)},
+			want: []string{"workflow>./activities:Activities.load", "workflow>./acts:charge"},
+		},
+		{
+			name: "temporal client workflow.start resolves only identifier targets",
+			src: lines(
+				"import type { Client } from '@temporalio/client';", // 1
+				"import { myWorkflow } from './workflows';",         // 2
+				"export async function run(client: Client) {",       // 3
+				"  await client.workflow.start(myWorkflow, {});",    // 4
+				"  await client.workflow.start('myWorkflow', {});",  // 5
+				"}"), // 6
+			syms: []extract.Symbol{fn("run", 3, 6)},
+			want: []string{"run>./workflows:myWorkflow"},
+		},
+		{
 			name: "documented false positive: a parameter shadowing a same-file function",
 			src: lines(
 				"function cb() {}",               // 1
