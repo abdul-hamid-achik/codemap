@@ -181,6 +181,12 @@ The adapter is one process hop (`vecgrep search ... --format json`), not shared
 packages, shared databases, or MCP-to-MCP recursion. `find` and `grep` remain
 offline structural/text fallbacks in every mode.
 
+Local vectors live per project under `vectors/<project-key>.veclite` in the data
+directory, so opening one project's vectors loads only its records. Projects
+embedded by older versions keep their records in the legacy shared
+`codemap.veclite` until their next embedded `codemap index`, which migrates
+them once; `codemap vectors-gc` prunes orphaned records from both layouts.
+
 The full built-in default list is:
 
 - **Any-depth** (bare, matches at every path level): `.git`, `node_modules`, `vendor`, `__pycache__`,
