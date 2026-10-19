@@ -1514,6 +1514,45 @@ func (s *Store) ProjectNodes(projectID int64) ([]Node, error) {
 	return s.queryNodes("SELECT "+nodeCols+" FROM nodes WHERE project_id=? ORDER BY id", projectID)
 }
 
+// ProjectHasVecIDs reports whether any node of the project carries a local
+// vector id. It is the cheap pre-flight for structure-only vector cleanup:
+// opening the shared veclite store loads every project's records into memory,
+// so a project that never embedded locally must not pay that open (nor fail
+// on a broken store) just to learn there is nothing to delete.
+func (s *Store) ProjectHasVecIDs(projectID int64) (bool, error) {
+	var one int
+	err := s.db.QueryRow(
+		`SELECT 1 FROM nodes WHERE project_id=? AND vec_id IS NOT NULL AND vec_id<>'' LIMIT 1`,
+		projectID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ProjectVecIDCount counts nodes of the project carrying a local vector id.
+func (s *Store) ProjectVecIDCount(projectID int64) (int, error) {
+	var n int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM nodes WHERE project_id=? AND vec_id IS NOT NULL AND vec_id<>''`,
+		projectID).Scan(&n)
+	return n, err
+}
+
+// ClearProjectVecIDsByName blanks every vec_id of the named project (” is
+// the no-vector value node scans expect; NULL breaks them). Called after the
+// project's local vectors were deleted so later structure-only runs can tell
+// (from the graph alone) that no cleanup remains.
+func (s *Store) ClearProjectVecIDsByName(projectName string) error {
+	_, err := s.db.Exec(
+		`UPDATE nodes SET vec_id='' WHERE project_id=(SELECT id FROM projects WHERE name=?) AND vec_id IS NOT NULL AND vec_id<>''`,
+		projectName)
+	return err
+}
+
 // ProjectEdges returns every edge whose source node is in the project, ordered by
 // id. Edges carry no project_id of their own (they belong to a project via their
 // source/target nodes, both in-project), so this is the project's full edge set —

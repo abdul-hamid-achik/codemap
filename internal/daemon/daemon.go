@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -166,10 +167,13 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	}
 
 	// The incremental indexer (gosrc registered; embeds via the session's
-	// possibly-throttled embedder unless structure-only).
+	// possibly-throttled embedder unless structure-only). Under the vecgrep
+	// semantic backend the daemon must not open the local vector store at
+	// all: retrieval is delegated, and the open loads every project's
+	// records into a process that then holds them for its whole lifetime.
 	var vec *vector.Store
 	var emb embed.Provider
-	if !cfg.NoEmbed {
+	if !cfg.NoEmbed && !strings.EqualFold(strings.TrimSpace(sess.Config.Semantic.Backend), "vecgrep") {
 		emb = sess.Embedder()
 		if v, verr := sess.Vectors(); verr == nil {
 			vec = v

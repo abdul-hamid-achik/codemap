@@ -272,11 +272,19 @@ func (svc *Service) embeddedCount(name string) (n int, ok bool) {
 	if _, err := os.Stat(config.VeclitePath()); err != nil {
 		return 0, true // no veclite file → definitely no embeddings
 	}
-	v, err := svc.s.VectorsReadOnly()
+	// Count from the graph, not by opening veclite: a read-only veclite open
+	// still loads every project's records into memory, which made this
+	// existence check cost gigabytes on a large shared store. The graph's
+	// vec_id is what every query joins on, so it is the count that matters.
+	g, err := svc.s.Graph()
 	if err != nil {
 		return 0, false
 	}
-	c, err := v.CountByProject(name)
+	p, err := g.GetProjectByName(name)
+	if err != nil {
+		return 0, false
+	}
+	c, err := g.ProjectVecIDCount(p.ID)
 	if err != nil {
 		return 0, false
 	}

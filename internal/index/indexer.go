@@ -1361,7 +1361,11 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		res.EmbedMs = 1 // sub-millisecond but embedding did run
 	}
 
-	if ix.vectors != nil {
+	// Sync persists embed inserts. A structure-only run (embedder nil) only
+	// deletes vectors, and each delete already syncs when it removes rows —
+	// an unconditional Sync here re-serializes the whole shared collection
+	// for nothing.
+	if ix.vectors != nil && ix.embedder != nil {
 		if err := ix.vectors.Sync(); err != nil {
 			return res, err
 		}
@@ -1608,7 +1612,7 @@ func (ix *Indexer) IndexFiles(ctx context.Context, projectID int64, projectName,
 	if err := ix.embedAndStore(ctx, projectName, embedAcc, opts, res); err != nil {
 		return res, err
 	}
-	if ix.vectors != nil {
+	if ix.vectors != nil && ix.embedder != nil {
 		if err := ix.vectors.Sync(); err != nil {
 			return res, err
 		}
@@ -2038,10 +2042,21 @@ func (ix *Indexer) clearProjectVectors(projectName string) error {
 	if ix.vectors == nil {
 		return nil
 	}
-	if _, err := ix.vectors.DeleteByProject(projectName); err != nil {
+	deleted, err := ix.vectors.DeleteByProject(projectName)
+	if err != nil {
 		return err
 	}
-	return ix.vectors.Sync()
+	// Sync re-serializes the whole shared collection; a clear that deleted
+	// nothing must not pay it.
+	if deleted > 0 {
+		if err := ix.vectors.Sync(); err != nil {
+			return err
+		}
+	}
+	// Drop the graph-side pointers too, even when the store had nothing
+	// left: stale vec_ids would make every later structure-only run reopen
+	// the store to rediscover the same empty cleanup.
+	return ix.graph.ClearProjectVecIDsByName(projectName)
 }
 
 // nodeIndex is the project-wide symbol index built once from ProjectNodes and

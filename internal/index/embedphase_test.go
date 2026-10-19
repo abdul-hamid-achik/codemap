@@ -147,6 +147,15 @@ func TestIncrementalNoEmbedClearsWholeProjectVectors(t *testing.T) {
 			if got, err := v.CountByProject("app"); err != nil || got != 0 {
 				t.Fatalf("incremental no-embed vectors = (%d, %v), want honest project-wide zero", got, err)
 			}
+			// The graph-side vec_id pointers are cleared too (to '', the
+			// value node scans accept), so a later structure-only run can
+			// skip reopening the vector store entirely.
+			if got, err := g.ProjectVecIDCount(pid); err != nil || got != 0 {
+				t.Fatalf("graph vec_ids after no-embed clear = (%d, %v), want 0", got, err)
+			}
+			if _, err := g.ProjectNodes(pid); err != nil {
+				t.Fatalf("nodes unscannable after vec_id clear: %v", err)
+			}
 		})
 	}
 }

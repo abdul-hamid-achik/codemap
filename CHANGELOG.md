@@ -220,6 +220,16 @@ releases page is the authoritative history.
 
 ### Fixed
 
+- **Structure-only indexing no longer loads the shared vector store into memory** — every
+  `codemap index` without local embeddings opened veclite twice (maintenance cleanup plus the
+  cache auto-save's count check), and veclite loads every project's records on open, so a no-op
+  incremental on a large shared store peaked at multiple GB of RSS even for projects with no
+  local vectors at all (e.g. under `semantic.backend: vecgrep`). Cleanup/count pre-flights now
+  read graph-side `vec_id` evidence, clears drop the graph pointers so the open is paid at most
+  once, whole-collection `Sync` runs only when something changed, and the daemon does not open
+  the local store under the vecgrep backend. Measured on a 4,665-file monorepo: 5.2 GB → 157 MB
+  peak RSS, 12.7 s → 2.1 s for a no-op index. `AGENTS.md` was also pruned (62 KB → 14 KB) so it
+  fits harness rules budgets; the detail moved to pointers into `docs/`, schemas, and code.
 - **`index.precise_servers` validation message** — a negative value no longer says "0 = auto";
   0 means one process, the default.
 - **Opt-in parallel `--precise`** — `index.precise_servers` / `CODEMAP_PRECISE_SERVERS` (default 1)

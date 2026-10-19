@@ -225,9 +225,18 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	// source or deleted graph nodes. Open an existing collection for cleanup even
 	// when embeddings were explicitly disabled or the provider is unavailable.
 	// This path never creates a vector store and never inserts embeddings.
+	// The open itself is the expensive part — veclite loads every project's
+	// records into memory — so only pay it when this project actually has
+	// local vectors to clear (checked cheaply against the graph, pre-wipe).
 	if emb == nil {
-		if vec, err = svc.s.VectorsForMaintenance(); err != nil {
-			return nil, err
+		hasVec, herr := g.ProjectHasVecIDs(pid)
+		if herr != nil {
+			return nil, herr
+		}
+		if hasVec {
+			if vec, err = svc.s.VectorsForMaintenance(); err != nil {
+				return nil, err
+			}
 		}
 	}
 
