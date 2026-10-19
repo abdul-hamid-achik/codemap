@@ -58,3 +58,46 @@ func TestStructureOnlyIndexSkipsVectorStoreWhenProjectHasNoVectors(t *testing.T)
 		t.Error("maintenance vector store was opened for a project with no local vectors")
 	}
 }
+
+// embeddedCount is the existence pre-flight behind cache save/export and
+// branch snapshot/restore. It must answer from graph-side vec_id evidence:
+// opening veclite read-only to count loads every project's records, which
+// made the post-index cache auto-save cost gigabytes on a large store.
+func TestEmbeddedCountDoesNotOpenVectorStore(t *testing.T) {
+	isolate(t)
+
+	vecPath := config.VeclitePath()
+	if err := os.MkdirAll(filepath.Dir(vecPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vecPath, []byte("not a veclite database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	proj := t.TempDir()
+	if err := os.WriteFile(filepath.Join(proj, "main.go"),
+		[]byte("package app\n\nfunc Run() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	ir, err := svc.Init(proj, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, ok := svc.embeddedCount(ir.Project); !ok || n != 0 {
+		t.Fatalf("embeddedCount = (%d, %v), want known 0 without opening veclite", n, ok)
+	}
+	if sess.vectorsRO != nil {
+		t.Error("read-only vector store was opened just to count")
+	}
+}

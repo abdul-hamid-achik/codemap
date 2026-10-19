@@ -76,7 +76,7 @@ tasks:
       - gofmt -w .
 
   verify:source:
-    desc: Verify Go formatting and modules without modifying files
+    desc: Verify Go formatting, modules, and the AGENTS.md size budget without modifying files
     cmds:
       - |
         unformatted="$(gofmt -l .)"
@@ -86,6 +86,15 @@ tasks:
           exit 1
         fi
       - go mod tidy -diff
+      - |
+        # Harnesses truncate rules files around 64 KiB for subagent startup
+        # context; 32 KiB leaves headroom. New contract detail goes to
+        # docs/, schemas, or code with a one-line pointer in AGENTS.md.
+        agents_bytes="$(wc -c < AGENTS.md | tr -d ' ')"
+        if [ "$agents_bytes" -gt 32768 ]; then
+          echo "AGENTS.md is $agents_bytes bytes, over the 32768-byte budget"
+          exit 1
+        fi
 
   lint:
     desc: Lint with golangci-lint v2.12.2; fall back offline
