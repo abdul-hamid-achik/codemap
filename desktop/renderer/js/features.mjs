@@ -961,10 +961,10 @@ export const FEATURES = [
     id: 'agent-skill',
     group: 'knowledge',
     title: 'Install skill',
-    blurb: 'Write the using-codemap skill to ~/.agents/skills and link it into Claude Code, Codex, OpenCode, Hermes and omp.',
+    blurb: 'Write the using-codemap skill to ~/.agents/skills for Claude Code, Codex, Muse, OpenCode, Hermes and omp.',
     cmd: ['agent', 'skill'],
     args: [
-      { kind: 'text', flag: '--harness', name: 'harness', label: 'Harnesses', placeholder: 'claude,codex,opencode,hermes,omp', hint: 'Comma-separated; empty links every detected harness.' },
+      { kind: 'text', flag: '--harness', name: 'harness', label: 'Harnesses', placeholder: 'claude,codex,muse,opencode,hermes,omp', hint: 'Comma-separated; empty links every detected harness.' },
       { kind: 'bool', flag: '--dry-run', name: 'dry_run', label: 'Dry run', def: true, hint: 'Print every planned change, change nothing.' },
       { kind: 'bool', flag: '--copy', name: 'copy', label: 'Copy instead of symlink' },
       { kind: 'bool', flag: '--remove', name: 'remove', label: 'Uninstall', hint: 'Remove only the skill and links codemap wrote.' },

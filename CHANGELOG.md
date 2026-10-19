@@ -22,7 +22,9 @@ releases page is the authoritative history.
 
 - **`codemap agent skill`** — installs a portable `using-codemap` skill once in the shared
   skill library (`~/.agents/skills`, or `$MINERVA_AGENTS_DIR/skills`) and symlinks it into
-  Claude Code, Codex, OpenCode and Hermes; omp reads the library natively. The skill works with
+  Claude Code, Codex, OpenCode and Hermes; Muse and omp read the library natively
+  (Muse users can optionally promote it to a managed personal skill with
+  `muse skills install ~/.agents/skills/using-codemap`). The skill works with
   or without the MCP server (it maps every `codemap_*` tool to `codemap <command> --json` and
   says to index first). `--harness`, `--copy`, `--remove`, `--dry-run`, `--force`; only files
   codemap wrote are ever replaced or removed, and Claude Code is skipped when the codemap
@@ -30,6 +32,13 @@ releases page is the authoritative history.
   in at `integrations/agent-skills/using-codemap/SKILL.md` for skill managers that install
   from GitHub. Codemap Studio gains an Install skill panel.
 
+- **Temporal workflow wiring in the TS/JS base graph** — typed `proxyActivities` calls
+  (including `Pick<Contract, "activity">`, `typeof import(...)`, destructured activity locals,
+  and activities passed by value to a step runner), `executeChild`/`startChild`, and Temporal
+  client `workflow.start*` identifier targets now become name-provenance `calls` candidates.
+  This makes `callers`/`context`/`path`/`flow` able to cross the client → workflow → activity
+  boundary without a precise reindex; string workflow/activity names stay unresolved rather
+  than guessing same-named symbols.
 - **Declared inheritance edges** — `extends` / `implements` edges for TypeScript, JavaScript, and
   Python classes and interfaces (resolved through same-file and import bindings), derived
   `overrides` edges from each method to the same-named method of a direct base, and — under Go

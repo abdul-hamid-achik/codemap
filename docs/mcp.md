@@ -252,7 +252,7 @@ The analysis tools carry three kinds of signal so a consumer can act on confiden
   that a consumer switches on (no prose parsing):
   - `resolved` — every matched definition file has precise coverage (go/types for Go, language-server callHierarchy for TS/JS/Python/Vue)
   - `name` — name-based call graph (the Go/Ruby/Lua default; same-named symbols may over-match)
-  - `unresolved` — the language has no complete call graph and the index isn't precise (TS/JS/Python/Vue) — callers/blast/tests are **incomplete, not absent** (TS/JS still carry name-based candidates for JSX component usage, same-file calls, and calls through imported bindings; Python and Vue have none); reindex with `codemap_index precise:true`
+  - `unresolved` — the language has no complete call graph and the index isn't precise (TS/JS/Python/Vue) — callers/blast/tests are **incomplete, not absent** (TS/JS still carry name-based candidates for JSX component usage, same-file calls, calls through imported bindings, and typed Temporal workflow wiring; Python and Vue have none); reindex with `codemap_index precise:true`
   - `none` — no matching symbol / nothing to classify
 
   The free-form `resolution` sentence stays for humans. Map resolved→high, name→medium, unresolved/none→low confidence.

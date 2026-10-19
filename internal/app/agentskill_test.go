@@ -14,6 +14,7 @@ func skillHome(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("MINERVA_AGENTS_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("HERMES_HOME", "")
@@ -31,7 +32,7 @@ func targetByHarness(rep SkillReport, name string) (SkillTarget, bool) {
 
 func TestInstallAgentSkillLinksDetectedHarnesses(t *testing.T) {
 	home := skillHome(t)
-	for _, d := range []string{".claude", ".hermes/skills/.archive", ".omp"} {
+	for _, d := range []string{".claude", ".hermes/skills/.archive", ".omp", ".config/muse"} {
 		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -64,6 +65,12 @@ func TestInstallAgentSkillLinksDetectedHarnesses(t *testing.T) {
 	if tg, _ := targetByHarness(rep, "omp"); tg.Action != "native" {
 		t.Fatalf("omp reads ~/.agents/skills natively, got %+v", tg)
 	}
+	if tg, _ := targetByHarness(rep, "muse"); tg.Action != "native" || tg.Path != filepath.Dir(canonical) {
+		t.Fatalf("muse reads ~/.agents/skills natively, got %+v", tg)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "muse", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("Muse's managed skills dir must not be created; stat err=%v", err)
+	}
 	for _, name := range []string{"codex", "opencode"} {
 		if _, ok := targetByHarness(rep, name); ok {
 			t.Fatalf("%s is not installed and was not requested", name)
@@ -84,6 +91,20 @@ func TestInstallAgentSkillLinksDetectedHarnesses(t *testing.T) {
 		if tg.Action != "unchanged" && tg.Action != "native" {
 			t.Fatalf("reinstall %s = %s", tg.Harness, tg.Action)
 		}
+	}
+}
+
+func TestInstallAgentSkillDetectsMuseFromDataHome(t *testing.T) {
+	home := skillHome(t)
+	if err := os.MkdirAll(filepath.Join(home, ".local", "share", "muse", "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := InstallAgentSkill(SkillOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tg, _ := targetByHarness(rep, "muse"); tg.Action != "native" {
+		t.Fatalf("muse data-home target = %+v, want native", tg)
 	}
 }
 
@@ -230,7 +251,7 @@ func TestAgentSkillTeachesBothSurfaces(t *testing.T) {
 	if !strings.HasPrefix(s, "---\nname: using-codemap\ndescription: ") {
 		t.Fatal("skill must lead with name + description frontmatter")
 	}
-	for _, want := range []string{agentSkillMarker, "codemap_context", "`codemap status --json`", "`codemap index`", "-C <dir>", "codemap file-impact --json"} {
+	for _, want := range []string{agentSkillMarker, "codemap_context", "`codemap status --json`", "`codemap index`", "-C <dir>", "codemap file-impact --json", "codemap coverage --json", "semantic retrieval is unavailable, not empty", "proxyActivities", "codemap_symbol_at"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("skill must contain %q", want)
 		}

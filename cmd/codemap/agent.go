@@ -42,11 +42,11 @@ var (
 	}
 	agentSkillCmd = &cobra.Command{
 		Use:   "skill",
-		Short: "Install the using-codemap skill in ~/.agents/skills and link it into Claude Code, Codex, OpenCode, Hermes and omp",
+		Short: "Install the using-codemap skill in ~/.agents/skills for Claude Code, Codex, Muse, OpenCode, Hermes and omp",
 		Long: "Writes the portable using-codemap skill (MCP tools or CLI) to the shared skill library\n" +
 			"(~/.agents/skills, or $MINERVA_AGENTS_DIR/skills) and symlinks it into each detected\n" +
-			"harness's skills dir; omp reads the library natively. Only files codemap wrote are ever\n" +
-			"replaced or removed.",
+			"harness's skills dir; Muse and omp read the library natively. Only files codemap wrote\n" +
+			"are ever replaced or removed.",
 		Args: cobra.NoArgs,
 		RunE: runAgentSkill,
 	}

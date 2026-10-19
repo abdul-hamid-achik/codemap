@@ -99,6 +99,7 @@ its own skills directory:
 |---|---|
 | Claude Code | `~/.claude/skills` (skipped when the codemap plugin is installed, since the plugin ships the skill) |
 | OpenAI Codex | `$CODEX_HOME/skills` (`~/.codex/skills`) |
+| Muse | none: it reads `~/.agents/skills` directly (for a managed personal copy, run `muse skills install ~/.agents/skills/using-codemap`) |
 | OpenCode | `$XDG_CONFIG_HOME/opencode/skills` |
 | Hermes Agent | `$HERMES_HOME/skills` (`~/.hermes/skills`) |
 | oh-my-pi (`omp`) | none: it reads `~/.agents/skills` directly |

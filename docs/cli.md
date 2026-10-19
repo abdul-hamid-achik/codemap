@@ -86,7 +86,8 @@ e.g. `callers Close` lists callers of every `Close`). **The best fix is to reind
 Python). Successful coverage is recorded per file;
 a query is `resolved` only when all matched definition files completed the pass, while partial
 failures remain `name`/`unresolved`. (TypeScript and JavaScript get name-based candidate edges for
-JSX component usage, imports, Next.js framework wiring, and high-precision calls: same-file calls
+JSX component usage, imports, Next.js framework wiring, typed Temporal `proxyActivities` and
+workflow starts, and high-precision calls: same-file calls
 (`f()`, `new C()`, `await f()`, `this.m()`) and calls through imported bindings (named, default, and
 namespace imports and `require`, resolved through relative paths, `@/`/`~/` aliases, and workspace
 packages). Arbitrary `obj.method()` calls are not linked (Python carries the same kind of candidates:

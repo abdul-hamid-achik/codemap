@@ -12,13 +12,13 @@ import (
 // This file installs the portable using-codemap skill (RenderPlaybook
 // FormatAgentSkill) behind `codemap agent skill`. The skill is written ONCE to
 // the shared skill library (~/.agents/skills, the directory minerva manages and
-// omp reads natively) and linked into every detected harness that loads skills
-// from its own directory. Like agent setup, no DB/session is opened.
+// Muse and omp read natively) and linked into every detected harness that loads
+// skills from its own directory. Like agent setup, no DB/session is opened.
 //
-// Skill directories verified 2026-10-07: Claude Code ~/.claude/skills, Codex
-// $CODEX_HOME/skills (~/.codex), OpenCode $XDG_CONFIG_HOME/opencode/skills,
-// Hermes $HERMES_HOME/skills (~/.hermes; its loader follows symlinks), omp
-// ~/.agents/skills natively.
+// Skill directories verified 2026-10-07 and 2026-10-19: Claude Code
+// ~/.claude/skills, Codex $CODEX_HOME/skills (~/.codex), OpenCode
+// $XDG_CONFIG_HOME/opencode/skills, Hermes $HERMES_HOME/skills (~/.hermes; its
+// loader follows symlinks), and Muse and omp reading ~/.agents/skills natively.
 
 // agentSkillName is the skill's directory and frontmatter name.
 const agentSkillName = "using-codemap"
@@ -99,6 +99,33 @@ var skillHarnesses = []skillHarness{
 		home:      func() string { return filepath.Join(homeDir(), ".omp") },
 		skillsDir: func() string { return "" },
 	},
+	{
+		// Muse reads the shared ~/.agents/skills library as a user-skill
+		// source. Its managed personal store is intentionally not a symlink
+		// target: users who want a managed copy can run
+		// `muse skills install ~/.agents/skills/using-codemap`.
+		name:      "muse",
+		home:      museHome,
+		skillsDir: func() string { return "" },
+	},
+}
+
+// museHome returns the first existing Muse home candidate, or the XDG
+// config candidate when none exists yet (for an explicitly requested target).
+func museHome() string {
+	configCandidate := filepath.Join(configHome(), "muse")
+	if dirExists(configCandidate) {
+		return configCandidate
+	}
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		dataHome = filepath.Join(homeDir(), ".local", "share")
+	}
+	dataCandidate := filepath.Join(dataHome, "muse")
+	if dirExists(dataCandidate) {
+		return dataCandidate
+	}
+	return configCandidate
 }
 
 // SkillHarnessNames lists the harness names `codemap agent skill` accepts.

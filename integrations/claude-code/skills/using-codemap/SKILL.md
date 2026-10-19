@@ -26,7 +26,10 @@ ambiguous the response already carries candidates:[…] and accepts a selector, 
 pick one definition from those instead of a second lookup. Prefer
 codemap_index --precise for exact call edges — it is the only complete call graph for
 TypeScript and JavaScript (the default index has same-file and imported-binding
-candidates only) and the only call graph for Python.
+candidates only) and the only call graph for Python. On a large, partly covered
+repo, scope trust with codemap_coverage and use one-off precise
+codemap_callers/codemap_callees for the symbol in question before paying for a
+full precise reindex.
 
 ## The workflow
 
@@ -43,14 +46,15 @@ Index once, then query. The typical agent loop for understanding or fixing code:
   4. orient on a symbol        # codemap_context <sym>  (def + callers + callees + tests + test_commands, ONE call)
                                # codemap_context_batch <s1> <s2> …  (several symbols at once + shared callers)
   5. go deeper                 # codemap_impact (blast radius + runnable test_commands) · codemap_source (full body)
-                               # codemap_callers / codemap_callees (add precise:true on Go)
+                               # codemap_callers / codemap_callees (precise:true = exact one-off via the language server)
                                # codemap_references (callback/RunE/registration value wiring; not callers)
   6. before a risky change     # codemap_risk <sym>  (how careful?)
                                # codemap_file_context <file>  (ONE call: symbol outline + file impact + related files)
                                # codemap_dependencies <file>  (evidence only) · codemap_file_impact <file>  (evidence + blast/tests)
                                # codemap_related_files <file>  (the other files structurally tied to this one)
-  7. trace flow                # codemap_flow <handler>  (how a feature works: call tree in call order, with docs)
-                               # codemap_path <from> <to>  (shortest call chain)
+  7. trace flow                # codemap_flow <handler>  (how a feature works: call tree in call order, with docs;
+                               #   check steps_total/leaf reasons — a sparse tree is a coverage signal, not the whole flow)
+                               # codemap_path <from> <to>  (shortest call chain; no path across runtime dispatch ≠ unreachable)
   8. AFTER you edit            # codemap_review  (your diff → changed symbols, blast radius, the TESTS TO RUN)
   9. survey                    # codemap_hotspots (hubs) · codemap_orphans (dead code)
 
@@ -107,8 +111,9 @@ server's callHierarchy. Successful precise coverage is recorded per file; a quer
 "resolved" only when every matched definition file completed the pass. Partial failures
 remain honestly "name" or "unresolved" rather than upgrading the whole project. (TS/JS have
 name-based candidate edges at the base level — JSX component usage, imports, framework
-wiring, and plain calls to same-file definitions and imported bindings (arbitrary
-obj.method() calls are not linked) — so the graph is partial until --precise, and
+wiring, typed Temporal proxyActivities / workflow starts, and plain calls to same-file
+definitions and imported bindings (arbitrary obj.method() calls are not linked) — so the
+graph is partial until --precise, and
 impact/callers/callees on an uncovered TS/JS/Python symbol return a "resolution" note and
 call_graph:"unresolved", NOT a confidently-empty result or untested:true; missing
 callers/tests are unresolved, not absent. Python base call edges are candidates (same-file,
@@ -120,8 +125,9 @@ parsing the free-form resolution sentence. The Go pass
 needs the go toolchain + a buildable module; packages that don't type-check keep
 name-based edges (per-package degrade), and no go/go.mod falls back wholesale with a
 "note" — never worse than name-based, never a hard error. Opt-in: without --precise the
-index is the fast name-based path. For a one-off exact Go answer without reindexing,
-callers/callees also accept precise:true / --precise for one-off language-server resolution. Interface dispatch is statically
+index is the fast name-based path. For a one-off exact answer without reindexing,
+callers/callees also accept precise:true / --precise for language-server resolution
+(Go, TypeScript, JavaScript, Python where the server is available). Interface dispatch is statically
 undecidable, so a precise edge points at the interface method, not concrete implementors.
 
 Precise indexing makes call EDGES exact; a bare query name can still intentionally
@@ -140,6 +146,13 @@ general value references; an empty result is therefore not proof of no wiring.
 The stored source location is the enclosing declaration (or file scope), not the
 exact expression line. 'index --precise' resolves call edges and does not upgrade
 reference confidence; use the report's own coverage/stale/confidence fields.
+Runtime and framework dispatch has the same blind spot: Temporal
+workflow.start/executeChild, proxyActivities objects, signal/query names, DI
+containers, event buses and other string-keyed registrations may connect code
+that neither calls nor references can prove. When a path or flow stops at such a
+boundary, use codemap_grep for the literal registration/signal/workflow names and
+codemap_dependencies for typed evidence — and say the boundary is runtime-wired
+rather than claiming there is no path.
 
 codemap_coverage exposes the per-file signal behind that enum directly: which files have
 a persisted precise-resolution row, its resolver and timestamp, and whether that file has

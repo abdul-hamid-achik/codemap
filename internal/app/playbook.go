@@ -44,7 +44,10 @@ ambiguous the response already carries candidates:[…] and accepts a selector, 
 pick one definition from those instead of a second lookup. Prefer
 codemap_index --precise for exact call edges — it is the only complete call graph for
 TypeScript and JavaScript (the default index has same-file and imported-binding
-candidates only) and the only call graph for Python.`
+candidates only) and the only call graph for Python. On a large, partly covered
+repo, scope trust with codemap_coverage and use one-off precise
+codemap_callers/codemap_callees for the symbol in question before paying for a
+full precise reindex.`
 
 // PlaybookFormat selects a harness-native rendering of the canonical playbook.
 type PlaybookFormat string
@@ -62,8 +65,8 @@ const (
 	// CONVENTIONS.md and any AGENTS.md-reading harness without MCP.
 	FormatMarkdownSectionCLI PlaybookFormat = "markdown-cli"
 	// FormatAgentSkill renders a portable Agent Skills SKILL.md for any harness
-	// that loads skills from a directory (~/.agents/skills, Codex, OpenCode,
-	// Hermes, omp, Claude Code): the canonical body plus a "Calling codemap"
+	// that loads skills from a directory (~/.agents/skills, Codex, Muse,
+	// OpenCode, Hermes, omp, Claude Code): the canonical body plus a "Calling codemap"
 	// section, so one file works whether or not the codemap MCP server is
 	// connected. `codemap agent skill` installs it.
 	FormatAgentSkill PlaybookFormat = "skill"
@@ -100,11 +103,24 @@ const agentSkillCalling = "## Calling codemap\n\n" +
 	"the repository: every codemap_<tool> below is `codemap <tool> --json` with\n" +
 	"underscores turned into dashes (codemap_file_impact is `codemap file-impact --json`),\n" +
 	"codemap_context_batch is `codemap context <a> <b> --json`, and the MCP path\n" +
-	"parameter is `-C <dir>`.\n\n" +
+	"parameter is `-C <dir>`. If neither the tools nor the `codemap` binary are available,\n" +
+	"say so plainly instead of guessing: the one-time setup is to install codemap, then run\n" +
+	"`codemap agent skill` (this skill, for every detected harness) and optionally\n" +
+	"`codemap agent setup <harness>` (the MCP server).\n\n" +
 	"Before the first question in a repository, check the index with\n" +
-	"`codemap status --json`. When registered is false or nodes is 0, run\n" +
-	"`codemap index` (add --precise for exact TypeScript/JavaScript/Python call edges\n" +
-	"when the language server is installed); when a result says stale, reindex first.\n" +
+	"`codemap status --json`. When registered is false, indexed is false, or nodes\n" +
+	"is 0, run `codemap index`; when a result says stale, reindex first. Check\n" +
+	"`codemap coverage --json` before trusting exact callers on a partly covered repo:\n" +
+	"status's per-language precise flag is all-or-nothing, while coverage is per file.\n" +
+	"Add --precise for exact TypeScript/JavaScript/Python call edges when its cost is\n" +
+	"justified and the language server is installed; for one symbol, prefer\n" +
+	"codemap_callers/codemap_callees with precise:true first.\n\n" +
+	"If codemap_explore or codemap_task_context reports lexical mode or a semantic-owner\n" +
+	"error, semantic retrieval is unavailable, not empty: treat seeds as keyword/name\n" +
+	"matches and name the remediation from the error (for vecgrep, build its project\n" +
+	"index). If a helper is a nested arrow const or local closure that find/impact\n" +
+	"cannot address by bare name, resolve its file:line with codemap_symbol_at and work\n" +
+	"from the enclosing symbol.\n\n" +
 	"CLI exit codes: 0 answered, 2 not found, 3 index missing, 6 a review/risk gate failed.\n\n"
 
 // mcpToolRe matches a codemap_<tool> MCP token so the CLI renderer can rewrite it.
