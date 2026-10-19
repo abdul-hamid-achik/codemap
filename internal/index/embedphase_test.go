@@ -16,10 +16,12 @@ import (
 // test can assert how the embed phase batched its work. fail, if set, makes every
 // call error — to exercise graceful degradation.
 type recordingEmbedder struct {
-	dims    int
-	fail    error
-	mu      sync.Mutex
-	batches []int
+	dims         int
+	fail         error
+	failFromCall int // 1-based call from which fail applies; 0 = every call
+	calls        int
+	mu           sync.Mutex
+	batches      []int
 }
 
 func (r *recordingEmbedder) Profile() embed.EmbeddingProfile {
@@ -29,8 +31,10 @@ func (r *recordingEmbedder) Profile() embed.EmbeddingProfile {
 func (r *recordingEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	r.mu.Lock()
 	r.batches = append(r.batches, len(texts))
+	r.calls++
+	call := r.calls
 	r.mu.Unlock()
-	if r.fail != nil {
+	if r.fail != nil && (r.failFromCall == 0 || call >= r.failFromCall) {
 		return nil, r.fail
 	}
 	out := make([][]float32, len(texts))
@@ -109,6 +113,42 @@ func TestEmbedPhaseDegradesOnError(t *testing.T) {
 	}
 	if res.Nodes < 3 {
 		t.Errorf("structure should still be indexed despite the embed failure, got %d nodes", res.Nodes)
+	}
+}
+
+// TestEmbedPhaseLateWaveFailureClearsEarlierWaves: embedding stores wave by
+// wave, so a provider failing mid-run must still degrade the whole project —
+// vectors inserted by earlier waves are cleared, not left as a partial index.
+func TestEmbedPhaseLateWaveFailureClearsEarlierWaves(t *testing.T) {
+	g, v := newStores(t)
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString("package app\n")
+	for i := 0; i < 12; i++ {
+		fmt.Fprintf(&b, "func W%d() {}\n", i)
+	}
+	writeFile(t, dir, "a.go", b.String())
+	pid, _ := g.UpsertProject("app", dir, "go")
+
+	cfg := config.DefaultConfig().Index
+	cfg.EmbedBatchSize = 2
+	cfg.EmbedConcurrency = 1 // one batch per wave, deterministic call order
+	rec := &recordingEmbedder{dims: 4, fail: fmt.Errorf("ollama died mid-run"), failFromCall: 3}
+	res, err := New(g, v, rec, cfg).IndexProject(context.Background(), pid, "app", dir, Options{})
+	if err != nil {
+		t.Fatalf("index must not fail when embedding fails: %v", err)
+	}
+	if res.EmbedNote == "" {
+		t.Error("expected EmbedNote when a later wave fails")
+	}
+	if got := v.Count(); got != 0 {
+		t.Errorf("earlier waves' vectors must be cleared on late failure, got %d", got)
+	}
+	if got, err := g.ProjectVecIDCount(pid); err != nil || got != 0 {
+		t.Errorf("graph vec_ids after late failure = (%d, %v), want 0", got, err)
+	}
+	if res.Nodes < 13 {
+		t.Errorf("structure should still be indexed, got %d nodes", res.Nodes)
 	}
 }
 

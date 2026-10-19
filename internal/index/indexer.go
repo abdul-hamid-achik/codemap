@@ -1963,59 +1963,68 @@ func (ix *Indexer) embedAndStore(ctx context.Context, projectName string, items 
 		concurrency = defaultEmbedConcurrency
 	}
 
-	vecs := make([][]float32, len(items))
-	var done int64
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(concurrency)
-	for start := 0; start < len(items); start += batchSize {
-		start, end := start, min(start+batchSize, len(items))
-		g.Go(func() error {
-			texts := make([]string, end-start)
-			for i := start; i < end; i++ {
-				texts[i-start] = items[i].content
-			}
-			out, err := ix.embedder.Embed(gctx, texts)
-			if err != nil {
-				return err
-			}
-			if len(out) != len(texts) {
-				return fmt.Errorf("got %d vectors for %d inputs", len(out), len(texts))
-			}
-			copy(vecs[start:end], out)
-			if opts.OnEmbed != nil {
-				opts.OnEmbed(int(atomic.AddInt64(&done, int64(len(texts)))), len(items))
-			}
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		// Embeddings failed (e.g. Ollama unreachable). The structural index is
-		// already stored, so keep it and report. Because changed-file vectors were
-		// removed before extraction, retaining unchanged-file vectors here would
-		// expose a silently partial semantic index. Degrade the whole project to
-		// structure-only instead.
-		res.EmbedNote = "embeddings skipped: " + err.Error()
-		if clearErr := ix.clearProjectVectors(projectName); clearErr != nil {
-			return fmt.Errorf("clear project vectors after embedding failure: %w", clearErr)
-		}
-		return nil
-	}
-
-	// Serial insert: veclite + SQLite writes aren't safe to run concurrently.
-	// Insert all vectors first (veclite), then batch the node vec_id updates in
-	// one graph transaction — turning N SQLite UPDATEs into a single fsync.
+	// Embed and store in waves: at most `concurrency` batches are in flight,
+	// then that wave is inserted serially (veclite/SQLite writes aren't safe
+	// to parallelize) and its vectors/texts are dropped before the next wave.
+	// Holding every vector ([]float32 per item) for the whole run cost one
+	// full copy of the embedding space in RSS on large reindexes.
 	type vecUpdate struct {
 		nodeID int64
 		vecID  string
 	}
 	updates := make([]vecUpdate, 0, len(items))
 	reportPhase(opts, "storing vectors…", 0, len(items))
-	for i, item := range items {
-		vid, err := ix.vectors.Insert(vecs[i], item.content, item.meta)
-		if err != nil {
-			return err
+	var done int64
+	waveSize := batchSize * concurrency
+	for waveStart := 0; waveStart < len(items); waveStart += waveSize {
+		waveEnd := min(waveStart+waveSize, len(items))
+		vecs := make([][]float32, waveEnd-waveStart)
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(concurrency)
+		for start := waveStart; start < waveEnd; start += batchSize {
+			start, end := start, min(start+batchSize, waveEnd)
+			g.Go(func() error {
+				texts := make([]string, end-start)
+				for i := start; i < end; i++ {
+					texts[i-start] = items[i].content
+				}
+				out, err := ix.embedder.Embed(gctx, texts)
+				if err != nil {
+					return err
+				}
+				if len(out) != len(texts) {
+					return fmt.Errorf("got %d vectors for %d inputs", len(out), len(texts))
+				}
+				copy(vecs[start-waveStart:end-waveStart], out)
+				if opts.OnEmbed != nil {
+					opts.OnEmbed(int(atomic.AddInt64(&done, int64(len(texts)))), len(items))
+				}
+				return nil
+			})
 		}
-		updates = append(updates, vecUpdate{nodeID: item.nodeID, vecID: strconv.FormatUint(vid, 10)})
+		if err := g.Wait(); err != nil {
+			// Embeddings failed (e.g. Ollama unreachable). The structural index is
+			// already stored, so keep it and report. Because changed-file vectors were
+			// removed before extraction, retaining unchanged-file vectors here would
+			// expose a silently partial semantic index. Degrade the whole project to
+			// structure-only instead (this also removes any earlier waves' inserts).
+			res.EmbedNote = "embeddings skipped: " + err.Error()
+			if clearErr := ix.clearProjectVectors(projectName); clearErr != nil {
+				return fmt.Errorf("clear project vectors after embedding failure: %w", clearErr)
+			}
+			return nil
+		}
+		for i := waveStart; i < waveEnd; i++ {
+			vid, err := ix.vectors.Insert(vecs[i-waveStart], items[i].content, items[i].meta)
+			if err != nil {
+				return err
+			}
+			updates = append(updates, vecUpdate{nodeID: items[i].nodeID, vecID: strconv.FormatUint(vid, 10)})
+			// Release this item's embed text and vector now that both live
+			// only in the store.
+			items[i].content = ""
+			vecs[i-waveStart] = nil
+		}
 	}
 	if len(updates) > 0 {
 		tx, err := ix.graph.BeginTx(ctx)
