@@ -16,6 +16,10 @@ terminal:
     cols: 100
     rows: 20
     profile: xterm-256color
+preconditions:
+    commands:
+        - run: "curl -sf \"$(printenv CODEMAP_OLLAMA_URL || echo http://localhost:11434)/api/tags\" | grep -q nomic-embed-text || { echo 'semantic flow needs Ollama running with nomic-embed-text (ollama serve; ollama pull nomic-embed-text)' >&2; exit 1; }"
+          timeoutMs: 5000
 steps:
     - wait:
         process:

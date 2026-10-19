@@ -194,11 +194,20 @@ tasks:
       - air
 
   flows:
-    desc: Run glyphrun E2E behavior specs
+    desc: Run glyphrun E2E behavior specs (no Ollama needed; see flows:semantic)
     aliases: [e2e]
     deps: [build]
     cmds:
       - glyph run specs/*.yml --format md --progress auto
+
+  flows:semantic:
+    desc: Run the glyphrun flows that need a local Ollama with nomic-embed-text (specs/needs-ollama; not part of flows)
+    deps: [build]
+    preconditions:
+      - sh: curl -sf "${CODEMAP_OLLAMA_URL:-http://localhost:11434}/api/tags" | grep -q nomic-embed-text
+        msg: "flows:semantic needs Ollama running with nomic-embed-text (ollama serve; ollama pull nomic-embed-text)"
+    cmds:
+      - glyph run specs/needs-ollama/*.yml --format md --progress auto
 
 
   bench:
