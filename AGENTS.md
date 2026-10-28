@@ -20,9 +20,10 @@ radius of changing this type"*, *"find auth-like code, then show what calls it"*
 Three surfaces over one store:
 - **CLI** — human commands + `--json` machine output (Cobra, `cmd/codemap/`).
 - **MCP server** — `codemap serve` (stdio), `codemap_*` tools (`internal/mcp/`).
-- **Codemap Studio** — Electron app in `desktop/`; never reimplements anything, every
-  panel spawns `codemap … --json` (see `docs/desktop.md`). The terminal Studio TUI was
-  retired.
+- **Codemap Studio** — Electron app in `desktop/`; never reimplements codemap
+  intelligence, every intelligence panel spawns `codemap … --json` (see
+  `docs/desktop.md`). Today's bounded shell runner only executes a visible,
+  user-confirmed test command. The terminal Studio TUI was retired.
 
 Highlights: learning layer (`atlas`/`features`/`flow`/`processes` — summaries are read
 from READMEs/package docs/leading comments, never generated), hybrid queries
@@ -58,7 +59,8 @@ schemas/            # versioned JSON schemas for machine contracts (e.g. review 
 **Package boundaries are part of the contract.** Dependency direction is one-way:
 `cmd → app → {graph, vector, index, extract, embed, lsp, config, daemon, git, snapshot,
 branchstate, cachestate}`. MCP handlers and CLI RunE handlers are thin; the desktop app
-only spawns the CLI. Never put business logic in `internal/mcp` or `desktop/`.
+gets code intelligence only from the CLI (its shell IPC is execution plumbing,
+not analysis). Never put business logic in `internal/mcp` or `desktop/`.
 
 ## Documentation Discipline
 

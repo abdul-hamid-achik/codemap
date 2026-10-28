@@ -76,6 +76,17 @@ async function evalIn(win, fn, ...args) {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const log = (msg) => process.stdout.write(`[smoke] ${msg}\n`)
 
+async function waitForEval(win, fn, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs
+  let last = false
+  while (Date.now() < deadline) {
+    last = await evalIn(win, fn)
+    if (last) return last
+    await wait(500)
+  }
+  return last
+}
+
 app.whenReady().then(async () => {
   // Same runtime the shipped app uses — no parallel IPC stub to drift.
   const settings = new Settings(userData)
@@ -135,13 +146,41 @@ app.whenReady().then(async () => {
   await shoot(win, '01-boot')
 
 
-  // ---- Learn: the project lands on Overview, and every Learn view draws ------
+  // ---- Today first, then Learn: the project lands on the daily cockpit -----
   const only = process.env.SMOKE_ONLY || ''
   const learnSection = async () => {
-    const landed = await evalIn(win, () => ({ view: window.__studio.state.view, hero: !!document.querySelector('.ov-hero'), active: document.querySelector('.nav-item.active')?.dataset?.nav || '' }))
+    await waitForEval(win, () => window.__studio.state.view === 'today' && !!document.querySelector('.today'), 30000)
+    const landed = await evalIn(win, () => ({ view: window.__studio.state.view, today: !!document.querySelector('.today'), active: document.querySelector('.nav-item.active')?.dataset?.nav || '' }))
     results.landing = landed
-    if (landed.view !== 'overview' || !landed.hero) errors.push(`indexed project did not land on Overview: ${JSON.stringify(landed)}`)
+    if (landed.view !== 'today' || !landed.today) errors.push(`indexed project did not land on Today: ${JSON.stringify(landed)}`)
+    log('today: cockpit')
+    await waitForEval(win, () => !!document.querySelector('.today-verdict') && !!document.querySelector('.today-task input'), 45000)
+    const todayInfo = await evalIn(win, async () => {
+      const terminal = await window.studio.terminal.run({
+        command: `node -e "console.log('codemap-studio-terminal-ok')"`,
+        cwd: window.__studio.state.project,
+        timeoutMs: 30000,
+      })
+      return {
+        verdict: !!document.querySelector('.today-verdict'),
+        actions: document.querySelectorAll('.today-action').length,
+        commands: document.querySelectorAll('.today-command').length,
+        hasTaskStarter: !!document.querySelector('.today-task input'),
+        terminalOk: !!terminal?.ok,
+        terminalOutput: terminal?.output || '',
+        text: (document.querySelector('.view-root')?.textContent || '').slice(0, 240),
+      }
+    })
+    results.today = todayInfo
+    if (!todayInfo.verdict) errors.push('today verdict did not render')
+    if (!todayInfo.hasTaskStarter) errors.push('today task starter did not render')
+    if (!todayInfo.terminalOk || !todayInfo.terminalOutput.includes('codemap-studio-terminal-ok')) {
+      errors.push(`integrated terminal did not run: ${JSON.stringify(todayInfo)}`)
+    }
+    await shoot(win, 'today-00-cockpit')
+
     log('learn: overview')
+    await evalIn(win, () => window.__studio.route('overview', { fresh: true }))
     await wait(3500)
     const ov = await evalIn(win, () => ({
       steps: document.querySelectorAll('.lp-step').length,
@@ -287,12 +326,17 @@ app.whenReady().then(async () => {
   }
 
   // ---- walk every app view ----------------------------------------------
-  const views = ['overview', 'atlas', 'features', 'flow', 'processes', 'dashboard', 'catalog', 'search', 'source', 'graph', 'map', 'review', 'agents', 'mcp', 'raw', 'history', 'settings']
+  const views = ['today', 'overview', 'atlas', 'features', 'flow', 'processes', 'dashboard', 'catalog', 'search', 'source', 'graph', 'map', 'review', 'agents', 'mcp', 'raw', 'history', 'settings']
   for (const v of views) {
     log(`view ${v}`)
     try {
       await evalIn(win, (name) => window.__studio.route(name, { fresh: true }), v)
-      await wait(v === 'review' ? 12000 : v === 'dashboard' || v === 'map' || v === 'processes' || v === 'agents' ? 4200 : v === 'overview' || v === 'atlas' || v === 'features' ? 3000 : 1600)
+      await wait(v === 'review' ? 12000 : v === 'today' ? 9000 : v === 'dashboard' || v === 'map' || v === 'processes' || v === 'agents' ? 4200 : v === 'overview' || v === 'atlas' || v === 'features' ? 3000 : 1600)
+      await waitForEval(win, () => {
+        const root = document.querySelector('.view-root')
+        const text = (root?.textContent || '').trim()
+        return !!root && root.querySelectorAll('*').length >= 10 && !['reading', 'analysing', 'loading'].some((s) => text.toLowerCase().startsWith(s))
+      }, 30000)
       const info = await evalIn(win, () => {
         const root = document.querySelector('.view-root')
         return { nodes: root ? root.querySelectorAll('*').length : 0, text: (root?.textContent || '').slice(0, 120) }

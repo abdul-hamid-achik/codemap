@@ -1188,6 +1188,7 @@ export const APP_VIEWS = [
   { id: 'features', group: 'learn', label: 'Features', icon: '✦' },
   { id: 'flow', group: 'learn', label: 'Flow', icon: '⇢' },
   { id: 'processes', group: 'learn', label: 'Processes', icon: '⇶' },
+  { id: 'today', group: 'app', label: 'Today', icon: '☀' },
   { id: 'dashboard', group: 'app', label: 'Health', icon: '◈' },
   { id: 'search', group: 'app', label: 'Unified search', icon: '⌕' },
   { id: 'graph', group: 'app', label: 'Graph explorer', icon: '⇄' },

@@ -11,7 +11,7 @@
     "dev": "electron . --devtools",
     "icons": "electron scripts/make-icons.mjs",
     "test": "node --test --test-concurrency=1 --test-timeout=600000 \"test/*.test.mjs\"",
-    "test:unit": "node --test test/features.test.mjs test/render.test.mjs test/views.test.mjs test/graph.test.mjs",
+    "test:unit": "node --test test/features.test.mjs test/render.test.mjs test/views.test.mjs test/graph.test.mjs test/today.test.mjs",
     "test:live": "node --test --test-timeout=600000 test/integration.test.mjs test/cli.test.mjs",
     "smoke": "node test/smoke.mjs",
     "dist": "node scripts/stage-binary.mjs && electron-builder --dir",

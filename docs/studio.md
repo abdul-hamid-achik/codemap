@@ -2,7 +2,7 @@
 
 The terminal Studio TUI was retired and there is no `codemap studio` command.
 
-Codemap Studio is now the [desktop app](/desktop): an Electron workbench that runs `codemap … --json` behind a graph explorer, review desk, architecture map, and MCP inspector.
+Codemap Studio is now the [desktop app](/desktop): an Electron workbench that runs `codemap … --json` behind a Today change cockpit, graph explorer, review desk, architecture map, and MCP inspector.
 
 For terminal and agent workflows, use:
 

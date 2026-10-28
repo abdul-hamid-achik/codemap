@@ -24,6 +24,11 @@ const api = {
   run: (req) => invoke('codemap:run', req),
   cancel: (runIdOrKey) => invoke('codemap:cancel', runIdOrKey),
   active: () => invoke('codemap:active'),
+  terminal: {
+    run: (req) => invoke('terminal:run', req),
+    cancel: (runId) => invoke('terminal:cancel', runId),
+    active: () => invoke('terminal:active'),
+  },
 
   project: {
     pick: () => invoke('project:pick'),
@@ -52,7 +57,7 @@ const api = {
   theme: (t) => invoke('theme:set', t),
 
   on: (channel, cb) => {
-    const allowed = ['codemap:stream', 'ui:goto', 'ui:palette', 'app:error']
+    const allowed = ['codemap:stream', 'terminal:stream', 'ui:goto', 'ui:palette', 'app:error']
     if (!allowed.includes(channel)) return () => {}
     const listener = (_e, payload) => cb(payload)
     ipcRenderer.on(channel, listener)

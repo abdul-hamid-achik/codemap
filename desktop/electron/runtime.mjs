@@ -11,6 +11,7 @@ import path from 'node:path'
 
 import { runCodemap, resolveBinary, shellEnv, cancelRun, activeRuns, codemapEnv } from './cli.mjs'
 import { inspectServer } from './mcp.mjs'
+import { runShellCommand, cancelShellRun, activeShellRuns } from './terminal.mjs'
 
 function runGit(args, cwd, timeoutMs = 15000) {
   return new Promise((resolve) => {
@@ -190,6 +191,38 @@ export function createRuntime({ appRoot, settings, getWin, isDev = false }) {
 
     ipcMain.handle('codemap:cancel', (_e, idOrKey) => cancelRun(typeof idOrKey === 'string' ? runIdsByKey.get(idOrKey) : idOrKey))
     ipcMain.handle('codemap:active', () => activeRuns())
+
+    // Explicit, user-confirmed shell commands (the Today test runner). The
+    // command is displayed verbatim in the renderer before this is called;
+    // output streams on terminal:stream and the run lands in history.
+    ipcMain.handle('terminal:run', async (_event, req) => {
+      const command = String(req?.command || '').trim()
+      if (!command) return { ok: false, error: 'empty command', command, exitCode: null, output: '', ms: 0 }
+      if (command.length > 8000) return { ok: false, error: 'command is too long', command, exitCode: null, output: '', ms: 0 }
+      const dir = projectDir(req?.cwd)
+      const timeoutMs = Math.min(Math.max(Number(req?.timeoutMs) || 600000, 1000), 30 * 60 * 1000)
+      const result = await runShellCommand({
+        command,
+        cwd: dir,
+        env: await env(),
+        timeoutMs,
+        onEvent: (evt) => send('terminal:stream', evt),
+      })
+      settings.addHistory({
+        featureId: 'terminal',
+        args: [command],
+        cwd: dir,
+        ok: result.ok,
+        gateFailed: false,
+        exitCode: result.exitCode,
+        code: result.ok ? '' : result.cancelled ? 'cancelled' : result.timedOut ? 'timeout' : 'shell_failed',
+        ms: result.ms,
+        bytes: (result.output || '').length,
+      })
+      return result
+    })
+    ipcMain.handle('terminal:cancel', (_e, runId) => cancelShellRun(String(runId || '')))
+    ipcMain.handle('terminal:active', () => activeShellRuns())
 
     ipcMain.handle('project:pick', async () => {
       const r = await dialog.showOpenDialog(getWin(), {

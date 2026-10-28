@@ -10,6 +10,14 @@ releases page is the authoritative history.
 
 ### Added
 
+- **Codemap Studio “Today” cockpit** — indexed projects now open on a daily
+  start/finish screen that joins status, review, affected tests, precise
+  coverage and doctor into one honesty-preserving verdict and a bounded “Do
+  next” queue. Today can reindex or run the precise pass, build a task brief
+  from a sentence, copy a compact agent/PR brief, and run the user-confirmed
+  suggested test command inside the app with streaming output, timeout and
+  cancellation. Overview remains the Learn home.
+
 - **Codemap Studio catches up with the CLI** — a **Processes** view (every entry point's
   execution flow, filterable by kind and searchable, each opening in Flow); an **Agents** view
   (per-harness MCP registration and using-codemap skill state, with every change previewed as a

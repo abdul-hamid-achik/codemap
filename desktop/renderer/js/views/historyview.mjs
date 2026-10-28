@@ -34,7 +34,7 @@ export function historyView(ctx) {
         h('div.view-head', [
           h('div.vh-main', [
             h('h1', ['Run history', badge(`${stats.total} run(s)`, 'accent')]),
-            h('div.vh-sub', 'Everything Codemap Studio has executed against the codemap CLI in this workspace, with its exit code and duration. Re-run any entry, or open the panel it belongs to.'),
+            h('div.vh-sub', 'Everything Codemap Studio has executed in this workspace — codemap CLI runs and Today test commands — with its exit code and duration. Re-run a CLI entry, open its panel, or return to Today for a shell command.'),
           ]),
           h('div.vh-actions', [
             h('input', { type: 'search', value: filter, placeholder: 'filter by feature or argument…', style: 'width:260px', oninput: (e) => { filter = e.target.value; render() } }),
@@ -54,8 +54,8 @@ export function historyView(ctx) {
               body: table(
                 [
                   { key: 'at', label: 'When', render: (r) => h('span.mono.small', { title: fmt.time(r.at) }, fmt.ago(r.at)) },
-                  { key: 'featureId', label: 'Feature', render: (r) => h('span.mono', r.feat?.title || r.featureId) },
-                  { key: 'args', label: 'argv', cls: 'code', render: (r) => h('span', { title: (r.args || []).join(' ') }, (r.args || []).join(' ') || '—') },
+                  { key: 'featureId', label: 'Feature', render: (r) => h('span.mono', r.feat?.title || (r.featureId === 'terminal' ? 'Terminal' : r.featureId)) },
+                  { key: 'args', label: 'argv / command', cls: 'code', render: (r) => h('span', { title: (r.args || []).join(' ') }, (r.args || []).join(' ') || '—') },
                   { key: 'exitCode', label: 'Exit', render: (r) => badge(String(r.exitCode ?? '?'), r.ok ? 'ok' : r.gateFailed ? 'warn' : 'danger') },
                   { key: 'code', label: 'Code', render: (r) => h('span.mono.small', r.code || '') },
                   { key: 'ms', label: 'Time', cls: 'num', render: (r) => fmt.ms(r.ms) },
@@ -65,10 +65,12 @@ export function historyView(ctx) {
                     label: '',
                     sort: false,
                     render: (r) =>
-                      h('div.btn-row', [
-                        h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); replay(r) } }, 're-run'),
-                        r.feat ? h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); ctx.openFeature(r.featureId) } }, 'panel') : null,
-                      ]),
+                      r.featureId === 'terminal'
+                        ? h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); ctx.go('today') } }, 'Today')
+                        : h('div.btn-row', [
+                            h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); replay(r) } }, 're-run'),
+                            r.feat ? h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); ctx.openFeature(r.featureId) } }, 'panel') : null,
+                          ]),
                   },
                 ],
                 rows,
@@ -81,6 +83,7 @@ export function historyView(ctx) {
   }
 
   async function replay(row) {
+    if (row.featureId === 'terminal') return ctx.go('today')
     const args = (row.args || []).filter((a) => a !== '--json')
     toast(`re-running codemap ${args.join(' ')}`)
     const res = await runArgs(args, { featureId: row.featureId, cwd: row.cwd, json: !args.includes('--json') ? true : false })

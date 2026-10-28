@@ -40,19 +40,27 @@ function sample() {
 
 test('the canvas lays out nodes and converges', async () => {
   const c = new GraphCanvas(host(), {})
-  c.setData(sample())
-  assert.equal(c.nodes.length, 3)
-  assert.equal(c.edges.length, 2)
-  const before = c.nodes.map((n) => ({ x: n.x, y: n.y }))
-  for (let i = 0; i < 120; i++) c.step()
-  const moved = c.nodes.some((n, i) => Math.abs(n.x - before[i].x) > 0.5 || Math.abs(n.y - before[i].y) > 0.5)
-  assert.ok(moved, 'the force layout should move nodes')
-  for (const n of c.nodes) {
-    assert.ok(Number.isFinite(n.x) && Number.isFinite(n.y), `node ${n.id} drifted to ${n.x},${n.y}`)
+  try {
+    c.setData(sample())
+    assert.equal(c.nodes.length, 3)
+    assert.equal(c.edges.length, 2)
+    // setData already pre-settles the layout. Reheat from a deterministic
+    // displacement so this checks the force step itself, not random drift.
+    c.nodes[1].x += 90
+    c.nodes[1].y -= 45
+    c.alpha = 1
+    const before = c.nodes.map((n) => ({ x: n.x, y: n.y }))
+    for (let i = 0; i < 120; i++) c.step()
+    const moved = c.nodes.some((n, i) => Math.abs(n.x - before[i].x) > 0.5 || Math.abs(n.y - before[i].y) > 0.5)
+    assert.ok(moved, 'the force layout should move nodes')
+    for (const n of c.nodes) {
+      assert.ok(Number.isFinite(n.x) && Number.isFinite(n.y), `node ${n.id} drifted to ${n.x},${n.y}`)
+    }
+    assert.ok(c.alpha < 0.4, 'the simulation should cool down')
+    c.draw()
+  } finally {
+    c.destroy()
   }
-  assert.ok(c.alpha < 0.4, 'the simulation should cool down')
-  c.draw()
-  c.destroy()
 })
 
 test('edges to unknown nodes are dropped, focus nodes are larger', () => {

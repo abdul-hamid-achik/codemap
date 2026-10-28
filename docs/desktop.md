@@ -58,7 +58,26 @@ first compiles the matching `codemap` into the package.
 
 Open a project with the project chip in the title bar. If it is not indexed
 yet, the app offers to run `codemap index` for you. An indexed project opens on
-**Overview**.
+**Today**, the daily cockpit.
+
+## Start and finish a change
+
+**Today** is the screen to leave open while you work. It combines `status`,
+`review`, `affected`, precise-coverage and `doctor` into one honest verdict:
+
+- **Do next** turns the exact current state into a bounded action queue:
+  reindex a stale graph, run the selected tests, inspect uncovered symbols,
+  close precise-coverage gaps, or fix a missing toolchain/service.
+- **Run these tests** shows the commands codemap selected for the diff,
+  lets you edit one, confirms it verbatim, then runs it inside Studio in your
+  login shell from the project root with streaming output, a timeout and Stop.
+- **Start a task** builds a `task-context` brief from a sentence, or routes the
+  same intent into Explore.
+- **Copy agent brief** produces compact Markdown with the changed symbols,
+  tests to run and trust limits, ready for an agent chat or PR description.
+
+An unresolved or unknown call graph is shown as exactly that. Today never
+turns incomplete evidence into a green “safe” verdict.
 
 ## Learn a repository
 
@@ -70,7 +89,7 @@ and `flow` — so an agent sees the same answers over MCP.
 
 ![Overview: the README summary, size, languages, and a six-step learning path](/desktop/overview.jpg)
 
-The landing page for a project. It shows the README's first paragraph, how big the
+The Learn home for a project. It shows the README's first paragraph, how big the
 repository is, its language mix, and whether the index is fresh. Below that is a
 six-step **learning path**:
 
@@ -151,6 +170,7 @@ command has no panel, so the list cannot silently drift from the CLI.
 
 | View | What it answers |
 | --- | --- |
+| Today | What changed, what needs attention, what tests should I run, and what brief should I hand an agent? |
 | Health | Is the index fresh, honest and complete — and what should I look at first? |
 | Unified search | One box over four retrieval modes: name, indexed text, semantic, intent |
 | Graph explorer | Typed relations from one exact source definition, drawn and expandable |
@@ -179,9 +199,14 @@ report.
   `<repo>/codemap` → login-shell `command -v` → the `codemap` bundled in the
   installed app. A PATH binary older than the bundled one yields to it, since
   the app calls commands an older CLI lacks.
-- **One door.** `codemap:run` spawns the binary with your project as cwd,
+- **One door for codemap.** `codemap:run` spawns the binary with your project as cwd,
   appends `--json`, streams long runs (`index`, `daemon start`) line by line,
   and maps exit codes 0–6 onto the UI.
+- **Explicit shell actions.** Today's test runner is the only shell surface. The
+  renderer passes one visible, user-confirmed command to `terminal:run`; the
+  main process runs it in the login shell from the project root, caps output,
+  enforces a timeout, supports cancellation, and records the run in history.
+  It adds no code-intelligence logic of its own.
 - **MCP.** The inspector spawns `codemap serve --profile <p>` and speaks
   newline-delimited JSON-RPC 2.0 (initialize → initialized → tools/list →
   optional tools/call), then closes the server. Nothing stays resident.

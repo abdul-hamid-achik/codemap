@@ -109,7 +109,7 @@ codemap has three surfaces over one structural store:
 
 - **CLI** — human commands, plus `--json` on query commands for machine output.
 - **MCP server** — `codemap serve` (stdio) exposes `codemap_*` tools to agents.
-- **Codemap Studio** — an Electron desktop app in [`desktop/`](desktop/) that runs `codemap … --json` behind a graph explorer, review desk, and architecture map. See [docs/desktop.md](docs/desktop.md).
+- **Codemap Studio** — an Electron desktop app in [`desktop/`](desktop/) that runs `codemap … --json` behind a Today change cockpit, graph explorer, review desk, and architecture map. See [docs/desktop.md](docs/desktop.md).
 
 ## Installation
 

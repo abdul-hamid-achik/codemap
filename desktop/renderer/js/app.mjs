@@ -10,6 +10,7 @@ import { badge, callout, card, emptyState, kindBadge, spinner, symRow, toast, fm
 import { runArgs, refreshContext, loadProjects, followNext, argsToValues } from './runner.mjs'
 import { graphPayloadFor } from './report.mjs'
 
+import { todayView } from './views/todayview.mjs'
 import { dashboardView } from './views/dashboard.mjs'
 import { catalogView } from './views/catalog.mjs'
 import { searchView } from './views/searchview.mjs'
@@ -143,7 +144,7 @@ function buildSidebar() {
   const items = []
   const viewEntry = (v) => ({ id: `view:${v.id}`, label: v.label, icon: v.icon, view: v.id })
   items.push(navGroup('Learn', APP_VIEWS.filter((v) => v.group === 'learn').map(viewEntry), 'learn'))
-  items.push(navGroup('Workspace', APP_VIEWS.filter((v) => v.group === 'app').slice(0, 7).map(viewEntry), 'workspace'))
+  items.push(navGroup('Workspace', APP_VIEWS.filter((v) => v.group === 'app' && !['catalog', 'history', 'settings'].includes(v.id)).map(viewEntry), 'workspace'))
   for (const g of GROUPS) {
     const feats = groups.get(g.id) || []
     if (!feats.length) continue
@@ -211,6 +212,7 @@ function route(view, opts = {}) {
         case 'flow': return flowView(ctx, opts)
         case 'processes': return processesView(ctx, opts)
         case 'agents': return agentsView(ctx)
+        case 'today': return todayView(ctx)
         case 'dashboard': return dashboardView(ctx)
         case 'catalog': return catalogView(ctx)
         case 'search': return searchView(ctx, opts)
@@ -562,18 +564,19 @@ async function afterProjectChange() {
   updateHealthChip()
   // a different project invalidates everything the Learn views cached
   clearLearnCache()
-  for (const id of ['view:overview', 'view:atlas', 'view:features', 'view:flow']) {
+  for (const id of ['view:overview', 'view:atlas', 'view:features', 'view:flow', 'view:today']) {
     instances.get(id)?.destroy?.()
     instances.delete(id)
   }
   route(landingView(), { fresh: true })
 }
 
-// An indexed project opens on the Overview; anything else needs the Health
-// dashboard's "index it" actions first.
+// An indexed project opens on Today, the daily cockpit; anything else needs
+// the Health dashboard's "index it" actions first. Overview remains the
+// Learn home, one click away.
 function landingView() {
   const s = state.status
-  return s && s.registered !== false && (s.nodes ?? 0) > 0 ? 'overview' : 'dashboard'
+  return s && s.registered !== false && (s.nodes ?? 0) > 0 ? 'today' : 'dashboard'
 }
 
 function wireChrome() {
@@ -637,7 +640,7 @@ function wireChrome() {
     }
     if (mod && /^[1-6]$/.test(e.key)) {
       e.preventDefault()
-      const map = ['dashboard', 'search', 'graph', 'source', 'review', 'map']
+      const map = ['today', 'search', 'graph', 'source', 'review', 'map']
       ctx.go(map[Number(e.key) - 1])
       return
     }

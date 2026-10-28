@@ -277,6 +277,7 @@ export function installDOM() {
       project: { pick: async () => null, use: async (p) => p, tree: async () => ({ files: [], root: '' }) },
       fs: { read: async () => ({ ok: false, error: 'stub' }) },
       run: async () => ({ ok: true, json: {}, stdout: '', stderr: '', exitCode: 0, ms: 1, command: [] }),
+      terminal: { run: async () => ({ ok: true, exitCode: 0, output: '', ms: 1 }), cancel: async () => true, active: async () => [] },
       git: async () => ({ isRepo: false, branch: '', changed: [], commits: [], branches: [], changedCount: 0 }),
       gitDiff: async () => ({ ok: true, diff: '', bytes: 0, untracked: [] }),
       mcp: { inspect: async () => ({ ok: true, tools: [] }) },

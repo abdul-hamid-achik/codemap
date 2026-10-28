@@ -111,4 +111,4 @@ and [MCP reference](/mcp). For diff checks in CI, use the [GitHub Action](/ci).
 
 ## Prefer a GUI?
 
-[Codemap Studio](/desktop) is a desktop app that runs the same CLI commands behind a graph explorer, review desk, and architecture map.
+[Codemap Studio](/desktop) is a desktop app that runs the same CLI commands behind a Today change cockpit, graph explorer, review desk, and architecture map.
