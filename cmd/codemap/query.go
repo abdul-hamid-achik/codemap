@@ -657,7 +657,11 @@ func runImpact(cmd *cobra.Command, args []string) error {
 			if n.Kind == "test" {
 				marker = "✓"
 			}
-			fmt.Printf("   %s [%d] %-36s %s:%d\n", marker, n.Depth, disp(n.FQN, n.Symbol), n.File, n.StartLine)
+			loc := fmt.Sprintf("%s:%d", n.File, n.StartLine)
+			if n.Via != "" {
+				loc += "  via " + n.Via
+			}
+			fmt.Printf("   %s [%d] %-36s %s\n", marker, n.Depth, disp(n.FQN, n.Symbol), loc)
 		}
 		if more > 0 {
 			fmt.Printf("   … (%d more — use --json for all, or lower --depth)\n", more)
@@ -1436,6 +1440,12 @@ func runSemantic(cmd *cobra.Command, args []string) error {
 	}
 	if rep.Fusion != "" {
 		fmt.Printf("fusion: %s\n", rep.Fusion)
+	}
+	// A delegated vecgrep search may have degraded (e.g. keyword-only after an
+	// empty/blocked vector index); its warnings ride on the report — never let a
+	// fallback be silent just because there are hits to show.
+	for _, w := range rep.Warnings {
+		fmt.Println("  ⚠ vecgrep degraded: " + w)
 	}
 	for _, h := range rep.Hits {
 		// Mirror `find`'s outline (file:line + signature) but lead with the relevance
