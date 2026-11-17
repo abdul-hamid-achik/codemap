@@ -107,6 +107,16 @@ func RenderTable(sum suite.Summary) string {
 	rowMCPSessions(&b, base, cm)
 	rowStat(&b, "input tokens (incl. cache reads)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.InputTokens }, fmtK, true)
 	rowStat(&b, "output tokens", base, cm, func(a suite.ArmSummary) suite.Stat { return a.OutputTokens }, fmtK, true)
+	// Residual context occupancy: summed tool-result text bytes per session —
+	// the code-graph answer to CodeGraph's disclosed dense-payload weakness
+	// (their ~80% more resident context); narrow bounded answers should hold
+	// this below the read/grep baseline despite fewer round trips. Rows are
+	// emitted only when a run actually measured result bytes — summaries from
+	// before the metric existed would otherwise read as a false zero.
+	if (base != nil && base.ToolResultBytes.Mean > 0) || (cm != nil && cm.ToolResultBytes.Mean > 0) {
+		rowStat(&b, "tool result bytes (residual context)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.ToolResultBytes }, fmtKiB, true)
+		rowStat(&b, "  of which mcp codemap", base, cm, func(a suite.ArmSummary) suite.Stat { return a.MCPResultBytes }, fmtKiB, true)
+	}
 	rowStat(&b, "wall-clock (s)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.WallClockS }, fmtNum, true)
 	rowStat(&b, "cost (USD)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.CostUSD }, fmtUSD, true)
 	rowCorrect(&b, base, cm)
@@ -201,6 +211,15 @@ func fmtK(x float64) string {
 }
 
 func fmtUSD(x float64) string { return fmt.Sprintf("$%.3f", x) }
+
+// fmtKiB renders byte counts as KiB (one decimal below 10 KiB), the unit a
+// residual-context reader reasons in.
+func fmtKiB(x float64) string {
+	if x >= 10*1024 {
+		return fmt.Sprintf("%.0f KiB", x/1024)
+	}
+	return fmt.Sprintf("%.1f KiB", x/1024)
+}
 
 func shortSHA(s string) string {
 	if len(s) > 12 {

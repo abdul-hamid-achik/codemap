@@ -34,6 +34,15 @@ func TestFoldEvents_Success(t *testing.T) {
 	if m.MCPToolCalls != 2 {
 		t.Errorf("MCPToolCalls = %d, want 2", m.MCPToolCalls)
 	}
+	// Residual context occupancy: t1 (mcp callers, 16 B) + t2 (Grep block
+	// array, 32+28 B) + t3 (Read, 3 B) = 79 text bytes; t4 never returned a
+	// result. Only t1 is MCP-attributed.
+	if m.ToolResultBytes != 79 {
+		t.Errorf("ToolResultBytes = %d, want 79", m.ToolResultBytes)
+	}
+	if m.MCPResultBytes != 16 {
+		t.Errorf("MCPResultBytes = %d, want 16", m.MCPResultBytes)
+	}
 	if m.InputTokens != 15230 || m.OutputTokens != 842 || m.CacheReadTokens != 4096 {
 		t.Errorf("token totals wrong: in=%d out=%d cache=%d", m.InputTokens, m.OutputTokens, m.CacheReadTokens)
 	}

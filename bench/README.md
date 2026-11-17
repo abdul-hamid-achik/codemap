@@ -21,14 +21,18 @@ Two arms, identical except for the codemap MCP config:
 
 Per session (one task × arm × repetition) the harness records: **tool calls** (the headline
 metric — a count of `tool_use` content blocks across every `assistant` event, *not*
-`num_turns`, which undercounts parallel calls), input/output/cache tokens, wall-clock,
+`num_turns`, which undercounts parallel calls), input/output/cache tokens, **tool result
+bytes** (residual context occupancy: the summed UTF-8 text bytes of every `tool_result`
+block, with the `mcp__` subset attributed via tool_use ids — tool results are never
+evicted mid-session, so this is what a session's answers leave resident in context; the
+measure CodeGraph discloses as its dense-payload weakness), wall-clock,
 cost (`total_cost_usd`), and whether the final answer **grades correct** against ground
 truth. Results aggregate to **mean ± σ** over N repetitions.
 
 ## Running it
 
-Local only (like `task flows`) — never in CI. Needs `claude` (Claude Code CLI) and
-`gopls` (only to *regenerate* truth). Two auth modes:
+Local only (like `task flows`) — never in CI. Needs `claude` (Claude Code CLI) for the
+default driver and `gopls` (only to *regenerate* truth). Auth modes for `-driver claude`:
 
 - **`ANTHROPIC_API_KEY` set** (preferred): sessions run `--bare` — fully hermetic, no
   ambient hooks/skills/MCP/CLAUDE.md. Keys are never committed.
@@ -38,6 +42,15 @@ Local only (like `task flows`) — never in CI. Needs `claude` (Claude Code CLI)
   config, preserving the A/B's core fairness property. Residual caveat: user-level
   CLAUDE.md/hooks may load, so treat subscription-mode numbers as even more
   directional than usual.
+
+`-driver deepseek` runs without any CLI agent: the driver itself executes the
+tool loop against the DeepSeek OpenAI-compatible API (function calling), runs
+the native file tools jailed to the fixture workdir, and speaks the codemap
+MCP stdio protocol directly. Requirements/env: `DEEPSEEK_API_KEY` (required),
+`DEEPSEEK_BASE_URL`, and `DEEPSEEK_PRICE_IN`/`_CACHE_READ`/`_OUT` (per-1M;
+the cost column is computed from these and stays DIRECTIONAL). Both arms see
+exactly `--allowedTools` — the same fairness pin as claude's `--bare`. Use
+`-model deepseek-flash` for cheap plumbing and `deepseek-v4-pro` for real runs.
 
 ```sh
 task bench                              # full matrix: build → fetch fixture → index → run → report
@@ -94,23 +107,27 @@ preserves the shipped lean inventory. They intentionally match today. Both remov
 | `explore` | 3,692 bytes | 2.43 ms |
 | `traverse` | 4,039 bytes | 2.51 ms |
 
-## The four runs tell a story — read this
+## The five runs tell a story — read this
 
-All four 60-session matrices are committed under `results/` and they differ in
+All five committed matrices are under `results/` and they differ in
 exactly instructive ways:
 
-| Δ (codemap vs baseline) | subscription (full) | hermetic (full, 39) | hermetic (core, 22) | **hermetic (core + playbook)** |
-|---|---|---|---|---|
-| tool calls | −59% | −26% | −40% | **−44%** |
-| input tokens (incl. cache) | −30% | **+95%** | +12% | +25% |
-| wall-clock | +65% | −23% | −40% | **−40%** |
-| cost | −43% | +6% | −22% | −13% |
-| correctness | 8/10 both | 10/10 vs 9/10 | 8/10 vs 9/10 (+1) | 8/10 both |
-| sessions using MCP tools | 15/30 | 15/30 | 16/30 | **14/30** |
+| Δ (codemap vs baseline) | subscription (full) | hermetic (full, 39) | hermetic (core, 22) | **hermetic (core + playbook)** | **deepseek-v4-pro (N=1)** |
+|---|---|---|---|---|---|
+| tool calls | −59% | −26% | −40% | **−44%** | **+57%** |
+| input tokens (incl. cache) | −30% | **+95%** | +12% | +25% | **+235%** |
+| residual context (tool result bytes) | — | — | — | — | **+33%** |
+| wall-clock | +65% | −23% | −40% | **−40%** | +57% |
+| cost | −43% | +6% | −22% | −13% | +128% |
+| correctness | 8/10 both | 10/10 vs 9/10 | 8/10 vs 9/10 (+1) | 8/10 both | 8/10 vs 6/10 (−2) |
+| sessions using MCP tools | 15/30 | 15/30 | 16/30 | **14/30** | **9/10** |
 
 (`20260712-182434` subscription/full · `20260712-203241` api-key/full ·
 `20260713-001943` api-key/core · `20260713-014512` api-key/core/`--playbook` — the
-**reference run** (it models codemap as deployed), and the repo README table.)
+**reference run** (it models codemap as deployed), and the repo README table ·
+`20261116-201203` deepseek-v4-pro api-key/`--playbook` via the new
+`-driver deepseek` — no claude involved, N=1, and the first run carrying the
+residual-context metric.)
 
 Lessons, honestly stated:
 1. The subscription run's wall-clock penalty was plan throttling, not codemap —
@@ -127,9 +144,20 @@ Lessons, honestly stated:
    a couple of greps, which is the *correct* choice. What this bench cannot see is
    long multi-task sessions where the reflex compounds; testing that requires
    multi-step task chains (documented follow-up), not more reps of this suite.
-4. When the codemap arm does engage, wins are consistent across every hermetic run:
-   fewer calls, less output, ~40% faster, cheaper or par — with correctness at or
-   above baseline.
+4. When the codemap arm does engage, wins are consistent across every hermetic
+   claude run: fewer calls, less output, ~40% faster, cheaper or par — with
+   correctness at or above baseline.
+5. **deepseek-v4-pro behaves differently from sonnet** (N=1, extra-directional):
+   it ADOPTS codemap eagerly (9/10 sessions vs claude's ~50%) but keeps exploring
+   with file tools too — belt-and-suspenders — so tool calls (+57%) and input
+   tokens (+235%; the 22-tool schema tax again, and this API does not discount
+   tool schemas the way claude's caching does) go UP, and two codemap-arm sessions
+   wandered past the answer format (both failures were "no fenced json block",
+   not wrong facts). The residual-context metric this run finally measures:
+   codemap's bounded answers left **39 KiB ± 50 resident vs 29 KiB ± 34** for
+   grep+read (+33%), of which only **7.5 KiB ± 12** came from codemap results —
+   the opposite regime of CodeGraph's disclosed ~80% dense-payload penalty, and
+   the number to watch as non-claude models adopt structural tools harder.
 
 ## Methodology (read before trusting a number)
 

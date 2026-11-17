@@ -89,6 +89,8 @@ type Session struct {
 	InputTokens     int     `json:"input_tokens"`
 	OutputTokens    int     `json:"output_tokens"`
 	CacheReadTokens int     `json:"cache_read_tokens"`
+	ToolResultBytes int     `json:"tool_result_bytes"` // summed tool-result text bytes: residual context occupancy
+	MCPResultBytes  int     `json:"mcp_result_bytes"`  // subset attributed to mcp__ tools
 	WallClockMs     int64   `json:"wall_clock_ms"`
 	CostUSD         float64 `json:"cost_usd"`
 	Pass            bool    `json:"pass"`
@@ -108,18 +110,20 @@ type Stat struct {
 
 // ArmSummary aggregates every session for one arm.
 type ArmSummary struct {
-	Arm          string `json:"arm"`
-	ToolCalls    Stat   `json:"tool_calls"`
-	MCPToolCalls Stat   `json:"mcp_tool_calls"`
-	InputTokens  Stat   `json:"input_tokens"`
-	OutputTokens Stat   `json:"output_tokens"`
-	WallClockS   Stat   `json:"wall_clock_s"`
-	CostUSD      Stat   `json:"cost_usd"`
-	TasksCorrect int    `json:"tasks_correct"` // distinct tasks passing in a majority of reps
-	TasksTotal   int    `json:"tasks_total"`
-	Sessions     int    `json:"sessions"`
-	MCPSessions  int    `json:"mcp_sessions"`     // non-failed sessions with >= 1 MCP tool call
-	Failed       int    `json:"failed,omitempty"` // sessions that errored; excluded from the metric stats
+	Arm             string `json:"arm"`
+	ToolCalls       Stat   `json:"tool_calls"`
+	MCPToolCalls    Stat   `json:"mcp_tool_calls"`
+	InputTokens     Stat   `json:"input_tokens"`
+	OutputTokens    Stat   `json:"output_tokens"`
+	ToolResultBytes Stat   `json:"tool_result_bytes"` // residual context occupancy (KiB in the report)
+	MCPResultBytes  Stat   `json:"mcp_result_bytes"`  // subset attributed to mcp__ tools
+	WallClockS      Stat   `json:"wall_clock_s"`
+	CostUSD         Stat   `json:"cost_usd"`
+	TasksCorrect    int    `json:"tasks_correct"` // distinct tasks passing in a majority of reps
+	TasksTotal      int    `json:"tasks_total"`
+	Sessions        int    `json:"sessions"`
+	MCPSessions     int    `json:"mcp_sessions"`     // non-failed sessions with >= 1 MCP tool call
+	Failed          int    `json:"failed,omitempty"` // sessions that errored; excluded from the metric stats
 }
 
 // Summary is the committed artifact: metadata + per-arm aggregates + raw
@@ -167,7 +171,7 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 		if len(ss) == 0 {
 			continue
 		}
-		var tc, mtc, in, outp, wall, cost []float64
+		var tc, mtc, in, outp, trb, mrb, wall, cost []float64
 		type pc struct{ pass, total int }
 		perTask := map[string]*pc{}
 		failed := 0
@@ -185,6 +189,11 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 				// context the session actually consumed (cache reads dominate).
 				in = append(in, float64(s.InputTokens+s.CacheReadTokens))
 				outp = append(outp, float64(s.OutputTokens))
+				// Residual context occupancy: tool results stay in context for
+				// the whole session, so their summed size is what the session
+				// leaves occupied.
+				trb = append(trb, float64(s.ToolResultBytes))
+				mrb = append(mrb, float64(s.MCPResultBytes))
 				wall = append(wall, float64(s.WallClockMs)/1000.0)
 				cost = append(cost, s.CostUSD)
 				if s.MCPToolCalls > 0 {
@@ -208,18 +217,20 @@ func Aggregate(sessions []Session, armOrder []string) []ArmSummary {
 			}
 		}
 		out = append(out, ArmSummary{
-			Arm:          arm,
-			ToolCalls:    MeanStd(tc),
-			MCPToolCalls: MeanStd(mtc),
-			InputTokens:  MeanStd(in),
-			OutputTokens: MeanStd(outp),
-			WallClockS:   MeanStd(wall),
-			CostUSD:      MeanStd(cost),
-			TasksCorrect: correct,
-			TasksTotal:   len(perTask),
-			Sessions:     len(ss),
-			MCPSessions:  mcpSessions,
-			Failed:       failed,
+			Arm:             arm,
+			ToolCalls:       MeanStd(tc),
+			MCPToolCalls:    MeanStd(mtc),
+			InputTokens:     MeanStd(in),
+			OutputTokens:    MeanStd(outp),
+			ToolResultBytes: MeanStd(trb),
+			MCPResultBytes:  MeanStd(mrb),
+			WallClockS:      MeanStd(wall),
+			CostUSD:         MeanStd(cost),
+			TasksCorrect:    correct,
+			TasksTotal:      len(perTask),
+			Sessions:        len(ss),
+			MCPSessions:     mcpSessions,
+			Failed:          failed,
 		})
 	}
 	return out

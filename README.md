@@ -41,12 +41,17 @@ instead of dozens of file reads.
   **TypeScript + JavaScript** and **Python**: a pure-Go tree-sitter parser extracts the same symbols
   their language servers would, with no server installed. With the server installed, `--precise`
   adds a **precise call graph**; one `typescript-language-server` resolves calls across the
-  `.ts`↔`.js` boundary. Base (non-precise)
+  `.ts`↔`.js` boundary, `pyright-langserver` resolves Python, and **Rust** indexes through
+  `rust-analyzer` (symbols when the server is present; its `callHierarchy` under `--precise`).
+  Projects with an existing [SCIP](https://github.com/sourcegraph/scip) index import it
+  project-wide with `codemap index --scip` (definitions, references, implementations —
+  provenance-tagged, never relabeled as calls). Base (non-precise)
   TS/JS indexing additionally extracts name-based **import edges**, high-precision **call candidates** (same-file calls and calls through imported bindings), **JSX component-usage edges**
   (`<Foo/>` in `.tsx`/`.jsx` — rendering *is* invocation for a function component, so React
   codebases no longer read as disconnected), and **Next.js framework-wiring references** (App
   Router special files, `route.ts` HTTP verbs, middleware, Pages Router), so framework-invoked
-  symbols stop appearing as orphans. **Vue SFCs** route
+  symbols stop appearing as orphans.
+  **Vue SFCs** route
   `<script>`/`<script setup>` blocks through that TS/JS server and currently provide symbols +
   `defines` edges only, with source lines mapped back to the original `.vue` file. Semantic search
   is language-agnostic.
@@ -56,8 +61,9 @@ instead of dozens of file reads.
   768-dim by default) into [veclite](https://github.com/abdul-hamid-achik/veclite), then searched
   with vector + BM25 hybrid retrieval. `--no-embed` keeps codemap's own index structure-only.
 - **Impact analysis** — `impact` returns a symbol's definition sites, direct callers, the
-  transitive blast radius (everything affected by a change), and which tests cover those
-  paths (flagging untested code).
+  transitive blast radius (everything affected by a change — including the inheritance family:
+  subtypes of a changed type and overriding methods, each labeled `via extends`/`implements`/
+  `overrides`), and which tests cover those paths (flagging untested code).
 - **Built for agent harnesses** — `context <symbol>` bundles definition + callers + callees +
   value-reference wiring + tests + blast radius in **one call** (no multi-round-trip stitching),
   and `status` reports index
@@ -136,6 +142,7 @@ language-agnostic once symbols are indexed. A precise call graph
 | Language | How | Extensions | Call graph |
 |---|---|---|---|
 | **Go** | stdlib `go/parser` (pure Go, always) · `--precise` adds exact edges via in-process `go/types` | `.go` | name-based by default; exact via `--precise` |
+| **Rust** | `rust-analyzer` LSP backend (optional, auto-detected): `documentSymbol` supplies symbols when the server is on `PATH`; `--precise` uses its advertised `callHierarchy` for exact calls. Works best on Cargo workspaces; a missing or failing server degrades visibly and never hangs | `.rs` | none name-based (no parser backend); symbols + `defines` always with the server; exact calls via `--precise` |
 | **TypeScript / JavaScript** | built-in pure-Go tree-sitter parser (TS, TSX, JS/JSX) · `--precise` drives `typescript-language-server` `callHierarchy` (one server, resolves across the `.ts`↔`.js` boundary) · plus a name-based scan for imports, JSX component usage, and Next.js framework wiring | `.ts` `.tsx` `.mts` `.cts` `.js` `.jsx` `.mjs` `.cjs` | name-based JSX, import, framework, same-file call, and imported-binding edges by default (partial); complete calls via `--precise` |
 | **Python** | built-in pure-Go tree-sitter parser · `--precise` drives `pyright-langserver` | `.py` `.pyw` `.pyi` | name-based same-file, self/cls-method, and imported-binding candidates (partial); complete via `--precise` |
 | **Ruby** | built-in pure-Go scanner (modules/classes/defs incl. `def self.x`, endless defs, `private def`; heredoc-, `=begin`-, and string-safe) | `.rb` | name-based (calls + `require`/`require_relative` imports) |
@@ -146,16 +153,19 @@ language-agnostic once symbols are indexed. A precise call graph
 | **SQL / sqlc** | Offline declarations and query references; configured sqlc Go mapping | `.sql` | `reads`, `writes`, `depends_on`; no calls |
 | **YAML** | Key paths and explicit Task/Compose/workflow dependencies | `.yaml` `.yml` | `depends_on`; no calls |
 | **Markdown** | CommonMark sections and local links | `.md` `.markdown` | `documents`; no calls |
+| **Any SCIP producer** | `codemap index --scip <index.scip>` imports an existing [SCIP](https://github.com/sourcegraph/scip) index project-wide: definitions, references, implementations — every edge tagged with producer + provenance. SCIP occurrences are never relabeled as calls | `.scip` | imported references/implements only; `call_graph` stays honest |
 
 > Vue SFCs: a `.vue` file's `<script>`/`<script setup>` block (with `lang="ts"` routing to TypeScript, unmarked/`lang="js"` to JavaScript) is parsed by the same backend that indexes plain `.ts`/`.js` files. Template/style blocks are not indexed.
 
 The language servers auto-enable when installed — run [`codemap doctor`](docs/cli.md) to see which are
-detected, or `--no-lsp` to skip. The next waves are tracked honestly at **T0 recognized**:
-Rust; Java/Kotlin/Scala; C/C++/CUDA; C#/VB; PHP; Dart; Swift; Elixir;
-Svelte/Astro/Razor; shell; HCL/Terraform. T0 means the file is detected
+detected (`rustup component add rust-analyzer` for Rust), or `--no-lsp` to skip. The next waves are
+tracked honestly at **T0 recognized**:
+Java/Kotlin/Scala; C/C++/CUDA; C#/VB; PHP; Dart; Swift; Elixir;
+Svelte/Astro/Razor; shell; HCL/Terraform — with the SCIP importer (`--scip`) as the
+project-level path for several of them. T0 means the file is detected
 and reported with a planned/missing backend, but produces no graph nodes yet. Public support
 advances per relation domain (symbols, references/imports, resolved calls) only after its
-fixture and accuracy gates pass; optional SCIP import is the project-level path for several waves.
+fixture and accuracy gates pass.
 See the [language support plan](docs/languages.md) for the T0–T4 admission gates,
 the Rust pilot, and the project-level SCIP importer design.
 

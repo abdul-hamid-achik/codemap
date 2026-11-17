@@ -37,9 +37,18 @@ type Metrics struct {
 	CacheReadTokens int
 	WallClockMs     int64
 	CostUSD         float64
-	FinalAnswer     string // raw final assistant text; grader extracts the JSON block
-	RawTranscript   string // path to the saved stream-json file (artifact)
-	OK              bool   // result event subtype == "success"
+	// ToolResultBytes is the summed size (UTF-8 text bytes) of every tool
+	// result in the transcript — the residual context occupancy those results
+	// leave in the session, since tool results are never evicted mid-session.
+	// It is the codemap-vs-dense-payload comparison CodeGraph calls residual
+	// context occupancy; non-text result parts (images) are not counted.
+	ToolResultBytes int
+	// MCPResultBytes is the subset of ToolResultBytes attributed to mcp__
+	// tools via tool_use id matching.
+	MCPResultBytes int
+	FinalAnswer    string // raw final assistant text; grader extracts the JSON block
+	RawTranscript  string // path to the saved stream-json file (artifact)
+	OK             bool   // result event subtype == "success"
 }
 
 // Driver runs a single agent session.

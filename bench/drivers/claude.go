@@ -198,8 +198,11 @@ type streamEvent struct {
 	// assistant
 	Message *struct {
 		Content []struct {
-			Type string `json:"type"`
-			Name string `json:"name"`
+			Type      string          `json:"type"`
+			Name      string          `json:"name"`
+			ID        string          `json:"id"`
+			ToolUseID string          `json:"tool_use_id"`
+			Content   json.RawMessage `json:"content"`
 		} `json:"content"`
 	} `json:"message"`
 	// result
@@ -216,12 +219,15 @@ type streamEvent struct {
 }
 
 // FoldEvents parses a newline-delimited stream-json event stream, counting
-// tool_use blocks across assistant events and reading token/cost/answer from the
-// final result event. It is the unit under test in claude_test.go.
+// tool_use blocks across assistant events, summing tool_result text bytes
+// (residual context occupancy, with the mcp__ subset matched via tool_use
+// ids), and reading token/cost/answer from the final result event. It is the
+// unit under test in claude_test.go.
 func FoldEvents(r io.Reader) (Metrics, InitInfo, error) {
 	var m Metrics
 	var init InitInfo
 	sawResult := false
+	mcpTool := map[string]bool{} // tool_use id -> came from an mcp__ tool
 
 	sc := bufio.NewScanner(r)
 	// stream-json lines can be large (big tool results / final answers).
@@ -247,9 +253,26 @@ func FoldEvents(r io.Reader) (Metrics, InitInfo, error) {
 				for _, b := range ev.Message.Content {
 					if b.Type == "tool_use" {
 						m.ToolCalls++
-						if strings.HasPrefix(b.Name, "mcp__") {
+						isMCP := strings.HasPrefix(b.Name, "mcp__")
+						if isMCP {
 							m.MCPToolCalls++
 						}
+						mcpTool[b.ID] = isMCP
+					}
+				}
+			}
+		case "user":
+			// Tool results arrive as user messages carrying tool_result blocks;
+			// their text stays resident in context for the rest of the session.
+			if ev.Message != nil {
+				for _, b := range ev.Message.Content {
+					if b.Type != "tool_result" {
+						continue
+					}
+					n := toolResultTextBytes(b.Content)
+					m.ToolResultBytes += n
+					if mcpTool[b.ToolUseID] {
+						m.MCPResultBytes += n
 					}
 				}
 			}
@@ -277,4 +300,32 @@ func FoldEvents(r io.Reader) (Metrics, InitInfo, error) {
 		return m, init, fmt.Errorf("no result event in stream (session did not complete)")
 	}
 	return m, init, nil
+}
+
+// toolResultTextBytes measures the UTF-8 text bytes of a tool_result content
+// value. Claude stream-json emits it either as a plain string or as an array
+// of content blocks ({"type":"text","text":…}); non-text blocks (images) are
+// not resident as text and count 0.
+func toolResultTextBytes(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return len(s)
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		n := 0
+		for _, b := range blocks {
+			if b.Type == "text" {
+				n += len(b.Text)
+			}
+		}
+		return n
+	}
+	return 0
 }

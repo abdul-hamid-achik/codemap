@@ -150,7 +150,7 @@ func orchestrate(c config) error {
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
 		Driver:        driver.Name(),
 		Model:         c.model,
-		AuthMode:      drivers.AuthMode(),
+		AuthMode:      drivers.AuthModeFor(driver.Name()),
 		Playbook:      c.playbook,
 		FixtureRepo:   fixtureRepo(c.fixture),
 		FixtureSHA:    fixtureSHA(c.fixture),
@@ -184,6 +184,8 @@ func runOne(d drivers.Driver, t suite.Task, arm drivers.Arm, rep int, transcript
 	s.InputTokens = m.InputTokens
 	s.OutputTokens = m.OutputTokens
 	s.CacheReadTokens = m.CacheReadTokens
+	s.ToolResultBytes = m.ToolResultBytes
+	s.MCPResultBytes = m.MCPResultBytes
 	s.WallClockMs = m.WallClockMs
 	s.CostUSD = m.CostUSD
 	s.OK = m.OK
@@ -315,10 +317,8 @@ func pickDriver(c config, tasks []suite.Task) (drivers.Driver, error) {
 		return drivers.NewSmokeDriver(tasks, func(t suite.Task) string {
 			return filepath.Join(c.tasksDir, t.Truth)
 		})
-	case "codex":
-		return drivers.CodexDriver{}, nil
-	case "gemini":
-		return drivers.GeminiDriver{}, nil
+	case "deepseek":
+		return drivers.DeepSeekDriver{}, nil
 	default:
 		return nil, fmt.Errorf("unknown driver %q", c.driver)
 	}
