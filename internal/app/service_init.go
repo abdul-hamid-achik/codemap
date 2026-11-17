@@ -55,6 +55,10 @@ type IndexReport struct {
 	Nodes       int               `json:"nodes"`
 	Edges       int               `json:"edges"`
 	Errors      []index.FileError `json:"errors,omitempty"`
+	// Scip reports a project-level SCIP import (index --scip): per-domain
+	// completeness with producer provenance. Occurrences are never imported as
+	// call edges, so coverage claims stay honest.
+	Scip *index.ScipImportReport `json:"scip,omitempty"`
 	// Precise* surface the opt-in go/types pass (index --precise).
 	PreciseUpgraded int    `json:"precise_upgraded,omitempty"`
 	PreciseSkipped  int    `json:"precise_skipped,omitempty"`
@@ -245,21 +249,45 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	// when embeddings were explicitly disabled or the provider is unavailable.
 	// This path never creates a vector store and never inserts embeddings.
 	// The open itself is the expensive part — veclite loads every project's
-	// records into memory — so only pay it when this project actually has
-	// local vectors to clear (checked cheaply against the graph, pre-wipe).
+	// records into memory and the close re-serializes the collection — so it is
+	// paid only when there is something to clean: files changed or deleted since
+	// the last index (their replaced nodes' vectors must go), or a wipe
+	// (Reindex drops every previous record). A no-op incremental run of a
+	// project with vectors skips the open entirely; when staleness can't be
+	// determined, fall back to opening so cleanup correctness is preserved.
 	if emb == nil {
 		hasVec, herr := g.ProjectHasVecIDs(pid)
 		if herr != nil {
 			return nil, herr
 		}
 		if hasVec {
-			if scope := vectorScope(project); projectShardExists(scope) {
-				if vec, err = svc.s.VectorsForProjectMaintenance(scope); err != nil {
+			needsCleanup := opts.Reindex
+			if !needsCleanup {
+				stats, serr := g.Stats(pid)
+				if serr != nil {
+					needsCleanup = true
+				} else {
+					langs := make(map[string]bool, len(stats.Languages))
+					for l := range stats.Languages {
+						langs[l] = true
+					}
+					st, serr2 := index.New(g, nil, nil, svc.s.Config.Index).Staleness(pid, root, langs)
+					if serr2 != nil {
+						needsCleanup = true
+					} else {
+						needsCleanup = st.Changed > 0 || st.Deleted > 0
+					}
+				}
+			}
+			if needsCleanup {
+				if scope := vectorScope(project); projectShardExists(scope) {
+					if vec, err = svc.s.VectorsForProjectMaintenance(scope); err != nil {
+						return nil, err
+					}
+					vecScope = scope
+				} else if vec, err = svc.s.VectorsForMaintenance(); err != nil {
 					return nil, err
 				}
-				vecScope = scope
-			} else if vec, err = svc.s.VectorsForMaintenance(); err != nil {
-				return nil, err
 			}
 		}
 	}
@@ -303,6 +331,7 @@ func (svc *Service) Index(ctx context.Context, cwd string, opts index.Options, w
 	rep.Nodes = res.Nodes
 	rep.Edges = res.Edges
 	rep.Errors = res.Errors
+	rep.Scip = res.Scip
 	rep.PreciseUpgraded = res.PreciseUpgraded
 	rep.PreciseSkipped = res.PreciseSkipped
 	rep.PreciseNote = res.PreciseNote
@@ -391,7 +420,7 @@ func indexAdvisory(res *index.Result) string {
 	}
 	if len(planned) > 0 {
 		msgs = append(msgs, "skipped "+summarizeUnsupported(planned)+
-			" — recognized at T0 only (structural backend planned, not shipped); codemap currently indexes Go, TypeScript, JavaScript, Python, Ruby, Lua, Vue script blocks, CSS/SCSS/Sass/Less, and HTML")
+			" — recognized at T0 only (structural backend planned, not shipped); codemap currently indexes Go, TypeScript, JavaScript, Python, Ruby, Lua, Vue script blocks, CSS/SCSS/Sass/Less, and HTML, plus Rust via the rust-analyzer server when installed")
 	}
 	return strings.Join(msgs, "; ")
 }

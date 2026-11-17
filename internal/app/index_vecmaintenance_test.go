@@ -101,3 +101,101 @@ func TestEmbeddedCountDoesNotOpenVectorStore(t *testing.T) {
 		t.Error("read-only vector store was opened just to count")
 	}
 }
+
+// A no-op structure-only reindex of a project that HAS local vectors must skip
+// the vector-store open: nothing was replaced or deleted, so there is nothing
+// to clean, and opening veclite (which loads every project's records and
+// re-serializes them on close) dominated no-op wall time on a large shared
+// store. A run that WILL touch vector records — changed or deleted files, or a
+// Reindex wipe — must still open the store for cleanup. The poisoned store
+// file makes the open observable: skipped → run succeeds, attempted → it fails.
+func TestStructureOnlyNoOpSkipsVectorOpenButChangedStillCleans(t *testing.T) {
+	isolate(t)
+
+	proj := t.TempDir()
+	mainPath := filepath.Join(proj, "main.go")
+	if err := os.WriteFile(mainPath,
+		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	svc := NewService(sess)
+	if _, err := svc.Init(proj, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a project with local vectors: mark a node's vec_id graph-side
+	// (what every query joins on), then poison the legacy store file.
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep0, err := svc.Status(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := g.GetProjectByName(rep0.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := g.FindNodesBySymbol(p.ID, "Run")
+	if err != nil || len(nodes) == 0 {
+		t.Fatalf("Run node not found: %v %v", nodes, err)
+	}
+	if _, err := g.SetNodeVecIDs(p.ID, map[int64]string{nodes[0].ID: "vec-run"}); err != nil {
+		t.Fatal(err)
+	}
+	vecPath := config.VeclitePath()
+	if err := os.MkdirAll(filepath.Dir(vecPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vecPath, []byte("not a veclite database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// No-op structure-only reindex: nothing changed or deleted → the poisoned
+	// store must never be opened.
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatalf("no-op structure-only reindex opened the (corrupt) vector store: %v", err)
+	}
+	if sess.vectorsMaintenance != nil {
+		t.Error("maintenance vector store was opened for a no-op run")
+	}
+
+	// A changed file replaces its nodes — the old vectors must be cleaned, so
+	// the open (and its failure on the poisoned file) is required.
+	if err := os.WriteFile(mainPath,
+		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n\nfunc Extra() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err == nil {
+		t.Fatal("changed-file run should have opened the corrupt vector store for cleanup and failed")
+	}
+
+	// Restore a valid state: clear the vec_ids and rewrite the file so the
+	// remaining assertions start from a clean, unchanged tree. A Reindex wipe
+	// with vec_ids present must also open for cleanup.
+	if err := g.ClearProjectVecIDsByName(rep0.Project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.SetNodeVecIDs(p.ID, map[int64]string{nodes[0].ID: "vec-run"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mainPath,
+		[]byte("package app\n\nfunc Run() { Helper() }\n\nfunc Helper() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatalf("re-sync after change failed unexpectedly: %v", err)
+	}
+	if _, err := svc.Index(context.Background(), proj, index.Options{Reindex: true}, false); err == nil {
+		t.Fatal("Reindex wipe with vec_ids present should have opened the corrupt vector store and failed")
+	}
+}
