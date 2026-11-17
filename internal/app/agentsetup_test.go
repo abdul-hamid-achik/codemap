@@ -384,3 +384,177 @@ func snapshotTree(t *testing.T, dir string) string {
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
 }
+
+// fakeClaudeHome points HOME (and PATH, so the real `claude` CLI is never
+// invoked) at an isolated temp dir and returns the settings path.
+func fakeClaudeHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", t.TempDir())
+	return filepath.Join(home, ".claude", "settings.json")
+}
+
+// TestSetupClaudeHooksOptIn: --hooks creates ~/.claude/settings.json with the
+// two codemap hook entries; a second run is byte-identical (idempotent,
+// "unchanged"); user-owned hooks and sibling settings keys survive the merge.
+func TestSetupClaudeHooksOptIn(t *testing.T) {
+	settings := fakeClaudeHome(t)
+	dir := t.TempDir()
+
+	rep, err := SetupHarness(dir, "claude-code", SetupOptions{Hooks: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Written) != 1 || rep.Written[0].Action != "created" {
+		t.Fatalf("first run written = %+v, want one created action", rep.Written)
+	}
+	m := readJSON(t, settings)
+	hooks, _ := m["hooks"].(map[string]any)
+	for _, ev := range []string{"PreToolUse", "PostToolUse"} {
+		list, _ := hooks[ev].([]any)
+		if len(list) != 1 {
+			t.Fatalf("%s entries = %d, want 1", ev, len(list))
+		}
+		e, _ := list[0].(map[string]any)
+		if e["matcher"] != claudeHookMatcher {
+			t.Fatalf("%s matcher = %v", ev, e["matcher"])
+		}
+		hs, _ := e["hooks"].([]any)
+		h, _ := hs[0].(map[string]any)
+		if h["type"] != "command" || h["command"] == "" {
+			t.Fatalf("%s hook = %+v", ev, h)
+		}
+	}
+	first, _ := os.ReadFile(settings)
+
+	// Re-run: byte-identical file, reported unchanged.
+	rep2, err := SetupHarness(dir, "claude-code", SetupOptions{Hooks: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep2.Written[0].Action != "unchanged" {
+		t.Fatalf("second run action = %q, want unchanged", rep2.Written[0].Action)
+	}
+	second, _ := os.ReadFile(settings)
+	if string(first) != string(second) {
+		t.Fatal("second run changed the settings file")
+	}
+}
+
+// TestSetupClaudeHooksPreservesUserConfig: existing user hooks (own matcher)
+// and unrelated top-level settings keys survive the merge; a stale codemap
+// entry is replaced, not duplicated.
+func TestSetupClaudeHooksPreservesUserConfig(t *testing.T) {
+	settings := fakeClaudeHome(t)
+	dir := t.TempDir()
+	existing := `{
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hi"}]},
+      {"matcher": "Edit|Write|MultiEdit", "hooks": [{"type": "command", "command": "codemap status --old-format"}]}
+    ]
+  }
+}`
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetupHarness(dir, "claude-code", SetupOptions{Hooks: true}); err != nil {
+		t.Fatal(err)
+	}
+	m := readJSON(t, settings)
+	if m["model"] != "opus" {
+		t.Fatalf("sibling key model = %v, want opus", m["model"])
+	}
+	pre, _ := m["hooks"].(map[string]any)["PreToolUse"].([]any)
+	if len(pre) != 2 {
+		t.Fatalf("PreToolUse entries = %d, want 2 (user kept, codemap replaced)", len(pre))
+	}
+	for _, e := range pre {
+		em, _ := e.(map[string]any)
+		cmd := em["hooks"].([]any)[0].(map[string]any)["command"].(string)
+		if em["matcher"] == "Bash" && cmd != "echo hi" {
+			t.Fatalf("user hook clobbered: %v", e)
+		}
+		if em["matcher"] == claudeHookMatcher && cmd == "codemap status --old-format" {
+			t.Fatal("stale codemap hook entry not replaced")
+		}
+	}
+}
+
+// TestSetupClaudeHooksDefaultOff: without --hooks the user settings file is
+// never created or touched.
+func TestSetupClaudeHooksDefaultOff(t *testing.T) {
+	settings := fakeClaudeHome(t)
+	dir := t.TempDir()
+	rep, err := SetupHarness(dir, "claude-code", SetupOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Written) != 0 {
+		t.Fatalf("written = %+v, want none", rep.Written)
+	}
+	if _, err := os.Stat(settings); !os.IsNotExist(err) {
+		t.Fatalf("settings file must not exist without --hooks, stat err = %v", err)
+	}
+	// With an existing settings file it is left byte-identical.
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := []byte("{\"model\": \"opus\"}\n")
+	if err := os.WriteFile(settings, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SetupHarness(dir, "claude-code", SetupOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(settings)
+	if string(before) != string(after) {
+		t.Fatal("settings file modified without --hooks")
+	}
+}
+
+// TestSetupClaudeHooksMalformedSettings: an unparsable settings.json aborts
+// with an error and is never clobbered.
+func TestSetupClaudeHooksMalformedSettings(t *testing.T) {
+	settings := fakeClaudeHome(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before := []byte("{ not json // comment\n")
+	if err := os.WriteFile(settings, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SetupHarness(dir, "claude-code", SetupOptions{Hooks: true})
+	if err == nil {
+		t.Fatal("malformed settings.json must error")
+	}
+	if !strings.Contains(err.Error(), "not valid json") {
+		t.Fatalf("error should explain the refusal: %v", err)
+	}
+	after, _ := os.ReadFile(settings)
+	if string(before) != string(after) {
+		t.Fatal("malformed settings.json was modified")
+	}
+}
+
+// TestSetupClaudeHooksDryRun: --hooks --dry-run writes nothing.
+func TestSetupClaudeHooksDryRun(t *testing.T) {
+	settings := fakeClaudeHome(t)
+	dir := t.TempDir()
+	rep, err := SetupHarness(dir, "claude-code", SetupOptions{Hooks: true, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Written) != 1 || rep.Written[0].Action != "created" {
+		t.Fatalf("dry-run written = %+v, want one planned created", rep.Written)
+	}
+	if _, err := os.Stat(settings); !os.IsNotExist(err) {
+		t.Fatalf("dry-run must not write, stat err = %v", err)
+	}
+}

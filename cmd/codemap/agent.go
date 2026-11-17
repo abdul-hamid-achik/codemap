@@ -53,7 +53,7 @@ var (
 )
 
 func init() {
-	agentSetupCmd.Flags().Bool("global", false, "write user-level config where the harness has one (default: project-scoped files)")
+	agentSetupCmd.Flags().Bool("hooks", false, "claude code only: also merge advisory codemap hooks into user-level ~/.claude/settings.json (opt-in; never writes the repo)")
 	agentSetupCmd.Flags().Bool("dry-run", false, "print every planned write, change nothing")
 	agentSetupCmd.Flags().Bool("no-playbook", false, "register the MCP server only, skip the guidance file")
 	agentPlaybookCmd.Flags().String("format", "markdown", "output format: markdown | markdown-cli | claude-skill | cursor-rule | skill")
@@ -82,7 +82,8 @@ func runAgentSetup(cmd *cobra.Command, args []string) error {
 	global, _ := cmd.Flags().GetBool("global")
 	dry, _ := cmd.Flags().GetBool("dry-run")
 	noPlaybook, _ := cmd.Flags().GetBool("no-playbook")
-	rep, err := app.SetupHarness(targetDir(cmd), args[0], app.SetupOptions{Global: global, DryRun: dry, NoPlaybook: noPlaybook})
+	hooks, _ := cmd.Flags().GetBool("hooks")
+	rep, err := app.SetupHarness(targetDir(cmd), args[0], app.SetupOptions{Global: global, DryRun: dry, NoPlaybook: noPlaybook, Hooks: hooks})
 	if err != nil {
 		return err
 	}

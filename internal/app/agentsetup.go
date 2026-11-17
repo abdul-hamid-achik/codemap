@@ -28,6 +28,7 @@ type SetupOptions struct {
 	Global     bool // write user-level config where the harness has one
 	DryRun     bool // compute + report planned writes, mutate nothing
 	NoPlaybook bool // register the MCP server only, skip the guidance file
+	Hooks      bool // opt-in (Claude Code only): merge editor hooks into user-level ~/.claude/settings.json
 }
 
 // FileAction records one planned or performed write. Action is one of
@@ -355,21 +356,161 @@ func setupClaudeCode(dir string, opts SetupOptions) (SetupReport, error) {
 		"claude plugin install codemap@codemap",
 	}
 	_, haveClaude := exec.LookPath("claude")
+	installed := false
 	if haveClaude == nil && !opts.DryRun {
+		ok := true
 		for _, c := range cmds {
 			parts := strings.Fields(c)
 			out, err := exec.Command(parts[0], parts[1:]...).CombinedOutput() //nolint:gosec // fixed argv, no user input
 			if err != nil {
 				// Never a hard failure: fall back to printing the commands.
 				rep.Snippets = append(rep.Snippets, Snippet{Content: strings.Join(cmds, "\n"), Reason: "run these to install the codemap plugin (`claude` invocation failed: " + strings.TrimSpace(string(out)) + ")"})
-				return rep, nil
+				ok = false
+				break
 			}
 		}
-		rep.Notes = append(rep.Notes, "installed the codemap plugin (MCP server + using-codemap skill)")
-		return rep, nil
+		installed = ok
 	}
-	rep.Snippets = append(rep.Snippets, Snippet{Content: strings.Join(cmds, "\n"), Reason: "run these to install the codemap plugin (MCP server + using-codemap skill), or in Claude Code: /plugin marketplace add abdul-hamid-achik/codemap"})
+	if installed {
+		rep.Notes = append(rep.Notes, "installed the codemap plugin (MCP server + using-codemap skill)")
+	} else if len(rep.Snippets) == 0 {
+		rep.Snippets = append(rep.Snippets, Snippet{Content: strings.Join(cmds, "\n"), Reason: "run these to install the codemap plugin (MCP server + using-codemap skill), or in Claude Code: /plugin marketplace add abdul-hamid-achik/codemap"})
+	}
+	if opts.Hooks {
+		path := claudeSettingsPath()
+		if path == "" {
+			return rep, fmt.Errorf("cannot determine home directory for claude code settings")
+		}
+		action, err := mergeClaudeHooks(path, opts.DryRun)
+		if err != nil {
+			return rep, err
+		}
+		rep.Written = append(rep.Written, action)
+		rep.Notes = append(rep.Notes, "merged opt-in editor hooks into user-level "+path+" (never written into the project repo)")
+	}
 	return rep, nil
+}
+
+// claudeSettingsPath returns the USER-level Claude Code settings path
+// (~/.claude/settings.json). Hooks are never written into a project repo —
+// only here. Empty when the home dir is unknown.
+func claudeSettingsPath() string {
+	home := homeDir()
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "settings.json")
+}
+
+// claudeHookMatcher matches Claude Code's file-editing tools (Edit, Write;
+// MultiEdit is legacy but harmless to include).
+const claudeHookMatcher = "Edit|Write|MultiEdit"
+
+// claudeHookCommands are the opt-in editor hook commands. Both are advisory
+// only (`|| true`, never exit non-zero) and bounded (head -c) so a noisy
+// status can never flood the transcript. PreToolUse nudges BEFORE an edit
+// when the index is already stale (full drift check — status prints the
+// "index is stale" warning line only when stale); PostToolUse echoes the
+// cheap tail of `codemap status --skip-stale` (readiness stats, no drift
+// walk) right after an edit so the agent sees the reindex hint.
+const (
+	claudePreToolUseCommand  = "codemap status 2>/dev/null | grep -m1 'index is stale' >&2 || true"
+	claudePostToolUseCommand = "codemap status --skip-stale 2>/dev/null | tail -n 3 | head -c 400 >&2 || true"
+)
+
+// claudeHookEntry builds one Claude Code hooks entry per the documented schema
+// ({"matcher": ..., "hooks": [{"type": "command", "command": ..., "timeout": ...}]})).
+func claudeHookEntry(command string) map[string]any {
+	return map[string]any{
+		"matcher": claudeHookMatcher,
+		"hooks": []any{map[string]any{
+			"type":    "command",
+			"command": command,
+			"timeout": 10,
+		}},
+	}
+}
+
+// mergeClaudeHooks merges codemap's opt-in editor hooks into the USER-level
+// Claude Code settings (path is always ~/.claude/settings.json — never a
+// project repo). Merge-not-overwrite: every sibling settings key and every
+// non-codemap hooks entry survives; codemap's own entries under
+// hooks.PreToolUse/PostToolUse are replaced wholesale, so a re-run that would
+// produce byte-identical output reports "unchanged" and writes nothing
+// (idempotent). An existing file that isn't valid JSON aborts with an error —
+// it is NEVER rewritten.
+func mergeClaudeHooks(path string, dry bool) (FileAction, error) {
+	orig, readErr := os.ReadFile(path)
+	existed := readErr == nil
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		return FileAction{}, readErr
+	}
+	root := map[string]any{}
+	if existed {
+		if err := json.Unmarshal(orig, &root); err != nil {
+			return FileAction{}, fmt.Errorf("%s is not valid json, refusing to merge hooks into it (fix or remove the file and re-run): %v", path, err)
+		}
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	for event, command := range map[string]string{
+		"PreToolUse":  claudePreToolUseCommand,
+		"PostToolUse": claudePostToolUseCommand,
+	} {
+		list, _ := hooks[event].([]any)
+		kept := make([]any, 0, len(list)+1)
+		for _, e := range list {
+			if !isCodemapHookEntry(e) {
+				kept = append(kept, e)
+			}
+		}
+		kept = append(kept, claudeHookEntry(command))
+		hooks[event] = kept
+	}
+	root["hooks"] = hooks
+	out, err := marshalJSON(root)
+	if err != nil {
+		return FileAction{}, err
+	}
+	action := "created"
+	if existed {
+		if bytes.Equal(bytes.TrimRight(orig, "\n"), bytes.TrimRight(out, "\n")) {
+			action = "unchanged"
+		} else {
+			action = "updated"
+		}
+	}
+	if action != "unchanged" && !dry {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return FileAction{}, err
+		}
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			return FileAction{}, err
+		}
+	}
+	return FileAction{Path: path, Action: action}, nil
+}
+
+// isCodemapHookEntry reports whether a hooks entry is one codemap wrote: same
+// matcher and a first command hook mentioning codemap. User entries (different
+// matcher or codemap-free commands) always survive the merge.
+func isCodemapHookEntry(e any) bool {
+	m, ok := e.(map[string]any)
+	if !ok || m["matcher"] != claudeHookMatcher {
+		return false
+	}
+	hs, ok := m["hooks"].([]any)
+	if !ok || len(hs) == 0 {
+		return false
+	}
+	h, ok := hs[0].(map[string]any)
+	if !ok {
+		return false
+	}
+	cmd, _ := h["command"].(string)
+	return strings.Contains(cmd, "codemap")
 }
 
 func setupCodex(dir string, opts SetupOptions) (SetupReport, error) {
