@@ -94,19 +94,25 @@ func RenderTable(sum suite.Summary) string {
 	if sum.Playbook {
 		auth += ", playbook-injected"
 	}
-	fmt.Fprintf(&b, "> **DIRECTIONAL** — %s @ `%s`, %s, N=%d (mean ± σ)%s, %s. Not a controlled study; see [bench/README.md](bench/README.md).\n>\n",
-		sum.FixtureRepo, shortSHA(sum.FixtureSHA), sum.Model, sum.Reps, auth, dateOf(sum.GeneratedAt))
-
 	base := findArm(sum.Arms, "baseline")
 	cm := findArm(sum.Arms, "codemap")
-
-	fmt.Fprintf(&b, "> | metric (mean ± σ, per session) | baseline (Read/Grep/Glob) | with codemap | Δ |\n")
-	fmt.Fprintf(&b, "> |---|---|---|---|\n")
-	rowStat(&b, "tool calls", base, cm, func(a suite.ArmSummary) suite.Stat { return a.ToolCalls }, fmtNum, true)
-	rowStat(&b, "mcp tool calls", base, cm, func(a suite.ArmSummary) suite.Stat { return a.MCPToolCalls }, fmtNum, true)
-	rowMCPSessions(&b, base, cm)
-	rowStat(&b, "input tokens (incl. cache reads)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.InputTokens }, fmtK, true)
-	rowStat(&b, "output tokens", base, cm, func(a suite.ArmSummary) suite.Stat { return a.OutputTokens }, fmtK, true)
+	// Optional third comparison surface (the codegraph arm): one extra column
+	// when the run included it.
+	xg := findArm(sum.Arms, "codegraph")
+	fmt.Fprintf(&b, "> **DIRECTIONAL** — %s @ `%s`, %s, N=%d (mean ± σ)%s, %s. Not a controlled study; see [bench/README.md](bench/README.md).\n>\n",
+		sum.FixtureRepo, shortSHA(sum.FixtureSHA), sum.Model, sum.Reps, auth, dateOf(sum.GeneratedAt))
+	if xg != nil {
+		fmt.Fprintf(&b, "> | metric (mean ± σ, per session) | baseline (Read/Grep/Glob) | with codemap | with codegraph | Δ baseline→codemap |\n")
+		fmt.Fprintf(&b, "> |---|---|---|---|---|\n")
+	} else {
+		fmt.Fprintf(&b, "> | metric (mean ± σ, per session) | baseline (Read/Grep/Glob) | with codemap | Δ |\n")
+		fmt.Fprintf(&b, "> |---|---|---|---|\n")
+	}
+	rowStat(&b, xg, "tool calls", base, cm, func(a suite.ArmSummary) suite.Stat { return a.ToolCalls }, fmtNum)
+	rowStat(&b, xg, "mcp tool calls", base, cm, func(a suite.ArmSummary) suite.Stat { return a.MCPToolCalls }, fmtNum)
+	rowMCPSessions(&b, base, cm, xg)
+	rowStat(&b, xg, "input tokens (incl. cache reads)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.InputTokens }, fmtK)
+	rowStat(&b, xg, "output tokens", base, cm, func(a suite.ArmSummary) suite.Stat { return a.OutputTokens }, fmtK)
 	// Residual context occupancy: summed tool-result text bytes per session —
 	// the code-graph answer to CodeGraph's disclosed dense-payload weakness
 	// (their ~80% more resident context); narrow bounded answers should hold
@@ -114,12 +120,12 @@ func RenderTable(sum suite.Summary) string {
 	// emitted only when a run actually measured result bytes — summaries from
 	// before the metric existed would otherwise read as a false zero.
 	if (base != nil && base.ToolResultBytes.Mean > 0) || (cm != nil && cm.ToolResultBytes.Mean > 0) {
-		rowStat(&b, "tool result bytes (residual context)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.ToolResultBytes }, fmtKiB, true)
-		rowStat(&b, "  of which mcp codemap", base, cm, func(a suite.ArmSummary) suite.Stat { return a.MCPResultBytes }, fmtKiB, true)
+		rowStat(&b, xg, "tool result bytes (residual context)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.ToolResultBytes }, fmtKiB)
+		rowStat(&b, xg, "  of which mcp tools", base, cm, func(a suite.ArmSummary) suite.Stat { return a.MCPResultBytes }, fmtKiB)
 	}
-	rowStat(&b, "wall-clock (s)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.WallClockS }, fmtNum, true)
-	rowStat(&b, "cost (USD)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.CostUSD }, fmtUSD, true)
-	rowCorrect(&b, base, cm)
+	rowStat(&b, xg, "wall-clock (s)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.WallClockS }, fmtNum)
+	rowStat(&b, xg, "cost (USD)", base, cm, func(a suite.ArmSummary) suite.Stat { return a.CostUSD }, fmtUSD)
+	rowCorrect(&b, base, cm, xg)
 
 	if sum.IndexSeconds > 0 {
 		fmt.Fprintf(&b, ">\n> One-time codemap index cost (disclosed, not per-session): **%.0fs**. codemap is modelled as pre-indexed (the daemon keeps it fresh in real use), so the codemap arm pays query time, not index time.\n", sum.IndexSeconds)
@@ -127,9 +133,13 @@ func RenderTable(sum suite.Summary) string {
 	return b.String()
 }
 
-func rowStat(b *strings.Builder, label string, base, cm *suite.ArmSummary, pick func(suite.ArmSummary) suite.Stat, f func(float64) string, lowerBetter bool) {
+func rowStat(b *strings.Builder, xg *suite.ArmSummary, label string, base, cm *suite.ArmSummary, pick func(suite.ArmSummary) suite.Stat, f func(float64) string) {
 	bc := cell(base, pick, f)
 	cc := cell(cm, pick, f)
+	xc := ""
+	if xg != nil {
+		xc = cell(xg, pick, f) + " |"
+	}
 	delta := "—"
 	if base != nil && cm != nil {
 		bv := pick(*base).Mean
@@ -139,14 +149,18 @@ func rowStat(b *strings.Builder, label string, base, cm *suite.ArmSummary, pick 
 			delta = fmt.Sprintf("%+.0f%%", pct)
 		}
 	}
-	fmt.Fprintf(b, "> | %s | %s | %s | %s |\n", label, bc, cc, delta)
+	fmt.Fprintf(b, "> | %s | %s | %s | %s%s |\n", label, bc, cc, xc, delta)
 }
 
-// rowMCPSessions renders "sessions using codemap tools" as N/M per arm, where
+// rowMCPSessions renders "sessions using MCP tools" as N/M per arm, where
 // M is the arm's non-failed session count. An arm with zero non-failed
 // sessions (all errored, or the arm didn't run) renders as "—".
-func rowMCPSessions(b *strings.Builder, base, cm *suite.ArmSummary) {
-	fmt.Fprintf(b, "> | sessions using codemap tools | %s | %s | — |\n", mcpSessionsCell(base), mcpSessionsCell(cm))
+func rowMCPSessions(b *strings.Builder, base, cm, xg *suite.ArmSummary) {
+	xc := ""
+	if xg != nil {
+		xc = mcpSessionsCell(xg) + " |"
+	}
+	fmt.Fprintf(b, "> | sessions using MCP tools | %s | %s | %s— |\n", mcpSessionsCell(base), mcpSessionsCell(cm), xc)
 }
 
 func mcpSessionsCell(a *suite.ArmSummary) string {
@@ -160,7 +174,7 @@ func mcpSessionsCell(a *suite.ArmSummary) string {
 	return fmt.Sprintf("%d/%d", a.MCPSessions, m)
 }
 
-func rowCorrect(b *strings.Builder, base, cm *suite.ArmSummary) {
+func rowCorrect(b *strings.Builder, base, cm, xg *suite.ArmSummary) {
 	bc, cc, delta := "—", "—", "—"
 	if base != nil {
 		bc = fmt.Sprintf("%d/%d", base.TasksCorrect, base.TasksTotal)
@@ -168,12 +182,17 @@ func rowCorrect(b *strings.Builder, base, cm *suite.ArmSummary) {
 	if cm != nil {
 		cc = fmt.Sprintf("%d/%d", cm.TasksCorrect, cm.TasksTotal)
 	}
+	xc := ""
+	if xg != nil {
+		xc = fmt.Sprintf("%d/%d", xg.TasksCorrect, xg.TasksTotal) + " |"
+	}
 	if base != nil && cm != nil {
 		delta = fmt.Sprintf("%+d", cm.TasksCorrect-base.TasksCorrect)
 	}
-	fmt.Fprintf(b, "> | tasks correct | %s | %s | %s |\n", bc, cc, delta)
+	fmt.Fprintf(b, "> | tasks correct | %s | %s | %s%s |\n", bc, cc, xc, delta)
 	warnFailed(b, base)
 	warnFailed(b, cm)
+	warnFailed(b, xg)
 }
 
 // warnFailed appends a visible caveat when an arm had errored sessions — they

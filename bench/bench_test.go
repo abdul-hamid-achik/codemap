@@ -141,7 +141,7 @@ func TestSpliceTable_IdempotentAndDirectional(t *testing.T) {
 	if !strings.Contains(once, "mcp tool calls") || !strings.Contains(once, "2.1 ± 0.5") {
 		t.Errorf("table missing mcp tool calls row:\n%s", once)
 	}
-	if !strings.Contains(once, "sessions using codemap tools") || !strings.Contains(once, "24/30") {
+	if !strings.Contains(once, "sessions using MCP tools") || !strings.Contains(once, "24/30") {
 		t.Errorf("table missing sessions-using-codemap-tools row:\n%s", once)
 	}
 	// baseline never calls MCP tools (0 non-error sessions with a call) — the

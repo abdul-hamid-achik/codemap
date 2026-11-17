@@ -1,0 +1,9 @@
+{
+  "_comment": "codegraph arm template (the 77k-star colbymchenry/codegraph as a comparison surface). ${CODEMAP_REPO} is expanded at runtime like codemap.mcp.json. --no-telemetry keeps the comparison clean (their telemetry is on by default); --no-watch keeps the session hermetic.",
+  "mcpServers": {
+    "codegraph": {
+      "command": "codegraph",
+      "args": ["serve", "--mcp", "--path", "${CODEMAP_REPO}/bench/fixtures/repo", "--no-watch", "--no-telemetry"]
+    }
+  }
+}

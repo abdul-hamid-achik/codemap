@@ -214,10 +214,17 @@ func buildArms(names []string, c config) ([]drivers.Arm, error) {
 	if err != nil {
 		return nil, err
 	}
-	var resolvedMCP string
+	var resolvedMCP, resolvedCodegraphMCP string
 	for _, name := range names {
 		if name == "codemap" {
 			resolvedMCP, err = resolveMCPConfig(c.mcpConfig, c.out)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if name == "codegraph" {
+			tmpl := filepath.Join(filepath.Dir(c.mcpConfig), "codegraph.mcp.json")
+			resolvedCodegraphMCP, err = resolveMCPConfig(tmpl, c.out)
 			if err != nil {
 				return nil, err
 			}
@@ -244,8 +251,15 @@ func buildArms(names []string, c config) ([]drivers.Arm, error) {
 			// actually deployed (tool-selection guidance taught), not the
 			// baseline's file tools, which need no playbook.
 			a.AppendSystemPrompt = playbookText
+		case "codegraph":
+			// Third comparison surface: the colbymchenry/codegraph MCP tools
+			// on the same fixture, same driver, same neutral system prompt.
+			// No codemap playbook here — it teaches codemap_* tool names.
+			a.AllowedTools = "Read,Grep,Glob,mcp__codegraph"
+			a.MCPConfig = resolvedCodegraphMCP
+			a.MCPServer = "codegraph"
 		default:
-			return nil, fmt.Errorf("unknown arm %q (want baseline|codemap)", name)
+			return nil, fmt.Errorf("unknown arm %q (want baseline|codemap|codegraph)", name)
 		}
 		arms = append(arms, a)
 	}
@@ -295,7 +309,7 @@ func resolveMCPConfig(templatePath, outDir string) (string, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", err
 	}
-	out := filepath.Join(outDir, "codemap.mcp.resolved.json")
+	out := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(templatePath), ".json")+".resolved.json")
 	if err := os.WriteFile(out, []byte(expanded+"\n"), 0o644); err != nil {
 		return "", err
 	}
