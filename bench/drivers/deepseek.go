@@ -179,7 +179,6 @@ func (d DeepSeekDriver) Run(ctx context.Context, prompt string, arm Arm, transcr
 	// MCP server (codemap arm only): spawn from the resolved config, expose
 	// its tools under mcp__<server>__<tool> like the claude CLI names them.
 	var mcp *mcpStdioClient
-	var mcpTools []string
 	if arm.MCPConfig != "" {
 		var err error
 		mcp, err = dialMCPConfig(ctx, arm.MCPConfig)
@@ -216,12 +215,11 @@ func (d DeepSeekDriver) Run(ctx context.Context, prompt string, arm Arm, transcr
 				dt.Function.Parameters = map[string]any{"type": "object", "properties": map[string]any{}}
 			}
 			tools = append(tools, dt)
-			mcpTools = append(mcpTools, fn)
 		}
 	}
 
 	// Transcript sink: claude stream-json shaped events.
-	var sink io.Writer = io.Discard
+	sink := io.Writer(io.Discard)
 	if transcriptPath != "" {
 		f, ferr := os.Create(transcriptPath)
 		if ferr != nil {
@@ -535,12 +533,12 @@ func nativeRead(workdir string, args map[string]any) (string, error) {
 			continue
 		}
 		if n >= limit || total >= nativeReadMaxBytes {
-			b.WriteString(fmt.Sprintf("… (%d more lines; re-read with offset/limit)\n", len(lines)-ln+1))
+			fmt.Fprintf(&b, "… (%d more lines; re-read with offset/limit)\n", len(lines)-ln+1)
 			break
 		}
 		row := fmt.Sprintf("%6d\t%s\n", ln, line)
 		if total+len(row) > nativeReadMaxBytes {
-			b.WriteString(fmt.Sprintf("… (%d more lines; file is large — use Grep to narrow)\n", len(lines)-ln+1))
+			fmt.Fprintf(&b, "… (%d more lines; file is large — use Grep to narrow)\n", len(lines)-ln+1)
 			break
 		}
 		b.WriteString(row)
