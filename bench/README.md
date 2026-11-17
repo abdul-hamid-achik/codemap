@@ -159,6 +159,33 @@ Lessons, honestly stated:
    the opposite regime of CodeGraph's disclosed ~80% dense-payload penalty, and
    the number to watch as non-claude models adopt structural tools harder.
 
+## Head-to-head: codemap vs codegraph (20261117-211603)
+
+`-arms baseline,codemap,codegraph` on the same fixture, driver
+(deepseek-v4-pro), and neutral system prompt — no playbook on either tool arm,
+N=1, extra-directional. codegraph v1.6.3 (`codegraph serve --mcp`,
+telemetry off, no-watch), indexed in 1.9s.
+
+| per session | baseline | with codemap | with codegraph |
+|---|---|---|---|
+| tool calls | 13.2 ± 17.2 | 13.6 ± 15.4 | 12.0 ± 14.9 |
+| sessions using MCP tools | 0/10 | 8/10 | 7/10 |
+| **residual context (tool result bytes)** | 33 KiB ± 53 | **26 KiB ± 26 (−21%)** | **46 KiB ± 56 (+40%)** |
+| — of which MCP-tool bytes | 0 | **4.3 KiB ± 9.3** | **23 KiB ± 23** |
+| wall-clock (s) | 45.4 ± 58 | 39.2 ± 51 (−14%) | 51.1 ± 60 (+13%) |
+| tasks correct | 9/10 | 8/10 | 7/10 |
+
+Reading, honestly: with the same model driving both, codemap's bounded
+per-question answers leave the session **5.3× less MCP-originated context
+resident** than codegraph's dense explore payloads (4.3 vs 23 KiB) — codemap
+even lands BELOW the grep/read baseline (−21%) while codegraph sits +40% over
+it, which is exactly the dense-payload penalty their own benchmarks disclose.
+Adoption is comparable (8/10 vs 7/10); correctness differences at N=1 are
+noise (one codegraph failure was again answer format, not facts). Also
+corrected by this run: the deepseek +235% input-tax of 20261116 was mostly the
+**playbook text**, not the tool schemas — without playbook the codemap arm is
+input-par (+13%).
+
 ## Methodology (read before trusting a number)
 
 - **Fixture** — `github.com/go-git/go-git` pinned by SHA in `fixtures/fixture.lock`
