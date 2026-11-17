@@ -149,6 +149,7 @@ type Client struct {
 	args         []string
 	spawnCtx     context.Context // Spawn's context: a restarted process lives as long
 	root         string          // the initialize root, reused by Restart
+	dir          string          // process cwd for (re)spawns; "" = inherit codemap's
 
 	mu       sync.Mutex
 	crashed  string // non-empty once the server reported its backend died
@@ -264,7 +265,16 @@ func initializationOptions(name string) map[string]any {
 
 // Spawn starts a language-server subprocess and wires a client to its stdio.
 func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
-	p, err := startProcess(ctx, name, args...)
+	return SpawnAt(ctx, "", name, args...)
+}
+
+// SpawnAt is Spawn with the server process's working directory set to dir.
+// Version-manager shims (asdf .tool-versions, mise) resolve binaries
+// per-project cwd, so the server must run where the project's pins apply —
+// a shim that probes fine under the project root still exits 126 when the
+// spawn inherits codemap's own cwd.
+func SpawnAt(ctx context.Context, dir, name string, args ...string) (*Client, error) {
+	p, err := startProcess(ctx, dir, name, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +282,7 @@ func Spawn(ctx context.Context, name string, args ...string) (*Client, error) {
 	cl.cmd = p.cmd
 	cl.name = name
 	cl.args = args
+	cl.dir = dir
 	cl.spawnCtx = ctx
 	cl.stderrBuf = p.stderr
 	return cl, nil
@@ -302,7 +313,7 @@ func (c *Client) Restart(ctx context.Context) error {
 	if c.name == "" {
 		return fmt.Errorf("language server was not spawned by codemap; cannot restart it")
 	}
-	p, err := startProcess(c.spawnCtx, c.name, c.args...)
+	p, err := startProcess(c.spawnCtx, c.dir, c.name, c.args...)
 	if err != nil {
 		return err
 	}
@@ -331,9 +342,13 @@ type process struct {
 	stderr *cappedBuffer
 }
 
-// startProcess launches the server binary with piped stdio.
-func startProcess(ctx context.Context, name string, args ...string) (*process, error) {
+// startProcess launches the server binary with piped stdio. dir, when
+// non-empty, is the process cwd (version-manager shims resolve per-project).
+func startProcess(ctx context.Context, dir, name string, args ...string) (*process, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

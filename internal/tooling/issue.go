@@ -289,6 +289,25 @@ func BuildAgentFix(binary, code, cwd string) *AgentFix {
 			{ID: "install", Run: "go install golang.org/x/tools/gopls@latest"},
 			{ID: "verify", Run: "gopls version"},
 		}
+	case "rust-analyzer":
+		fix.Steps = []FixStep{
+			{
+				ID:     "probe",
+				Run:    cd + " && command -v rust-analyzer && rust-analyzer --version",
+				Expect: "exit 0 and a version line",
+			},
+			{
+				ID:     "install",
+				Run:    "rustup component add rust-analyzer",
+				Alt:    []string{"install rust-analyzer via your package manager and ensure it is on PATH"},
+				Expect: "rust-analyzer --version succeeds in the project directory",
+			},
+			{
+				ID:          "reindex",
+				Run:         "codemap index --json",
+				SuccessWhen: "languages.rust present when the project has .rs files; tooling.issues empty for rust",
+			},
+		}
 	default:
 		fix.Steps = []FixStep{
 			{ID: "probe", Run: cd + " && command -v " + binary + " && " + binary + " --version"},

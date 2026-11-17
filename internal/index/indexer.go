@@ -90,6 +90,14 @@ type Options struct {
 	// paying a project-wide --reindex (which would also re-embed and re-walk
 	// everything already correct).
 	ForcePaths []string
+	// ScipPath, when set, imports a project-level .scip index (produced by an
+	// external indexer such as scip-java run over this same project) after the
+	// normal extraction passes: definitions/references/implements/imports are
+	// written as one atomic producer generation tagged "scip:<tool>". Call
+	// edges are never imported — SCIP occurrences are not call-role evidence.
+	// An invalid file (bad metadata, wrong project root, path traversal) is an
+	// actionable error and leaves the graph untouched.
+	ScipPath string
 	// OnFile, if non-nil, is called once per scanned file just before it is
 	// indexed: done is the 1-based position, total is the number of scanned files
 	// (== Result.FilesScanned), rel is the project-relative path. Used only by the
@@ -199,6 +207,11 @@ type Result struct {
 	// Languages maps each indexed language to its file count (e.g. "go" -> 36),
 	// so callers can tailor advice (the --precise tip applies only to Go).
 	Languages map[string]int `json:"languages,omitempty"`
+	// Scip reports a project-level SCIP index import (Options.ScipPath /
+	// `codemap index --scip file.scip`): per-domain completeness counts for the
+	// producer-tagged generation (definitions, references, implements, imports).
+	// CallEdges is always 0 by design — an import never claims call coverage.
+	Scip *ScipImportReport `json:"scip,omitempty"`
 }
 
 // Indexer turns project files into a stored graph + vectors. The vector store
@@ -490,6 +503,28 @@ func bindOther(e extract.Extractor, lang, langID string) extract.Extractor {
 		return le.Bind(lang, langID)
 	}
 	return nil
+}
+
+// unsupportedWantsServer reports whether any recognized-but-unsupported
+// language (no in-process backend — Rust today) is served by a DefaultServers
+// spec. In the default tree-sitter mode those files would otherwise stay in
+// the T0 "unsupported" bucket even when rust-analyzer is installed, so the
+// server is spawned for symbols, not only for --precise call edges. Languages
+// the tree-sitter backend already serves (TS/JS/Python) and Vue (registerVue)
+// are excluded: they never need a symbol-mode spawn.
+func unsupportedWantsServer(unsupported map[string]int) bool {
+	sitter := make(map[string]bool, len(sittersrc.Languages))
+	for _, lang := range sittersrc.Languages {
+		sitter[lang] = true
+	}
+	for _, spec := range lspsrc.DefaultServers {
+		for _, lb := range spec.Langs {
+			if unsupported[lb.Lang] > 0 && !sitter[lb.Lang] && lb.Lang != "vue" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // tsServerSpec returns the lspsrc.DefaultServers entry that serves
@@ -1106,8 +1141,12 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 			reportPhase(opts, "starting language servers for --precise…", 0, 0)
 			registered = ix.registerLSP(ctx, root, presentLanguages(files, unsupported), res, projectID, opts)
 			res.LspMs = int(time.Since(lspStart).Milliseconds())
-		} else if unsupported["vue"] > 0 {
-			registered = ix.registerVue(ctx, root, res, projectID, opts)
+		} else if unsupported["vue"] > 0 || unsupportedWantsServer(unsupported) {
+			// Vue binds its script blocks to the tree-sitter extractors; a
+			// language with no in-process backend at all (Rust today) gets its
+			// symbols from the language server when one is installed, so those
+			// files leave the T0 bucket instead of staying "unsupported".
+			registered = ix.registerLSP(ctx, root, unsupported, res, projectID, opts)
 		}
 		if registered {
 			if files, unsupported, err = ix.walk(root); err != nil {
@@ -1410,6 +1449,20 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 		}
 	}
 
+	// Pass 5 (opt-in): project-level SCIP import (--scip). Runs after the
+	// native/LSP passes and before the authoritative totals so res.Nodes /
+	// res.Edges include the imported generation. An invalid .scip file is an
+	// actionable error; the import itself is transactional, so the graph is
+	// never left half-replaced.
+	if opts.ScipPath != "" {
+		reportPhase(opts, "importing scip index…", 0, 0)
+		scipStart := time.Now()
+		if err := ix.importScipIndex(ctx, projectID, root, opts.ScipPath, res); err != nil {
+			return res, err
+		}
+		res.ExtractMs += int(time.Since(scipStart).Milliseconds())
+	}
+
 	// Report authoritative project totals (correct under incremental runs too).
 	// StatsCounts skips the per-language/per-kind GROUP BYs the index report
 	// never shows — on a multi-million-edge graph those cost seconds per run.
@@ -1428,7 +1481,7 @@ func (ix *Indexer) IndexProject(ctx context.Context, projectID int64, projectNam
 	// ANALYZE also costs tens of seconds on those tables, so it is reserved
 	// for whole-graph builds (--reindex, first index); scoped incrementals
 	// take the cheap PRAGMA optimize refresh instead.
-	if len(touched) > 0 || res.FilesDeleted > 0 {
+	if len(touched) > 0 || res.FilesDeleted > 0 || res.Scip != nil {
 		// Fold this run's node writes into the lexical index in one bulk pass
 		// (best-effort: LexicalSearch re-syncs before searching anyway).
 		_ = ix.graph.SyncLexical()
@@ -3170,7 +3223,7 @@ func languageFamily(lang string) string {
 	switch lang {
 	case "typescript", "javascript", "vue":
 		return "js"
-	case "go", "python", "ruby", "lua":
+	case "go", "python", "ruby", "lua", "rust":
 		return lang
 	}
 	return ""
@@ -3270,8 +3323,10 @@ func (ix *Indexer) RegisterLSPForProject(ctx context.Context, root string, preci
 		// to keep --precise call edges current. Vue just binds its delegates.
 		if precise {
 			ix.registerLSP(ctx, root, res.Unsupported, res, 0, Options{Reindex: true, Precise: true})
-		} else if res.Unsupported["vue"] > 0 {
-			ix.registerVue(ctx, root, res, 0, Options{Reindex: true})
+		} else if res.Unsupported["vue"] > 0 || unsupportedWantsServer(res.Unsupported) {
+			// Same rationale as IndexProject's tree-sitter branch: Rust (no
+			// in-process backend) needs the server for symbols, not just precise.
+			ix.registerLSP(ctx, root, res.Unsupported, res, 0, Options{Reindex: true})
 		}
 		return res.MissingServers, nil
 	}

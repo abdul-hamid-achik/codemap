@@ -194,7 +194,7 @@ func splitOversized(groups [][]int, k int) [][]int {
 	return out
 }
 
-var projectMarkers = []string{"tsconfig.json", "jsconfig.json", "package.json", "pyproject.toml", "pyrightconfig.json"}
+var projectMarkers = []string{"tsconfig.json", "jsconfig.json", "package.json", "pyproject.toml", "pyrightconfig.json", "Cargo.toml"}
 
 // projectKey is the nearest ancestor directory of rel (root-relative, slash
 // separated) holding a project marker, or "." when none does below root.

@@ -23,6 +23,12 @@ type ServerSpec struct {
 // typescript-language-server serves both TypeScript and JavaScript (.ts/.tsx and
 // .js/.jsx/.mjs/.cjs); codemap spawns it once and routes each file with its own
 // languageId. Python uses pyright-langserver (a separate process).
+// Rust uses rust-analyzer when installed: it speaks LSP over stdio with no
+// arguments and serves .rs files (codemap language "rust"). rust-analyzer
+// answers fully only when the project (or an ancestor) is a Cargo workspace;
+// outside one it degrades to empty/partial answers — codemap surfaces that as
+// visible per-file degradation, never a hang (requests are bounded like the
+// other servers).
 var DefaultServers = []ServerSpec{
 	{
 		Cmd:  "typescript-language-server",
@@ -36,5 +42,9 @@ var DefaultServers = []ServerSpec{
 		Cmd:   "pyright-langserver",
 		Args:  []string{"--stdio"},
 		Langs: []LangBinding{{Lang: "python", LangID: "python"}},
+	},
+	{
+		Cmd:   "rust-analyzer",
+		Langs: []LangBinding{{Lang: "rust", LangID: "rust"}},
 	},
 }

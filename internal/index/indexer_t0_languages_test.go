@@ -14,8 +14,9 @@ import (
 // nodes are created.
 func TestRecognitionOnlyLanguagesStayT0(t *testing.T) {
 	dir := t.TempDir()
+	// Rust is no longer T0: docs/languages.md Wave 1 wires rust-analyzer as an
+	// optional LSP backend for .rs (see indexer_rust_test.go).
 	files := map[string]string{
-		"src/main.rs":       "rust",
 		"src/App.java":      "java",
 		"src/App.kt":        "kotlin",
 		"src/App.scala":     "scala",

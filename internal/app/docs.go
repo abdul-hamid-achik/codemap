@@ -17,9 +17,12 @@ Both call the same services. Stored-graph queries work offline; embeddings are o
 Start: codemap init; codemap index --no-embed; codemap docs workflow.
 Go, TypeScript, JavaScript, Python, Vue script blocks, Ruby, Lua, GDScript, SQL,
 YAML, Markdown, HTML and stylesheets have built-in backends (TS/JS/Python via
-tree-sitter) — no language server is needed to index. --precise resolves exact
-calls: in-process go/types for Go, typescript-language-server (TS/JS) and
-pyright-langserver (Python) when installed.
+tree-sitter) — no language server is needed to index. Rust indexes through the
+rust-analyzer server when it is on PATH. --precise resolves exact calls:
+in-process go/types for Go, typescript-language-server (TS/JS), pyright-langserver
+(Python) and rust-analyzer's callHierarchy (Rust) when installed.
+codemap index --scip <file> imports an existing SCIP index (definitions,
+references, implementations — never relabeled as calls).
 
 Use context/impact for functions, dependencies/traverse for non-call relations,
 and source with a durable selector for one exact definition. SQL reads/writes,

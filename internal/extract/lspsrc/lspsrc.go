@@ -171,13 +171,27 @@ type languageClient interface {
 // New spawns the language server `command args...`, initializes it at root, and
 // returns an extractor for the given codemap language id and LSP languageId.
 func New(ctx context.Context, lang, langID, root, command string, args ...string) (*Extractor, error) {
-	client, err := lsp.Spawn(ctx, command, args...)
+	// Spawn with the project root as cwd: version-manager shims (asdf
+	// .tool-versions) resolve the binary per-project, so a shim that probed
+	// fine under root would still fail inheriting codemap's own cwd. A project
+	// WITHOUT its own pin can kill the shim under root (no default version →
+	// the shim exits before initialize), so that case retries once with the
+	// inherited cwd — the pre-root behavior, which resolved via codemap's own
+	// working directory.
+	client, err := lsp.SpawnAt(ctx, root, command, args...)
 	if err != nil {
 		return nil, err
 	}
-	if err := client.Initialize(ctx, root); err != nil {
+	if ierr := client.Initialize(ctx, root); ierr != nil {
 		_ = client.Close()
-		return nil, err
+		client, err = lsp.SpawnAt(ctx, "", command, args...)
+		if err != nil {
+			return nil, err
+		}
+		if ierr := client.Initialize(ctx, root); ierr != nil {
+			_ = client.Close()
+			return nil, ierr
+		}
 	}
 	if !client.SupportsDocumentSymbols() {
 		_ = client.Close()
@@ -371,6 +385,7 @@ func hasDeclarations(src []byte) bool {
 	for _, kw := range []string{
 		"function", "class ", "interface ", "enum ", "=>",
 		"const ", "let ", "var ", "type ", "namespace ", "module ", "def ",
+		"fn ", "struct ", "impl ", "trait ", "mod ",
 	} {
 		if strings.Contains(s, kw) {
 			return true
