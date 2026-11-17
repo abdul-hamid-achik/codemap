@@ -62,9 +62,12 @@ type SemanticReport struct {
 	Mode    string `json:"mode"`             // "semantic", "vecgrep", "name", "lexical", "name+lexical", or "none"
 	Fusion  string `json:"fusion,omitempty"` // hybrid-search weighting used: "identifier", "natural_language", or "balanced" (empty when no fusion happened, e.g. a pure-vector fallback)
 	Note    string `json:"note,omitempty"`   // why there are no results, when applicable
-	// OwnerError is set by Search when the explicitly configured semantic owner
-	// (semantic.backend: vecgrep) failed and the hits come from the name/lexical
-	// floor instead. Semantic itself never degrades: it returns the error.
+	// Warnings carries non-fatal degradation notices from the semantic owner:
+	// with semantic.backend=vecgrep (or the fallback delegation), vecgrep's
+	// hybrid search may degrade to keyword-only (empty or blocked vector index,
+	// embedder unavailable) and reports that on stderr — preserved here, and
+	// folded into Note, so a delegated fallback is never silent.
+	Warnings   []string      `json:"warnings,omitempty"`
 	OwnerError string        `json:"owner_error,omitempty"`
 	Hits       []SemanticHit `json:"hits"`
 }
@@ -138,7 +141,7 @@ func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK in
 		backend = "fallback"
 	}
 	if backend == "vecgrep" {
-		hits, searchErr := svc.semanticViaVecgrepStrict(ctx, cwd, pid, query, topK)
+		hits, warnings, searchErr := svc.semanticViaVecgrepStrict(ctx, cwd, pid, query, topK)
 		if searchErr != nil {
 			return nil, searchErr
 		}
@@ -147,7 +150,10 @@ func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK in
 		if len(hits) == 0 {
 			rep.Note = "vecgrep completed the semantic query with no matches"
 		}
-		rep.Hits = hits
+		rep.Warnings, rep.Hits = warnings, hits
+		for _, w := range warnings {
+			rep.Note = joinNote(rep.Note, "vecgrep degraded: "+w)
+		}
 		svc.recordQueryUsage(pid, hits)
 		return rep, nil
 	}
@@ -161,10 +167,13 @@ func (svc *Service) SemanticWith(ctx context.Context, cwd, query string, topK in
 		// repo. Delegate to it and map its hits back onto the graph (FQN/kind), so
 		// semantic search works with no codemap embed pass. Degrades to the note below.
 		if backend == "fallback" {
-			if hits := svc.semanticViaVecgrep(ctx, cwd, pid, query, topK); len(hits) > 0 {
+			if hits, warnings := svc.semanticViaVecgrep(ctx, cwd, pid, query, topK); len(hits) > 0 {
 				rep.Mode = "vecgrep"
 				rep.Note = "semantic results via vecgrep (codemap has no local embeddings for this project)"
-				rep.Hits = hits
+				rep.Warnings, rep.Hits = warnings, hits
+				for _, w := range warnings {
+					rep.Note = joinNote(rep.Note, "vecgrep degraded: "+w)
+				}
 				return rep, nil
 			}
 		}

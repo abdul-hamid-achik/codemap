@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
@@ -78,7 +79,8 @@ type Process struct {
 }
 
 // ProcessesReport is a bounded, on-demand list of execution flows. Nothing is
-// stored: every call re-reads the graph and the registrations.
+// persisted: each call builds flows from the in-memory graph, cached per index
+// fingerprint (see loadProcessIndex).
 type ProcessesReport struct {
 	SchemaVersion    int       `json:"schema_version"`
 	Project          string    `json:"project"`
@@ -141,57 +143,118 @@ type processEngine struct {
 	errs     []string
 }
 
-// newProcessEngine reads the project's graph and registrations. It returns a
-// nil engine (and no error) when the project is not indexed or has no nodes.
+// processIndexState is the per-index-generation, request-independent input of
+// the process engine: the whole graph in memory, the completed feature scan,
+// its sorted features (all kinds — kind filtering and ID dedupe stay
+// per-request because both depend on the filter), and precise-resolution
+// coverage. Everything is immutable once cached; each request derives its own
+// flow builder and kind-filtered entries from it.
+type processIndexState struct {
+	projPath string
+	nodes    []graph.Node
+	edges    []graph.Edge
+	scan     *featureScan
+	feats    []scoredFeature // sorted; IDs not yet deduped
+	resolved map[string]bool
+	notes    []string
+	errs     []string
+}
+
+// processIndexCache memoizes one project's processIndexState keyed by the
+// store's index_state fingerprint (ProjectIndexFingerprint): any reindex that
+// rewrites, adds, or drops an indexed file changes the key and invalidates the
+// entry. In-process only — the win is the long-lived MCP server calling
+// processes/explore repeatedly between reindexes.
+type processIndexCache struct {
+	mu          sync.Mutex
+	pid         int64
+	fingerprint string
+	state       *processIndexState // nil state caches "indexed but no nodes"
+	hits        int
+}
+
+// loadProcessIndex returns the cached processIndexState for pid, loading and
+// caching it when the fingerprint missed. The bool reports whether the project
+// is indexed with nodes. A fingerprint read failure degrades to an uncached
+// load rather than failing the request.
+func (svc *Service) loadProcessIndex(g *graph.Store, pid int64, name string) (*processIndexState, bool, error) {
+	fp, fpErr := g.ProjectIndexFingerprint(pid)
+	if fpErr == nil {
+		svc.procCache.mu.Lock()
+		if svc.procCache.pid == pid && svc.procCache.fingerprint == fp && svc.procCache.state != nil {
+			svc.procCache.hits++
+			st := svc.procCache.state
+			svc.procCache.mu.Unlock()
+			return st, true, nil
+		}
+		svc.procCache.mu.Unlock()
+	}
+
+	proj, err := g.GetProjectByName(name)
+	if err != nil {
+		return nil, false, err
+	}
+	nodes, err := g.ProjectNodes(pid)
+	if err != nil {
+		return nil, false, err
+	}
+	var st *processIndexState
+	if len(nodes) > 0 {
+		edges, err := g.ProjectEdges(pid)
+		if err != nil {
+			return nil, true, err
+		}
+		scan := newFeatureScan(proj.Path, name, nodes)
+		feats := scan.run()
+		sortFeatures(feats)
+		resolved, rErr := g.CallGraphResolvedFiles(pid)
+		if rErr != nil {
+			resolved = nil
+		}
+		st = &processIndexState{
+			projPath: proj.Path, nodes: nodes, edges: edges, scan: scan, feats: feats,
+			resolved: resolved, notes: append([]string{}, scan.notes...), errs: capFeatureErrors(scan.errs),
+		}
+	}
+	if fpErr == nil {
+		svc.procCache.mu.Lock()
+		svc.procCache.pid, svc.procCache.fingerprint, svc.procCache.state = pid, fp, st
+		svc.procCache.mu.Unlock()
+	}
+	return st, st != nil, nil
+}
+
+// newProcessEngine prepares per-request flow building: a fresh builder over
+// the cached (or newly loaded) graph plus the kind-filtered entrypoints. It
+// returns a nil engine (and no error) when the project is not indexed or has
+// no nodes.
 func (svc *Service) newProcessEngine(cwd string, kinds []string, depth, maxSteps int) (*processEngine, string, bool, error) {
 	pid, name, found, err := svc.project(cwd)
-	if err != nil {
+	if err != nil || !found {
 		return nil, name, false, err
-	}
-	if !found {
-		return nil, name, false, nil
 	}
 	g, err := svc.s.Graph()
 	if err != nil {
 		return nil, name, false, err
 	}
-	proj, err := g.GetProjectByName(name)
-	if err != nil {
-		return nil, name, false, err
+	st, indexed, err := svc.loadProcessIndex(g, pid, name)
+	if err != nil || st == nil {
+		return nil, name, indexed, err
 	}
-	nodes, err := g.ProjectNodes(pid)
-	if err != nil {
-		return nil, name, false, err
-	}
-	if len(nodes) == 0 {
-		return nil, name, false, nil
-	}
-	edges, err := g.ProjectEdges(pid)
-	if err != nil {
-		return nil, name, true, err
-	}
-	// The flow builder copies the nodes; the feature scan then normalizes the
-	// slice's paths in place, so build the flow side first.
+
 	opts := FlowOptions{Depth: depth, MaxNodes: maxSteps}
-	b := newFlowBuilder(proj.Path, nodes, edges, opts)
+	b := newFlowBuilder(st.projPath, st.nodes, st.edges, opts)
 	b.ceiling = processBuildCeiling
 
-	scan := newFeatureScan(proj.Path, name, nodes)
-	feats := scan.run()
-	feats = filterFeatures(feats, FeaturesOptions{Kinds: kinds})
-	sortFeatures(feats)
+	feats := filterFeatures(st.feats, FeaturesOptions{Kinds: kinds})
 	dedupeFeatureIDs(feats)
 
-	resolved, rErr := g.CallGraphResolvedFiles(pid)
-	if rErr != nil {
-		resolved = nil
-	}
 	e := &processEngine{
-		g: g, pid: pid, project: name, scan: scan, builder: b, resolved: resolved,
-		notes: append([]string{}, scan.notes...), errs: capFeatureErrors(scan.errs),
+		g: g, pid: pid, project: name, scan: st.scan, builder: b, resolved: st.resolved,
+		notes: append([]string{}, st.notes...), errs: append([]string{}, st.errs...),
 	}
 	for _, f := range feats {
-		if h := scan.nodeByID[f.handlerNodeID]; h != nil && (h.Kind == graph.KindFunction || h.Kind == graph.KindMethod) {
+		if h := st.scan.nodeByID[f.handlerNodeID]; h != nil && (h.Kind == graph.KindFunction || h.Kind == graph.KindMethod) {
 			e.entries = append(e.entries, f)
 		} else {
 			e.skipped++
@@ -273,7 +336,8 @@ func processSteps(root *FlowStep) []*FlowStep {
 // Processes returns execution flows from the project's entrypoints: for each
 // feature with a resolved handler (CLI command, HTTP route, MCP/RPC tool, page,
 // program) the flow call tree, flattened into ordered steps. It is computed
-// on demand from the stored graph — nothing is persisted.
+// on demand from the stored graph — nothing is persisted, and the graph and
+// feature scan are reused across calls until the index fingerprint changes.
 func (svc *Service) Processes(cwd string, opts ProcessesOptions) (*ProcessesReport, error) {
 	opts, err := normalizeProcessesOptions(opts)
 	if err != nil {

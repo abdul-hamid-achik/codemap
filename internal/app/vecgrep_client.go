@@ -45,7 +45,7 @@ type vecgrepHit struct {
 // or yields nothing usable, so the caller degrades to its own behavior. CLI-only,
 // one hop (no vecgrep import); mirrors how vecgrep shells codemap.
 func vecgrepSearch(ctx context.Context, cfg config.VecgrepConfig, cwd, query string, topK int) []vecgrepHit {
-	hits, _, err := vecgrepSearchCommand(ctx, cfg, cwd, query, topK)
+	hits, _, _, err := vecgrepSearchCommand(ctx, cfg, cwd, query, topK)
 	if err != nil {
 		return nil
 	}
@@ -55,10 +55,14 @@ func vecgrepSearch(ctx context.Context, cfg config.VecgrepConfig, cwd, query str
 // vecgrepSearchCommand is the observable form used when the user explicitly
 // selects semantic.backend=vecgrep. available distinguishes an optional missing
 // adapter from a real zero-hit search; execution/contract errors are preserved
-// instead of silently switching semantic owners.
-func vecgrepSearchCommand(ctx context.Context, cfg config.VecgrepConfig, cwd, query string, topK int) ([]vecgrepHit, bool, error) {
+// instead of silently switching semantic owners. warnings carries vecgrep's
+// non-fatal degradation notices: for machine formats vecgrep keeps stdout a
+// single JSON document and prints "Warning: …" lines on stderr (e.g. hybrid
+// search degrading to keyword-only when the vector index is empty or the
+// embedder is unreachable), so the fallback stays visible across the boundary.
+func vecgrepSearchCommand(ctx context.Context, cfg config.VecgrepConfig, cwd, query string, topK int) ([]vecgrepHit, []string, bool, error) {
 	if !cfg.Enabled {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
 	// Option-injection guard (P0-03): a query that starts with "-" is parsed as
 	// a flag by argv-parsing tools even past a `--` separator. The query is
@@ -67,25 +71,39 @@ func vecgrepSearchCommand(ctx context.Context, cfg config.VecgrepConfig, cwd, qu
 	// flags. Vector stores are not security-critical so failing closed here is
 	// the right tradeoff (caller degrades to local semantic search).
 	if query == "" || query[0] == '-' {
-		return nil, true, fmt.Errorf("vecgrep semantic query must be non-empty and must not start with '-'")
+		return nil, nil, true, fmt.Errorf("vecgrep semantic query must be non-empty and must not start with '-'")
 	}
 	bin := cfg.Bin
 	if bin == "" {
 		bin = "vecgrep"
 	}
 	if _, err := exec.LookPath(bin); err != nil {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
-	out, err := runVecgrepJSON(ctx, bin, cwd,
+	out, stderr, err := runVecgrepJSON(ctx, bin, cwd,
 		"search", query, "--format", "json", "--limit", strconv.Itoa(topK))
 	if err != nil {
-		return nil, true, fmt.Errorf("vecgrep semantic search: %w", err)
+		return nil, nil, true, fmt.Errorf("vecgrep semantic search: %w", err)
 	}
 	var hits []vecgrepHit
 	if err := json.Unmarshal(out, &hits); err != nil {
-		return nil, true, fmt.Errorf("parse vecgrep semantic output: %w", err)
+		return nil, nil, true, fmt.Errorf("parse vecgrep semantic output: %w", err)
 	}
-	return hits, true, nil
+	return hits, vecgrepWarnings(stderr), true, nil
+}
+
+// vecgrepWarnings extracts vecgrep's degradation notices from stderr: lines
+// shaped "Warning: <message>", printed for machine formats so stdout stays a
+// single JSON document. Anything else on stderr is noise, not a contract.
+func vecgrepWarnings(stderr []byte) []string {
+	var warnings []string
+	for _, line := range strings.Split(string(stderr), "\n") {
+		line = strings.TrimSpace(line)
+		if w := strings.TrimPrefix(line, "Warning: "); line != w {
+			warnings = append(warnings, w)
+		}
+	}
+	return warnings
 }
 
 // vecgrepMemoryRecall shells vecgrep's global agent-memory store for memories
@@ -110,7 +128,7 @@ func vecgrepMemoryRecall(ctx context.Context, cfg config.VecgrepConfig, cwd, que
 	if _, err := exec.LookPath(bin); err != nil {
 		return nil, nil
 	}
-	out, err := runVecgrepJSON(ctx, bin, cwd, "memory", "recall", query,
+	out, _, err := runVecgrepJSON(ctx, bin, cwd, "memory", "recall", query,
 		"--tags", strings.Join(tags, ","), "--min-importance", "0.3",
 		"--limit", strconv.Itoa(topK), "--format", "json")
 	if err != nil {
@@ -125,15 +143,17 @@ func vecgrepMemoryRecall(ctx context.Context, cfg config.VecgrepConfig, cwd, que
 
 // runVecgrepJSON executes the CLI boundary with production limits. Keeping the
 // subprocess policy in one place ensures semantic search and memory recall have
-// the same cancellation and output-bounding behavior.
-func runVecgrepJSON(ctx context.Context, bin, cwd string, args ...string) ([]byte, error) {
+// the same cancellation and output-bounding behavior. It returns the child's
+// stdout and stderr; stderr carries vecgrep's "Warning: …" degradation lines
+// even on success.
+func runVecgrepJSON(ctx context.Context, bin, cwd string, args ...string) ([]byte, []byte, error) {
 	return runVecgrepJSONWithLimits(ctx, bin, cwd, vecgrepCommandTimeout, vecgrepMaxOutputBytes, args...)
 }
 
 // runVecgrepJSONWithLimits is split out so the process-boundary behavior can be
 // tested quickly with hermetic helper executables rather than sleeping for the
 // production timeout.
-func runVecgrepJSONWithLimits(ctx context.Context, bin, cwd string, timeout time.Duration, maxOutput int, args ...string) ([]byte, error) {
+func runVecgrepJSONWithLimits(ctx context.Context, bin, cwd string, timeout time.Duration, maxOutput int, args ...string) ([]byte, []byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -149,25 +169,25 @@ func runVecgrepJSONWithLimits(ctx context.Context, bin, cwd string, timeout time
 	cmd.WaitDelay = vecgrepCommandWaitDelay
 	err := cmd.Run()
 	if stdout.exceeded() {
-		return nil, fmt.Errorf("stdout exceeds %d bytes", maxOutput)
+		return nil, nil, fmt.Errorf("stdout exceeds %d bytes", maxOutput)
 	}
 	if err != nil {
 		// CommandContext often reports "signal: killed" after cancellation.
 		// Preserve the causal context error so callers can use errors.Is.
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return nil, nil, ctxErr
 		}
 		if runErr := runCtx.Err(); runErr != nil {
-			return nil, runErr
+			return nil, nil, runErr
 		}
 		if msg := stderrSummary(stderr.bytes()); msg != "" {
 			// vecgrep explains its own failures ("index not built … run
 			// 'vecgrep index'"); a bare "exit status 1" hides the fix.
-			return nil, fmt.Errorf("%w: %s", err, msg)
+			return nil, nil, fmt.Errorf("%w: %s", err, msg)
 		}
-		return nil, err
+		return nil, nil, err
 	}
-	return stdout.bytes(), nil
+	return stdout.bytes(), stderr.bytes(), nil
 }
 
 // vecgrepMaxStderrBytes bounds the stderr kept for error messages.
@@ -237,26 +257,27 @@ func (w *cappedCommandOutput) bytes() []byte {
 // local embeddings, mapping each chunk hit back onto a graph node by its
 // (relative_path, start_line) so the result carries codemap's FQN/kind/signature.
 // Hits with no enclosing node are kept (vecgrep's raw symbol_name + position), so
-// recall isn't lost. Returns nil when vecgrep can't help.
-func (svc *Service) semanticViaVecgrep(ctx context.Context, cwd string, pid int64, query string, topK int) []SemanticHit {
-	hits, _ := svc.semanticViaVecgrepStrict(ctx, cwd, pid, query, topK)
-	return hits
+// recall isn't lost. Returns nil when vecgrep can't help; warnings (possibly nil)
+// are vecgrep's own degradation notices for the times it did help.
+func (svc *Service) semanticViaVecgrep(ctx context.Context, cwd string, pid int64, query string, topK int) ([]SemanticHit, []string) {
+	hits, warnings, _ := svc.semanticViaVecgrepStrict(ctx, cwd, pid, query, topK)
+	return hits, warnings
 }
 
-func (svc *Service) semanticViaVecgrepStrict(ctx context.Context, cwd string, pid int64, query string, topK int) ([]SemanticHit, error) {
-	raw, available, err := vecgrepSearchCommand(ctx, svc.s.Config.Vecgrep, cwd, query, topK)
+func (svc *Service) semanticViaVecgrepStrict(ctx context.Context, cwd string, pid int64, query string, topK int) ([]SemanticHit, []string, error) {
+	raw, warnings, available, err := vecgrepSearchCommand(ctx, svc.s.Config.Vecgrep, cwd, query, topK)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !available {
-		return nil, fmt.Errorf("vecgrep semantic backend is unavailable; install vecgrep or set semantic.backend to fallback or local")
+		return nil, nil, fmt.Errorf("vecgrep semantic backend is unavailable; install vecgrep or set semantic.backend to fallback or local")
 	}
 	if len(raw) == 0 {
-		return []SemanticHit{}, nil
+		return []SemanticHit{}, warnings, nil
 	}
 	g, err := svc.s.Graph()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	hits := make([]SemanticHit, 0, len(raw))
 	for _, h := range raw {
@@ -276,5 +297,5 @@ func (svc *Service) semanticViaVecgrepStrict(ctx context.Context, cwd string, pi
 		hits = append(hits, hit)
 	}
 	enrichHitAnnotations(g, pid, hits)
-	return hits, nil
+	return hits, warnings, nil
 }

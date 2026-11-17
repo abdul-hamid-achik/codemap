@@ -876,6 +876,30 @@ func (s *Store) IndexedFiles(projectID int64) ([]string, error) {
 	return files, rows.Err()
 }
 
+// ProjectIndexFingerprint digests the project's index_state rows (path + hash)
+// in deterministic order. Any reindex that rewrites, adds, or drops an indexed
+// file changes it, so it is the cheap freshness key for in-process caches of
+// whole-graph views (processes, explore) in long-lived servers.
+func (s *Store) ProjectIndexFingerprint(projectID int64) (string, error) {
+	rows, err := s.db.Query("SELECT file_path, file_hash FROM index_state WHERE project_id=? ORDER BY file_path", projectID)
+	if err != nil {
+		return "", fmt.Errorf("read index_state fingerprint: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	h := sha256.New()
+	for rows.Next() {
+		var path, hash string
+		if err := rows.Scan(&path, &hash); err != nil {
+			return "", fmt.Errorf("scan index_state fingerprint: %w", err)
+		}
+		_, _ = fmt.Fprintf(h, "%s\x00%s\n", path, hash)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("read index_state fingerprint: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // DeleteFileHash drops a file's index_state row (used when a file is removed from
 // disk; its nodes are deleted separately via DeleteNodesInFile).
 func (s *Store) DeleteFileHash(projectID int64, file string) error {

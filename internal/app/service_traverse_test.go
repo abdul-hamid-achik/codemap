@@ -69,6 +69,91 @@ func TestTraverseBySelectorPreservesDomainConfidence(t *testing.T) {
 	}
 }
 
+func TestTraverseImportHopConfidenceMatchesDependencies(t *testing.T) {
+	isolate(t)
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	g, err := sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	pid, err := g.UpsertProject("traverse-imports", root, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsFile := func(file string) int64 {
+		id, err := g.AddNode(&graph.Node{
+			ProjectID: pid, FilePath: file, Kind: graph.KindFile, Language: "typescript",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	src := tsFile("src/a.ts")
+	resolved := tsFile("src/b.ts")
+	// The import resolver writes a file→file edge only when the specifier
+	// resolved to exactly one project file — the same evidence `dependencies`
+	// marks confirmed.
+	if _, err := g.AddEdgeProv(src, resolved, graph.EdgeImports, 1, graph.ProvName); err != nil {
+		t.Fatal(err)
+	}
+	// An import edge to a non-file target is name-based fan-out, not a
+	// resolved specifier.
+	extern, err := g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "src/a.ts", Symbol: "lodash", Kind: graph.KindModule,
+		Language: "typescript",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.AddEdgeProv(src, extern, graph.EdgeImports, 1, graph.ProvName); err != nil {
+		t.Fatal(err)
+	}
+	// Traversals start from an exact symbol; the owner file's import edges are
+	// seeded from it.
+	_, err = g.AddNode(&graph.Node{
+		ProjectID: pid, FilePath: "src/a.ts", Symbol: "App", FQN: "traverse.App",
+		Kind: graph.KindFunction, Language: "typescript", StartLine: 3, EndLine: 4, SourceHash: "App",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := NewService(sess).TraverseBySelector(root, SymbolSelector{
+		File: "src/a.ts", StartLine: 3, FQN: "traverse.App", Kind: graph.KindFunction,
+	}, TraverseOptions{Direction: graph.TraversalOutgoing, EdgeTypes: []string{graph.EdgeImports}, Depth: 1, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Found || len(rep.Hops) != 2 {
+		t.Fatalf("traverse report = found:%v hops:%d", rep.Found, len(rep.Hops))
+	}
+	byKey := map[string]TraverseHop{}
+	for _, hop := range rep.Hops {
+		byKey[hop.Symbol.File+"#"+hop.Symbol.Symbol] = hop
+	}
+	if hop := byKey["src/b.ts#"]; hop.Confidence != "confirmed" ||
+		hop.ConfidenceReason != "the import specifier resolved to exactly one project file" {
+		t.Fatalf("resolved import hop = %+v, want confirmed with resolved-import reason", hop)
+	}
+	if hop := byKey["src/a.ts#lodash"]; hop.Confidence != "candidate" {
+		t.Fatalf("name-based import hop = %+v, want candidate", hop)
+	}
+	for _, d := range rep.Domains {
+		if d.EdgeType != graph.EdgeImports {
+			t.Fatalf("unexpected domain %+v", d)
+		}
+	}
+	if rep.Domains[0].Confirmed != 1 || rep.Domains[0].Candidate != 1 {
+		t.Fatalf("import domain = %+v, want 1 confirmed 1 candidate", rep.Domains[0])
+	}
+}
+
 func addAppTraverseFile(t *testing.T, g *graph.Store, pid int64, file string) int64 {
 	t.Helper()
 	id, err := g.AddNode(&graph.Node{

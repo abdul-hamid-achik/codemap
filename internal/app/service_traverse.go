@@ -127,7 +127,7 @@ func (svc *Service) TraverseBySelector(cwd string, selector SymbolSelector, opts
 		if !ok {
 			return nil, fmt.Errorf("traversal parent missing from result")
 		}
-		confidence, reason := traversalEdgeConfidence(step.Edge.EdgeType, step.Edge.Provenance)
+		confidence, reason := traversalEdgeConfidence(step.Edge, parent, step.Node)
 		domain := domains[step.Edge.EdgeType]
 		if domain == nil {
 			domain = &TraverseDomain{EdgeType: step.Edge.EdgeType}
@@ -210,17 +210,52 @@ func normalizeTraverseOptions(opts TraverseOptions) (TraverseOptions, error) {
 	return opts, nil
 }
 
-func traversalEdgeConfidence(edgeType, provenance string) (string, string) {
-	if edgeType == graph.EdgeDefines {
+// traversalEdgeConfidence classifies one traversal hop. Import hops reuse the
+// same evidence the `dependencies` command classifies on: a resolved file→file
+// import (written by the import resolver only when the specifier matched
+// exactly one project file) is confirmed; Go's package-scoped imports and
+// unresolved or name-based edges stay candidates.
+func traversalEdgeConfidence(edge graph.Edge, source, target graph.Node) (string, string) {
+	if edge.EdgeType == graph.EdgeDefines {
 		return "confirmed", "the extractor observed direct file membership"
 	}
-	if edgeType == graph.EdgeImports {
-		return "candidate", "imports are package-scoped dependency evidence, not proof of a symbol use"
+	if edge.EdgeType == graph.EdgeImports {
+		dep := graph.FileDependencyEdge{
+			EdgeType:   edge.EdgeType,
+			Source:     traversalDependencyNode(source),
+			Target:     traversalDependencyNode(target),
+			Weight:     edge.Weight,
+			Provenance: edge.Provenance,
+		}
+		confidence, reason := dependencyConfidence(dep, dependencyTargetScope(dep), false)
+		return confidence, traversalImportReason(confidence, reason)
 	}
-	if provenance == graph.ProvPrecise {
+	if edge.Provenance == graph.ProvPrecise {
 		return "confirmed", "the relation was resolved by an exact backend"
 	}
 	return "candidate", "the relation is name-based or heuristic and may fan out"
+}
+
+func traversalDependencyNode(n graph.Node) graph.FileDependencyNode {
+	return graph.FileDependencyNode{
+		File: n.FilePath, Symbol: n.Symbol, FQN: n.FQN, Kind: n.Kind,
+		Language: n.Language, StartLine: n.StartLine,
+	}
+}
+
+// traversalImportReason renders the dependency reason codes back into the
+// sentence style traverse hops report.
+func traversalImportReason(confidence, reason string) string {
+	if confidence == DependencyConfidenceConfirmed {
+		if reason == DependencyReasonPrecise {
+			return "the relation was resolved by an exact backend"
+		}
+		return "the import specifier resolved to exactly one project file"
+	}
+	if reason == DependencyReasonPackageScope {
+		return "imports are package-scoped dependency evidence, not proof of a symbol use"
+	}
+	return "the import is name-based or unresolved and may fan out"
 }
 
 func containsString(values []string, target string) bool {

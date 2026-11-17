@@ -20,6 +20,12 @@ type Service struct {
 	// hermetically, with no language server on PATH — the same idea as the
 	// extract.CallResolver seam the indexer's precise pass uses.
 	preciseClientFactory func(ctx context.Context, cmd string, args []string, root string) (preciseLSPClient, error)
+	// procCache memoizes the process engine's immutable inputs (graph load +
+	// feature scan) per project + index_state fingerprint, so repeated
+	// processes/explore calls in one long-lived MCP server skip the whole-graph
+	// reload and feature scan. Guarded by its own mutex: MCP tool calls run
+	// concurrently, and the builder/scan state each call derives is not shared.
+	procCache processIndexCache
 }
 
 // NextAction is one bounded, executable follow-up recommendation attached to

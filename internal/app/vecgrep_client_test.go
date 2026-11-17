@@ -26,6 +26,20 @@ func fakeVecgrep(t *testing.T, jsonOut string) string {
 	return p
 }
 
+// fakeVecgrepWarn writes an executable stub that prints jsonOut on stdout and
+// warnOut on stderr — standing in for `vecgrep search … --format json` when
+// hybrid search degrades (e.g. keyword-only after an empty/blocked index) and
+// vecgrep keeps stdout a single JSON document while warning on stderr.
+func fakeVecgrepWarn(t *testing.T, jsonOut, warnOut string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "vecgrep")
+	script := "#!/bin/sh\ncat <<'JSON'\n" + jsonOut + "\nJSON\ncat <<'WARN' >&2\n" + warnOut + "\nWARN\n"
+	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func semanticProj(t *testing.T, vecgrepBin string) (*Service, string) {
 	t.Helper()
 	isolate(t)
@@ -187,7 +201,7 @@ func TestVecgrepSubprocessLimits(t *testing.T) {
 	t.Run("default timeout bounds a caller without deadline", func(t *testing.T) {
 		bin := writeHelper(t, "while :; do :; done\n")
 		start := time.Now()
-		_, err := runVecgrepJSONWithLimits(context.Background(), bin, t.TempDir(), 75*time.Millisecond, 1024, "search")
+		_, _, err := runVecgrepJSONWithLimits(context.Background(), bin, t.TempDir(), 75*time.Millisecond, 1024, "search")
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("error = %v, want deadline exceeded", err)
 		}
@@ -201,7 +215,7 @@ func TestVecgrepSubprocessLimits(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 		start := time.Now()
-		_, err := runVecgrepJSONWithLimits(ctx, bin, t.TempDir(), 5*time.Second, 1024, "search")
+		_, _, err := runVecgrepJSONWithLimits(ctx, bin, t.TempDir(), 5*time.Second, 1024, "search")
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("error = %v, want caller deadline exceeded", err)
 		}
@@ -213,7 +227,7 @@ func TestVecgrepSubprocessLimits(t *testing.T) {
 	t.Run("stdout is bounded and terminates producer", func(t *testing.T) {
 		bin := writeHelper(t, "while :; do printf '012345678901234567890123456789\\n'; done\n")
 		start := time.Now()
-		_, err := runVecgrepJSONWithLimits(context.Background(), bin, t.TempDir(), 5*time.Second, 1024, "search")
+		_, _, err := runVecgrepJSONWithLimits(context.Background(), bin, t.TempDir(), 5*time.Second, 1024, "search")
 		if err == nil || !strings.Contains(err.Error(), "stdout exceeds 1024 bytes") {
 			t.Fatalf("error = %v, want bounded stdout error", err)
 		}
@@ -235,7 +249,7 @@ func TestVecgrepTimeoutPreservesSemanticOwnerPolicy(t *testing.T) {
 
 	explicitCtx, cancelExplicit := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancelExplicit()
-	_, available, err := vecgrepSearchCommand(explicitCtx, cfg, t.TempDir(), "query", 5)
+	_, _, available, err := vecgrepSearchCommand(explicitCtx, cfg, t.TempDir(), "query", 5)
 	if !available || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("explicit adapter result: available=%v error=%v", available, err)
 	}
@@ -306,5 +320,62 @@ func TestContextNoMemoriesWhenVecgrepOff(t *testing.T) {
 	}
 	if len(rep.Memories) != 0 {
 		t.Errorf("expected no memories when vecgrep off, got %d", len(rep.Memories))
+	}
+}
+
+// TestSemanticVecgrepWarningsPropagate: when vecgrep answers the semantic query
+// but reports keyword-side degradation ("Warning: …" on stderr — its machine
+// formats keep stdout a single JSON document), codemap must keep that fallback
+// honest: the warnings reach SemanticReport.Warnings and the human-facing note,
+// both for the explicit semantic.backend=vecgrep owner and for the no-local-
+// embeddings fallback delegation.
+func TestSemanticVecgrepWarningsPropagate(t *testing.T) {
+	const warn = "Warning: vector index unavailable, hybrid search degraded to keyword-only\n"
+	hits := `[{"relative_path":"a.go","symbol_name":"TargetFunc","start_line":2,"end_line":2,"language":"go","score":0.42}]`
+	assertWarned := func(t *testing.T, rep *SemanticReport) {
+		t.Helper()
+		if rep.Mode != "vecgrep" {
+			t.Fatalf("Mode = %q, want vecgrep (note: %q)", rep.Mode, rep.Note)
+		}
+		if len(rep.Warnings) != 1 || !strings.Contains(rep.Warnings[0], "degraded to keyword-only") {
+			t.Fatalf("Warnings = %v, want the vecgrep degradation notice", rep.Warnings)
+		}
+		if !strings.Contains(rep.Note, "vecgrep degraded: ") || !strings.Contains(rep.Note, "keyword-only") {
+			t.Fatalf("Note = %q, want the degradation folded into the human-facing note", rep.Note)
+		}
+		if len(rep.Hits) != 1 || rep.Hits[0].Symbol != "TargetFunc" {
+			t.Fatalf("hits = %+v, want the (degraded but real) vecgrep hit", rep.Hits)
+		}
+	}
+
+	t.Run("explicit vecgrep backend", func(t *testing.T) {
+		svc, proj := semanticProj(t, fakeVecgrepWarn(t, hits, warn))
+		svc.s.Config.Semantic.Backend = "vecgrep"
+		rep, err := svc.Semantic(context.Background(), proj, "the target function", 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertWarned(t, rep)
+	})
+
+	t.Run("fallback delegation with no local embeddings", func(t *testing.T) {
+		svc, proj := semanticProj(t, fakeVecgrepWarn(t, hits, warn))
+		rep, err := svc.Semantic(context.Background(), proj, "the target function", 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertWarned(t, rep)
+	})
+}
+
+// TestVecgrepWarningsParsing: only "Warning: " lines on stderr are a contract;
+// other stderr noise must not leak into the report.
+func TestVecgrepWarningsParsing(t *testing.T) {
+	got := vecgrepWarnings([]byte("scope note\nWarning: first \nWarning: second\nError: nope\n"))
+	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
+		t.Fatalf("vecgrepWarnings = %v, want [first second]", got)
+	}
+	if w := vecgrepWarnings([]byte("quiet\n")); len(w) != 0 {
+		t.Fatalf("clean stderr must yield no warnings, got %v", w)
 	}
 }
