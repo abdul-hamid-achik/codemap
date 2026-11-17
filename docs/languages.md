@@ -13,6 +13,7 @@ capabilities, and the JSON contracts keep that distinction visible.
 | Language | Symbols and definitions | Relationships | Requirement / limit |
 |---|---|---|---|
 | **Go** | Built in with the standard-library parser | Name-based by default; exact per-file coverage with `codemap index --precise` via in-process `go/types` | Go toolchain + buildable modules for the precise pass (a repo without a root `go.mod` loads each module under it). One-off `callers --precise` / `callees --precise` uses `gopls`. |
+| **Rust** | `rust-analyzer` LSP backend, auto-detected when on `PATH` (works best on Cargo workspaces; a missing or failing server is reported and skipped, never hangs) | `documentSymbol` → symbols + `defines`; with `--precise`, the server's advertised `callHierarchy` → exact per-file calls | Server optional for symbols, required for precise. No name-based parser backend — without the server, `.rs` stays recognized-only. |
 | **TypeScript + JavaScript** | Built in with a pure-Go tree-sitter parser (TS, TSX, JS/JSX, `.mjs`/`.cjs`), producing the same symbols `typescript-language-server`'s `documentSymbol` would | Name-based candidate edges by default for JSX component usage (`.tsx`/`.jsx`), imports, Next.js framework wiring, typed Temporal `proxyActivities` and workflow starts, same-file calls, and calls through imported bindings; arbitrary `obj.method()` calls are not linked, so the graph is partial until `--precise` (LSP `callHierarchy`), which supersedes the candidates per file | None to index. `--precise` needs `node` + `typescript-language-server`. |
 | **Python** | Built in with a pure-Go tree-sitter parser, producing the same symbols `pyright-langserver` would | Name-based candidates for same-file calls, `self`/`cls` methods, and imported bindings, plus file→file import edges; `--precise` (LSP `callHierarchy`) supersedes them per file | None to index. `--precise` needs `node` + `pyright-langserver`. |
 | **Ruby** | Built in with a pure-Go scanner: modules, classes, `def` (incl. `def self.x`, endless defs, `private def`); heredoc-, `=begin`-, and string-safe | Name-based calls plus `require`/`require_relative` imports; no precise pass yet | None — works offline like Go's name-based path. |
@@ -155,43 +156,38 @@ coverage publication.
 
 ## Delivery waves
 
-### Wave 1 — Rust pilot
+### Wave 1 — Rust pilot (shipped)
 
-Rust is the first T0 → T4 candidate. The pilot uses the official
-[rust-analyzer](https://rust-analyzer.github.io/book/) binary and admits only
-the LSP capabilities that the running version advertises.
+Rust is indexed through the official [rust-analyzer](https://rust-analyzer.github.io/book/)
+binary, registered as an optional LSP backend for `.rs`. Symbols (`documentSymbol`) are
+extracted whenever the server is present; `--precise` admits the server's advertised
+`callHierarchy` only, recording per-file coverage like the other LSP languages. The
+server runs with the project root as its working directory so asdf/mise shims resolve
+under the project's toolchain pins. Missing-server, spawn-failure, and empty-answer
+degradation is visible (`doctor`, `status`, index notes) and bounded — a stalled server
+skips the file, never hangs the index. Mixed Go/Rust projects keep name-based call
+candidates within their language family.
 
-- Register `rust-analyzer` as an optional LSP backend for `.rs` files.
-- Admit T1 only after Cargo workspace, module, trait/impl, generic, macro-adjacent
-  and test fixtures produce stable symbols and source ranges.
-- Admit T3 only when the running server advertises `callHierarchy` and each
-  fixture's exact cross-module calls pass. Files whose analysis fails stay
-  `unresolved`.
-- Add `codemap doctor` detection/install guidance, missing-server behavior,
-  incremental reindex and mixed Go/Rust project tests.
-- Compare LSP navigation with a Rust-produced SCIP index before choosing whether
-  SCIP becomes the preferred T2 source for references/implementations.
+### Wave 2 — SCIP importer (first cut shipped) and compiler families
 
-### Wave 2 — SCIP importer and compiler families
+`codemap index --scip <index.scip>` imports an existing
+[SCIP](https://github.com/sourcegraph/scip) index project-wide through
+`internal/extract/scip`. The adapter:
 
-Build `internal/extract/scip` as a project-level, versioned adapter. The
-[SCIP protocol](https://github.com/sourcegraph/scip) is language-agnostic, and
-its maintained indexer catalog already covers several languages in these waves;
-codemap still validates every imported relation against its own gates.
+- validates metadata, project root and relative paths before mutating the graph
+  (path traversal, absolute paths, and mixed-project input are rejected);
+- streams documents/occurrences so large indexes are bounded;
+- maps stable symbols to codemap selectors and tags every edge with producer
+  (`scip:<tool>`), version, and provenance;
+- publishes per-domain completeness (definitions, references, implementations)
+  in the index result;
+- replaces one producer generation atomically;
+- snapshot-tests the adapter against fixtures built with the scip bindings
+  (malformed protobuf, traversal paths, wrong roots rejected).
 
-- validate metadata, project root and relative paths before mutating the graph;
-- stream documents/occurrences so large indexes are bounded;
-- map stable symbols to codemap selectors and tag every edge with producer,
-  version and provenance;
-- publish completeness separately for definitions, references, imports and
-  implementations;
-- replace one producer generation atomically, with a rebuild path for contract
-  changes;
-- snapshot-test the adapter with the SCIP CLI and reject path traversal,
-  malformed ranges and mixed-project input.
-
-Once the importer is trustworthy, use it to accelerate Java/Kotlin/Scala,
-C/C++/CUDA and C#/Visual Basic. Each language still advances independently;
+SCIP occurrences are never relabeled as call edges — `call_graph` stays honest.
+Use it to accelerate Java/Kotlin/Scala, C/C++/CUDA and C#/Visual Basic via their
+upstream `scip-*` indexers. Each language still advances independently;
 the existence of an upstream indexer is not itself a codemap support claim.
 
 ### Wave 3 — additional semantic backends

@@ -143,6 +143,7 @@ func init() {
 	indexCmd.Flags().Bool("no-embed", false, "skip semantic embeddings (index structure only)")
 	indexCmd.Flags().Bool("precise", false, "resolve call edges exactly (Go via go/types, needs the go toolchain; TypeScript/JavaScript/Python via callHierarchy) — eliminates same-named over-matching and gives the LSP languages a call graph")
 	indexCmd.Flags().Bool("no-lsp", false, "never spawn language servers (TS/JS/Python still index via the built-in tree-sitter parser; their --precise call graph needs the servers)")
+	indexCmd.Flags().String("scip", "", "import a .scip index produced by an external indexer run over this project (e.g. scip-java); imports definitions/references/implements as a producer-tagged generation — never call edges")
 	indexCmd.Flags().Bool("watch", false, "after indexing, start the daemon to keep the index fresh automatically (same as 'codemap daemon start')")
 	indexCmd.Flags().String("via-vault", "", "re-run indexing inside `tvault run -p <project>` so registry creds (GOPRIVATE/NPM_TOKEN/…) reach the language servers")
 	indexCmd.Flags().Bool("cache", true, "save/restore the index to/from the fcheap stash vault (best-effort; auto-restore before --reindex, auto-save after index)")

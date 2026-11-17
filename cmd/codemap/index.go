@@ -44,6 +44,10 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	// worth extending the daemon control-socket protocol for. A daemon-owned
 	// index still needs this run direct (stop the daemon first).
 	forceExtra, _ := cmd.Flags().GetStringSlice("force-extra")
+	// scipPath imports an external .scip index (see index.Options.ScipPath).
+	// Not forwarded to the daemon protocol: like force-extra it is a one-off
+	// direct-run flag, so delegation is skipped entirely when it is set.
+	scipPath, _ := cmd.Flags().GetString("scip")
 	// If a background daemon already owns the writable handle, delegate the
 	// reindex to it over the control socket (shared daemon.ReindexViaDaemon
 	// guard — the same one MCP and studio use). Opening a second write session
@@ -60,31 +64,33 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		v := !noEmbed
 		dopts.Embed = &v
 	}
-	if info := daemon.QueryStatus(); info != nil && !jsonOut(cmd) {
-		if ok, _ := daemon.DelegationAllowed(cwd, info); ok {
-			fmt.Fprintf(os.Stderr, "indexing via daemon (pid %d; no live progress)…\n", info.PID)
+	if scipPath == "" {
+		if info := daemon.QueryStatus(); info != nil && !jsonOut(cmd) {
+			if ok, _ := daemon.DelegationAllowed(cwd, info); ok {
+				fmt.Fprintf(os.Stderr, "indexing via daemon (pid %d; no live progress)…\n", info.PID)
+			}
 		}
-	}
-	switch d := daemon.ReindexViaDaemon(cwd, dopts); {
-	case d.Refused:
-		return fmt.Errorf("%s", d.Reason)
-	case d.Delegated:
-		if d.Err != nil {
-			return fmt.Errorf("%s\n  stop it with 'codemap daemon stop', then re-run", d.Err)
+		switch d := daemon.ReindexViaDaemon(cwd, dopts); {
+		case d.Refused:
+			return fmt.Errorf("%s", d.Reason)
+		case d.Delegated:
+			if d.Err != nil {
+				return fmt.Errorf("%s\n  stop it with 'codemap daemon stop', then re-run", d.Err)
+			}
+			if jsonOut(cmd) {
+				return printJSON(d.Report)
+			}
+			printIndexReport(cmd, d.Report, precise)
+			fmt.Printf("  via daemon (pid %d)\n", d.PID)
+			return nil
 		}
-		if jsonOut(cmd) {
-			return printJSON(d.Report)
-		}
-		printIndexReport(cmd, d.Report, precise)
-		fmt.Printf("  via daemon (pid %d)\n", d.PID)
-		return nil
 	}
 	sess, err := openSessionAt(cmd, cwd)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
-	opts := index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP, ForcePaths: forceExtra}
+	opts := index.Options{Reindex: reindex, Precise: precise, NoLSP: noLSP, ForcePaths: forceExtra, ScipPath: scipPath}
 	svc := app.NewService(sess)
 
 	// Auto-restore from fcheap cache before a costly --reindex: if a matching
