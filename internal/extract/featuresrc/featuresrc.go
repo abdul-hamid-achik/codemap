@@ -91,6 +91,12 @@ type HandlerRef struct {
 	// File is an optional override of where Name is looked up first (defaults
 	// to the registration file).
 	File string
+	// Inline marks an anonymous handler body (a func literal passed directly
+	// to a registration, e.g. cobra RunE): Line holds its start line and the
+	// app layer resolves the footprint to the enclosing function's region.
+	Inline bool
+	// Line is the start line of an Inline handler body.
+	Line int
 }
 
 // Registration is one detected feature registration.

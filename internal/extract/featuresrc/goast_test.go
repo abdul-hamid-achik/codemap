@@ -116,8 +116,9 @@ func TestDetectGoCobraTree(t *testing.T) {
 	if save.Parent != "cache" || save.Framework != "cobra" || save.Detector != DetectorGoAST || save.Confidence != Confirmed {
 		t.Errorf("cache save meta = %+v", save)
 	}
-	if drop := find(regs, KindCLICommand, "cache drop"); drop.Handler != nil {
-		t.Errorf("inline func literal must leave handler nil, got %+v", drop.Handler)
+	if drop := find(regs, KindCLICommand, "cache drop"); drop.Handler == nil || !drop.Handler.Inline ||
+		drop.Handler.Name != "" || drop.Handler.File != "cmd/tool/cache.go" || drop.Handler.Line != 17 {
+		t.Errorf("inline func literal handler = %+v", drop.Handler)
 	}
 	if m := find(regs, KindCLICommand, "map"); m.Handler == nil || m.Handler.Name != "runMap" || m.Invocation != "tool map" {
 		t.Errorf("constructor-bound command = %+v", m)
@@ -382,5 +383,31 @@ func TestDetectGoDeterministic(t *testing.T) {
 				t.Fatalf("run %d: nondeterministic at %d: %+v vs %+v", i, j, a[j], b[j])
 			}
 		}
+	}
+}
+
+func TestDetectGoCobraInlineRunE(t *testing.T) {
+	src := `package main
+
+import "github.com/spf13/cobra"
+
+func newServeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "serve",
+		Short: "Serve the API",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runServe(cmd, args)
+		},
+	}
+}
+`
+	regs := detectGo(t, GoOptions{}, map[string]string{"cmd/serve.go": src})
+	r := find(regs, KindCLICommand, "serve")
+	if r == nil {
+		t.Fatalf("serve not found: %+v", regs)
+	}
+	h := r.Handler
+	if h == nil || !h.Inline || h.Name != "newServeCmd" || h.File != "cmd/serve.go" || h.Line < 6 || h.Line > 11 {
+		t.Errorf("inline RunE handler = %+v", h)
 	}
 }

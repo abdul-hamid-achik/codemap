@@ -80,11 +80,15 @@ tests specific to that feature. The footprint tells you how big a feature is bef
 read it.
 
 Go registrations are read from the syntax tree (cobra, urfave/cli, `net/http`, chi, gin,
-echo, gorilla, Go 1.22 route patterns, MCP SDKs, gRPC `Register*Server`, `func main`) and
+echo, gorilla, Go 1.22 route patterns, MCP SDKs, gRPC `Register*Server`, `func main` —
+including inline `Run:`/`RunE:` closures, resolved to their enclosing function) and
 reported as `confidence: confirmed`. TypeScript, JavaScript, and Python are detected by
-pattern (Express-style routes, commander and yargs, Next.js App and Pages routers, FastAPI
-and Flask decorators, Django `path()`, click and typer, `__main__`) and reported as
-`candidate`. Ruby, Lua, and GDScript detection is not implemented, and the report says so
+pattern (Express-style routes with mounted sub-router prefixes resolved through
+`require()`d modules, commander and yargs, Next.js App and Pages routers, FastAPI
+decorators with `APIRouter` prefixes, Flask, Django `path()`, click and typer,
+`__main__`) and reported as `candidate`. Ruby (Sinatra-style verb routes; rake tasks
+with descriptions) and Lua (`nvim_create_user_command`) are detected by pattern too;
+GDScript makes no feature claims (no honest detector exists) and the report says so
 in `notes`.
 
 ## 4. See how it works: `flow`

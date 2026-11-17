@@ -11,7 +11,7 @@ import (
 const maxPatternLines = 20000
 
 var (
-	jsExpressRe   = regexp.MustCompile("\\b(?:app|router|server|api|r|routes?)\\.(get|post|put|patch|delete|all|head|options)\\(\\s*['\"`](/[^'\"`]*)['\"`]")
+	jsExpressRe   = regexp.MustCompile("\\b(app|router|server|api|r|routes?)\\.(get|post|put|patch|delete|all|head|options)\\(\\s*['\"`](/[^'\"`]*)['\"`]")
 	jsCommandRe   = regexp.MustCompile(`\.command\(\s*['"]([\w:-]+)([^'"]*)['"]\s*(?:,\s*['"]([^'"]+)['"])?`)
 	jsArgSyntaxRe = regexp.MustCompile(`^(?:\s+[<\[][^'"]*)?\s*$`)
 	jsDescRe      = regexp.MustCompile(`\.description\(\s*['"]([^'"]+)['"]`)
@@ -21,6 +21,18 @@ var (
 	nextDefaultFn = regexp.MustCompile(`export\s+default\s+(?:async\s+)?(?:function|class)\s*\*?\s*([A-Za-z_$][\w$]*)`)
 	nextDefaultID = regexp.MustCompile(`(?m)^export\s+default\s+([A-Za-z_$][\w$]*)\s*;?\s*$`)
 	nextDefaultWr = regexp.MustCompile(`export\s+default\s+[A-Za-z_$][\w$.]*\(\s*([A-Za-z_$][\w$]*)\s*[,)]`)
+
+	jsUseRe = regexp.MustCompile("\\b([A-Za-z_$][\\w$]*)\\.use\\(\\s*['\"`](/[^'\"`]*)['\"`]\\s*,\\s*(?:require\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)|([A-Za-z_$][\\w$]*)\\s*[,)])")
+
+	pyAPIRouterRe = regexp.MustCompile(`^\s*(\w+)\s*=\s*APIRouter\s*\(([^)]*)`)
+	pyIncludeRe   = regexp.MustCompile(`\.include_router\(\s*(\w+)([^)]*)\)`)
+	pyPrefixKw    = regexp.MustCompile(`prefix\s*=\s*['"]([^'"]*)['"]`)
+
+	rubyRouteRe = regexp.MustCompile(`^\s*(get|post|put|patch|delete|head|options)\s+['"]([^'"]+)['"]\s+do\b`)
+	rubyDescRe  = regexp.MustCompile(`^\s*desc\s+['"]([^'"]+)['"]`)
+	rakeTaskRe  = regexp.MustCompile(`^\s*task\s+[:']?([\w][\w:.-]*)`)
+
+	luaCmdRe = regexp.MustCompile(`(?:vim\.api\.)?nvim_create_user_command\(\s*['"]([\w!]+)['"]\s*,\s*(function\b|[^,\s]+)?`)
 
 	pyRouteRe   = regexp.MustCompile(`^\s*@(\w+)\.(get|post|put|patch|delete|head|options|route|api_route)\(\s*(?:path\s*=\s*)?['"]([^'"]+)['"](.*)$`)
 	pyMethodsRe = regexp.MustCompile(`methods\s*=\s*[\[(]([^\])]*)[\])]`)
@@ -61,13 +73,25 @@ func isCommentLine(l string) bool {
 }
 
 // DetectPattern runs the regex detectors appropriate for the file extension
-// (TS/JS and Python). All results are candidates.
+// (TS/JS, Python, Ruby, Lua). All results are candidates; GDScript is
+// recognized but yields no claims (Godot lifecycle hooks such as _ready are
+// not features and no honest detector exists for tool scripts).
 func DetectPattern(rel string, src []byte) []Registration {
+	base := strings.ToLower(path.Base(rel))
+	if base == "rakefile" {
+		return detectRuby(rel, src)
+	}
 	switch strings.ToLower(path.Ext(rel)) {
 	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts":
 		return detectJS(rel, src)
 	case ".py":
 		return detectPython(rel, src)
+	case ".rb", ".rake":
+		return detectRuby(rel, src)
+	case ".lua":
+		return detectLua(rel, src)
+	case ".gd":
+		return detectGDScript(rel, src)
 	}
 	return nil
 }
@@ -88,14 +112,15 @@ func detectJS(rel string, src []byte) []Registration {
 		return nil
 	}
 	lines := splitLines(src)
+	mounts := sameFileMounts(lines)
 	var out []Registration
 	for i, l := range lines {
 		if isCommentLine(l) {
 			continue
 		}
 		if m := jsExpressRe.FindStringSubmatchIndex(l); m != nil {
-			verb := strings.ToUpper(l[m[2]:m[3]])
-			route := l[m[4]:m[5]]
+			verb := strings.ToUpper(l[m[4]:m[5]])
+			route := joinRoute(mounts[l[m[2]:m[3]]], l[m[6]:m[7]])
 			if verb == "ALL" {
 				verb = "ANY"
 			}
@@ -153,6 +178,140 @@ func detectJS(rel string, src []byte) []Registration {
 		}
 	}
 	return out
+}
+
+// joinRoute concatenates a mount prefix and a route into a clean path.
+func joinRoute(prefix, route string) string {
+	full := strings.TrimSuffix(prefix, "/") + "/" + strings.TrimPrefix(route, "/")
+	full = strings.ReplaceAll(full, "//", "/")
+	if full == "" {
+		full = "/"
+	}
+	return full
+}
+
+// sameFileMounts returns router variable -> mount prefix for `x.use('/p', y)`
+// chains within one file, resolved to a fixpoint (app.use('/a', r1);
+// r1.use('/b', r2)). A variable mounted under two different prefixes is
+// dropped (no claim).
+func sameFileMounts(lines []string) map[string]string {
+	type mount struct{ recv, tgt, p string }
+	var ms []mount
+	for _, l := range lines {
+		if isCommentLine(l) {
+			continue
+		}
+		for _, m := range jsUseRe.FindAllStringSubmatch(l, -1) {
+			if m[4] != "" { // plain variable target; require(...) is cross-file
+				ms = append(ms, mount{recv: m[1], tgt: m[4], p: m[2]})
+			}
+		}
+	}
+	pref := map[string]string{}
+	drop := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for _, m := range ms {
+			if drop[m.tgt] {
+				continue
+			}
+			np := joinRoute(pref[m.recv], m.p)
+			if old, ok := pref[m.tgt]; ok {
+				if old != np {
+					delete(pref, m.tgt)
+					drop[m.tgt] = true
+					changed = true
+				}
+				continue
+			}
+			pref[m.tgt] = np
+			changed = true
+		}
+	}
+	return pref
+}
+
+// DetectJSSet runs the JS/TS pattern detectors over a batch of files and
+// resolves Express router mounts across files: `app.use('/prefix',
+// require('./mod'))` prefixes every express route registered in the required
+// module. Same-file mounts (`app.use('/prefix', router)`) are resolved by
+// DetectPattern itself. Modules mounted under several different prefixes keep
+// their router-relative path (no claim).
+func DetectJSSet(files []SourceFile) []Registration {
+	sorted := append([]SourceFile(nil), files...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
+	byPath := map[string]SourceFile{}
+	for _, sf := range sorted {
+		byPath[sf.Path] = sf
+	}
+	// Cross-file require mounts: target file -> prefix.
+	target := map[string]string{}
+	drop := map[string]bool{}
+	for _, sf := range sorted {
+		for _, l := range splitLines(sf.Src) {
+			if isCommentLine(l) {
+				continue
+			}
+			for _, m := range jsUseRe.FindAllStringSubmatch(l, -1) {
+				if m[3] == "" {
+					continue
+				}
+				t := resolveRequire(sf.Path, m[3], byPath)
+				if t == "" || drop[t] {
+					continue
+				}
+				if old, ok := target[t]; ok {
+					if old != m[2] {
+						delete(target, t)
+						drop[t] = true
+					}
+					continue
+				}
+				target[t] = m[2]
+			}
+		}
+	}
+	var out []Registration
+	for _, sf := range sorted {
+		regs := DetectPattern(sf.Path, sf.Src)
+		if p, ok := target[sf.Path]; ok {
+			for i := range regs {
+				r := &regs[i]
+				if r.Framework != "express" || r.Kind != KindHTTPRoute {
+					continue
+				}
+				verb, route, _ := strings.Cut(r.Label, " ")
+				route = joinRoute(p, route)
+				r.Label, r.Invocation = verb+" "+route, verb+" "+route
+			}
+		}
+		out = append(out, regs...)
+	}
+	return out
+}
+
+// resolveRequire resolves a relative require() path against the importing
+// file and the set of scanned files; "" when nothing or several files match.
+func resolveRequire(from, req string, files map[string]SourceFile) string {
+	if !strings.HasPrefix(req, "./") && !strings.HasPrefix(req, "../") {
+		return ""
+	}
+	base := strings.TrimSuffix(path.Join(path.Dir(from), req), "/")
+	if _, ok := files[base]; ok {
+		return base
+	}
+	var hits []string
+	for _, ext := range []string{".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".cts"} {
+		for _, cand := range []string{base + ext, path.Join(base, "index"+ext)} {
+			if _, ok := files[cand]; ok {
+				hits = append(hits, cand)
+			}
+		}
+	}
+	if len(hits) != 1 {
+		return ""
+	}
+	return hits[0]
 }
 
 func hasAny(src []byte, subs ...string) bool {
@@ -264,10 +423,12 @@ func nextDef(lines []string, from int) (string, int) {
 func detectPython(rel string, src []byte) []Registration {
 	text := string(src)
 	isURLs := path.Base(rel) == "urls.py"
-	if !strings.Contains(text, "@") && !strings.Contains(text, "__main__") && !isURLs {
+	if !strings.Contains(text, "@") && !strings.Contains(text, "__main__") &&
+		!strings.Contains(text, "APIRouter") && !strings.Contains(text, "include_router") && !isURLs {
 		return nil
 	}
 	lines := splitLines(src)
+	routerPrefix := pyRouterPrefix(lines)
 	var out []Registration
 	for i, l := range lines {
 		if m := pyRouteRe.FindStringSubmatch(l); m != nil {
@@ -275,6 +436,9 @@ func detectPython(rel string, src []byte) []Registration {
 			route := m[3]
 			if !strings.HasPrefix(route, "/") {
 				route = "/" + route
+			}
+			if p, ok := routerPrefix[m[1]]; ok {
+				route = joinRoute(p, route)
 			}
 			methods := []string{strings.ToUpper(m[2])}
 			if m[2] == "route" || m[2] == "api_route" {
@@ -366,6 +530,132 @@ func detectPython(rel string, src []byte) []Registration {
 		}
 	}
 	return out
+}
+
+// pyRouterPrefix maps router variable -> path prefix from APIRouter(prefix=)
+// declarations and include_router(router, prefix=) calls within one file.
+func pyRouterPrefix(lines []string) map[string]string {
+	pref := map[string]string{}
+	for _, l := range lines {
+		if isCommentLine(l) {
+			continue
+		}
+		if m := pyAPIRouterRe.FindStringSubmatch(l); m != nil {
+			if pm := pyPrefixKw.FindStringSubmatch(m[2]); pm != nil && pm[1] != "" {
+				pref[m[1]] = "/" + strings.Trim(pm[1], "/")
+			}
+			continue
+		}
+		if m := pyIncludeRe.FindStringSubmatch(l); m != nil {
+			p := pref[m[1]]
+			if pm := pyPrefixKw.FindStringSubmatch(m[2]); pm != nil && pm[1] != "" {
+				p = joinRoute(p, "/"+strings.Trim(pm[1], "/"))
+			}
+			if p != "" {
+				pref[m[1]] = p
+			}
+		}
+	}
+	return pref
+}
+
+// detectRuby detects Sinatra-style HTTP routes (`get '/x' do ... end`) in any
+// Ruby file and rake tasks (`task :name`) in Rakefiles and *.rake. Handlers
+// are blocks, so no handler reference is claimed. Rails route files and
+// gem-internal DSLs are deliberately not detected.
+func detectRuby(rel string, src []byte) []Registration {
+	base := path.Base(rel)
+	isRake := base == "Rakefile" || strings.HasSuffix(rel, ".rake")
+	if !isRake && !hasAny(src, " do\n", " do ") {
+		return nil
+	}
+	lines := splitLines(src)
+	var out []Registration
+	lastDesc, lastDescLine := "", -10
+	for i, l := range lines {
+		if isCommentLine(l) {
+			continue
+		}
+		if m := rubyRouteRe.FindStringSubmatch(l); m != nil {
+			route := m[2]
+			if !strings.HasPrefix(route, "/") {
+				route = "/" + route
+			}
+			verb := strings.ToUpper(m[1])
+			reg := Registration{
+				Kind: KindHTTPRoute, Label: verb + " " + route, Invocation: verb + " " + route,
+				Framework: "sinatra", Detector: DetectorPattern, Confidence: Candidate,
+				File: rel, Line: i + 1,
+			}
+			if c := rubyComment(lines, i); c != "" {
+				reg.Description, reg.DescSource = c, DescDocstring
+			}
+			out = append(out, reg)
+			continue
+		}
+		if isRake {
+			if m := rubyDescRe.FindStringSubmatch(l); m != nil {
+				lastDesc, lastDescLine = summarize(m[1]), i
+				continue
+			}
+			if m := rakeTaskRe.FindStringSubmatch(l); m != nil {
+				reg := Registration{
+					Kind: KindCLICommand, Label: m[1], Framework: "rake",
+					Detector: DetectorPattern, Confidence: Candidate, File: rel, Line: i + 1,
+				}
+				if lastDescLine >= i-3 && lastDesc != "" {
+					reg.Description, reg.DescSource = lastDesc, DescRegistration
+				}
+				out = append(out, reg)
+			}
+		}
+	}
+	return out
+}
+
+func rubyComment(lines []string, i int) string {
+	if i <= 0 {
+		return ""
+	}
+	prev := strings.TrimSpace(lines[i-1])
+	if strings.HasPrefix(prev, "#") {
+		return summarize(strings.TrimPrefix(prev, "#"))
+	}
+	return ""
+}
+
+// detectLua detects Neovim user commands (nvim_create_user_command('Name',
+// ...)), the dominant Lua command surface in indexed repos. OpenResty content
+// by phase is configuration, not commands, and is deliberately not claimed.
+func detectLua(rel string, src []byte) []Registration {
+	if !hasAny(src, "nvim_create_user_command") {
+		return nil
+	}
+	lines := splitLines(src)
+	var out []Registration
+	for i, l := range lines {
+		if isCommentLine(l) {
+			continue
+		}
+		for _, m := range luaCmdRe.FindAllStringSubmatch(l, -1) {
+			reg := Registration{
+				Kind: KindCLICommand, Label: m[1], Framework: "neovim",
+				Detector: DetectorPattern, Confidence: Candidate, File: rel, Line: i + 1,
+			}
+			if m[2] != "" && m[2] != "function" {
+				reg.Handler = &HandlerRef{Name: m[2], SameFileOnly: true}
+			}
+			out = append(out, reg)
+		}
+	}
+	return out
+}
+
+// detectGDScript is a recognized-but-no-claims detector: Godot lifecycle
+// hooks (_ready, _process) are not user-facing features and there is no
+// honest syntactic signal for exported tool scripts or scene entrypoints.
+func detectGDScript(rel string, src []byte) []Registration {
+	return nil
 }
 
 func pyModuleDoc(lines []string) string {

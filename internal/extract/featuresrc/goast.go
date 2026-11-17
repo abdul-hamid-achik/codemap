@@ -526,7 +526,11 @@ func (d *goDetector) visitLit(f *goFile, ctx walkCtx, lit *ast.CompositeLit) {
 			if v, ok := fields[key]; ok {
 				info.hasRun = true
 				if info.handler == nil {
-					info.handler, _ = d.handlerOf(f, ctx, v)
+					if h, inline := d.handlerOf(f, ctx, v); h != nil {
+						info.handler = h
+					} else if inline {
+						info.handler = d.inlineHandler(f, ctx, v)
+					}
 				}
 			}
 		}
@@ -598,6 +602,28 @@ func (d *goDetector) handlerOf(f *goFile, ctx walkCtx, e ast.Expr) (*HandlerRef,
 		return nil, inline
 	}
 	return nil, false
+}
+
+// inlineHandler builds a reference for an anonymous handler body (a cobra
+// RunE/Run func literal): the app layer resolves the footprint to the
+// enclosing function's region via the closure's position.
+func (d *goDetector) inlineHandler(f *goFile, ctx walkCtx, e ast.Expr) *HandlerRef {
+	for {
+		p, ok := e.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		e = p.X
+	}
+	fl, ok := e.(*ast.FuncLit)
+	if !ok {
+		return nil
+	}
+	name := ctx.fn
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:]
+	}
+	return &HandlerRef{Name: name, File: f.path, Line: f.line(fl.Pos()), Inline: true, SameFileOnly: true}
 }
 
 func (d *goDetector) visitCall(f *goFile, ctx walkCtx, call *ast.CallExpr, prefix string, funcPrefix map[*ast.FuncLit]string) {

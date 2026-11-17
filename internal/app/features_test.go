@@ -493,3 +493,27 @@ func regFor(file, name, recv, qualifier string) featuresrc.Registration {
 		Handler: &featuresrc.HandlerRef{Name: name, Recv: recv, Qualifier: qualifier},
 	}
 }
+
+func TestFeatureScanInlineHandlerResolution(t *testing.T) {
+	nodes := []graph.Node{
+		{ID: 1, FilePath: "cmd/root.go", Symbol: "newRoot", FQN: "newRoot", Kind: graph.KindFunction, Language: "go", StartLine: 5, EndLine: 40},
+		{ID: 2, FilePath: "cmd/root.go", Symbol: "helper", FQN: "helper", Kind: graph.KindFunction, Language: "go", StartLine: 45, EndLine: 50},
+		{ID: 3, FilePath: "cmd/root_test.go", Symbol: "newRoot", FQN: "newRoot", Kind: graph.KindFunction, Language: "go", StartLine: 1, EndLine: 9},
+	}
+	s := newFeatureScan(t.TempDir(), "p", nodes)
+	reg := featuresrc.Registration{
+		Kind: featuresrc.KindCLICommand, Label: "serve", File: "cmd/root.go",
+		Handler: &featuresrc.HandlerRef{Name: "newRoot", File: "cmd/root.go", Line: 20, Inline: true, SameFileOnly: true},
+	}
+	if n := s.resolveHandler(reg); n == nil || n.ID != 1 {
+		t.Errorf("inline handler inside newRoot = %+v", n)
+	}
+	reg.Handler.Line = 100 // outside every function region
+	if n := s.resolveHandler(reg); n != nil {
+		t.Errorf("inline handler outside any region must stay unresolved, got %+v", n)
+	}
+	reg.Handler.Line = 3 // inside the test file's region only
+	if n := s.resolveHandler(reg); n != nil {
+		t.Errorf("test-file symbols are never handlers, got %+v", n)
+	}
+}

@@ -114,7 +114,7 @@ func (s *featureScan) readSource(rel string) ([]byte, bool) {
 func (s *featureScan) run() []scoredFeature {
 	var regs []featuresrc.Registration
 	goDirs := map[string][]string{}
-	var jsFiles, pyFiles []string
+	var jsFiles, pyFiles, otherFiles []string
 	jsDirs := map[string]bool{".": true}
 	for _, p := range s.files {
 		if isFeatureExcludedPath(p) {
@@ -133,6 +133,12 @@ func (s *featureScan) run() []scoredFeature {
 			}
 		case ".py":
 			pyFiles = append(pyFiles, p)
+		case ".rb", ".rake", ".lua", ".gd":
+			otherFiles = append(otherFiles, p)
+		default:
+			if path.Base(p) == "Rakefile" {
+				otherFiles = append(otherFiles, p)
+			}
 		}
 	}
 
@@ -159,17 +165,24 @@ func (s *featureScan) run() []scoredFeature {
 		regs = append(regs, r...)
 		s.errs = append(s.errs, errs...)
 	}
+	var jsSrcs []featuresrc.SourceFile
 	for _, p := range jsFiles {
-		b, ok := s.readSource(p)
-		if !ok {
-			continue
+		if b, ok := s.readSource(p); ok {
+			jsSrcs = append(jsSrcs, featuresrc.SourceFile{Path: p, Src: b})
 		}
-		regs = append(regs, featuresrc.DetectPattern(p, b)...)
-		if s.isNextPackage(path.Dir(p)) {
-			regs = append(regs, featuresrc.DetectNextPath(p, b)...)
+	}
+	regs = append(regs, featuresrc.DetectJSSet(jsSrcs)...)
+	for _, sf := range jsSrcs {
+		if s.isNextPackage(path.Dir(sf.Path)) {
+			regs = append(regs, featuresrc.DetectNextPath(sf.Path, sf.Src)...)
 		}
 	}
 	for _, p := range pyFiles {
+		if b, ok := s.readSource(p); ok {
+			regs = append(regs, featuresrc.DetectPattern(p, b)...)
+		}
+	}
+	for _, p := range otherFiles {
 		if b, ok := s.readSource(p); ok {
 			regs = append(regs, featuresrc.DetectPattern(p, b)...)
 		}
@@ -197,9 +210,8 @@ func (s *featureScan) run() []scoredFeature {
 
 	unsupported := []string{}
 	for lang, n := range s.languages {
-		switch lang {
-		case "ruby", "lua", "gdscript":
-			unsupported = append(unsupported, fmt.Sprintf("feature detection not implemented for %s (%d files)", lang, n))
+		if lang == "gdscript" {
+			unsupported = append(unsupported, fmt.Sprintf("gdscript: %d files indexed, no feature claims (no honest detectors)", n))
 		}
 	}
 	sort.Strings(unsupported)
@@ -214,7 +226,7 @@ func (s *featureScan) run() []scoredFeature {
 	}
 	for _, r := range regs {
 		if r.Framework == "express" {
-			s.note("express routes are listed with router-relative paths; router.use mount prefixes are not resolved")
+			s.note("express router mounts are resolved within a file and through require() mounts; other cross-file mounts stay router-relative")
 			break
 		}
 	}
@@ -392,9 +404,13 @@ func handlerKindOK(r featuresrc.Registration, n *graph.Node) bool {
 // resolveHandler maps a syntactic handler reference to exactly one graph node:
 // same file first, then same directory (package), then project-unique. An
 // ambiguous tier resolves to nothing — handlers are never guessed across
-// packages.
+// packages. Inline references (anonymous func literals, e.g. cobra RunE)
+// resolve to the function whose region encloses the literal.
 func (s *featureScan) resolveHandler(r featuresrc.Registration) *graph.Node {
 	ref := r.Handler
+	if ref.Inline {
+		return s.resolveInlineHandler(r, ref)
+	}
 	var cands []*graph.Node
 	for _, n := range s.bySymbol[ref.Name] {
 		if handlerKindOK(r, n) {
@@ -459,4 +475,26 @@ func (s *featureScan) resolveHandler(r featuresrc.Registration) *graph.Node {
 		}
 	}
 	return nil
+}
+
+// resolveInlineHandler locates the innermost function or method whose source
+// region encloses an anonymous handler literal; nothing is guessed outside
+// the literal's own file.
+func (s *featureScan) resolveInlineHandler(r featuresrc.Registration, ref *featuresrc.HandlerRef) *graph.Node {
+	file := ref.File
+	if file == "" {
+		file = r.File
+	}
+	var best *graph.Node
+	for _, n := range s.byFile[file] {
+		if !handlerKindOK(r, n) || isFeatureTestNode(n) {
+			continue
+		}
+		if n.StartLine <= ref.Line && ref.Line <= n.EndLine {
+			if best == nil || n.StartLine > best.StartLine {
+				best = n
+			}
+		}
+	}
+	return best
 }

@@ -271,3 +271,205 @@ func TestIsIgnoredPath(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectJSExpressMounts(t *testing.T) {
+	src := `const app = express();
+const api = express.Router();
+const router = express.Router();
+
+// Health endpoint
+app.get('/health', health);
+api.get('/users', listUsers);
+router.post('/items/:id', auth, addItem);
+app.use('/api', api);
+api.use('/v1', router);
+app.use(express.json());
+`
+	regs := DetectPattern("server/index.js", []byte(src))
+	for _, want := range []string{"GET /health", "GET /api/users", "POST /api/v1/items/:id"} {
+		if find(regs, KindHTTPRoute, want) == nil {
+			t.Errorf("missing %q (have %v)", want, labels(regs, KindHTTPRoute))
+		}
+	}
+	if len(labels(regs, KindHTTPRoute)) != 3 {
+		t.Fatalf("labels = %v", labels(regs, KindHTTPRoute))
+	}
+	if r := find(regs, KindHTTPRoute, "GET /api/users"); r.Framework != "express" || r.Handler == nil || r.Handler.Name != "listUsers" {
+		t.Errorf("mounted route = %+v", r)
+	}
+}
+
+func TestDetectJSExpressAmbiguousMounts(t *testing.T) {
+	src := `const app = express();
+const router = express.Router();
+router.get('/x', h);
+app.use('/a', router);
+app.use('/b', router);
+`
+	regs := DetectPattern("server/index.js", []byte(src))
+	if r := find(regs, KindHTTPRoute, "GET /x"); r == nil {
+		t.Fatalf("ambiguous mount must keep the router-relative path, have %v", labels(regs, KindHTTPRoute))
+	}
+}
+
+func TestDetectJSSetRequireMounts(t *testing.T) {
+	server := `const app = express();
+app.use('/api', require('./routes/users'));
+app.use('/health', healthRoute);
+`
+	users := `const router = express.Router();
+router.get('/:id', getUser);
+router.post('/', createUser);
+`
+	other := `const r = express.Router();
+r.get('/ping', ping);
+`
+	regs := DetectJSSet([]SourceFile{
+		{Path: "src/routes/users.js", Src: []byte(users)},
+		{Path: "src/server.js", Src: []byte(server)},
+		{Path: "src/other.js", Src: []byte(other)},
+	})
+	for _, want := range []string{"GET /api/:id", "POST /api/", "GET /ping"} {
+		if find(regs, KindHTTPRoute, want) == nil {
+			t.Errorf("missing %q (have %v)", want, labels(regs, KindHTTPRoute))
+		}
+	}
+	// A router mounted under two different prefixes stays router-relative.
+	conflict := `const app = express();
+app.use('/a', require('./routes/users'));
+app.use('/b', require('./routes/users'));
+`
+	regs = DetectJSSet([]SourceFile{
+		{Path: "src/server.js", Src: []byte(conflict)},
+		{Path: "src/routes/users.js", Src: []byte(users)},
+	})
+	if find(regs, KindHTTPRoute, "GET /:id") == nil {
+		t.Errorf("conflicting mounts must stay router-relative, have %v", labels(regs, KindHTTPRoute))
+	}
+}
+
+func TestDetectPythonFastAPIRouterPrefix(t *testing.T) {
+	src := `from fastapi import FastAPI, APIRouter
+
+app = FastAPI()
+users = APIRouter(prefix="/users")
+
+@users.get("/{user_id}")
+async def get_user(user_id: int):
+    """Fetch a user."""
+    return {}
+
+app.include_router(users)
+`
+	regs := DetectPattern("app/main.py", []byte(src))
+	r := find(regs, KindHTTPRoute, "GET /users/{user_id}")
+	if r == nil {
+		t.Fatalf("missing prefixed route, have %v", labels(regs, KindHTTPRoute))
+	}
+	if r.Handler == nil || r.Handler.Name != "get_user" || r.Description != "Fetch a user." {
+		t.Errorf("route = %+v", r)
+	}
+
+	src2 := `router = APIRouter()
+
+@router.post("/items")
+def add_item():
+    pass
+
+app.include_router(router, prefix="/v2")
+`
+	regs = DetectPattern("app/api.py", []byte(src2))
+	if p := find(regs, KindHTTPRoute, "POST /v2/items"); p == nil || p.Handler == nil || p.Handler.Name != "add_item" {
+		t.Errorf("include_router prefix = %+v (have %v)", p, labels(regs, KindHTTPRoute))
+	}
+}
+
+func TestDetectRubySinatraAndRake(t *testing.T) {
+	app := `require 'sinatra'
+
+# Say hello
+get '/hello' do
+  'hi'
+end
+
+post "/users/:id" do
+  params[:id]
+end
+
+not_a_route = compute(:get)
+`
+	regs := DetectPattern("app.rb", []byte(app))
+	if r := find(regs, KindHTTPRoute, "GET /hello"); r == nil || r.Framework != "sinatra" ||
+		r.Confidence != Candidate || r.Handler != nil || r.Description != "Say hello" {
+		t.Errorf("sinatra get = %+v", r)
+	}
+	if r := find(regs, KindHTTPRoute, "POST /users/:id"); r == nil || r.Handler != nil {
+		t.Errorf("sinatra post = %+v", r)
+	}
+	if len(labels(regs, KindHTTPRoute)) != 2 {
+		t.Fatalf("labels = %v", labels(regs, KindHTTPRoute))
+	}
+
+	rake := `desc "Run all specs"
+task :spec do
+  sh "rspec"
+end
+
+task :default => :spec
+
+task :clean
+`
+	regs = DetectPattern("Rakefile", []byte(rake))
+	s := find(regs, KindCLICommand, "spec")
+	if s == nil || s.Framework != "rake" || s.Description != "Run all specs" || s.Handler != nil {
+		t.Errorf("rake spec = %+v", s)
+	}
+	if find(regs, KindCLICommand, "default") == nil || find(regs, KindCLICommand, "clean") == nil {
+		t.Errorf("rake tasks = %v", labels(regs, KindCLICommand))
+	}
+	// Rake-style tasks in plain .rb files are not claimed.
+	if regs := DetectPattern("lib/tasks.rb", []byte(rake)); len(regs) != 0 {
+		t.Errorf("plain .rb rake tasks must not be claimed, got %v", labels(regs, KindCLICommand))
+	}
+}
+
+func TestDetectLuaNeovimCommands(t *testing.T) {
+	src := `local M = {}
+
+vim.api.nvim_create_user_command('Greet', function(opts)
+  print('hi ' .. opts.args)
+end, {})
+
+vim.api.nvim_create_user_command("Farewell", M.farewell, { nargs = 0 })
+
+nvim_create_user_command('Bare', function() end, {})
+`
+	regs := DetectPattern("lua/plugin.lua", []byte(src))
+	g := find(regs, KindCLICommand, "Greet")
+	if g == nil || g.Framework != "neovim" || g.Confidence != Candidate || g.Handler != nil {
+		t.Errorf("Greet = %+v", g)
+	}
+	f := find(regs, KindCLICommand, "Farewell")
+	if f == nil || f.Handler == nil || f.Handler.Name != "M.farewell" {
+		t.Errorf("Farewell = %+v", f)
+	}
+	if find(regs, KindCLICommand, "Bare") == nil {
+		t.Errorf("commands = %v", labels(regs, KindCLICommand))
+	}
+	if regs := DetectPattern("lua/init.lua", []byte("return { setup = function() end }")); len(regs) != 0 {
+		t.Errorf("plain lua must yield nothing, got %+v", regs)
+	}
+}
+
+func TestDetectGDScriptNoClaims(t *testing.T) {
+	src := `extends Node
+
+func _ready():
+    pass
+
+@export var speed := 1.0
+`
+	if regs := DetectPattern("player/player.gd", []byte(src)); len(regs) != 0 {
+		t.Errorf("gdscript must yield no claims, got %+v", regs)
+	}
+}
