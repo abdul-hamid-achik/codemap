@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -255,7 +256,7 @@ func NewServer(sess *app.Session) *Server {
 		&sdkmcp.Implementation{Name: "codemap", Version: version.Version},
 		&sdkmcp.ServerOptions{Instructions: instructionsFor(profile)},
 	)
-	s.srv.AddReceivingMiddleware(s.coordinateToolOperations)
+	s.srv.AddReceivingMiddleware(s.coordinateToolOperations, s.trimStructuredToolText)
 	s.register()
 	return s
 }
@@ -293,6 +294,105 @@ func (s *Server) coordinateToolOperations(next sdkmcp.MethodHandler) sdkmcp.Meth
 		}
 		return next(ctx, method, req)
 	}
+}
+
+// structuredContentVersion is the first MCP protocol revision whose
+// CallToolResult defines structuredContent (2025-06-18). Protocol versions are
+// date-shaped strings, so they order lexically.
+const structuredContentVersion = "2025-06-18"
+
+// maxToolTextBytes bounds the text block of a tool result that ALSO carries
+// structuredContent. go-sdk v1.6.1 always mirrors the typed handler's output
+// into result.structuredContent (mcp/server.go: `res.StructuredContent =
+// outJSON` in the AddTool handler wrapper) — no client capability gates it,
+// because the protocol has none to declare (ClientCapabilities carries only
+// roots/sampling/elicitation/experimental). Emitting the same JSON twice in
+// one result doubled every payload (codemap_map on this repo: ~124 KB of
+// duplicated JSON), so for clients whose negotiated protocol revision knows
+// structuredContent the text block becomes a bounded pointer; payloads at or
+// below the bound, error results, and results without structured content keep
+// today's full text.
+const maxToolTextBytes = 4096
+
+// toolTextPreviewBytes is how much of the structured JSON the bounded text
+// pointer still shows, so a text-only rendering of the result stays useful.
+const toolTextPreviewBytes = 1024
+
+// trimStructuredToolText is a receiving middleware that dedupes tool text
+// against structuredContent (see maxToolTextBytes). It runs AFTER the SDK's
+// tool wrapper, so StructuredContent is already populated when next() returns.
+func (s *Server) trimStructuredToolText(next sdkmcp.MethodHandler) sdkmcp.MethodHandler {
+	return func(ctx context.Context, method string, req sdkmcp.Request) (sdkmcp.Result, error) {
+		res, err := next(ctx, method, req)
+		if method != "tools/call" || err != nil {
+			return res, err
+		}
+		call, ok := req.(*sdkmcp.CallToolRequest)
+		if !ok {
+			return res, err
+		}
+		tr, ok := res.(*sdkmcp.CallToolResult)
+		if !ok || tr.IsError {
+			return res, err
+		}
+		raw, ok := tr.StructuredContent.(json.RawMessage)
+		if !ok || len(raw) == 0 {
+			return res, err // no structured payload: keep the handler's full text
+		}
+		if !sessionSpeaksStructuredContent(call.Session) {
+			// Client negotiated a revision without structuredContent: strip the
+			// field (it predates their spec; unknown fields are ignored anyway)
+			// and keep the full-JSON text mirror, exactly today's contract.
+			tr.StructuredContent = nil
+			return res, err
+		}
+		if len(raw) <= maxToolTextBytes {
+			return res, err // already bounded: the full JSON stays the text block
+		}
+		tr.Content = []sdkmcp.Content{&sdkmcp.TextContent{Text: toolTextPointer(raw)}}
+		return res, err
+	}
+}
+
+// sessionSpeaksStructuredContent reports whether the calling session's client
+// declared a protocol revision that defines structuredContent. The SDK stores
+// the client's requested version (InitializeParams); the server negotiates by
+// echoing it or falling back to the latest, so a client asking for a newer
+// revision than the SDK supports still speaks this one.
+func sessionSpeaksStructuredContent(ss *sdkmcp.ServerSession) bool {
+	if ss == nil {
+		return false
+	}
+	p := ss.InitializeParams()
+	return p != nil && p.ProtocolVersion >= structuredContentVersion
+}
+
+// toolTextPointer renders the bounded text block for a large structured
+// payload: a compact JSON pointer saying where the full payload lives, with a
+// preview of its head. Compact and HTML-unescaped, like every other payload.
+func toolTextPointer(raw json.RawMessage) string {
+	preview := string(raw)
+	if len(preview) > toolTextPreviewBytes {
+		preview = preview[:toolTextPreviewBytes] + "…"
+	}
+	out := struct {
+		Structured bool   `json:"structured"`
+		FullBytes  int    `json:"full_bytes"`
+		Preview    string `json:"preview"`
+		Hint       string `json:"hint"`
+	}{
+		Structured: true,
+		FullBytes:  len(raw),
+		Preview:    preview,
+		Hint:       "full JSON payload is in this result's structuredContent field",
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(out); err != nil {
+		return string(raw) // unreachable for this shape; never lose the payload
+	}
+	return string(bytes.TrimRight(buf.Bytes(), "\n"))
 }
 
 // Run serves over stdio until the context is cancelled.
@@ -952,6 +1052,172 @@ func (s *Server) register() {
 			Description: "Remove a cached index from the fcheap vault by stash_id, or all cached indexes for the project when all=true. Frees disk space when indexes are no longer needed.",
 		}, s.handleCacheDrop)
 	}
+	s.registerResourcesPrompts()
+}
+
+// ---- resources & prompts (registered under every profile) ----
+
+// docsResourceURI is the stable URI prefix for one static resource per
+// agent-guide topic (internal/app docs.go's catalog, read via app.Docs). A
+// resource is data the CLIENT reads (harness welcome context, docs panels);
+// codemap_docs remains the tool an AGENT calls mid-session.
+const docsResourceURI = "codemap://docs/"
+
+// statusResourceURI exposes the codemap_status payload for the server's
+// working-directory project as a resource, so a client can pin index health
+// (freshness, daemon state) without spending a tool call.
+const statusResourceURI = "codemap://status"
+
+// registerResourcesPrompts registers the MCP resources and prompt templates.
+// They ride along under EVERY profile: they add no tool-schema tokens and no
+// tool-list entries, so the lean profiles' measured contracts (coreTools /
+// agentTools and their tests) are untouched.
+func (s *Server) registerResourcesPrompts() {
+	for _, topic := range app.DocTopicNames() {
+		s.srv.AddResource(&sdkmcp.Resource{
+			URI:         docsResourceURI + topic,
+			Name:        "codemap-docs-" + topic,
+			Description: docResourceDescription(topic),
+			MIMEType:    "text/markdown",
+		}, s.handleDocsResource)
+	}
+	s.srv.AddResource(&sdkmcp.Resource{
+		URI:         statusResourceURI,
+		Name:        "codemap-status",
+		Description: "Index health for the server's working-directory project: registration, node/edge counts, languages, freshness (stale file count), and background-daemon state — the same payload as the codemap_status tool.",
+		MIMEType:    "application/json",
+	}, s.handleStatusResource)
+	s.srv.AddPrompt(&sdkmcp.Prompt{
+		Name:        "review_diff",
+		Description: "Review the current git diff for blast radius and regression tests using codemap tools.",
+		Arguments: []*sdkmcp.PromptArgument{{
+			Name:        "since",
+			Description: "optional git ref: review everything since it instead of the working tree",
+		}},
+	}, s.handleReviewDiffPrompt)
+	s.srv.AddPrompt(&sdkmcp.Prompt{
+		Name:        "triage_impact",
+		Description: "Triage what breaks if a symbol changes: impact, risk, and the tests to run.",
+		Arguments: []*sdkmcp.PromptArgument{{
+			Name:        "symbol",
+			Description: "the function/method/type to triage (name, or a path-qualified name)",
+			Required:    true,
+		}},
+	}, s.handleTriageImpactPrompt)
+	s.srv.AddPrompt(&sdkmcp.Prompt{
+		Name:        "orient_task",
+		Description: "Orient on a task in the indexed project: where to start, what to read, what to check.",
+		Arguments: []*sdkmcp.PromptArgument{{
+			Name:        "task",
+			Description: "what you are about to do, in one sentence",
+			Required:    true,
+		}},
+	}, s.handleOrientTaskPrompt)
+}
+
+// docResourceDescription derives the resource description from the topic's
+// first line so the resource catalog stays in sync with internal/app docs.go
+// (the single source of truth) instead of duplicating prose here.
+func docResourceDescription(topic string) string {
+	body := app.Docs(topic)
+	if i := strings.IndexByte(body, '\n'); i >= 0 {
+		body = body[:i]
+	}
+	if body = strings.TrimSpace(body); len(body) > 120 {
+		body = body[:120] + "…"
+	}
+	return body
+}
+
+func (s *Server) handleDocsResource(_ context.Context, req *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
+	uri := req.Params.URI
+	topic := strings.TrimPrefix(uri, docsResourceURI)
+	if topic == uri || !slices.Contains(app.DocTopicNames(), topic) {
+		return nil, sdkmcp.ResourceNotFoundError(uri)
+	}
+	return &sdkmcp.ReadResourceResult{Contents: []*sdkmcp.ResourceContents{{
+		URI:      uri,
+		MIMEType: "text/markdown",
+		Text:     app.Docs(topic),
+	}}}, nil
+}
+
+func (s *Server) handleStatusResource(_ context.Context, req *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
+	rep, err := s.statusPayload(cwdOf(""))
+	if err != nil {
+		return nil, err
+	}
+	// Same compact-JSON encoding as tool text payloads.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(rep); err != nil {
+		return nil, err
+	}
+	return &sdkmcp.ReadResourceResult{Contents: []*sdkmcp.ResourceContents{{
+		URI:      req.Params.URI,
+		MIMEType: "application/json",
+		Text:     string(bytes.TrimRight(buf.Bytes(), "\n")),
+	}}}, nil
+}
+
+// promptResult renders one user-role instruction message (MCP prompts render
+// to messages the client feeds to the model).
+func promptResult(description, instructions string) (*sdkmcp.GetPromptResult, error) {
+	return &sdkmcp.GetPromptResult{
+		Description: description,
+		Messages: []*sdkmcp.PromptMessage{{
+			Role:    "user",
+			Content: &sdkmcp.TextContent{Text: instructions},
+		}},
+	}, nil
+}
+
+func (s *Server) handleReviewDiffPrompt(_ context.Context, req *sdkmcp.GetPromptRequest) (*sdkmcp.GetPromptResult, error) {
+	scope, invocation := "the working tree (unstaged + untracked files)", ""
+	if since := strings.TrimSpace(req.Params.Arguments["since"]); since != "" {
+		scope = "everything since " + since
+		invocation = fmt.Sprintf(` (since=%q)`, since)
+	}
+	return promptResult("Diff review via codemap", fmt.Sprintf(`Review %s with codemap before proposing changes:
+
+1. Call codemap_status. If "stale" is non-zero, call codemap_index first — every query below reads the indexed snapshot, not live files.
+2. Call codemap_review%s to map the diff to changed symbols, their blast radius, covering tests, copy/paste-ready test_commands, and aggregate risk.
+3. Read the honesty fields: call_graph/resolution tell you whether impact is precise or name-based; analysis_complete false or partial_errors mean the review is bounded, not authoritative.
+4. For any changed symbol that matters, drill with codemap_impact (use the selector from the review's changed symbols) and codemap_risk. An "unknown" risk is a signal to reindex with precise:true, not reassurance.
+5. Report: what the diff touches, what breaks, which tests to run (the test_commands), and the confidence level. Never claim zero impact from an empty result alone — check the coverage fields first.`,
+		scope, invocation))
+}
+
+func (s *Server) handleTriageImpactPrompt(_ context.Context, req *sdkmcp.GetPromptRequest) (*sdkmcp.GetPromptResult, error) {
+	symbol := strings.TrimSpace(req.Params.Arguments["symbol"])
+	if symbol == "" {
+		return nil, fmt.Errorf("symbol argument is required")
+	}
+	return promptResult("Impact triage via codemap", fmt.Sprintf(`Triage the impact of changing "%s" with codemap:
+
+1. Call codemap_status. If "stale" is non-zero, call codemap_index first.
+2. Call codemap_impact with symbol "%[1]s". If the result reports ambiguous same-name definitions, re-run it with the selector from candidates[] so the whole analysis pins one exact definition.
+3. Call codemap_risk with the same symbol or selector for the 0..1 score and its factors; treat "unknown" as "reindex with precise:true", never as low risk.
+4. Call codemap_context with the selector for the full bundle — source, callers, callees, callback wiring, covering tests, and test_commands.
+5. Report: definition site(s), direct callers, transitive blast radius (with depth), which tests cover it (and which to run), and the call_graph confidence (resolved / name / unresolved / none) that qualifies every claim above.`, symbol))
+}
+
+func (s *Server) handleOrientTaskPrompt(_ context.Context, req *sdkmcp.GetPromptRequest) (*sdkmcp.GetPromptResult, error) {
+	task := strings.TrimSpace(req.Params.Arguments["task"])
+	if task == "" {
+		return nil, fmt.Errorf("task argument is required")
+	}
+	return promptResult("Task orientation via codemap", fmt.Sprintf(`Orient on this task in the indexed project using codemap:
+
+Task: %s
+
+1. Call codemap_status. If "stale" is non-zero, call codemap_index first.
+2. Call codemap_read_order to learn where the codebase wants to be read first (entrypoints and hubs, each with a reason).
+3. Search for the task's nouns: codemap_find for exact names, codemap_semantic for meaning (codemap_grep for exact text). If results are ambiguous, narrow with a longer codemap_find query.
+4. Call codemap_context on the most relevant hit (pass its selector) — definition, callers, callees, tests, blast radius in one call.
+5. Before editing: codemap_impact on the symbol you plan to touch, then codemap_review after the edit to select regression tests.
+Stay honest: every result carries call_graph/resolution and freshness — say which confidence each conclusion rests on.`, task))
 }
 
 // ---- handlers (thin: resolve path, call Service, return JSON) ----
@@ -1043,23 +1309,28 @@ func (p *mcpProgress) onEmbed(done, total int) {
 }
 
 func (s *Server) handleStatus(_ context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {
-	// Status is an agent health check. Keep it bounded by skipping the local
-	// vector-store count; callers that need that diagnostic can use the CLI's
-	// explicit `status --full` path.
-	rep, err := s.svc.LightweightStatus(cwdOf(in.Path))
-	// Surface index drift (changed/new/deleted files since indexing) so the agent
-	// knows whether to call codemap_index before trusting query results.
+	rep, err := s.statusPayload(cwdOf(in.Path))
+	return result(rep, err)
+}
+
+// statusPayload assembles the payload behind both codemap_status and the
+// codemap://status resource. Status is an agent health check: keep it bounded
+// by skipping the local vector-store count (callers that need that diagnostic
+// can use the CLI's explicit `status --full` path), surface index drift so the
+// agent knows whether to call codemap_index before trusting query results, and
+// attach live background-daemon state (nil if none is running) so the agent
+// knows whether the index is being kept fresh automatically.
+func (s *Server) statusPayload(path string) (any, error) {
+	rep, err := s.svc.LightweightStatus(path)
 	if err == nil && rep != nil && rep.Registered {
-		if st, sErr := s.svc.Staleness(cwdOf(in.Path)); sErr == nil {
+		if st, sErr := s.svc.Staleness(path); sErr == nil {
 			rep.Stale = st
 		}
 	}
 	if err != nil || rep == nil {
-		return result(rep, err)
+		return rep, err
 	}
-	// Attach live background-daemon state (nil if none is running) so the agent
-	// knows whether the index is being kept fresh automatically.
-	return result(daemon.AttachStatus(rep), nil)
+	return daemon.AttachStatus(rep), nil
 }
 
 func (s *Server) handleBranchStatus(ctx context.Context, _ *sdkmcp.CallToolRequest, in pathInput) (*sdkmcp.CallToolResult, any, error) {

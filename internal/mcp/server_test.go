@@ -32,6 +32,23 @@ func textOf(res *sdkmcp.CallToolResult) string {
 	return b.String()
 }
 
+// payloadOf returns the FULL tool payload: the structuredContent JSON when
+// the result carries it (clients that speak a structuredContent revision get
+// the complete data there while the text block is a bounded pointer), else
+// the text content. Assertions about payload contents belong here, not on
+// textOf, once results can exceed the text bound.
+func payloadOf(t *testing.T, res *sdkmcp.CallToolResult) string {
+	t.Helper()
+	if res.StructuredContent == nil {
+		return textOf(res)
+	}
+	b, err := json.Marshal(res.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structuredContent: %v", err)
+	}
+	return string(b)
+}
+
 // result() serializes compact tool payloads without HTML escaping, so agents do
 // not spend tokens on indentation and <, >, & stay literal.
 func TestResultJSONIsCompactAndNotHTMLEscaped(t *testing.T) {
@@ -1082,7 +1099,7 @@ func TestMCPDoctor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	txt := textOf(res)
+	txt := payloadOf(t, res)
 	for _, want := range []string{"data_dir", "go toolchain", "pyright-langserver", "embeddings"} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("doctor report should include %q, got: %s", want, txt)

@@ -10,7 +10,9 @@ the full tool reference — for registering codemap in one command with a playbo
 see [codemap for agents](/agents#one-command-setup); for the order to call these tools in,
 see [the agent loop](/agents#the-agent-loop).
 Tool text payloads use compact JSON to avoid spending context tokens on indentation; the
-structured result fields are identical to CLI `--json` reports.
+structured result fields are identical to CLI `--json` reports (see
+[Resources & prompts](#resources-prompts) for how text and `structuredContent` split on large
+payloads).
 
 For SQL/sqlc, YAML, Markdown, and HTML/CSS, start with [Data, configuration, and documentation](/data-and-docs). Use `dependencies` for inbound evidence and `traverse` for typed relationships. These formats do not gain function calls from `--precise`. The same guide is available through `codemap docs formats` and `codemap_docs` with `topic: "formats"`. MCP `traverse` requires the `full` profile.
 
@@ -164,6 +166,40 @@ The two an agent reaches for first: **`codemap_context`** bundles everything abo
 **`codemap_status`** reports index *freshness* so the agent reindexes before trusting a stale
 answer. **`codemap_impact`** remains the deep change-analysis query — definition sites, callers,
 the transitive blast radius, and which tests cover those paths, replacing many file reads.
+
+## Resources & prompts
+
+Beyond tools, the server exposes MCP **resources** and **prompt templates**. Both ride along
+under *every* profile (`agent`, `core`, `full`) — neither adds tool-schema tokens nor
+tool-list entries, so lean-profile contracts are untouched.
+
+**Resources** (stable URIs):
+
+| URI | Description |
+|---|---|
+| `codemap://docs/<topic>` | One static resource per agent-guide topic — `overview`, `formats`, `workflow`, `commands`, `annotations`, `accuracy`, `ecosystem`. The same text `codemap_docs` returns, for clients that prefer `resources/read` (harness welcome context, docs panels) |
+| `codemap://status` | The `codemap_status` payload for the server's working-directory project: registration, node/edge counts, languages, freshness (`stale` count), and background-daemon state, as JSON |
+
+**Prompt templates** (each renders to user-role instructions that use the codemap tools):
+
+| Prompt | Arguments | Renders to |
+|---|---|---|
+| `review_diff` | `since` (optional git ref; default reviews the working tree) | A diff-review loop: `codemap_status` → `codemap_index` if stale → `codemap_review` for blast radius, `test_commands`, and risk, drilling changed symbols with `codemap_impact`/`codemap_risk` while honoring the honesty fields |
+| `triage_impact` | `symbol` (required) | Impact triage for one symbol: `codemap_impact` (re-querying the `candidates[]` selector when the name is ambiguous) → `codemap_risk` → `codemap_context`, reporting blast radius, tests to run, and `call_graph` confidence |
+| `orient_task` | `task` (required) | First-contact orientation for a task: `codemap_read_order`, then `codemap_find`/`codemap_semantic`/`codemap_grep` for the task's nouns, `codemap_context` on the best hit, and `codemap_impact`/`codemap_review` around any edit |
+
+Prompt instructions only name tools the lean `agent`/`core` profiles register.
+
+### Structured content & the text bound
+
+The Go SDK mirrors every tool's typed output into the result's `structuredContent` field.
+codemap previously duplicated the same JSON as the text block too, doubling each payload. Now,
+for clients whose negotiated protocol revision defines `structuredContent` (2025-06-18+), the
+text block is bounded at 4 KiB: payloads at or below the bound keep their full JSON text, while
+larger ones become a compact pointer — `{"structured":true,"full_bytes":…,"preview":"…"}` —
+naming `structuredContent` as the complete payload. Clients on older protocol revisions keep
+the full-text mirror (and receive no field their spec doesn't define), and error results are
+never trimmed.
 
 ## Response token budgets
 
