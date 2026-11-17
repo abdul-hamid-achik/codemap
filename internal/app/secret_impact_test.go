@@ -344,3 +344,165 @@ func TestRequiredKeys(t *testing.T) {
 		t.Errorf("required_keys = %v, want [STRIPE_KEY] (DATABASE_URL is outside Entry's call tree)", rep.RequiredKeys)
 	}
 }
+
+// taintProj indexes a throwaway Go project and returns its service + root.
+func taintProj(t *testing.T, files map[string]string) (*Service, string) {
+	t.Helper()
+	isolate(t)
+	proj := t.TempDir()
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(proj, name), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sess, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	svc := NewService(sess)
+	if _, err := svc.Index(context.Background(), proj, index.Options{}, false); err != nil {
+		t.Fatal(err)
+	}
+	return svc, proj
+}
+
+// TestTaintPathsTwoHopSink proves the happy path: a key reader forwards through
+// two hops to an http.Post sink, and the report names the hops, sink and depth.
+func TestTaintPathsTwoHopSink(t *testing.T) {
+	svc, proj := taintProj(t, map[string]string{
+		"a.go": "package app\nimport (\"net/http\"; \"os\"; \"strings\")\n" +
+			"func ReadKey() string { return Wrap(os.Getenv(\"TAINT_KEY\")) }\n" +
+			"func Wrap(s string) string { return Send(s) }\n" +
+			"func Send(s string) string {\n" +
+			"	resp, err := http.Post(\"https://example.com\", \"text/plain\", strings.NewReader(s))\n" +
+			"	if err != nil { return err.Error() }\n" +
+			"	return resp.Status\n" +
+			"}\n",
+	})
+	rep, err := svc.SecretImpact(proj, []string{"TAINT_KEY"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Keys) != 1 || len(rep.Keys[0].TaintPaths) == 0 {
+		t.Fatalf("want a taint path, got keys=%+v", rep.Keys)
+	}
+	p := rep.Keys[0].TaintPaths[0]
+	if !strings.Contains(p.From, "ReadKey") || !strings.Contains(p.To, "Send") {
+		t.Errorf("path endpoints = %q -> %q, want ReadKey -> Send", p.From, p.To)
+	}
+	if len(p.Hops) != 3 || !strings.Contains(p.Hops[1], "Wrap") {
+		t.Errorf("hops = %v, want [ReadKey Wrap Send]", p.Hops)
+	}
+	if p.Sink != "http.Post" {
+		t.Errorf("sink = %q, want http.Post", p.Sink)
+	}
+	if p.Depth != 2 {
+		t.Errorf("depth = %d, want 2", p.Depth)
+	}
+	if p.Confidence != "candidate" {
+		t.Errorf("confidence = %q, want candidate", p.Confidence)
+	}
+	if len(rep.TaintSinks) == 0 || rep.TaintNote == "" || rep.TaintTruncated {
+		t.Errorf("taint docs missing: sinks=%d note=%q truncated=%v", len(rep.TaintSinks), rep.TaintNote, rep.TaintTruncated)
+	}
+}
+
+// TestTaintPathsCycleTerminates proves cycle safety: a reader whose forward
+// tree contains a call cycle still produces a bounded answer, not a loop.
+func TestTaintPathsCycleTerminates(t *testing.T) {
+	svc, proj := taintProj(t, map[string]string{
+		"a.go": "package app\nimport (\"log\"; \"os\")\n" +
+			"func Cyc() string { v := os.Getenv(\"CYC_KEY\"); Ping(v); return v }\n" +
+			"func Ping(s string) { log.Print(s); Cyc() }\n",
+	})
+	rep, err := svc.SecretImpact(proj, []string{"CYC_KEY"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Keys) != 1 || len(rep.Keys[0].TaintPaths) != 1 {
+		t.Fatalf("want exactly the Cyc->Ping path, got %+v", rep.Keys)
+	}
+	p := rep.Keys[0].TaintPaths[0]
+	if !strings.Contains(p.From, "Cyc") || !strings.Contains(p.To, "Ping") || p.Sink != "log.Print" {
+		t.Errorf("path = %+v, want Cyc -> Ping via log.Print", p)
+	}
+}
+
+// TestTaintPathsNoSink proves a reader with no reachable sink reports EMPTY
+// paths (never an error) and the docs still explain the heuristic.
+func TestTaintPathsNoSink(t *testing.T) {
+	svc, proj := taintProj(t, map[string]string{
+		"a.go": "package app\nimport \"os\"\n" +
+			"func Quiet() string { return os.Getenv(\"QUIET_KEY\") }\n" +
+			"func Caller() string { return Quiet() }\n",
+	})
+	rep, err := svc.SecretImpact(proj, []string{"QUIET_KEY"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Keys) != 1 {
+		t.Fatalf("want 1 key, got %+v", rep.Keys)
+	}
+	paths := rep.Keys[0].TaintPaths
+	if paths == nil || len(paths) != 0 {
+		t.Errorf("taint_paths = %v, want empty non-nil", paths)
+	}
+	if len(rep.TaintSinks) == 0 || rep.TaintNote == "" {
+		t.Error("taint_sinks/taint_note must still document the heuristic")
+	}
+}
+
+// TestTaintPathsBoundTruncated proves the bound: a fan-out with more sink
+// paths than MaxTaintPaths is truncated at exactly MaxTaintPaths and flagged.
+func TestTaintPathsBoundTruncated(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("package app\nimport \"os\"\nfunc Fan() string {\n v := os.Getenv(\"FAN_KEY\")\n")
+	for i := range MaxTaintPaths + 5 {
+		b.WriteString(" v += Shout" + itoa(i) + "(v)\n")
+	}
+	b.WriteString(" return v\n}\n")
+	for i := range MaxTaintPaths + 5 {
+		b.WriteString("func Shout" + itoa(i) + "(s string) string { print(s); return s }\n")
+	}
+	svc, proj := taintProj(t, map[string]string{"a.go": b.String()})
+	rep, err := svc.SecretImpact(proj, []string{"FAN_KEY"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Keys) != 1 {
+		t.Fatalf("want 1 key, got %+v", rep.Keys)
+	}
+	paths := rep.Keys[0].TaintPaths
+	if len(paths) != MaxTaintPaths {
+		t.Fatalf("taint_paths = %d, want exactly %d", len(paths), MaxTaintPaths)
+	}
+	if !rep.TaintTruncated || !strings.Contains(rep.TaintNote, "truncated") {
+		t.Errorf("truncated=%v note=%q, want truncation flagged and noted", rep.TaintTruncated, rep.TaintNote)
+	}
+}
+
+// TestTaintPathsDepthBound proves the hop bound: a sink four edges away from
+// the reader is beyond the default depth-3 walk and must NOT be reported.
+func TestTaintPathsDepthBound(t *testing.T) {
+	svc, proj := taintProj(t, map[string]string{
+		"a.go": "package app\nimport \"os\"\n" +
+			"func R0() string { return os.Getenv(\"DEEP_KEY\") }\n" +
+			"func R1() string { return R0() }\n" +
+			"func R2() string { return R1() }\n" +
+			"func R3() string { return R2() }\n" +
+			"func R4(s string) { print(s) }\n" +
+			"func Deep() string { R4(R3()); return \"\" }\n",
+	})
+	// The reader is R0; R0->R1->R2->R3 is 3 hops; the print sink lives in R4,
+	// which R0 never reaches — so no path may be reported.
+	rep, err := svc.SecretImpact(proj, []string{"DEEP_KEY"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range rep.Keys[0].TaintPaths {
+		if strings.Contains(p.Sink, "print") {
+			t.Errorf("sink beyond depth reported: %+v", p)
+		}
+	}
+}
