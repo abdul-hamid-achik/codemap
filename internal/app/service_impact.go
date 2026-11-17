@@ -31,6 +31,11 @@ type ImpactNode struct {
 	// same-file fan-out over same-named definitions). Heuristic covering tests are always
 	// candidates. Absent on nodes not produced by an impact traversal.
 	Confidence string `json:"confidence,omitempty"`
+	// Via names the inheritance-family edge (extends, implements, overrides)
+	// this node was reached through, when it joined the blast radius through
+	// inheritance rather than a call — a subtype of a changed type, or an
+	// overriding method of a changed method. Absent for call-reached nodes.
+	Via string `json:"via,omitempty"`
 }
 
 // Impact node confidence values (additive field; see ImpactNode.Confidence).
@@ -431,6 +436,7 @@ func (svc *Service) impactFromLocations(cwd string, g *graph.Store, p *graph.Pro
 			File: nd.Node.FilePath, StartLine: nd.Node.StartLine, Depth: nd.Depth,
 			Signature: nd.Node.Signature, Doc: nd.Node.Docstring,
 			Confidence: confidenceLabel(nd.Confirmed),
+			Via:        nd.Via,
 		}
 		rep.BlastRadius = append(rep.BlastRadius, in)
 		if nd.Node.Kind == graph.KindTest {

@@ -650,6 +650,100 @@ func TestBlastRadiusCycleSafe(t *testing.T) {
 	}
 }
 
+func TestBlastRadiusInheritance(t *testing.T) {
+	s := openTest(t)
+	pid, _ := s.UpsertProject("p", "/p", "ts")
+	mk := func(file, sym, kind string) int64 {
+		id, err := s.AddNode(&Node{ProjectID: pid, FilePath: file, Symbol: sym, FQN: sym, Kind: kind, Language: "ts", SourceHash: "h"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	base := mk("base.ts", "Base", KindClass)
+	declared := mk("declared.ts", "Declared", KindClass)
+	preciseImpl := mk("precise.ts", "Precise", KindClass)
+	baseSave := mk("base.ts", "Base.save", KindMethod)
+	declaredSave := mk("declared.ts", "Declared.save", KindMethod)
+	caller := mk("caller.ts", "run", KindFunction)
+	// Declared inheritance: candidate weight; precise implements: exact.
+	if _, err := s.AddEdgeProv(declared, base, EdgeExtends, WeightTreeSitter, ProvName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdgeProv(preciseImpl, base, EdgeImplements, WeightLSP, ProvPrecise); err != nil {
+		t.Fatal(err)
+	}
+	// Derived override + a plain caller of the base method.
+	if _, err := s.AddEdgeProv(declaredSave, baseSave, EdgeOverrides, WeightTreeSitter, ProvName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdgeProv(caller, baseSave, EdgeCalls, WeightLSP, ProvName); err != nil {
+		t.Fatal(err)
+	}
+
+	type hit struct {
+		depth     int
+		via       string
+		confirmed bool
+	}
+	collect := func(symbol string) map[string]hit {
+		br, err := s.BlastRadius(pid, symbol, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]hit{}
+		for _, nd := range br {
+			out[nd.Node.Symbol] = hit{nd.Depth, nd.Via, nd.Confirmed}
+		}
+		return out
+	}
+
+	// Changing the base type hits its subtypes: declared stays a candidate,
+	// precise implements is confirmed.
+	typeHits := collect("Base")
+	if got := typeHits["Declared"]; got.depth != 1 || got.via != EdgeExtends || got.confirmed {
+		t.Errorf("Declared subtype = %+v, want depth 1 via extends candidate", got)
+	}
+	if got := typeHits["Precise"]; got.depth != 1 || got.via != EdgeImplements || !got.confirmed {
+		t.Errorf("Precise implementor = %+v, want depth 1 via implements confirmed", got)
+	}
+
+	// Changing the base method hits its overrider (via overrides) and callers
+	// (no via). The overrider's own callers are NOT walked from here — there
+	// are none in this fixture.
+	methodHits := collect("Base.save")
+	if got := methodHits["Declared.save"]; got.depth != 1 || got.via != EdgeOverrides || got.confirmed {
+		t.Errorf("overriding method = %+v, want depth 1 via overrides candidate", got)
+	}
+	if got := methodHits["run"]; got.depth != 1 || got.via != "" || got.confirmed {
+		// run and Base.save live in different files, so the call edge is a
+		// cross-file name match: candidate.
+		t.Errorf("caller = %+v, want depth 1 no via candidate", got)
+	}
+
+	// Traversal continues from an affected subtype: changing Base reaches
+	// whoever depends on Declared at the next hop. A same-file unique call into
+	// Declared is confirmed.
+	dep := mk("edge.ts", "usesDeclared", KindFunction)
+	if _, err := s.AddEdgeProv(dep, declared, EdgeCalls, WeightTreeSitter, ProvName); err != nil {
+		t.Fatal(err)
+	}
+	typeHits = collect("Base")
+	if got := typeHits["usesDeclared"]; got.depth != 2 || got.confirmed {
+		t.Errorf("subtype-dependent = %+v, want depth 2 candidate (cross-file call)", got)
+	}
+	// Make the dependent same-file: confirmed. Add a same-file unique caller of
+	// Precise by reusing its file.
+	dep2 := mk("precise.ts", "usesPrecise", KindFunction)
+	if _, err := s.AddEdgeProv(dep2, preciseImpl, EdgeCalls, WeightTreeSitter, ProvName); err != nil {
+		t.Fatal(err)
+	}
+	typeHits = collect("Base")
+	if got := typeHits["usesPrecise"]; got.depth != 2 || !got.confirmed {
+		t.Errorf("same-file subtype-dependent = %+v, want depth 2 confirmed", got)
+	}
+}
+
 func TestHotspotsOrphansPath(t *testing.T) {
 	s := openTest(t)
 	pid, _ := s.UpsertProject("p", "/p", "go")

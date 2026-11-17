@@ -21,6 +21,10 @@ type NodeDepth struct {
 	// same-file fan-out over several same-named methods). Any other node is a
 	// name-based candidate.
 	Confirmed bool
+	// Via is the edge type of the node's first-reach path when it joined the
+	// traversal through an inheritance-family edge (extends, implements,
+	// overrides) rather than a call; empty for nodes reached only through calls.
+	Via string
 }
 
 func (s *Store) startNodeIDs(projectID int64, symbol string) ([]int64, error) {
@@ -55,19 +59,33 @@ const inChunkSize = 500
 type callerEdge struct {
 	source    int64
 	target    int64
+	edgeType  string
 	confirmed bool
 }
 
-// callerEdgesBatch returns every incoming `calls` edge into ANY of the target
-// nodes, in chunked IN(…) queries. It replaces the per-node round-trip that made
-// the blast-radius BFS an N+1 (one query per reached node), and carries the edge
-// confirmation the BFS needs to classify each reached node without extra
-// queries. Distinct (source, target) pairs are deduped across chunks; a pair
-// with several edges is confirmed when any of them is.
-func (s *Store) callerEdgesBatch(targets []int64) ([]callerEdge, error) {
-	if len(targets) == 0 {
+// callerEdgesBatch returns every incoming edge of the given types into ANY of
+// the target nodes, in chunked IN(…) queries. It replaces the per-node
+// round-trip that made the blast-radius BFS an N+1 (one query per reached
+// node), and carries the edge confirmation the BFS needs to classify each
+// reached node without extra queries. Distinct (source, target) pairs are
+// deduped across chunks; a pair with several edges is confirmed when any of
+// them is, and prefers the calls edge type when reporting which family reached
+// the pair. Confirmation: precise provenance on any edge type, or — calls
+// only — a name-based edge between two nodes of the same file whose target
+// symbol is unique in that file. Declared inheritance (extends/implements and
+// the overrides derived from it) is name-provenance by design, so only a
+// precise pass (Go go/types implements/overrides) confirms it.
+func (s *Store) callerEdgesBatch(targets []int64, edgeTypes []string) ([]callerEdge, error) {
+	if len(targets) == 0 || len(edgeTypes) == 0 {
 		return nil, nil
 	}
+	edgePh := make([]string, len(edgeTypes))
+	edgeArgs := make([]any, 0, len(edgeTypes))
+	for i, et := range edgeTypes {
+		edgePh[i] = "?"
+		edgeArgs = append(edgeArgs, et)
+	}
+	edgeIn := strings.Join(edgePh, ",")
 	type pair struct{ src, tgt int64 }
 	idx := make(map[pair]int)
 	var out []callerEdge
@@ -78,25 +96,25 @@ func (s *Store) callerEdgesBatch(targets []int64) ([]callerEdge, error) {
 		}
 		batch := targets[start:end]
 		ph := make([]string, len(batch))
-		args := make([]any, 0, len(batch)+2)
-		args = append(args, ProvPrecise)
+		args := make([]any, 0, len(batch)+len(edgeTypes)+2)
+		args = append(args, ProvPrecise, EdgeCalls)
 		for i, id := range batch {
 			ph[i] = "?"
 			args = append(args, id)
 		}
-		args = append(args, EdgeCalls)
+		args = append(args, edgeArgs...)
 		rows, err := s.db.Query(
-			"SELECT e.source_id, e.target_id, (e.provenance = ? OR (src.file_path <> '' AND src.file_path = tgt.file_path AND "+
+			"SELECT e.source_id, e.target_id, e.edge_type, (e.provenance = ? OR (e.edge_type = ? AND src.file_path <> '' AND src.file_path = tgt.file_path AND "+
 				"(SELECT COUNT(*) FROM nodes sib WHERE sib.project_id = tgt.project_id AND sib.file_path = tgt.file_path AND sib.symbol = tgt.symbol) = 1)) "+
 				"FROM edges e JOIN nodes src ON src.id = e.source_id JOIN nodes tgt ON tgt.id = e.target_id "+
-				"WHERE e.target_id IN ("+strings.Join(ph, ",")+") AND e.edge_type=?",
+				"WHERE e.target_id IN ("+strings.Join(ph, ",")+") AND e.edge_type IN ("+edgeIn+")",
 			args...)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var e callerEdge
-			if err := rows.Scan(&e.source, &e.target, &e.confirmed); err != nil {
+			if err := rows.Scan(&e.source, &e.target, &e.edgeType, &e.confirmed); err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
@@ -104,6 +122,9 @@ func (s *Store) callerEdgesBatch(targets []int64) ([]callerEdge, error) {
 			if i, ok := idx[k]; ok {
 				if e.confirmed {
 					out[i].confirmed = true
+				}
+				if out[i].edgeType != EdgeCalls && e.edgeType == EdgeCalls {
+					out[i].edgeType = EdgeCalls
 				}
 				continue
 			}
@@ -540,8 +561,12 @@ func (s *Store) SymbolInfoIndex(projectID int64) (map[string]SymInfo, error) {
 	return out, rows.Err()
 }
 
-// BlastRadius returns the transitive callers of symbol — everything affected if
-// it changes — up to maxDepth hops, each with its minimum depth. The BFS is
+// BlastRadius returns the transitive set of nodes affected if symbol changes —
+// its callers, plus the inheritance family that must track the change: subtypes
+// of a changed type (incoming extends/implements) and overriding methods of a
+// changed method (incoming overrides). Traversal continues from every reached
+// node with the same edge family, so a subtype's callers join at the next hop.
+// Results go up to maxDepth hops, each with its minimum depth. The BFS is
 // cycle-safe (a visited map keyed by node id), so recursive call graphs do not
 // loop forever. The query symbol's own node(s) are excluded from the result.
 func (s *Store) BlastRadius(projectID int64, symbol string, maxDepth int) ([]NodeDepth, error) {
@@ -580,18 +605,26 @@ func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth i
 			return nil, err
 		}
 	}
-	// Level-by-level BFS over incoming call edges. The whole frontier at each
-	// depth is expanded in ONE batched query (callerEdgesBatch) instead of one
-	// callerIDs round-trip per reached node — the previous shape made blast
-	// radius (and codemap_review, which unions it per changed symbol) a per-node
-	// N+1. First reach is the minimum depth (BFS processes levels in order), so a
-	// visited set keyed by id is enough for cycle-safety and min-depth.
+	// Level-by-level BFS over incoming affected-by edges: calls, plus the
+	// inheritance family (a changed base affects its subtypes and overriders).
+	// The whole frontier at each depth is expanded in ONE batched query
+	// (callerEdgesBatch) instead of one callerIDs round-trip per reached node —
+	// the previous shape made blast radius (and codemap_review, which unions it
+	// per changed symbol) a per-node N+1. First reach is the minimum depth (BFS
+	// processes levels in order), so a visited set keyed by id is enough for
+	// cycle-safety and min-depth.
+	blastEdges := []string{EdgeCalls, EdgeExtends, EdgeImplements, EdgeOverrides}
 	visited := make(map[int64]int, len(starts)) // node id -> min depth
 	// confirmed[id]: some shortest path start→id uses only confirmed edges. The
 	// starts are trivially confirmed. A node's flag can only be upgraded while
 	// its own level is being expanded, so by the time it joins a frontier its
 	// flag is final and each edge reads it without re-walking paths.
 	confirmed := make(map[int64]bool, len(starts))
+	// via[id]: the edge family of the node's first-reach path. Calls wins over
+	// an inheritance edge at the same depth (a node that both calls and extends
+	// the target is primarily its caller), matching callerEdgesBatch's pair
+	// preference.
+	via := make(map[int64]string, len(starts))
 	frontier := make([]int64, 0, len(starts))
 	for _, id := range starts {
 		if _, seen := visited[id]; seen {
@@ -602,7 +635,7 @@ func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth i
 		frontier = append(frontier, id)
 	}
 	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
-		edges, err := s.callerEdgesBatch(frontier)
+		edges, err := s.callerEdgesBatch(frontier, blastEdges)
 		if err != nil {
 			return nil, err
 		}
@@ -611,13 +644,19 @@ func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth i
 		for _, e := range edges {
 			pathConfirmed := confirmed[e.target] && e.confirmed
 			if d, seen := visited[e.source]; seen {
-				if d == nd && pathConfirmed {
-					confirmed[e.source] = true // another shortest path, fully confirmed
+				if d == nd {
+					if pathConfirmed {
+						confirmed[e.source] = true // another shortest path, fully confirmed
+					}
+					if e.edgeType == EdgeCalls {
+						via[e.source] = EdgeCalls
+					}
 				}
 				continue
 			}
 			visited[e.source] = nd
 			confirmed[e.source] = pathConfirmed
+			via[e.source] = e.edgeType
 			next = append(next, e.source)
 		}
 		frontier = next
@@ -638,7 +677,11 @@ func (s *Store) blastRadiusFromNodes(projectID int64, starts []int64, maxDepth i
 	}
 	out := make([]NodeDepth, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, NodeDepth{Node: n, Depth: visited[n.ID], Confirmed: confirmed[n.ID]})
+		v := via[n.ID]
+		if v == EdgeCalls {
+			v = "" // call-reached is the default; Via reports only inheritance reach
+		}
+		out = append(out, NodeDepth{Node: n, Depth: visited[n.ID], Confirmed: confirmed[n.ID], Via: v})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Depth != out[j].Depth {
