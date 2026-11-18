@@ -2022,8 +2022,15 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		startLine int
 	}
 	newByIdentity := make(map[symbolIdentity][]placedNode, len(fr.Symbols))
+	// Declarative keys nest: a YAML key's source spans its whole subtree, so
+	// every ancestor would embed the same text as its children — N duplicate
+	// vectors whose structural names ("responses", "200") then outrank real
+	// symbols on a lexical match (observed: an OpenAPI file flooding the
+	// top-10 for a "durability" query). Only the leaf-most key per span is
+	// embedded; every key node stays in the graph.
+	skipEmbed := ancestorKeyEmbedSkips(fr.Symbols)
 	var toEmbed []embedItem
-	for _, sym := range fr.Symbols {
+	for i, sym := range fr.Symbols {
 		nid, err := graph.AddNodeTx(tx, &graph.Node{
 			ProjectID: projectID, FilePath: ft.rel, Symbol: sym.Name, FQN: sym.FQN,
 			Kind: sym.Kind, Language: sym.Language, StartLine: sym.StartLine, EndLine: sym.EndLine,
@@ -2037,7 +2044,7 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		if _, err := graph.AddEdgeProvTx(tx, fileID, nid, graph.EdgeDefines, graph.WeightLSP, graph.ProvName); err != nil {
 			return false, nil, nil, err
 		}
-		if ix.embedder != nil && ix.vectors != nil && !sqlcGenerated {
+		if ix.embedder != nil && ix.vectors != nil && !sqlcGenerated && !skipEmbed[i] {
 			toEmbed = append(toEmbed, embedItem{
 				nodeID:  nid,
 				content: embedText(sym, ix.cfg.EmbedMaxChars),
@@ -3415,4 +3422,39 @@ func writeGoImplementsTx(tx *sql.Tx, projectID int64, pr *typesrc.Result, posTo 
 		}
 	}
 	return nil
+}
+
+// ancestorKeyEmbedSkips marks declarative key symbols whose source span
+// contains another key's span: YAML (and SQL) keys nest, and an ancestor's
+// source is the whole subtree — embedding it duplicates every leaf below it
+// and lets structural names ("responses", "200") outrank real code on a
+// lexical match. Only the leaf-most key per span is embedded; equal spans
+// keep the first occurrence. Non-key symbols are never skipped.
+func ancestorKeyEmbedSkips(syms []extract.Symbol) []bool {
+	type span struct{ start, end int }
+	var keys []span
+	var keyIdx []int
+	for i, s := range syms {
+		if s.Kind == extract.KindKey {
+			keys = append(keys, span{s.StartLine, s.EndLine})
+			keyIdx = append(keyIdx, i)
+		}
+	}
+	skip := make([]bool, len(syms))
+	for a := range keys {
+		for b := range keys {
+			if a == b {
+				continue
+			}
+			contains := keys[b].start >= keys[a].start && keys[b].end <= keys[a].end
+			strict := keys[b] != keys[a]
+			// A strictly-contained key makes this an ancestor. An equal twin
+			// only skips the later occurrences (b < a keeps the first).
+			if contains && (strict || b < a) {
+				skip[keyIdx[a]] = true
+				break
+			}
+		}
+	}
+	return skip
 }
