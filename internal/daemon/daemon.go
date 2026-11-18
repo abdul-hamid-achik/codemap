@@ -34,6 +34,12 @@ type Config struct {
 	Throttle    embed.ThrottleConfig // applied to the embedder when embedding is on
 	NoEmbed     bool                 // structure-only (skip Ollama; used by tests)
 	Precise     bool                 // keep exact call edges current after watched edits
+	// BackgroundPrecise upgrades the index to precise (call-graph, plus
+	// embeddings when embedding is on) once the watcher has been idle for
+	// BackgroundPreciseDelay. One upgrade per drain cycle; a file event
+	// mid-upgrade cancels it (freshness beats precision). Default off.
+	BackgroundPrecise      bool          // run the idle upgrade to precise
+	BackgroundPreciseDelay time.Duration // idle delay before it fires (<=0 = 45s)
 	// Overrides, if set, is applied to the daemon's freshly-loaded config after it
 	// opens its session, so CLI-flag overrides (exclude, embedding) reach the
 	// daemon's own indexer/embedder — not just the debounce/throttle in this struct.
@@ -67,6 +73,14 @@ type Info struct {
 	// (ClearCallGraphResolvedTx fires on re-extraction). Surfaced via
 	// daemon.status and the startup banner so the decay isn't invisible.
 	Warning string `json:"warning,omitempty"`
+	// BackgroundPreciseState reports the idle→precise upgrade lifecycle
+	// (pending | running | done | cancelled | failed | skipped) when
+	// daemon.background_precise is enabled, so status surfaces never claim a
+	// precision the index doesn't have. Empty when the feature is off.
+	BackgroundPreciseState string `json:"background_precise_state,omitempty"`
+	// BackgroundPreciseNote explains the last transition (cancel reason,
+	// failure error, skip rationale).
+	BackgroundPreciseNote string `json:"background_precise_note,omitempty"`
 }
 
 // Daemon is a running background indexer for one project.
@@ -88,6 +102,8 @@ type Daemon struct {
 	cacheWG  sync.WaitGroup // tracks MaybeCacheAfterIndex goroutines (B44)
 	info     Info
 	idle     *time.Timer
+	bgTimer  *time.Timer        // idle→precise upgrade timer (one per drain cycle)
+	bgCancel context.CancelFunc // cancels an in-flight background upgrade
 	stopOnce sync.Once
 	done     chan struct{}
 }
@@ -256,6 +272,14 @@ func Start(parent context.Context, root string, cfg Config) (*Daemon, error) {
 	if cfg.IdleTimeout > 0 {
 		d.idle = time.AfterFunc(cfg.IdleTimeout, d.Stop)
 	}
+	if cfg.BackgroundPrecise && cfg.Precise {
+		// Enabled but redundant: the daemon itself already keeps precision.
+		d.mu.Lock()
+		d.info.BackgroundPreciseState = "skipped"
+		d.info.BackgroundPreciseNote = "daemon already runs precise"
+		d.mu.Unlock()
+	}
+	d.armBackgroundPrecise() // no-op unless background_precise is on
 	// B46: capture watcher exit so an unexpected death flips info.Watching
 	// to false and records last_error; pre-fix the goroutine discarded the
 	// error and status kept reporting watching:true after the watcher
@@ -283,6 +307,15 @@ func (d *Daemon) Stop() {
 	d.stopOnce.Do(func() {
 		if d.idle != nil {
 			d.idle.Stop()
+		}
+		d.mu.Lock()
+		if d.bgTimer != nil {
+			d.bgTimer.Stop()
+		}
+		bgCancel := d.bgCancel
+		d.mu.Unlock()
+		if bgCancel != nil {
+			bgCancel()
 		}
 		d.cancel()
 		if d.listener != nil {
@@ -320,6 +353,10 @@ func (d *Daemon) Stop() {
 // quickly.
 func (d *Daemon) onChange(toIndex, toRemove []string) {
 	d.resetIdle()
+	// Freshness beats precision: abort any in-flight idle→precise upgrade so
+	// the plain reindex below (through the same indexMu) reflects the newest
+	// tree state first; the upgrade is re-armed at the end of this batch.
+	d.cancelBackgroundPrecise()
 	rels := append(append([]string{}, toIndex...), toRemove...)
 	if len(rels) == 0 {
 		return
@@ -340,6 +377,10 @@ func (d *Daemon) onChange(toIndex, toRemove []string) {
 		d.mu.Unlock()
 		_ = d.writeState()
 
+		// The tree changed again: schedule one fresh idle→precise upgrade
+		// for this new drain cycle (no-op unless background_precise is on).
+		d.armBackgroundPrecise()
+
 		// Best-effort cache after significant syncs (avoid caching on every single
 		// file save — only when a batch of changes lands).
 		if len(rels) >= minCacheSyncFiles && snapshot.FcheapAvailable() {
@@ -358,6 +399,103 @@ func (d *Daemon) onChange(toIndex, toRemove []string) {
 // watcher event before the daemon caches the index to fcheap. Caching on every
 // single-file save would be wasteful; this thresholds to meaningful batches.
 const minCacheSyncFiles = 3
+
+// defaultBackgroundPreciseDelay is the idle window before the background
+// upgrade fires when daemon.background_precise is on without an explicit
+// delay: long enough that a burst of saves never triggers it, short enough
+// that precise coverage is restored shortly after editing stops.
+const defaultBackgroundPreciseDelay = 45 * time.Second
+
+// testHookBackgroundPreciseStart, when non-nil, is invoked right after the
+// background upgrade flips to "running" and before it contends for indexMu,
+// so tests can hold it mid-flight and exercise cancellation.
+var testHookBackgroundPreciseStart func()
+
+// armBackgroundPrecise schedules the one-shot idle→precise upgrade. It is
+// armed once at startup and re-armed ONLY from onChange (after a watcher
+// batch lands), never from completion — the upgrade runs at most once per
+// drain cycle instead of looping every idle period.
+func (d *Daemon) armBackgroundPrecise() {
+	if !d.cfg.BackgroundPrecise || d.cfg.Precise {
+		return
+	}
+	delay := d.cfg.BackgroundPreciseDelay
+	if delay <= 0 {
+		delay = defaultBackgroundPreciseDelay
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.bgTimer != nil {
+		d.bgTimer.Stop()
+	}
+	if d.info.BackgroundPreciseState != "running" {
+		d.info.BackgroundPreciseState = "pending"
+		d.info.BackgroundPreciseNote = ""
+	}
+	d.bgTimer = time.AfterFunc(delay, d.runBackgroundPrecise)
+}
+
+// cancelBackgroundPrecise aborts an in-flight background upgrade so a fresher
+// watcher reindex can take indexMu without waiting for the expensive precise
+// pass. No-op when none is running.
+func (d *Daemon) cancelBackgroundPrecise() {
+	d.mu.Lock()
+	cancel := d.bgCancel
+	d.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// runBackgroundPrecise is the idle-timer callback: upgrade the index to
+// precise exactly once, through the same indexMu-serialized path as watcher
+// and RPC reindexes (the daemon stays the sole writer). Embeddings ride along
+// whenever the daemon itself embeds. If the tree changes mid-upgrade, the
+// context is cancelled (see onChange) and this cycle gives up as "cancelled";
+// onChange's plain reindex then re-arms the next cycle.
+func (d *Daemon) runBackgroundPrecise() {
+	if !d.cfg.BackgroundPrecise || d.cfg.Precise {
+		return
+	}
+	ctx, cancel := context.WithCancel(d.ctx)
+	d.mu.Lock()
+	if ctx.Err() != nil { // daemon is shutting down
+		d.mu.Unlock()
+		cancel()
+		return
+	}
+	d.bgCancel = cancel
+	d.info.BackgroundPreciseState = "running"
+	d.info.BackgroundPreciseNote = ""
+	d.mu.Unlock()
+	_ = d.writeState()
+	if testHookBackgroundPreciseStart != nil {
+		testHookBackgroundPreciseStart()
+	}
+	d.withIndexMu(func() {
+		state, note := "done", ""
+		if ctx.Err() != nil {
+			state, note = "cancelled", "superseded by fresher file changes"
+		} else if _, err := d.svc.Index(ctx, d.root, index.Options{Precise: true}, !d.cfg.NoEmbed); err != nil {
+			state, note = "failed", err.Error()
+		} else {
+			// A full Indexer pass rewrote the DB; drop the incremental
+			// node-index cache so the next watcher batch rebuilds it fresh
+			// (same rationale as the daemon.reindex case, P7).
+			d.ix.InvalidateNodeIndex()
+			d.mu.Lock()
+			d.info.LastReindexAt = nowRFC3339()
+			d.mu.Unlock()
+		}
+		d.mu.Lock()
+		d.bgCancel = nil
+		d.info.BackgroundPreciseState = state
+		d.info.BackgroundPreciseNote = note
+		d.mu.Unlock()
+		cancel()
+		_ = d.writeState()
+	})
+}
 
 func (d *Daemon) serve() {
 	for {

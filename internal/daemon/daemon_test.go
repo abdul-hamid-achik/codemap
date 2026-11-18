@@ -388,3 +388,182 @@ func shortTempDir(t *testing.T) string {
 	t.Cleanup(func() { _ = os.RemoveAll(d) })
 	return d
 }
+
+// TestDaemonBackgroundPreciseIdleUpgrade pins L3: with daemon.background_precise
+// enabled, the daemon runs ONE precise reindex after the configured idle delay,
+// upgrading the watcher's name-level batches to exact call-graph coverage
+// without a manual --precise restart — and daemon.status reports the
+// pending → running → done lifecycle so surfaces don't lie.
+func TestDaemonBackgroundPreciseIdleUpgrade(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	root := t.TempDir()
+	mustWrite(t, root, "go.mod", "module example.com/bgp\n\ngo 1.25\n")
+	mustWrite(t, root, "a.go", "package bgp\n\nfunc Alpha() { Beta() }\n")
+	mustWrite(t, root, "b.go", "package bgp\n\nfunc Beta() {}\n")
+
+	d, err := Start(context.Background(), root, Config{
+		NoEmbed: true, Debounce: 80 * time.Millisecond,
+		BackgroundPrecise: true, BackgroundPreciseDelay: 150 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	if st := d.Info().BackgroundPreciseState; st != "pending" {
+		t.Fatalf("background_precise_state = %q, want pending right after startup", st)
+	}
+	if !eventually(10*time.Second, func() bool {
+		return d.Info().BackgroundPreciseState == "done"
+	}) {
+		t.Fatalf("idle upgrade never completed: %+v", d.Info())
+	}
+
+	// The upgrade actually made coverage precise.
+	g, err := d.sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := g.CallGraphResolvedFiles(d.pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved["a.go"] || !resolved["b.go"] {
+		t.Fatalf("idle upgrade did not produce precise coverage: %v", resolved)
+	}
+
+	// Honesty: the control socket reports the state too.
+	resp := sendControl(t, "daemon.status")
+	if !strings.Contains(resp, `"background_precise_state":"done"`) {
+		t.Errorf("daemon.status should report background_precise_state done: %s", resp)
+	}
+
+	// One upgrade per drain cycle: staying idle must NOT re-fire it.
+	time.Sleep(500 * time.Millisecond)
+	if st := d.Info().BackgroundPreciseState; st != "done" {
+		t.Fatalf("idle upgrade re-fired while idle: state = %q, want done", st)
+	}
+}
+
+// TestDaemonBackgroundPreciseCancelledByFileEvent pins the freshness-beats-
+// precision rule: a background upgrade cancelled mid-flight gives up as
+// "cancelled" without indexing, the next watcher batch runs the plain
+// (name-level) reindex, and the upgrade is re-armed for the new drain cycle
+// (state returns to pending). The upgrade is held mid-flight via the test
+// hook; the cancellation uses the exact mechanism onChange invokes.
+func TestDaemonBackgroundPreciseCancelledByFileEvent(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	root := t.TempDir()
+	mustWrite(t, root, "go.mod", "module example.com/bgpcancel\n\ngo 1.25\n")
+	mustWrite(t, root, "a.go", "package bgpcancel\n\nfunc Alpha() { Beta() }\n")
+	mustWrite(t, root, "b.go", "package bgpcancel\n\nfunc Beta() {}\n")
+
+	started := make(chan struct{})
+	proceed := make(chan struct{})
+	testHookBackgroundPreciseStart = func() { close(started); <-proceed }
+	t.Cleanup(func() { testHookBackgroundPreciseStart = nil })
+
+	d, err := Start(context.Background(), root, Config{
+		NoEmbed: true, Debounce: 80 * time.Millisecond,
+		BackgroundPrecise: true, BackgroundPreciseDelay: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background upgrade never started")
+	}
+
+	// A file event arrives mid-upgrade → the watcher's cancel path aborts it
+	// (freshness wins); the precise pass must NOT complete.
+	d.cancelBackgroundPrecise()
+	close(proceed)
+	if !eventually(5*time.Second, func() bool {
+		return d.Info().BackgroundPreciseState == "cancelled"
+	}) {
+		t.Fatalf("cancelled upgrade not reported: %+v", d.Info())
+	}
+
+	// The plain watcher reindex then reflects the new file...
+	mustWrite(t, root, "c.go", "package bgpcancel\n\nfunc Gamma() { Beta() }\n")
+	g, err := d.sess.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eventually(5*time.Second, func() bool {
+		ns, _ := g.FindNodesBySymbol(d.pid, "Gamma")
+		return len(ns) == 1
+	}) {
+		t.Fatal("plain reindex after cancelled upgrade did not index c.go")
+	}
+
+	// ...and the upgrade is re-armed for the new drain cycle.
+	if !eventually(5*time.Second, func() bool {
+		return d.Info().BackgroundPreciseState == "pending"
+	}) {
+		t.Fatalf("upgrade not re-armed after cancelled cycle: %+v", d.Info())
+	}
+	// Prevent the re-armed timer from firing mid-teardown assertions.
+	d.mu.Lock()
+	if d.bgTimer != nil {
+		d.bgTimer.Stop()
+	}
+	d.mu.Unlock()
+}
+
+// TestDaemonBackgroundPreciseDisabledByDefault pins that the feature is a
+// no-op without the flag (no state, no timer work) and reports "skipped" when
+// enabled on a daemon that already runs precise.
+func TestDaemonBackgroundPreciseDisabledByDefault(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	t.Setenv("CODEMAP_DATA", shortTempDir(t))
+	t.Setenv("CODEMAP_CONFIG", "")
+	root := t.TempDir()
+	mustWrite(t, root, "go.mod", "module example.com/bgpoff\n\ngo 1.25\n")
+	mustWrite(t, root, "a.go", "package bgpoff\n\nfunc Alpha() {}\n")
+
+	d, err := Start(context.Background(), root, Config{NoEmbed: true, Debounce: 80 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+	time.Sleep(400 * time.Millisecond) // far past any upgrade delay default wiring
+	if st := d.Info().BackgroundPreciseState; st != "" {
+		t.Fatalf("disabled daemon must not report background precise state, got %q", st)
+	}
+	resp := sendControl(t, "daemon.status")
+	if strings.Contains(resp, "background_precise") {
+		t.Errorf("disabled daemon status must not mention background_precise: %s", resp)
+	}
+	d.Stop()
+	d.Wait()
+
+	// Enabled but redundant: a precise daemon reports skipped, not pending.
+	d2, err := Start(context.Background(), root, Config{
+		NoEmbed: true, Debounce: 80 * time.Millisecond,
+		Precise: true, BackgroundPrecise: true, BackgroundPreciseDelay: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d2.Stop()
+	time.Sleep(300 * time.Millisecond)
+	info := d2.Info()
+	if info.BackgroundPreciseState != "skipped" {
+		t.Fatalf("precise daemon with background_precise on: state = %q, want skipped", info.BackgroundPreciseState)
+	}
+}

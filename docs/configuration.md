@@ -66,6 +66,8 @@ Each overrides the corresponding config-file value (and takes precedence over it
 | `CODEMAP_DAEMON_DEBOUNCE_MS` | `daemon.debounce_ms` |
 | `CODEMAP_DAEMON_IDLE_TIMEOUT_MIN` | `daemon.idle_timeout_min` |
 | `CODEMAP_DAEMON_PRECISE` | `daemon.precise` (keep exact call edges current after watched edits) |
+| `CODEMAP_DAEMON_BACKGROUND_PRECISE` | `daemon.background_precise` (upgrade the index to precise once the watcher has been idle; default off) |
+| `CODEMAP_DAEMON_BACKGROUND_PRECISE_DELAY_MS` | `daemon.background_precise_delay_ms` (idle delay before the background upgrade; default 45000, 0 = default) |
 | `CODEMAP_DAEMON_EMBED_RPS` | `daemon.embed_rps` |
 | `CODEMAP_DAEMON_EMBED_MAX_IN_FLIGHT` | `daemon.embed_max_in_flight` |
 | `CODEMAP_SEMANTIC_BACKEND` | `semantic.backend` (`fallback`, `local`, or `vecgrep`) |

@@ -98,6 +98,11 @@ type DaemonConfig struct {
 	EmbedRPS         float64 `yaml:"embed_rps"`           // background embed rate to Ollama (0 = unlimited)
 	EmbedMaxInFlight int     `yaml:"embed_max_in_flight"` // max concurrent embed calls (default 2; 0 uses default)
 	EmbedCacheSize   int     `yaml:"embed_cache_size"`    // dedup cache entries (default 4096; 0 uses default)
+	// BackgroundPrecise upgrades the index to precise (call-graph + embeddings,
+	// when embedding is on) once the watcher has been idle for
+	// BackgroundPreciseDelayMS. Default off: precise is an explicit contract.
+	BackgroundPrecise        bool `yaml:"background_precise"`          // upgrade to precise when idle (default false)
+	BackgroundPreciseDelayMS int  `yaml:"background_precise_delay_ms"` // idle delay before the upgrade (default 45000; 0 uses default)
 }
 
 // EmbeddingConfig controls how node source text is turned into vectors.
@@ -211,11 +216,13 @@ func DefaultConfig() *Config {
 			},
 		},
 		Daemon: DaemonConfig{
-			DebounceMS:       500,
-			IdleTimeoutMin:   0,
-			EmbedRPS:         0,
-			EmbedMaxInFlight: 2,
-			EmbedCacheSize:   4096,
+			DebounceMS:               500,
+			IdleTimeoutMin:           0,
+			EmbedRPS:                 0,
+			EmbedMaxInFlight:         2,
+			EmbedCacheSize:           4096,
+			BackgroundPrecise:        false,
+			BackgroundPreciseDelayMS: 45000,
 		},
 		Vecgrep: VecgrepConfig{Enabled: true},
 		Semantic: SemanticConfig{
@@ -331,6 +338,7 @@ func (c *Config) Validate() error {
 		{name: "daemon.idle_timeout_min", value: c.Daemon.IdleTimeoutMin, zeroMeaning: "0 = never shut down for idleness"},
 		{name: "daemon.embed_max_in_flight", value: c.Daemon.EmbedMaxInFlight, zeroMeaning: "0 = use the default"},
 		{name: "daemon.embed_cache_size", value: c.Daemon.EmbedCacheSize, zeroMeaning: "0 = use the default"},
+		{name: "daemon.background_precise_delay_ms", value: c.Daemon.BackgroundPreciseDelayMS, zeroMeaning: "0 = use the default"},
 	} {
 		if err := validateNonNegativeInt(setting.name, setting.value, setting.zeroMeaning); err != nil {
 			return err
@@ -483,6 +491,16 @@ func applyEnv(cfg *Config) error {
 		return err
 	} else if set {
 		cfg.Daemon.Precise = b
+	}
+	if b, set, err := envBool("CODEMAP_DAEMON_BACKGROUND_PRECISE"); err != nil {
+		return err
+	} else if set {
+		cfg.Daemon.BackgroundPrecise = b
+	}
+	if n, set, err := envInt("CODEMAP_DAEMON_BACKGROUND_PRECISE_DELAY_MS"); err != nil {
+		return err
+	} else if set {
+		cfg.Daemon.BackgroundPreciseDelayMS = n
 	}
 	if f, set, err := envFloat("CODEMAP_DAEMON_EMBED_RPS"); err != nil {
 		return err

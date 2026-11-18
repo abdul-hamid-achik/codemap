@@ -76,9 +76,11 @@ func startDaemonForeground(cmd *cobra.Command, root string) error {
 	noEmbed, _ := cmd.Flags().GetBool("no-embed")
 	dc := cfg.Daemon
 	d, err := daemon.Start(cmd.Context(), root, daemon.Config{
-		Debounce:    time.Duration(dc.DebounceMS) * time.Millisecond,
-		IdleTimeout: time.Duration(dc.IdleTimeoutMin) * time.Minute,
-		Precise:     dc.Precise,
+		Debounce:               time.Duration(dc.DebounceMS) * time.Millisecond,
+		IdleTimeout:            time.Duration(dc.IdleTimeoutMin) * time.Minute,
+		Precise:                dc.Precise,
+		BackgroundPrecise:      dc.BackgroundPrecise,
+		BackgroundPreciseDelay: time.Duration(dc.BackgroundPreciseDelayMS) * time.Millisecond,
 		Throttle: embed.ThrottleConfig{
 			RPS:         dc.EmbedRPS,
 			MaxInFlight: dc.EmbedMaxInFlight,
