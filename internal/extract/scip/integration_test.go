@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,9 +38,12 @@ public class Greeter {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "index.scip")
-	cmd := exec.Command(scipJava, "index", "--project-root", dir, "--output", out)
+	// scip-java v0.14+ indexes the CURRENT directory and needs a build tool
+	// (gradle/maven) present; run it from the fixture root.
+	cmd := exec.Command(scipJava, "index", "--output", out)
+	cmd.Dir = dir
 	if combined, err := cmd.CombinedOutput(); err != nil {
-		t.Skipf("scip-java failed on the fixture (%v: %s); skipping integration test", err, combined)
+		t.Skipf("scip-java failed on the fixture (%v: %s); skipping integration test", err, firstLines(string(combined), 3))
 	}
 	data, err := os.ReadFile(out)
 	if err != nil {
@@ -59,4 +63,12 @@ public class Greeter {
 	if sum.Defs == 0 {
 		t.Errorf("no definitions imported from a real scip-java index")
 	}
+}
+
+func firstLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "\n")
 }
