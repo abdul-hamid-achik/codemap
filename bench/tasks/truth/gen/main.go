@@ -393,11 +393,19 @@ func (m *model) coveringTests(fqn string) []string {
 	return setToSorted(nameSet)
 }
 
-// testShapedFQN reports whether a blast-radius FQN names a test function:
-// either "pkg.TestXxx" or a suite method "pkg.Suite.TestXxx".
+// testShapedFQN reports whether a blast-radius FQN names test-only code:
+// tests, benchmarks, examples, fuzz targets, and suite fixtures (SetUp/
+// TearDown methods) — none of it ships or gets reviewed as production.
 func testShapedFQN(fqn string) bool {
 	for _, part := range strings.Split(fqn, ".") {
-		if strings.HasPrefix(part, "Test") {
+		for _, prefix := range []string{"Test", "Benchmark", "Example", "Fuzz", "SetUp", "TearDown"} {
+			if strings.HasPrefix(part, prefix) {
+				return true
+			}
+		}
+		// Suite receiver types (gocheck/testify) are test infrastructure even
+		// when their helper methods are lowercase (doTestXxx, testXxx).
+		if strings.HasSuffix(part, "Suite") {
 			return true
 		}
 	}

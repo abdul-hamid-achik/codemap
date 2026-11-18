@@ -1,9 +1,14 @@
 {
   "symbols": [
-    "git.BenchmarkPlainClone",
-    "git.SubmoduleSuite.SetUpTest",
-    "git_test.ExamplePlainClone",
-    "git_test.ExamplePlainClone_accessToken",
-    "git_test.ExamplePlainClone_usernamePassword"
+    "git.Repository.CreateRemote",
+    "git.Repository.CreateRemoteAnonymous",
+    "git.Repository.FetchContext",
+    "git.Repository.PushContext",
+    "git.Repository.Remote",
+    "git.Repository.Remotes",
+    "git.Repository.clone",
+    "git.Repository.fetchAndUpdateReferences",
+    "git.Submodule.Repository",
+    "git.Worktree.PullContext"
   ]
 }

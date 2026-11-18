@@ -176,7 +176,7 @@ func orchestrate(c config) error {
 
 func runOne(d drivers.Driver, t suite.Task, arm drivers.Arm, rep int, transcript string, truth map[string]any) suite.Session {
 	s := suite.Session{Task: t.ID, Arm: arm.Name, Rep: rep, Transcript: transcript}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	m, err := d.Run(ctx, t.Prompt, arm, transcript)
 	s.ToolCalls = m.ToolCalls

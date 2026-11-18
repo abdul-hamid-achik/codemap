@@ -86,7 +86,7 @@ func (d DeepSeekDriver) maxTurns() int {
 	if d.MaxTurns > 0 {
 		return d.MaxTurns
 	}
-	return 40
+	return 60
 }
 
 // DeepSeekAuthMode reports how deepseek sessions authenticate: "api-key" when

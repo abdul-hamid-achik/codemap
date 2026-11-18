@@ -46,7 +46,7 @@
   },
   "prod_blast": {
     "pkg": "git",
-    "name": "PlainClone"
+    "name": "NewRemote"
   },
   "ci_selection": [
     {
