@@ -30,6 +30,14 @@ import (
 // server. Bounded, and gated by hasDeclarations so symbol-less files aren't retried.
 const parseWait = 8 * time.Second
 
+// prepareWait caps the backoff ladder an empty prepareCallHierarchy is retried
+// on. rust-analyzer answers prepare with an EMPTY list (no error) until it has
+// finished loading the Cargo workspace — symbols already work via its
+// detached-file mode, so the gap only shows on the precise pass, seconds after
+// initialize. Bounded like parseWait; once the workspace is up every prepare
+// answers on the first attempt, so the ladder is paid at most once per run.
+const prepareWait = 10 * time.Second
+
 // parseWaitGiveUpStreak is how many CONSECUTIVE files may burn the whole
 // parseWait budget without recovering a single symbol before codemap stops
 // betting on the retry entirely for the rest of the run.
@@ -402,25 +410,43 @@ func hasDeclarations(src []byte) bool {
 // ran, so successful disk-backed extracts do not accumulate buffers.
 func (e *Extractor) ExtractFile(relPath string, src []byte) (*extract.FileResult, error) {
 	uri, _ := lsp.URI(filepath.Join(e.root, relPath))
-	syms, err := e.client.DocumentSymbols(e.ctx, uri)
-	if err != nil {
-		return nil, wrapExtractErr(e.lang, relPath, err)
+	syms, diskErr := e.client.DocumentSymbols(e.ctx, uri)
+	if diskErr == nil && len(syms) > 0 {
+		return FromDocumentSymbols(e.lang, relPath, src, syms), nil
 	}
+	if !hasDeclarations(src) {
+		// A declaration-less file (a barrel / import-only module) is accepted
+		// empty without the DidOpen fallback; its disk error still surfaces.
+		if diskErr != nil {
+			return nil, wrapExtractErr(e.lang, relPath, diskErr)
+		}
+		return FromDocumentSymbols(e.lang, relPath, src, syms), nil
+	}
+	// Empty (tsserver/pyright racing the parse) or an error — some servers
+	// cannot serve on-disk files they were never told about and answer with
+	// "file not found" instead of an empty list (rust-analyzer). Either way
+	// the DidOpen fallback is the right next step for a file that has
+	// declarations; the ORIGINAL disk error stays the reported failure if the
+	// fallback cannot open or parse the file either.
 	opened := false
 	defer func() {
 		if opened {
 			_ = e.client.DidClose(uri)
 		}
 	}()
-	if len(syms) == 0 && hasDeclarations(src) {
-		if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
-			return nil, err
+	if err := e.client.DidOpen(uri, lspLanguageID(relPath, e.langID), string(src)); err != nil {
+		if diskErr != nil {
+			return nil, wrapExtractErr(e.lang, relPath, diskErr)
 		}
-		opened = true
-		syms, err = e.documentSymbolsParsed(uri, src)
-		if err != nil {
-			return nil, wrapExtractErr(e.lang, relPath, err)
+		return nil, err
+	}
+	opened = true
+	syms, err := e.documentSymbolsParsed(uri, src)
+	if err != nil {
+		if diskErr != nil {
+			return nil, wrapExtractErr(e.lang, relPath, diskErr)
 		}
+		return nil, wrapExtractErr(e.lang, relPath, err)
 	}
 	return FromDocumentSymbols(e.lang, relPath, src, syms), nil
 }
@@ -537,15 +563,7 @@ func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN s
 			fqn = symbolFQN(parentFQN, s)
 		}
 		if class.callable {
-			items, err := e.client.PrepareCallHierarchy(ctx, uri, s.SelectionRange.Start)
-			if err == nil && len(items) == 0 {
-				// tsserver's selection for a modified declaration starts at the
-				// modifier (`private constructor(`, `export default function`),
-				// where prepareCallHierarchy finds nothing; the name itself works.
-				if pos, ok := namePosition(lines, s); ok {
-					items, err = e.client.PrepareCallHierarchy(ctx, uri, pos)
-				}
-			}
+			items, err := e.prepareHierarchy(ctx, uri, s, lines)
 			if err != nil {
 				return fmt.Errorf("prepare call hierarchy for %s: %w", fqn, err)
 			}
@@ -591,9 +609,60 @@ func (e *Extractor) walkCallEdges(ctx context.Context, uri, relPath, parentFQN s
 	return nil
 }
 
+// prepareHierarchy asks prepareCallHierarchy for one symbol, retrying an EMPTY
+// answer or a transient request error on a bounded backoff ladder. A server
+// still loading its workspace (rust-analyzer's Cargo load) resolves every
+// declaration to nothing — or errors the request outright — for the first
+// seconds after initialize; once it answers, it keeps answering, so the ladder
+// is effectively a one-time startup wait, gated by the connection's health
+// like the documentSymbol retry so a dead server cannot stall the run.
+func (e *Extractor) prepareHierarchy(ctx context.Context, uri string, s lsp.DocumentSymbol, lines []string) ([]lsp.CallHierarchyItem, error) {
+	try := func() ([]lsp.CallHierarchyItem, error) {
+		items, err := e.client.PrepareCallHierarchy(ctx, uri, s.SelectionRange.Start)
+		if err == nil && len(items) == 0 {
+			// tsserver's selection for a modified declaration starts at the
+			// modifier (`private constructor(`, `export default function`),
+			// where prepareCallHierarchy finds nothing; the name works.
+			if pos, ok := namePosition(lines, s); ok {
+				items, err = e.client.PrepareCallHierarchy(ctx, uri, pos)
+			}
+		}
+		return items, err
+	}
+	items, err := try()
+	if len(items) > 0 || !e.health.retryAllowed() {
+		if len(items) > 0 {
+			e.health.recovered()
+		}
+		return items, err
+	}
+	deadline := time.Now().Add(prepareWait)
+	for backoff := 200 * time.Millisecond; time.Now().Before(deadline); {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		items, err = try()
+		if len(items) > 0 {
+			e.health.recovered()
+			return items, nil
+		}
+		if err != nil && ctx.Err() != nil {
+			return items, ctx.Err() // the caller cancelled, not the server
+		}
+		if backoff < 2*time.Second {
+			backoff *= 2
+		}
+	}
+	if err != nil {
+		return items, err
+	}
+	return items, nil // still empty after the wait — the caller reports it
+}
+
 // symbolFQN normalizes ownership across both legal documentSymbol response
 // shapes. Hierarchical DocumentSymbol children use parentFQN; flat
-// SymbolInformation entries carry their owner in ContainerName.
 func symbolFQN(parentFQN string, s lsp.DocumentSymbol) string {
 	if parentFQN != "" {
 		return parentFQN + "." + s.Name

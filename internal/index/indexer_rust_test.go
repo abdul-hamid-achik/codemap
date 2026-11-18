@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/abdul-hamid-achik/codemap/internal/extract"
+	"github.com/abdul-hamid-achik/codemap/internal/graph"
 )
 
 // rustSym builds a Rust symbol node at a 1-based start line, mirroring what
@@ -523,7 +524,32 @@ func TestRustRealServer(t *testing.T) {
 			}
 			if len(nodes) == 0 {
 				t.Error("rust-analyzer ran but symbol `shout` was not extracted — check degradation path")
+				return
 			}
+			// Precise pass through the real callHierarchy: main calls util::shout.
+			// A cold rust-analyzer serves prepareCallHierarchy only once its Cargo
+			// workspace finishes loading (the bounded ladder in lspsrc pays this
+			// once per run); a fresh-spawned server can still lose the race on a
+			// loaded machine, so the check retries with fresh indexers — the shape
+			// successive CLI invocations would have.
+			var callers []graph.Node
+			for attempt := 1; attempt <= 3; attempt++ {
+				ixN := New(g, nil, nil, lspModeConfig())
+				if _, perr := ixN.IndexProject(context.Background(), pid, "rust-real", dir, Options{Precise: true, Reindex: true}); perr != nil {
+					t.Fatalf("precise reindex failed: %v", perr)
+				}
+				var cerr error
+				callers, cerr = g.Callers(pid, "shout")
+				if cerr != nil {
+					t.Fatal(cerr)
+				}
+				for _, c := range callers {
+					if c.Symbol == "main" {
+						return // resolved: T3 works against the real server
+					}
+				}
+			}
+			t.Errorf("precise pass did not resolve main->shout via callHierarchy after 3 attempts (callers=%d)", len(callers))
 			return
 		}
 		// Honest degradation: report why the server could not serve the fixture.
