@@ -1,0 +1,9 @@
+{
+  "symbols": [
+    "git.BenchmarkPlainClone",
+    "git.SubmoduleSuite.SetUpTest",
+    "git_test.ExamplePlainClone",
+    "git_test.ExamplePlainClone_accessToken",
+    "git_test.ExamplePlainClone_usernamePassword"
+  ]
+}

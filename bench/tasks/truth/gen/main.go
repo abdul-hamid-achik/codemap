@@ -52,18 +52,20 @@ func (t Target) fqn() string {
 
 // Targets is the committed selection of fixture symbols each task points at.
 type Targets struct {
-	FindDef       Target `json:"find_def"`
-	Callers       Target `json:"callers"`
-	Callees       Target `json:"callees"`
-	BlastRadius   Target `json:"blast_radius"`
-	CoveringTests Target `json:"covering_tests"`
-	DeadCode      Target `json:"dead_code"`
-	CallPathFrom  Target `json:"call_path_from"`
-	CallPathTo    Target `json:"call_path_to"`
-	FileOutline   string `json:"file_outline"` // path relative to fixture root
-	RenameImpact  Target `json:"rename_impact"`
-	CallersMethod Target `json:"callers_method"`
-	BlastDepth    int    `json:"blast_depth"`
+	FindDef       Target    `json:"find_def"`
+	Callers       Target    `json:"callers"`
+	Callees       Target    `json:"callees"`
+	BlastRadius   Target    `json:"blast_radius"`
+	CoveringTests Target    `json:"covering_tests"`
+	DeadCode      Target    `json:"dead_code"`
+	CallPathFrom  Target    `json:"call_path_from"`
+	CallPathTo    Target    `json:"call_path_to"`
+	FileOutline   string    `json:"file_outline"` // path relative to fixture root
+	RenameImpact  Target    `json:"rename_impact"`
+	CallersMethod Target    `json:"callers_method"`
+	ProdBlast     Target    `json:"prod_blast"`
+	CiSelection   [2]Target `json:"ci_selection"`
+	BlastDepth    int       `json:"blast_depth"`
 }
 
 type model struct {
@@ -211,6 +213,18 @@ func runGen(fixture, targetsPath, out string) error {
 	cm := m.callersOf(tg.CallersMethod.fqn())
 	write(out, "10_callers_method.json", map[string]any{"callers": cm})
 	fmt.Printf("10 callers_method of %s -> %d\n", tg.CallersMethod.fqn(), len(cm))
+
+	// 11 prod_blast (inbound BFS depth BlastDepth, NON-TEST symbols only):
+	// the production code a change breaks — the review-facing blast radius.
+	prod := m.nonTestInbound(tg.ProdBlast.fqn(), tg.BlastDepth)
+	write(out, "11_prod_blast.json", map[string]any{"symbols": prod})
+	fmt.Printf("11 prod_blast of %s (depth %d) -> %d non-test\n", tg.ProdBlast.fqn(), tg.BlastDepth, len(prod))
+
+	// 12 ci_selection (union of covering tests for TWO symbols): the CI
+	// question a multi-target change asks — which tests must run at all.
+	ci := m.coveringTestsUnion(tg.CiSelection[0].fqn(), tg.CiSelection[1].fqn())
+	write(out, "12_ci_selection.json", map[string]any{"tests": ci})
+	fmt.Printf("12 ci_selection union of %s + %s -> %d\n", tg.CiSelection[0].fqn(), tg.CiSelection[1].fqn(), len(ci))
 
 	return nil
 }
@@ -377,6 +391,41 @@ func (m *model) coveringTests(fqn string) []string {
 		frontier = next
 	}
 	return setToSorted(nameSet)
+}
+
+// testShapedFQN reports whether a blast-radius FQN names a test function:
+// either "pkg.TestXxx" or a suite method "pkg.Suite.TestXxx".
+func testShapedFQN(fqn string) bool {
+	for _, part := range strings.Split(fqn, ".") {
+		if strings.HasPrefix(part, "Test") {
+			return true
+		}
+	}
+	return false
+}
+
+// nonTestInbound is inboundBFS filtered to production (non-test) symbols.
+func (m *model) nonTestInbound(fqn string, depth int) []string {
+	kept := map[string]bool{}
+	for _, s := range m.inboundBFS(fqn, depth) {
+		if !testShapedFQN(s) {
+			kept[s] = true
+		}
+	}
+	return setToSorted(kept)
+}
+
+// coveringTestsUnion is the union of coveringTests over two symbols — the CI
+// selection for a change touching both.
+func (m *model) coveringTestsUnion(a, b string) []string {
+	union := map[string]bool{}
+	for _, t := range m.coveringTests(a) {
+		union[t] = true
+	}
+	for _, t := range m.coveringTests(b) {
+		union[t] = true
+	}
+	return setToSorted(union)
 }
 
 func (m *model) reachable(from, to string) bool {

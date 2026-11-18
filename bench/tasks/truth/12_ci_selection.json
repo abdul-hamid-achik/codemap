@@ -1,0 +1,17 @@
+{
+  "tests": [
+    "TestCreateTagAnnotated",
+    "TestCreateTagAnnotatedBadHash",
+    "TestCreateTagAnnotatedBadOpts",
+    "TestCreateTagCanonicalize",
+    "TestCreateTagLightweight",
+    "TestCreateTagLightweightExists",
+    "TestCreateTagSigned",
+    "TestCreateTagSignedBadKey",
+    "TestDeleteTagAnnotatedUnpacked",
+    "TestInvalidTagName",
+    "TestNewTagReferenceName",
+    "TestPushFollowTags",
+    "TestUpdateServerInfoBasicChange"
+  ]
+}

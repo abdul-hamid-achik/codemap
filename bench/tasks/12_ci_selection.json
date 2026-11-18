@@ -1,0 +1,8 @@
+{
+  "id": "12_ci_selection",
+  "category": "change",
+  "grader": "set_equal",
+  "answer_key": "tests",
+  "truth": "truth/12_ci_selection.json",
+  "prompt": "In this repository, one commit changes two functions in package `plumbing`: `NewTagReferenceName` and `NewTag`. CI should run the test functions that would catch a regression in EITHER change: every test that transitively calls at least one of the two (through any call depth), directly or through helpers and suite methods. Use plain test function names with no package prefix (e.g. `TestCreateTagAnnotated`); for suite methods use the method name alone. Answer ONLY as a json fenced block: {\"tests\": [\"TestFoo\", ...]}."
+}

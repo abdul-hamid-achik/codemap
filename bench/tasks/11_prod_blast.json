@@ -1,0 +1,8 @@
+{
+  "id": "11_prod_blast",
+  "category": "change",
+  "grader": "set_equal",
+  "answer_key": "symbols",
+  "truth": "truth/11_prod_blast.json",
+  "prompt": "In this repository, a hotfix is about to change the function `PlainClone` in the root package (`git`). Which NON-TEST functions and methods are transitively affected within 2 call hops (its direct callers, and their callers) — the production code a reviewer must check? Exclude test functions and methods, and exclude `PlainClone` itself. Use fully-qualified names: `package.Function` for package-level functions and `package.ReceiverType.Method` for methods (receiver type WITHOUT any pointer `*`). `package` is the Go package NAME (the root go-git package is `git`). Answer ONLY as a json fenced block: {\"symbols\": [\"pkg.Recv.Method\", ...]}."
+}
