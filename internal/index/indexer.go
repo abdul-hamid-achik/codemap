@@ -177,6 +177,10 @@ type Result struct {
 	// index.max_file_bytes — surfaced so a silently-missing file (often generated)
 	// is explained, not just counted in FilesSkipped.
 	Oversized []string `json:"oversized,omitempty"`
+	// Minified lists recognized source files skipped as minified vendored
+	// bundles (*.min.js, *.min.css): their single-line shape parses poorly and
+	// their symbols are not source-of-truth. Skipped + explained like Oversized.
+	Minified []string `json:"minified,omitempty"`
 	// Generated lists source files skipped because they carry the canonical
 	// "// Code generated ... DO NOT EDIT." marker (protoc, sqlc, stringer, …) —
 	// detected by header regardless of filename, on top of the *_gen.go/*.pb.go
@@ -858,6 +862,7 @@ func (ix *Indexer) extractFiles(ctx context.Context, files []fileTask, limit int
 			res.FilesUnchanged += localRes.FilesUnchanged
 			res.Oversized = append(res.Oversized, localRes.Oversized...)
 			res.Generated = append(res.Generated, localRes.Generated...)
+			res.Minified = append(res.Minified, localRes.Minified...)
 			if len(localRes.Errors) > 0 {
 				res.Errors = append(res.Errors, localRes.Errors...)
 			}
@@ -1930,6 +1935,22 @@ func (ix *Indexer) indexFile(ctx context.Context, projectID int64, projectName s
 		res.FilesSkipped++
 		res.Generated = append(res.Generated, ft.rel)
 		// Record the hash like oversized, so staleness doesn't flag it as "new".
+		return false, nil, nil, ix.graph.SetFileHashStat(projectID, ft.rel, hash, mtimeSec, mtimeNsec, sizeBytes)
+	}
+	if isMinifiedBundle(ft.rel) {
+		// Vendored minified bundles (*.min.js): tree-sitter yields garbage
+		// symbols from a single multi-hundred-KB line, and the bundle is not
+		// source-of-truth anyway. Same ghost-node hygiene + hash recording as
+		// the generated branch.
+		_ = ix.graph.DeleteNodesInFile(projectID, ft.rel)
+		if err := ix.graph.ClearCallGraphResolved(projectID, ft.rel); err != nil {
+			return false, nil, nil, err
+		}
+		if ix.vectors != nil {
+			_, _ = ix.vectors.DeleteByFile(projectName, ft.rel)
+		}
+		res.FilesSkipped++
+		res.Minified = append(res.Minified, ft.rel)
 		return false, nil, nil, ix.graph.SetFileHashStat(projectID, ft.rel, hash, mtimeSec, mtimeNsec, sizeBytes)
 	}
 
@@ -3283,6 +3304,19 @@ func sha256hex(b []byte) string {
 // Go tooling (protoc-gen-go, sqlc, stringer, mockgen, …) emits and that `go`
 // itself recognizes: a line `// Code generated <by what>. DO NOT EDIT.`.
 var generatedHeaderRE = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)
+
+// isMinifiedBundle reports whether rel is a vendored minified bundle by its
+// conventional name (jquery.min.js, bootstrap.min.css). Path-based on
+// purpose: content sniffing a 500KB single line costs the read for no extra
+// signal.
+func isMinifiedBundle(rel string) bool {
+	base := strings.ToLower(filepath.Base(rel))
+	return strings.HasSuffix(base, ".min.js") ||
+		strings.HasSuffix(base, ".min.mjs") ||
+		strings.HasSuffix(base, ".min.css") ||
+		strings.HasSuffix(base, ".min.js.map") ||
+		strings.HasSuffix(base, ".min.css.map")
+}
 
 // isGenerated reports whether src carries the canonical generated-file header.
 // Per the Go convention the marker appears before the package clause, so only
