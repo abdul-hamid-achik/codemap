@@ -5,6 +5,12 @@
   "buildCommand": "bun run site:build",
   "outputDirectory": "docs/.vitepress/dist",
   "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/index"
+    }
+  ],
   "git": {
     "deploymentEnabled": {
       "*": false,
