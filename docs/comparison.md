@@ -29,6 +29,12 @@ session, with the MCP-originated subset attributed by tool id:
 | sessions that used the code-graph tool | — | 8/10 | 7/10 |
 | tasks answered correctly | 9/10 | 8/10 | 7/10 |
 
+And when a question **needs** structure, bounded answers are decisive: on the
+multi-step CI-selection task (every test that transitively covers either of
+two changed functions, any call depth), the grep/read baseline burned 77 tool
+calls and never produced an answer; the codemap arm answered with perfect
+precision and recall in 47 calls, at half the cost.
+
 codemap's bounded, per-question answers leave the session *below* the
 grep/read baseline; CodeGraph's dense explore payloads sit 40% above it.
 That is the entire design bet of codemap in one table.

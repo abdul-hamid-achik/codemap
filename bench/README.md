@@ -186,6 +186,16 @@ corrected by this run: the deepseek +235% input-tax of 20261116 was mostly the
 **playbook text**, not the tool schemas — without playbook the codemap arm is
 input-par (+13%).
 
+**Multi-step tasks (20261119-042610, 12-task matrix):** the chained questions
+split exactly along tool power. `12_ci_selection` (union of covering tests,
+any call depth) is **intractable by grep** — baseline burned 77 tool calls
+and $0.114 without producing an answer, while the codemap arm answered with
+**perfect precision/recall in 47 calls / $0.052**. `11_prod_blast` (2-hop,
+non-test filter) went the other way: baseline solved it with 27 greps;
+codemap over-included two main-package call sites. The compound-reflex story
+is real: where structure is *necessary*, codemap is decisive; where grep
+suffices, it still suffices.
+
 ## Methodology (read before trusting a number)
 
 - **Fixture** — `github.com/go-git/go-git` pinned by SHA in `fixtures/fixture.lock`
