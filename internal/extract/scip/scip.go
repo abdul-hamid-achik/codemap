@@ -122,6 +122,14 @@ func validate(idx *pb.Index, opts Options) error {
 	}
 	got := NormalizeProjectRoot(idx.Metadata.ProjectRoot)
 	want := filepath.Clean(opts.ProjectRoot)
+	// macOS keeps /tmp as a symlink to /private/tmp: an indexer and codemap
+	// may spell the same directory differently. Compare symlink-resolved
+	// paths so a matching root is not rejected over spelling.
+	gotR, gotErr := filepath.EvalSymlinks(got)
+	wantR, wantErr := filepath.EvalSymlinks(want)
+	if gotErr == nil && wantErr == nil {
+		got, want = gotR, wantR
+	}
 	if got != want {
 		return fmt.Errorf("scip index project_root %q does not match project %q (re-run the indexer against this project)", got, want)
 	}

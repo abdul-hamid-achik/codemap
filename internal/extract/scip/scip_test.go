@@ -2,6 +2,8 @@ package scip
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -213,5 +215,38 @@ func TestNeverEmitsCallEdges(t *testing.T) {
 	_, err = Import(idx, Options{ProjectRoot: "/proj"}, func(Batch) error { return nil })
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestValidateAcceptsSymlinkedRoot pins the macOS /tmp ↔ /private/tmp case:
+// an index produced under the resolved path must import into a project spelled
+// through the symlink (and vice versa), while a genuinely different root is
+// still rejected.
+func TestValidateAcceptsSymlinkedRoot(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	idx := &pb.Index{
+		Metadata: &pb.Metadata{
+			ProjectRoot:          "file://" + filepath.ToSlash(real),
+			TextDocumentEncoding: pb.TextEncoding_UTF8,
+			ToolInfo:             &pb.ToolInfo{Name: "t", Version: "1"},
+		},
+		Documents: []*pb.Document{{
+			Language: "Java", RelativePath: "src/A.java",
+			Occurrences: []*pb.Occurrence{},
+		}},
+	}
+	if err := validate(idx, Options{ProjectRoot: link}); err != nil {
+		t.Errorf("validate via symlink: %v", err)
+	}
+	if err := validate(idx, Options{ProjectRoot: real}); err != nil {
+		t.Errorf("validate direct: %v", err)
+	}
+	other := t.TempDir()
+	if err := validate(idx, Options{ProjectRoot: other}); err == nil {
+		t.Error("validate accepted a different root")
 	}
 }
