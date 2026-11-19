@@ -60,6 +60,7 @@ export default defineConfig({
       { text: 'MCP', link: '/mcp' },
       { text: 'Desktop', link: '/desktop' },
       { text: 'Languages', link: '/languages' },
+      { text: 'Compare', link: '/comparison' },
     ],
     sidebar: [
       {
@@ -69,6 +70,7 @@ export default defineConfig({
           { text: 'Quick Start', link: '/quick-start' },
           { text: 'Learn a codebase', link: '/learn' },
           { text: 'Language support', link: '/languages' },
+          { text: 'Comparison', link: '/comparison' },
           { text: 'Data, config & docs', link: '/data-and-docs' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Branches & caching', link: '/branches' },

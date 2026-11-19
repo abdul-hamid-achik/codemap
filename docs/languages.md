@@ -186,6 +186,10 @@ candidates within their language family.
   (malformed protobuf, traversal paths, wrong roots rejected).
 
 SCIP occurrences are never relabeled as call edges — `call_graph` stays honest.
+Validated against a real repository: scip-java on junit-team/junit4 (471
+files, 18s index) imports as 8,206 nodes / 22,949 edges (7,390 definitions,
+21,521 resolved references, 1,609 implements), queryable immediately by
+`find`/`symbols`/`traverse --edge-types references,implements`.
 Use it to accelerate Java/Kotlin/Scala, C/C++/CUDA and C#/Visual Basic via their
 upstream `scip-*` indexers. Each language still advances independently;
 the existence of an upstream indexer is not itself a codemap support claim.

@@ -31,6 +31,12 @@ instead of dozens of file reads.
 > One-time codemap index cost (disclosed, not per-session): **7s**. codemap is modelled as pre-indexed (the daemon keeps it fresh in real use), so the codemap arm pays query time, not index time.
 <!-- BENCH:END -->
 
+> **Measured against the alternatives** — same agent loop, same fixture, same
+> prompt: codemap's bounded answers leave **5.3× less tool context resident**
+> than CodeGraph's dense payloads, and land below the grep/read baseline. Full
+> table, methodology, and the honest negative results: [docs/comparison.md](docs/comparison.md)
+> and [bench/](bench/README.md).
+
 ## Features
 
 - **Structural code graph** — files, functions, types, methods, and tests as nodes; **call** edges
